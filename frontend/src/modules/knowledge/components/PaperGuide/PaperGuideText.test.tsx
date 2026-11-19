@@ -6,7 +6,7 @@ import {
   restoreTextPosition,
   visibleTextOffset,
 } from "./readingPosition";
-import { sourceTextLength, sourceBoundary } from "./sourceText";
+import { sourceTextLength } from "./sourceText";
 afterEach(() => vi.restoreAllMocks());
 it("preserves ordinary prose, escaped delimiters and malformed formulas exactly", () => {
   const text = String.raw`foo_bar costs \$5; escaped \\(x\\); unfinished \(x and 😀𐐀`;
@@ -124,14 +124,6 @@ it.each(["$$x$", "$$$x$", "甲😀 $$x$ tail", "$$x$ then $y$"])(
         display: undefined,
       },
     ]);
-    const range = document.createRange();
-    range.selectNodeContents(root);
-    expect(
-      sourceBoundary(root, range.startContainer, range.startOffset, "start"),
-    ).toBe(0);
-    expect(
-      sourceBoundary(root, range.endContainer, range.endOffset, "end"),
-    ).toBe(Array.from(text).length);
   },
 );
 

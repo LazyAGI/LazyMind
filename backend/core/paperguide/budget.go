@@ -13,8 +13,12 @@ const (
 	localProcessingReserveMillis = int64(120000)
 )
 
-// ModelAttemptTimeout is the server-owned per-attempt limit for Guide tasks.
-const ModelAttemptTimeout = 120 * time.Second
+func ModelAttemptTimeout(task string) time.Duration {
+	if task == "paper.explainer.chapter" {
+		return 5 * time.Minute
+	}
+	return 2 * time.Minute
+}
 
 var ErrBudget = errors.New("paper_guide_budget_exhausted")
 

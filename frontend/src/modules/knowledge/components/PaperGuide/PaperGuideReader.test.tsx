@@ -48,7 +48,7 @@ it.each([
   }
   const open = vi.fn();
   render(
-    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={open} onSelection={() => {}} />,
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={open} />,
   );
 
   const passage = within(screen.getByRole("region", { name: section.title }));
@@ -56,10 +56,6 @@ it.each([
   expect(citation).toBeVisible();
   fireEvent.click(citation!);
   expect(open).toHaveBeenLastCalledWith("claim-evidence", citation);
-  fireEvent.click(passage.getByLabelText("Passage actions"));
-  const viewSource = passage.getByRole("button", { name: "View source" });
-  fireEvent.click(viewSource);
-  expect(open).toHaveBeenLastCalledWith("claim-evidence", viewSource);
   expect(passage.getByText(/Guide equation explanation/)).toBeVisible();
 });
 
@@ -81,7 +77,7 @@ it("numbers direct and inherited sources once and only inherits referenced claim
   const beforeRender = JSON.stringify(r);
   const open = vi.fn();
   render(
-    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={open} onSelection={() => {}} />,
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={open} />,
   );
 
   const citationsIn = (name: string) => within(screen.getByRole("region", { name }))
@@ -116,56 +112,13 @@ it("keeps a paragraph readable when its referenced claim has no available eviden
     evidence_ids: null,
   }]));
   render(
-    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} onSelection={() => {}} />,
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} />,
   );
 
   const passage = within(screen.getByRole("region", { name: section.title }));
   expect(passage.getByText(block.text)).toBeVisible();
   expect(passage.queryByRole("button", { name: /^Source \d+$/ })).not.toBeInTheDocument();
-  fireEvent.click(passage.getByLabelText("Passage actions"));
   expect(passage.queryByRole("button", { name: "View source" })).not.toBeInTheDocument();
-});
-
-it("opens inherited evidence from a Unicode selection and sends the original passage reference to chat", () => {
-  const r = revision();
-  const section = r.sections[0];
-  const block = section.blocks[0];
-  block.claim_ids = ["c1"];
-  block.evidence_ids = [];
-  block.text = "甲😀乙𐐀丙";
-  section.claim_ids = ["c1"];
-  section.claims = [groundedClaim("c1", "selection-evidence")];
-  const open = vi.fn();
-  const choose = vi.fn();
-  render(
-    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={open} onSelection={choose} />,
-  );
-
-  const text = screen.getByText("甲😀乙𐐀丙");
-  const range = document.createRange();
-  range.setStart(text.firstChild!, 1);
-  range.setEnd(text.firstChild!, 6);
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
-  fireEvent.mouseUp(text);
-  const source = within(screen.getByRole("toolbar")).getByRole("button", { name: "View source" });
-  fireEvent.click(source);
-  expect(open).toHaveBeenCalledWith("selection-evidence", source);
-
-  fireEvent.mouseUp(text);
-  fireEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: "Explain this passage" }));
-  expect(choose).toHaveBeenCalledWith(expect.objectContaining({
-    source: "paper_guide",
-    text: "😀乙𐐀",
-    guideRef: {
-      revision_id: "r1",
-      section_key: "section:background:v1",
-      block_id: "background-block",
-      start: 1,
-      end: 4,
-      language: "en",
-    },
-  }));
 });
 
 it.each([
@@ -184,7 +137,6 @@ it.each([
     title="Paper"
     language="en"
     onEvidence={() => {}}
-    onSelection={() => {}}
   />);
   const hint = screen.queryByText("The next section will appear here after review.");
   if (shown) expect(hint).toBeVisible();
@@ -200,7 +152,6 @@ it.each(["method", "theory", "normative", "review"])(
         title="Paper"
         language="en"
         onEvidence={() => {}}
-        onSelection={() => {}}
       />,
     );
     expect(screen.getByRole("article")).toBeInTheDocument();
@@ -222,7 +173,6 @@ it("marks exact corrected section and labels teaching examples separately from p
       title="Paper"
       language="en"
       onEvidence={() => {}}
-      onSelection={() => {}}
     />,
   );
   expect(screen.getByText("Correction pending")).toBeInTheDocument();
@@ -230,31 +180,6 @@ it("marks exact corrected section and labels teaching examples separately from p
     screen.getByText("Teaching example · hypothetical"),
   ).toBeInTheDocument();
 });
-it("offers a keyboard selection action bound to the visible immutable section", () => {
-  const choose = vi.fn();
-  render(
-    <PaperGuideReader
-      revision={revision()}
-      title="Paper"
-      language="en"
-      onEvidence={() => {}}
-      onSelection={choose}
-    />,
-  );
-  fireEvent.click(
-    screen.getAllByRole("button", { name: "Explain this passage" })[0],
-  );
-  expect(choose.mock.calls[0][0]).toMatchObject({
-    source: "paper_guide",
-    guideRef: {
-      revision_id: "r1",
-      section_key: "section:background:v1",
-      block_id: "background-block",
-      start: 0,
-    },
-  });
-});
-
 it("moves keyboard focus and scrolls to the requested outline heading", () => {
   const scroll = vi.fn();
   Element.prototype.scrollIntoView = scroll;
@@ -264,7 +189,6 @@ it("moves keyboard focus and scrolls to the requested outline heading", () => {
       title="Paper"
       language="en"
       onEvidence={() => {}}
-      onSelection={() => {}}
     />,
   );
   const scroller = view.container.querySelector(".paper-guide-scroll") as HTMLDivElement;
@@ -295,7 +219,6 @@ it("preserves reading position when reviewed sections append and never injects m
       title="Paper"
       language="en"
       onEvidence={() => {}}
-      onSelection={() => {}}
     />,
   );
   view.rerender(
@@ -304,37 +227,10 @@ it("preserves reading position when reviewed sections append and never injects m
       title="Paper"
       language="en"
       onEvidence={() => {}}
-      onSelection={() => {}}
     />,
   );
   expect(scroll).not.toHaveBeenCalled();
   expect(document.querySelector("img")).toBeNull();
-});
-it("uses the real DOM selection and Unicode offsets rather than character search", () => {
-  const choose = vi.fn();
-  const r = revision();
-  r.sections[0].blocks[0].text = "甲😀乙𐐀丙";
-  render(
-    <PaperGuideReader
-      revision={r}
-      title="Paper"
-      language="en"
-      onEvidence={() => {}}
-      onSelection={choose}
-    />,
-  );
-  const text = screen.getByText("甲😀乙𐐀丙");
-  const range = document.createRange();
-  range.setStart(text.firstChild!, 1);
-  range.setEnd(text.firstChild!, 6);
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
-  fireEvent.mouseUp(text);
-  fireEvent.click(screen.getByRole("toolbar").querySelector("button")!);
-  expect(choose.mock.calls[0][0]).toMatchObject({
-    text: "😀乙𐐀",
-    guideRef: { start: 1, end: 4, section_key: "section:background:v1" },
-  });
 });
 it("visibly distinguishes paper paraphrase, interpretation, teaching and unverified external background", () => {
   const r = revision();
@@ -353,7 +249,6 @@ it("visibly distinguishes paper paraphrase, interpretation, teaching and unverif
       title="Paper"
       language="en"
       onEvidence={() => {}}
-      onSelection={() => {}}
     />,
   );
   expect(screen.getByText("Paper statement · guide paraphrase")).toBeVisible();
@@ -431,7 +326,6 @@ it("restores a Unicode reading anchor after width reflow and hidden-panel return
         title="Paper"
         language="en"
         onEvidence={() => {}}
-        onSelection={() => {}}
         onProgress={onProgress}
       />,
     );
@@ -466,7 +360,6 @@ it("restores a Unicode reading anchor after width reflow and hidden-panel return
         title="Paper"
         language="en"
         onEvidence={() => {}}
-        onSelection={() => {}}
         onProgress={onProgress}
       />,
     );
@@ -482,92 +375,6 @@ it("restores a Unicode reading anchor after width reflow and hidden-panel return
   }
 });
 
-it.each(["after", "after-surrogate", "inside", "across", "mathml", "boundary", "bold-to-math"])(
-  "maps %s math selections to exact original Unicode intervals",
-  (choice) => {
-    const choose = vi.fn();
-    const r = revision();
-    r.sections[0].blocks[0].text = "甲😀 \\(x_1\\) 后 \\(x_1\\)𐐀尾";
-    r.sections[0].blocks[0].emphasis = "后";
-    if (choice === "bold-to-math") {
-      r.plan = { layout: "flashpapers", sections: [], claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" } };
-    }
-    const view = render(
-      <PaperGuideReader
-        revision={r}
-        title="Paper"
-        language="en"
-        onEvidence={() => {}}
-        onSelection={choose}
-      />,
-    );
-    const block = view.container.querySelector(
-      '[data-guide-text="background-block"]',
-    )!;
-    const maths = block.querySelectorAll("[data-guide-math]");
-    expect(maths).toHaveLength(2);
-    const range = document.createRange();
-    const walker = document.createTreeWalker(
-      maths[1].querySelector(".katex-html")!,
-      NodeFilter.SHOW_TEXT,
-    );
-    const formulaText = walker.nextNode()!;
-    const textAfter = block.lastChild!.firstChild!;
-    let start: number, end: number, text: string;
-    if (choice === "after" || choice === "after-surrogate") {
-      range.setStart(textAfter, choice === "after-surrogate" ? 1 : 0);
-      range.setEnd(textAfter, 2);
-      start = 20;
-      end = 21;
-      text = "𐐀";
-    } else if (choice === "bold-to-math") {
-      range.setStart(block.querySelector("strong")!.firstChild!, 0);
-      range.setEnd(formulaText, 1);
-      start = 11;
-      end = 20;
-      text = "后 \\(x_1\\)";
-    } else if (choice === "across") {
-      range.setStart(block.firstChild!.firstChild!, 1);
-      range.setEnd(formulaText, 1);
-      start = 1;
-      end = 20;
-      text = "😀 \\(x_1\\) 后 \\(x_1\\)";
-    } else if (choice === "boundary") {
-      range.setStart(block, 2);
-      range.setEnd(block, 3);
-      start = 10;
-      end = 13;
-      text = " 后 ";
-    } else {
-      const node =
-        choice === "mathml"
-          ? maths[1].querySelector("annotation")!.firstChild!
-          : formulaText;
-      range.setStart(node, 0);
-      range.setEnd(node, 1);
-      start = 13;
-      end = 20;
-      text = "\\(x_1\\)";
-    }
-    window.getSelection()!.removeAllRanges();
-    window.getSelection()!.addRange(range);
-    fireEvent.mouseUp(block);
-    expect(screen.getByRole("toolbar").querySelector("p")?.textContent).toBe(
-      text,
-    );
-    fireEvent.click(screen.getByRole("toolbar").querySelector("button")!);
-    expect(choose.mock.calls[0][0]).toMatchObject({
-      text,
-      guideRef: {
-        revision_id: "r1",
-        section_key: "section:background:v1",
-        block_id: "background-block",
-        start,
-        end,
-      },
-    });
-  },
-);
 it("typesets display math without interpreting HTML and falls back exactly for invalid or unsafe TeX", () => {
   const r = revision();
   r.sections[0].blocks[0].text = "before \\[\\frac{1}{2}\\] after";
@@ -579,7 +386,6 @@ it("typesets display math without interpreting HTML and falls back exactly for i
       title="Paper"
       language="en"
       onEvidence={() => {}}
-      onSelection={() => {}}
     />,
   );
   expect(view.container.querySelector(".katex-display")).not.toBeNull();
@@ -591,49 +397,8 @@ it("typesets display math without interpreting HTML and falls back exactly for i
   ).toHaveTextContent(r.sections[2].blocks[0].text);
   expect(view.container.querySelector("img,a,iframe,script")).toBeNull();
 });
-it("discards a pending selection when its immutable section is replaced", () => {
+it("binds duplicate block IDs to the actual immutable section for progress and navigation", () => {
   const r = revision(),
-    choose = vi.fn();
-  const view = render(
-    <PaperGuideReader
-      revision={r}
-      title="Paper"
-      language="en"
-      onEvidence={() => {}}
-      onSelection={choose}
-    />,
-  );
-  const text = view.container.querySelector(
-    '[data-guide-text="background-block"]',
-  )!;
-  const range = document.createRange();
-  range.selectNodeContents(text);
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
-  fireEvent.mouseUp(text);
-  expect(screen.getByRole("toolbar")).toBeInTheDocument();
-  const changed = {
-    ...r,
-    sections: r.sections.map((s, i) =>
-      i ? s : { ...s, key: "section:background:v2" },
-    ),
-  };
-  view.rerender(
-    <PaperGuideReader
-      revision={changed}
-      title="Paper"
-      language="en"
-      onEvidence={() => {}}
-      onSelection={choose}
-    />,
-  );
-  expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
-  expect(choose).not.toHaveBeenCalled();
-});
-
-it("binds duplicate block IDs to the actual immutable section for selection, progress and navigation", () => {
-  const r = revision(),
-    choose = vi.fn(),
     progress = vi.fn();
   r.sections[0].blocks[0] = {
     ...r.sections[0].blocks[0],
@@ -666,32 +431,9 @@ it("binds duplicate block IDs to the actual immutable section for selection, pro
         title="Paper"
         language="en"
         onEvidence={() => {}}
-        onSelection={choose}
         onProgress={progress}
       />,
     );
-    const block = view.container.querySelector(
-      '[data-guide-section="section:question:v1"] [data-guide-text]',
-    )!;
-    const range = document.createRange();
-    range.selectNodeContents(block);
-    window.getSelection()!.removeAllRanges();
-    window.getSelection()!.addRange(range);
-    fireEvent.mouseUp(block);
-    expect(screen.getByRole("toolbar").querySelector("p")?.textContent).toBe(
-      "Second $b$ tail",
-    );
-    fireEvent.click(screen.getByRole("toolbar").querySelector("button")!);
-    expect(choose.mock.calls[0][0]).toMatchObject({
-      text: "Second $b$ tail",
-      guideRef: {
-        revision_id: "r1",
-        section_key: "section:question:v1",
-        block_id: "same-block",
-        start: 0,
-        end: 15,
-      },
-    });
     fireEvent.scroll(view.container.querySelector(".paper-guide-scroll")!);
     expect(progress).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -707,15 +449,6 @@ it("binds duplicate block IDs to the actual immutable section for selection, pro
     rect.mockRestore();
   }
 });
-it('keeps historical text readable but disables follow-up selection after positioning changes',()=>{
- const r=revision();r.source_current=false;const choose=vi.fn();
- render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={()=>{}} onSelection={choose}/>);
- expect(screen.getByRole('article')).toBeInTheDocument();
- for(const button of screen.getAllByRole('button',{name:'Explain this passage'})){expect(button).toBeDisabled();fireEvent.click(button);}
- for(const button of screen.getAllByRole('button',{name:'Give an example'}))expect(button).toBeDisabled();
- expect(choose).not.toHaveBeenCalled();
-});
-
 function renderInteractive(
   config: Partial<PaperGuideInteraction> & Pick<PaperGuideInteraction, "kind">,
   text = "Stable static explanation.",
@@ -739,11 +472,10 @@ function renderInteractive(
       ...config,
     } satisfies PaperGuideInteraction,
   });
-  const choose = vi.fn();
   const view = render(
-    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} onSelection={choose} />,
+    <PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} />,
   );
-  return { ...view, choose, r, block };
+  return { ...view, r, block };
 }
 
 const steps = [
@@ -833,23 +565,21 @@ it("filters only reported rows and shows original values, units and notes in the
 });
 
 it("keeps static prose and its Unicode selection separate from interaction content", () => {
-  const { choose, block } = renderInteractive({ kind: "stepper", steps }, "甲😀乙𐐀丙");
+  const { block } = renderInteractive({ kind: "stepper", steps }, "甲😀乙𐐀丙");
   expect(screen.getByText("Illustrative example")).toBeVisible();
   expect(screen.getByText("This example assumes a fixed baseline.")).toBeVisible();
   const prose = screen.getByText(block.text).closest("[data-guide-text]")!;
   expect(prose).toHaveTextContent(/^甲😀乙𐐀丙$/);
   expect(prose).not.toContainElement(screen.getByRole("button", { name: "Next" }));
   const range = document.createRange();
-  range.setStart(prose.firstChild!.firstChild!, 1);
-  range.setEnd(prose.firstChild!.firstChild!, 6);
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
+  range.selectNodeContents(prose);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
   fireEvent.mouseUp(prose);
-  fireEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: "Explain this passage" }));
-  expect(choose).toHaveBeenCalledWith(expect.objectContaining({
-    text: "😀乙𐐀",
-    guideRef: expect.objectContaining({ start: 1, end: 4 }),
-  }));
+  expect(selection.toString()).toBe(block.text);
+  expect(screen.queryByRole("toolbar", { name: "Guide passage" })).toBeNull();
+  selection.removeAllRanges();
 });
 
 it("navigates legacy subsection headings by immutable section and block IDs", () => {
@@ -857,7 +587,7 @@ it("navigates legacy subsection headings by immutable section and block IDs", ()
   for (const [index, section] of r.sections.slice(0, 2).entries()) {
     section.blocks.push({ ...section.blocks[0], id: "duplicate-heading-id", kind: "heading", text: `Subsection ${index + 1}` });
   }
-  render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} onSelection={() => {}} />);
+  render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} />);
   const outline = within(screen.getByRole("navigation", { name: "Article outline" }));
   fireEvent.click(outline.getByRole("button", { name: "Subsection 2" }));
   expect(screen.getByRole("heading", { name: "Subsection 2" })).toHaveFocus();

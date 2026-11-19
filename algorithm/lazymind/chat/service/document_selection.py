@@ -106,37 +106,6 @@ def resolve_document_selection_context(
     user_id: str | None = None,
 ) -> str:
     context = document_context if isinstance(document_context, dict) else {}
-    # Core removes this server-only field from all unreferenced client inputs,
-    # and re-authorizes every reference before forwarding it to this service.
-    guide = context.get('paper_guide_context')
-    ref = context.get('paper_guide')
-    if isinstance(guide, dict) and isinstance(ref, dict) and user_id:
-        matches = all(guide.get(key) and guide.get(key) == ref.get(key)
-                      for key in ('revision_id', 'section_key', 'block_id'))
-        matches = matches and all(context.get(key) == ref.get(key)
-                                  for key in ('dataset_id', 'document_id'))
-        if matches:
-            evidence = guide.get('evidence') or []
-            originals = '\n'.join(
-                f"[{_text(item.get('id'), 256)}] PDF page "
-                f"{int((item.get('locator') or {}).get('page', 0)) + 1}: "
-                f"{_text(item.get('text'))}"
-                for item in evidence if isinstance(item, dict)
-            )
-            missing = 'No original evidence is attached; teaching examples are hypothetical, not paper results.'
-            return (
-                'Use paper/source page labels in user-facing prose. Do not print internal '
-                'revision, section, block or evidence IDs unless the user explicitly asks for them. '
-                'Keep authorized source references available for citation and verification.\n\n'
-                'Guide passage (AI explanation, not an original-paper quotation; '
-                f"revision {_text(guide.get('revision_id'), 256)}, "
-                f"section {_text(guide.get('section_key'), 256)}):\n"
-                f"{_text(guide.get('text'))}\n\n"
-                'Original paper evidence (separate reference material):\n'
-                f'{originals or missing}'
-                + ('\nSource has changed; historical evidence must not locate the current PDF.'
-                   if not guide.get('source_current') else '')
-            )
     selected_text = _text(context.get('selected_text')) or _text(cited_text)
     paragraph_text = _text(context.get('paragraph_text'))
     user_id = str(user_id or '').strip()

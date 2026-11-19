@@ -1,6 +1,6 @@
 import { Modal } from "antd";
 import PaperGuideText from "./PaperGuideText";
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type { PaperGuideEvidence, PaperGuideOriginalDisplay } from "@/api/generated/core-client";
 type AssetImage = { url: string; width: number; height: number; mode: "region" | "page" };
 export type GuidePreview = (
@@ -76,10 +76,11 @@ export default function PaperGuideAsset({
       : (zh ? "放大原公式" : "Enlarge original formula");
   return (
     <figure className={compactPage ? "paper-guide-asset paper-guide-page-link" : "paper-guide-asset"}>
-      <div className="paper-guide-image-frame">
+      <div className="paper-guide-image-frame" aria-busy={!loaded && !failed && !unavailable}>
         {loaded ? (
           <button
             className={compactPage ? "paper-guide-citation" : "paper-guide-image-button"}
+            style={compactPage ? undefined : { "--guide-image-ratio": loaded.width / loaded.height } as CSSProperties}
             onClick={(event) => {
               opener.current = event.currentTarget;
               setLarge(true);

@@ -16,7 +16,7 @@ func paperGuideService() paperguide.Service {
 	return paperguide.Service{FeatureEnabled: PaperGuideEnabled, Repo: paperguide.Repository{DB: store.DB(), PrepareCheckpoint: preparePaperGuideCheckpoint, CheckpointGuard: paperGuideCheckpointGuard}, Source: paperGuideSource{}, Authorize: authorizePaperGuide, ResolveModel: resolvePaperGuideModel, Call: func(ctx context.Context, task string, input map[string]any, cfg map[string]any) (json.RawMessage, error) {
 		result, e := algo.RunStructuredTask(ctx, algo.StructuredTaskRequest{
 			Task: task, Version: paperguide.TaskVersion, Input: input, LLMConfig: cfg,
-			TransportTimeout: paperguide.ModelAttemptTimeout,
+			TransportTimeout: paperguide.ModelAttemptTimeout(task),
 		})
 		if e != nil {
 			// Preserve only safe cancellation causes, never raw provider errors.
@@ -51,9 +51,6 @@ func paperGuideService() paperguide.Service {
 	}}
 }
 func RegisterPaperGuideJobs() {
-	paperguide.SetChatSelectionResolver(func(ctx context.Context, scope paperguide.Scope, id string, in paperguide.SelectionRequest) (paperguide.SelectionContext, error) {
-		return paperGuideService().Selection(ctx, scope, id, in)
-	})
 	asyncjob.Register(PaperGuideJobType, func(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
 		return paperGuideService().Run(ctx, job, reporter)
 	})

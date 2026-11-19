@@ -1074,7 +1074,6 @@ const KnowledgeDocumentContent = () => {
           ir={paperIR} getPdfData={getGuidePdfData} getPdfVersion={getGuidePdfVersion} onModeChange={setGuideMode}
           auxiliaryOpen={!previewSideCollapsed} auxiliaryTab={previewSideTab}
           onAuxiliary={tab=>{setPreviewSideCollapsed(!tab);if(tab){setPreviewSideTab(tab);if(tab==="chat")setActivatedDocumentChatKey(documentKey);}}}
-          onSelection={selection=>{setDocumentChatSelection(selection);setPreviewSideTab("chat");setPreviewSideCollapsed(false);}}
           onReturnSource={guidePreviousPdfPosition?()=>{setPdfNavigateToPosition({...guidePreviousPdfPosition,requestId:++navigationSequence.current});setGuidePreviousPdfPosition(undefined);}:undefined}
           onNavigate={e=>{setGuidePreviousPdfPosition(pdfViewPosition);setPdfNavigateTo(undefined);const bbox=e.locator.kind==="page"?undefined:e.locator.bbox;setPdfNavigateToPosition({page:e.locator.page+1,progress:Math.max(0,(bbox?.[1]||0)-.1),requestId:++navigationSequence.current,sourceLocator:true,bbox});}}
           source={(readingModeSwitch) => <>        <div ref={sourcePaneRef} className="knowledge-preview-file-column paper-reader-pane">

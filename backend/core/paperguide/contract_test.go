@@ -54,10 +54,6 @@ func TestLegacyPublishedGuideAndSelectionRemainReadable(t *testing.T) {
 	if err != nil || !got.SourceCurrent || len(got.Sections) != 1 {
 		t.Fatalf("legacy history: %+v %v", got, err)
 	}
-	selected, err := service.Selection(t.Context(), scope, rev.ID, SelectionRequest{SectionKey: "section:background:v1", BlockID: "b_background", Start: 0, End: 3})
-	if err != nil || selected.Text != "The" || len(selected.Evidence) != 1 || selected.Evidence[0].ID != old.Evidence[1].ID {
-		t.Fatalf("legacy selection: %+v %v", selected, err)
-	}
 }
 
 func TestUncertainLegacyAttemptCannotAdoptContract(t *testing.T) {
@@ -95,14 +91,11 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			section.Version = 1
 			section.PublicationStatus = "published"
 			section.Blocks[0].EvidenceIDs = []string{old.Evidence[1].ID}
-			start, end, wantSelection := 0, 3, "The"
 			switch version {
 			case "paper-guide-v13":
 				section.Blocks[0].Text = "样本范围。〔e2〕"
-				start, end, wantSelection = 2, 9, "范围。〔e2〕"
 			case "paper-guide-v14", "paper-guide-v15", "paper-guide-v16", "paper-guide-v17", "paper-guide-v18", "paper-guide-v19", "paper-guide-v20", "paper-guide-v21":
 				section.Blocks[0].Text = "样本范围。校准值"
-				start, end, wantSelection = 2, 8, "范围。校准值"
 			}
 			storedSection := mustJSON(section)
 			for _, step := range []StepWrite{{Key: "plan", InputHash: "old-plan", Output: mustJSON(baselinePlan(old))}, {Key: "section:background:v1", InputHash: "old-section", Output: storedSection, Published: true}} {
@@ -141,11 +134,6 @@ func TestPublishedGuideAndSelectionRemainReadableAcrossTaskVersions(t *testing.T
 			evidence, currentSource := response.Evidence, response.SourceCurrent
 			if err != nil || !currentSource || evidence.ID != old.Evidence[1].ID {
 				t.Fatalf("legacy evidence: %+v %v", evidence, err)
-			}
-			selected, err := service.Selection(t.Context(), scope, rev.ID, SelectionRequest{SectionKey: "section:background:v1", BlockID: "b_background", Start: start, End: end})
-			if err != nil || !selected.SourceCurrent || selected.Text != wantSelection || len(selected.Evidence) != 1 || selected.Evidence[0].ID != old.Evidence[1].ID ||
-				selected.Evidence[0].Locator.Page != old.Evidence[1].Locator.Page {
-				t.Fatalf("legacy selection: %+v %v", selected, err)
 			}
 			var original orm.PaperGuideStep
 			if err = repo.DB.Where("revision_id = ? AND step_key = ?", rev.ID, "section:background:v1").Take(&original).Error; err != nil ||

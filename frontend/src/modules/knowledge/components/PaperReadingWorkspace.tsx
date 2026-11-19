@@ -1,7 +1,8 @@
+import { downloadPaperGuide } from "./PaperGuide/guideDownload";
 import GuideSectionIcon from "./PaperGuide/GuideSectionIcon";
 import GuideGenerationProgress, { GuideSkeleton } from "./PaperGuide/GuideGenerationProgress";
-import { BgColorsOutlined, DownOutlined, MoonOutlined, ReloadOutlined, SunOutlined } from "@ant-design/icons";
-import { Button, Dropdown, Modal, Popover, Select } from "antd";
+import { BgColorsOutlined, DownloadOutlined, DownOutlined, MoonOutlined, ReloadOutlined, SunOutlined } from "@ant-design/icons";
+import { Button, Dropdown, message, Modal, Popover, Select } from "antd";
 import {
   useCallback,
   useEffect,
@@ -21,7 +22,6 @@ import type {
   PaperGuideProgressRequest,
   PaperGuideBlock,
 } from "@/api/generated/core-client";
-import type { DocumentChatSelection } from "./PdfTemporaryChat/types";
 import {
   getReadingPreferences,
   type ReadingProviderSelection,
@@ -66,7 +66,6 @@ interface Props {
   auxiliaryOpen: boolean;
   auxiliaryTab: string;
   onAuxiliary: (tab: string | undefined) => void;
-  onSelection: (s: DocumentChatSelection) => void;
   onNavigate: (e: PaperGuideEvidence) => void;
   onReturnSource?: () => void;
   getPdfData: () => ArrayBuffer | null | Promise<ArrayBuffer>;
@@ -78,6 +77,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const { i18n } = useTranslation();
   const zh = i18n.language.startsWith("zh");
   const account = usePaperReaderSession();
+  const [exporting, setExporting] = useState(false);
   const [night, setNight] = useState(() => localStorage.getItem("paper-guide-night") === "true");
   const [paper, setPaper] = useState(() => {
     const saved = localStorage.getItem("paper-guide-paper");
@@ -104,7 +104,6 @@ export default function PaperReadingWorkspace(p: Props) {
   const [modeChoice, setModeChoice] = useState<{ key: string; value: string }>();
   const savedMode = modeChoice?.key === storageKey ? modeChoice.value : localStorage.getItem(storageKey);
   const [mountedSourceKey, setMountedSourceKey] = useState<string>();
-  const [guideChatKey, setGuideChatKey] = useState<string>();
   const [sourceOpen, setSourceOpen] = useState(false);
   const [width, setWidth] = useState(0);
   const container = useRef<HTMLDivElement>(null);
@@ -174,7 +173,6 @@ export default function PaperReadingWorkspace(p: Props) {
     evidence?.source_current && guide.revision?.source_current
   );
   useEffect(() => {
-    setGuideChatKey(undefined);
     setSourceOpen(false);
     setModel("");
     setRegenerateOpen(false);
@@ -210,7 +208,6 @@ export default function PaperReadingWorkspace(p: Props) {
   }, [showGuide, storageKey, language]);
   const setReadingMode = (value: string) => {
     setModeChoice({ key: storageKey, value });
-    setGuideChatKey(undefined);
     localStorage.setItem(storageKey, value);
     setSourceOpen(false);
     if (value === "article") p.onAuxiliary(undefined);
@@ -335,8 +332,7 @@ export default function PaperReadingWorkspace(p: Props) {
     if (sourceVisible) setMountedSourceKey(storageKey);
   }, [sourceVisible, storageKey]);
   const mountSource = sourceVisible || mountedSourceKey === storageKey;
-  const mountAuxiliary = mountSource || guideChatKey === storageKey;
-  const auxVisible = mountAuxiliary && p.auxiliaryOpen && !sourceOpen;
+  const auxVisible = mountSource && p.auxiliaryOpen && !sourceOpen;
   const dual = width >= 1100;
   const articleVisible = showGuide && (dual || (!sourceOpen && !auxVisible));
   useEffect(() => {
@@ -604,32 +600,53 @@ export default function PaperReadingWorkspace(p: Props) {
         <header className="paper-guide-toolbar">
           <div className="paper-guide-back">{showGuide && p.back}</div>{readingModeSwitch}
           {showGuide && <div className="guide-toolbar-actions">
-            {(guide.revision || savedLanguage === "zh" || savedLanguage === "en") && <Select<"zh" | "en"> className="guide-reading-language" aria-label={zh ? "阅读语言" : "Reading language"} value={language} disabled={busy || generating} options={languageOptions} virtual={false} onChange={selectLanguage} popupMatchSelectWidth={128} />}
-            {hasDetails && <Popover trigger="click" placement="bottomRight" getPopupContainer={(node: HTMLElement) => node.parentElement || node} content={toolbarDetails}>
-              <button className="guide-status-trigger" aria-label={zh ? "生成状态与操作" : "Generation status and actions"}>
-                {generating ? <GuideGenerationProgress {...progressProps} compact /> : <span>{error || guide.error ? (zh ? "生成遇到问题" : "Generation issue") : guide.availableRevision ? (zh ? "新版已就绪" : "New version ready") : labels[stage || ""] || (zh ? "版本提示" : "Version notice")}</span>}
-                <DownOutlined aria-hidden />
-              </button>
-            </Popover>}
-            {guide.revision?.run.stage === "completed" && !generating && <Button icon={<ReloadOutlined aria-hidden />} disabled={busy} onClick={openRegeneration}>{zh ? "重新生成" : "Regenerate"}</Button>}
-            <Button type="text" title={lightAction} aria-label={lightAction} icon={night ? <SunOutlined /> : <MoonOutlined />}
-              onClick={() => { setNight(!night); localStorage.setItem("paper-guide-night", String(!night)); }} />
-            <Dropdown trigger={["click"]} placement="bottomRight" menu={{
-              selectable: true, selectedKeys: [paper],
-              items: [
-                { key: "white", label: zh ? "素白" : "White" },
-                { key: "cream", label: zh ? "暖纸" : "Warm paper" },
-                { key: "sage", label: zh ? "鼠尾草绿" : "Soft sage" },
-              ].map(item => ({ ...item, icon: <span aria-hidden className={`guide-paper-swatch swatch-${item.key}`} /> })),
-              onClick: ({ key }: { key: string }) => {
-                if (key === "white" || key === "cream" || key === "sage") {
-                  setPaper(key);
-                  localStorage.setItem("paper-guide-paper", key);
-                }
-              },
-            }}>
-              <Button type="text" title={paperLabel} aria-label={paperLabel} icon={<BgColorsOutlined />} />
-            </Dropdown>
+            <div className="guide-toolbar-cluster">
+              {(guide.revision || savedLanguage === "zh" || savedLanguage === "en") && <Select<"zh" | "en"> className="guide-reading-language" variant="borderless" aria-label={zh ? "阅读语言" : "Reading language"} value={language} disabled={busy || generating} options={languageOptions} virtual={false} onChange={selectLanguage} popupMatchSelectWidth={128} />}
+              {hasDetails && <Popover trigger="click" placement="bottomRight" getPopupContainer={(node: HTMLElement) => node.parentElement || node} content={toolbarDetails}>
+                <button className="guide-status-trigger" aria-label={zh ? "生成状态与操作" : "Generation status and actions"}>
+                  {generating ? <GuideGenerationProgress {...progressProps} compact /> : <span>{error || guide.error ? (zh ? "生成遇到问题" : "Generation issue") : guide.availableRevision ? (zh ? "新版已就绪" : "New version ready") : stage === "paused" ? (zh ? "生成已中断" : "Interrupted") : labels[stage || ""] || (zh ? "版本提示" : "Version notice")}</span>}
+                  <DownOutlined aria-hidden />
+                </button>
+              </Popover>}
+              {guide.revision?.run.stage === "completed" && !generating && <Button icon={<ReloadOutlined aria-hidden />} disabled={busy} onClick={openRegeneration}>{zh ? "重新生成" : "Regenerate"}</Button>}
+            </div>
+            <div className="guide-toolbar-cluster guide-toolbar-tools">
+              {guide.revision?.sections.some(section => section.blocks.length) && <Dropdown trigger={["click"]} placement="bottomRight" menu={{
+                items: [{ key: "html", label: zh ? "下载 HTML" : "Download HTML" }, { key: "pdf", label: zh ? "另存为 PDF…" : "Save as PDF…" }],
+                onClick: async ({ key }: { key: string }) => {
+                  const article = container.current?.querySelector<HTMLElement>(".paper-guide-article");
+                  if (!article || exporting || (key !== "html" && key !== "pdf")) return;
+                  setExporting(true);
+                  try {
+                    await downloadPaperGuide(article, language, key);
+                  } catch (cause) {
+                    void message.error((zh ? "导出失败：" : "Export failed: ") + (cause instanceof Error ? cause.message : String(cause)));
+                  } finally {
+                    setExporting(false);
+                  }
+                },
+              }}>
+                <Button type="text" loading={exporting} title={zh ? "下载导读" : "Download guide"} aria-label={zh ? "下载导读" : "Download guide"} icon={<DownloadOutlined />} />
+              </Dropdown>}
+              <Button type="text" title={lightAction} aria-label={lightAction} icon={night ? <SunOutlined /> : <MoonOutlined />}
+                onClick={() => { setNight(!night); localStorage.setItem("paper-guide-night", String(!night)); }} />
+              <Dropdown trigger={["click"]} placement="bottomRight" menu={{
+                selectable: true, selectedKeys: [paper],
+                items: [
+                  { key: "white", label: zh ? "素白" : "White" },
+                  { key: "cream", label: zh ? "暖纸" : "Warm paper" },
+                  { key: "sage", label: zh ? "鼠尾草绿" : "Soft sage" },
+                ].map(item => ({ ...item, icon: <span aria-hidden className={`guide-paper-swatch swatch-${item.key}`} /> })),
+                onClick: ({ key }: { key: string }) => {
+                  if (key === "white" || key === "cream" || key === "sage") {
+                    setPaper(key);
+                    localStorage.setItem("paper-guide-paper", key);
+                  }
+                },
+              }}>
+                <Button type="text" title={paperLabel} aria-label={paperLabel} icon={<BgColorsOutlined />} />
+              </Dropdown>
+            </div>
           </div>}
         </header>
       )}
@@ -661,12 +678,6 @@ export default function PaperReadingWorkspace(p: Props) {
                 progress={localProgress.current || guide.status?.progress}
                 onProgress={saveProgress}
                 onEvidence={openEvidence}
-                onSelection={(selection) => {
-                  setSourceOpen(false);
-                  setGuideChatKey(storageKey);
-                  p.onSelection(selection);
-                  p.onAuxiliary("chat");
-                }}
                 renderAsset={renderAsset}
               />
             ) : initialReadFailed ? (
@@ -729,7 +740,7 @@ export default function PaperReadingWorkspace(p: Props) {
         </div>
         {!showGuide && p.divider}
         <div className="paper-reading-auxiliary" hidden={!auxVisible}>
-          {mountAuxiliary && p.auxiliary}
+          {mountSource && p.auxiliary}
         </div>
       </div>
       {!showGuide && p.dock}

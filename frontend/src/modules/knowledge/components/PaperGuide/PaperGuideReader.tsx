@@ -15,10 +15,8 @@ import type {
   PaperGuideRevisionResponse,
   PaperGuideProgressRequest,
 } from "@/api/generated/core-client";
-import type { DocumentChatSelection } from "../PdfTemporaryChat/types";
 import { restoreTextPosition, visibleTextOffset } from "./readingPosition";
 import PaperGuideText, { guideTextSegments } from "./PaperGuideText";
-import { sourceBoundary } from "./sourceText";
 import { isGuideRunActive } from "./guideRunState";
 
 function articleHeader(documentName: string, title: string, subtitle: string, zh: boolean) {
@@ -55,7 +53,6 @@ interface Props {
   title: string;
   language: string;
   onEvidence: (id: string, opener: HTMLButtonElement) => void;
-  onSelection: (selection: DocumentChatSelection) => void;
   progress?: PaperGuideProgressRequest | null;
   onProgress?: (progress: PaperGuideProgressRequest) => void;
   compact?: boolean;
@@ -66,7 +63,6 @@ export default function PaperGuideReader({
   title,
   language,
   onEvidence,
-  onSelection,
   progress,
   onProgress,
   compact,
@@ -95,26 +91,6 @@ export default function PaperGuideReader({
   const root = useRef<HTMLDivElement>(null);
   const restored = useRef("");
   const [active, setActive] = useState("");
-  const [selected, setSelected] = useState<{
-    revisionId: string;
-    includesTable: boolean;
-    section: PaperGuidePublishedSection;
-    block: PaperGuideBlock;
-    start: number;
-    end: number;
-    text: string;
-  }>();
-  useLayoutEffect(() => {
-    if (
-      selected &&
-      (selected.revisionId !== revision.id ||
-        !revision.sections.some(
-          (section) => section.key === selected.section.key,
-        ))
-    ) {
-      setSelected(undefined);
-    }
-  }, [revision, selected]);
   const numbers = new Map<string, number>();
   const sectionsWithSources = orderedSections.map((section) => {
     // Match server selection context: direct sources, then plan and local claims.
@@ -128,12 +104,6 @@ export default function PaperGuideReader({
     const flow = section.role === "overview" ? revision.plan?.paper_flow : undefined;
     return { section, blocks, flow };
   });
-  const selectedSourceId =
-    selected && selected.revisionId === revision.id
-      ? sectionsWithSources
-          .find(({ section }) => section.key === selected.section.key)
-          ?.blocks.find(({ block }) => block.id === selected.block.id)?.sources[0]
-      : undefined;
   const anchor = useRef<PaperGuideProgressRequest>();
   const lastWidth = useRef(0);
   const layoutPending = useRef(false);
@@ -205,94 +175,6 @@ export default function PaperGuideReader({
     lastCompact.current = compact;
     scheduleLayoutRestore();
   }, [compact]);
-  function ask(
-    section: PaperGuidePublishedSection,
-    block: PaperGuideBlock,
-    example = false,
-    range?: typeof selected,
-  ) {
-    if (!revision.source_current) return;
-    const start = range?.start ?? 0,
-      end = range?.end ?? Array.from(block.text).length;
-    onSelection({
-      source: "paper_guide",
-      text: range?.text ?? block.text,
-      question: example
-        ? zh
-          ? "请为这段导读举一个明确标注为假设的教学例子。"
-          : "Give a clearly labeled hypothetical example for this guide passage."
-        : zh
-          ? "请解释这段导读，区分教学说明和论文证据。"
-          : "Explain this guide passage, separating teaching from paper evidence.",
-      quickExplain: true,
-      guideRef: {
-        revision_id: range?.revisionId ?? revision.id,
-        section_key: section.key,
-        block_id: block.id,
-        start,
-        end,
-        language,
-      },
-    });
-    setSelected(undefined);
-  }
-  function capture() {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.rangeCount) {
-      setSelected(undefined);
-      return;
-    }
-    const range = sel.getRangeAt(0);
-    const element = (
-      range.startContainer instanceof Element
-        ? range.startContainer
-        : range.startContainer.parentElement
-    )?.closest<HTMLElement>("[data-guide-text]");
-    if (!element || !element.contains(range.endContainer)) {
-      setSelected(undefined);
-      return;
-    }
-    const blockId = element.dataset.guideText;
-    const sectionKey = element.closest<HTMLElement>("[data-guide-section]")
-      ?.dataset.guideSection;
-    const section = revision.sections.find((s) => s.key === sectionKey);
-    const block = section?.blocks.find((b) => b.id === blockId);
-    if (!section || !block) {
-      setSelected(undefined);
-      return;
-    }
-    const start = sourceBoundary(
-      element,
-      range.startContainer,
-      range.startOffset,
-      "start",
-    );
-    const end = sourceBoundary(
-      element,
-      range.endContainer,
-      range.endOffset,
-      "end",
-    );
-    if (start >= end) {
-      setSelected(undefined);
-      return;
-    }
-    setSelected({
-      revisionId: revision.id,
-      includesTable: Array.from(
-        element.querySelectorAll<HTMLElement>('[data-guide-atomic="table"]'),
-      ).some(
-        (table) =>
-          Number(table.dataset.guideSourceStart) < end &&
-          Number(table.dataset.guideSourceEnd) > start,
-      ),
-      section,
-      block,
-      start,
-      end,
-      text: Array.from(block.text).slice(start, end).join(""),
-    });
-  }
   function navigate(id: string) {
     const el = document.getElementById(id);
     setActive(id);
@@ -335,9 +217,6 @@ export default function PaperGuideReader({
       <div
         className="paper-guide-scroll"
         ref={root}
-        onMouseUp={capture}
-        onKeyUp={capture}
-        onTouchEnd={capture}
         onScroll={() => {
           const geometry = root.current?.getBoundingClientRect();
           if (
@@ -489,26 +368,6 @@ export default function PaperGuideReader({
                         {zh ? "来源" : "Source"} {numbers.get(id)}
                       </button>
                     ))}
-                    <details className="paper-guide-passage-actions">
-                      <summary aria-label={zh ? "选段操作" : "Passage actions"}>
-                        …
-                      </summary>
-                      <button disabled={!revision.source_current} onClick={() => ask(section, block)}>
-                        {zh ? "解释这段" : "Explain this passage"}
-                      </button>
-                      <button disabled={!revision.source_current} onClick={() => ask(section, block, true)}>
-                        {zh ? "举个例子" : "Give an example"}
-                      </button>
-                      {sources[0] && (
-                        <button
-                          onClick={(event) =>
-                            onEvidence(sources[0], event.currentTarget)
-                          }
-                        >
-                          {zh ? "查看原文" : "View source"}
-                        </button>
-                      )}
-                    </details>
                   </div>}
                 </div>
                 {flow && blockIndex === 0 && <PaperGuideFlow flow={flow} zh={zh} />}
@@ -536,54 +395,6 @@ export default function PaperGuideReader({
           )}
         </article>
       </div>
-      {selected && (
-        <div
-          className="paper-guide-selection"
-          role="toolbar"
-          aria-label={zh ? "导读选段" : "Guide passage"}
-        >
-          {selected.includesTable && (
-            <p className="paper-guide-table-selection-hint">
-              {zh
-                ? "表格选段将引用整表，以保留行列关系。"
-                : "The full table is included to preserve row and column context."}
-            </p>
-          )}
-          <p className="paper-guide-selection-preview">{selected.text}</p>
-          <button
-            disabled={!revision.source_current}
-            onClick={() =>
-              ask(selected.section, selected.block, false, selected)
-            }
-          >
-            {zh ? "解释这段" : "Explain this passage"}
-          </button>
-          <button
-            disabled={!revision.source_current}
-            onClick={() =>
-              ask(selected.section, selected.block, true, selected)
-            }
-          >
-            {zh ? "举个例子" : "Give an example"}
-          </button>
-          {selectedSourceId && (
-            <button
-              onClick={(event) => {
-                onEvidence(selectedSourceId, event.currentTarget);
-                setSelected(undefined);
-              }}
-            >
-              {zh ? "查看原文" : "View source"}
-            </button>
-          )}
-          <button
-            onClick={() => setSelected(undefined)}
-            aria-label={zh ? "关闭" : "Close"}
-          >
-            ×
-          </button>
-        </div>
-      )}
     </div>
   );
 }

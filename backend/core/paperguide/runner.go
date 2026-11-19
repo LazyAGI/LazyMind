@@ -279,7 +279,7 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 		}
 		return validate()
 	}
-	attemptTimeout := ModelAttemptTimeout
+	attemptTimeout := ModelAttemptTimeout(task)
 	attemptMillis := attemptTimeout.Milliseconds()
 	cfg, e := x.check(ctx)
 	if e != nil {

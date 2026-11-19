@@ -4,7 +4,6 @@ import PaperGuideReader from "./PaperGuideReader";
 import PaperGuidePlayground, { playgroundDocument } from "./PaperGuidePlayground";
 import { revision, section } from "./fixtures";
 import GuideGlossaryEntry from "./GuideGlossaryEntry";
-import { sourceBoundary } from "./sourceText";
 import { isGuideRunActive } from "./guideRunState";
 
 it("publishes arbitrary chapters in plan order with pending placeholders without source action buttons", () => {
@@ -14,7 +13,7 @@ it("publishes arbitrary chapters in plan order with pending placeholders without
   r.sections[1].blocks[0].evidence_ids = ["e1", "e2"];
   r.run.stage = "writing";
   const open = vi.fn();
-  const view = render(<PaperGuideReader revision={r} title="Original" language="en" onEvidence={open} onSelection={() => {}} />);
+  const view = render(<PaperGuideReader revision={r} title="Original" language="en" onEvidence={open} />);
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Understanding low rank");
   expect(screen.getAllByRole("heading", { level: 2 }).map(el => el.textContent)).toEqual(["Paper Summary", "rank-lab", "Experimental Results"]);
   expect(screen.getByText(/This chapter updates automatically/)).toBeVisible();
@@ -22,7 +21,7 @@ it("publishes arbitrary chapters in plan order with pending placeholders without
   expect(view.container.querySelector(".guide-skeleton")).not.toBeNull();
   const pending = { ...section("rank-lab"), key: "section:rank-lab:v1", blocks: [], publication_status: "generating" };
   r.sections.push(pending);
-  view.rerender(<PaperGuideReader revision={{ ...r }} title="Original" language="en" onEvidence={open} onSelection={() => {}} />);
+  view.rerender(<PaperGuideReader revision={{ ...r }} title="Original" language="en" onEvidence={open} />);
   fireEvent.click(screen.getByRole("button", { name: "rank-lab Generating" }));
   expect(screen.getByRole("heading", { name: "rank-lab" })).toHaveFocus();
   expect(screen.queryByText("Source 1")).toBeNull();
@@ -31,7 +30,7 @@ it("publishes arbitrary chapters in plan order with pending placeholders without
   expect(screen.queryByRole("button", { name: "View source" })).toBeNull();
   expect(open).not.toHaveBeenCalled();
   r.sections = [section("results"), section("rank-lab"), section("overview")];
-  view.rerender(<PaperGuideReader revision={{ ...r }} title="Original" language="en" onEvidence={open} onSelection={() => {}} />);
+  view.rerender(<PaperGuideReader revision={{ ...r }} title="Original" language="en" onEvidence={open} />);
   expect(screen.queryByText(/This chapter updates automatically/)).toBeNull();
   expect(screen.getAllByRole("heading", { level: 2 }).map(el => el.textContent)).toEqual(["Paper Summary", "rank-lab", "Experimental Results"]);
 });
@@ -44,7 +43,7 @@ it("renders the five planned layers inside the pending overview", () => {
   }, sections: [{ role: "overview", title: "论文简述", focus: "", terms: [], asset_ids: [], claim_ids: [], evidence_ids: [] }] };
   r.sections = [];
   r.run.stage = "writing";
-  const props = { title: "DDPM", language: "zh", onEvidence: vi.fn(), onSelection: vi.fn() };
+  const props = { title: "DDPM", language: "zh", onEvidence: vi.fn() };
   const view = render(<PaperGuideReader revision={r} {...props} />);
   const graph = screen.getByRole("figure", { name: "论文脉络图" });
   expect(within(graph).getAllByRole("term").map(node => node.textContent)).toEqual(["领域", "存在问题", "提出方法", "主要模块", "实验验证"]);
@@ -64,7 +63,7 @@ it("reads a legacy overview and renders a dataset-free English flow when present
   const r = revision();
   r.plan = { layout: "flashpapers", sections: [], claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" } };
   r.sections = [section("overview")];
-  const props = { revision: r, title: "Paper", language: "en", onEvidence: vi.fn(), onSelection: vi.fn() };
+  const props = { revision: r, title: "Paper", language: "en", onEvidence: vi.fn() };
   const view = render(<PaperGuideReader {...props} />);
   expect(screen.getByRole("heading", { name: "Paper Summary" })).toBeVisible();
   expect(screen.queryByRole("figure", { name: "Paper at a glance" })).toBeNull();
@@ -84,7 +83,7 @@ it("uses the same bookmark in the outline and heading for each optional deep div
   })) };
   r.sections = [section("attention-analysis")];
   r.run.stage = "writing";
-  render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={vi.fn()} onSelection={vi.fn()} />);
+  render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={vi.fn()} />);
   for (const [name, icon] of [["attention-method", "attention"], ["attention-analysis", "bookmark"], ["rank-budget", "bookmark"], ["Limitations", "boundary"]]) {
     const heading = screen.getByRole("heading", { name });
     const entry = screen.getByRole("button", { name: new RegExp(name) });
@@ -166,7 +165,7 @@ it("renders custom scenes only in the Flashpapers reader", () => {
   const r = revision();
   r.sections[0].blocks[0].kind = "playground";
   r.sections[0].blocks[0].playground = { html: "<svg><circle r='12'/></svg><script>let rank=2</script>" };
-  const props = { revision: r, title: "Paper", language: "en", onEvidence: vi.fn(), onSelection: vi.fn() };
+  const props = { revision: r, title: "Paper", language: "en", onEvidence: vi.fn() };
   const view = render(<PaperGuideReader {...props} />);
   expect(view.container.querySelector("iframe")).toBeNull();
   r.plan = { layout: "flashpapers", sections: [], claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" } };
@@ -180,7 +179,7 @@ it("keeps a single-level icon outline while retaining subheadings in the article
   r.plan = { layout: "flashpapers", title: "A paper", subtitle: "", claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" }, sections: ["overview", "results"].map(role => ({ role, title: role, focus: "", terms: [], asset_ids: [], claim_ids: [], evidence_ids: [] })) } as typeof r.plan;
   r.sections = [section("overview"), section("results")];
   r.sections[0].blocks.push({ ...r.sections[0].blocks[0], id: "detail-title", kind: "heading", text: "Details stay in the article" });
-  const view = render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} onSelection={() => {}} />);
+  const view = render(<PaperGuideReader revision={r} title="Paper" language="en" onEvidence={() => {}} />);
   const nav = screen.getByRole("navigation", { name: "Article outline" });
   expect(within(nav).getAllByRole("button")).toHaveLength(2);
   expect(within(nav).queryByText("Details stay in the article")).toBeNull();
@@ -201,7 +200,7 @@ it("renders existing glossary terms as collapsed entries with source offsets and
     { ...s.blocks[0], id: "plain", kind: "paragraph", text: "A background paragraph without a term delimiter." },
   ];
   r.sections = [s];
-  const view = render(<PaperGuideReader revision={r} title="Paper" language="zh" onEvidence={() => {}} onSelection={() => {}} />);
+  const view = render(<PaperGuideReader revision={r} title="Paper" language="zh" onEvidence={() => {}} />);
   const summary = screen.getByText("Noise schedule 噪声调度").closest("summary")!;
   const details = summary.closest("details")!;
   expect(details).not.toHaveAttribute("open");
@@ -227,13 +226,7 @@ it.each([
   const summary = entry.querySelector("summary")!;
   expect(summary.textContent).toBe(title);
   fireEvent.click(summary);
-  for (const [element, expected] of [[summary, title], [entry.querySelector("p")!, body]] as const) {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const start = sourceBoundary(entry, range.startContainer, range.startOffset, "start");
-    const end = sourceBoundary(entry, range.endContainer, range.endOffset, "end");
-    expect(Array.from(text).slice(start, end).join("")).toBe(expected);
-  }
+  expect(entry.querySelector("p")?.textContent).toBe(body);
 });
 
 it("uses fixed labels for standard chapters and preserves paper-specific method titles", () => {
@@ -241,7 +234,7 @@ it("uses fixed labels for standard chapters and preserves paper-specific method 
   const entries = [["overview", "概览：DDPM"], ["why-it-matters", "为什么重要：噪声"], ["big-idea", "核心想法：逐步加噪"], ["noise-training", "如何训练噪声预测器"], ["results", "结果：图像质量"], ["deep-dive", "渐进生成与压缩"], ["limitations", "局限：速度"], ["glossary", "术语表：领域"]];
   r.plan = { ...r.plan!, layout: "flashpapers", sections: entries.map(([role,title]) => ({role,title,focus:"",terms:[],asset_ids:[],claim_ids:[],evidence_ids:[]})) };
   r.sections = entries.map(([role,title]) => ({ ...section(role), title }));
-  render(<PaperGuideReader revision={r} title="DDPM" language="zh" onEvidence={() => {}} onSelection={() => {}} />);
+  render(<PaperGuideReader revision={r} title="DDPM" language="zh" onEvidence={() => {}} />);
   expect(screen.getAllByRole("heading", {level:2}).map(el => el.textContent)).toEqual(["论文简述", "问题与瓶颈", "核心想法", "如何训练噪声预测器", "实验结果", "渐进生成与压缩", "局限", "术语表"]);
   expect(screen.getByRole("button", {name:"核心想法 可阅读"})).toBeInTheDocument();
 });
@@ -252,7 +245,7 @@ it.each([
 ])("renders English above Chinese for current and earlier plans", (title, subtitle, documentName) => {
   const r = revision();
   r.plan = { layout: "flashpapers", title, subtitle, sections: [], claims: [], questions: [], required_assets: [], term_policy: [], profiles: { primary: null, secondary: [], uncertainty_reason: "" } };
-  const view = render(<PaperGuideReader revision={r} title={documentName} language="zh" onEvidence={vi.fn()} onSelection={vi.fn()} />);
+  const view = render(<PaperGuideReader revision={r} title={documentName} language="zh" onEvidence={vi.fn()} />);
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Mamba: Linear-Time Sequence Modeling with Selective State Spaces");
   expect(view.container.querySelector(".flashpapers-subtitle")).toHaveTextContent("Mamba：用选择性状态空间进行线性时间序列建模");
 });
@@ -265,7 +258,7 @@ it("presents a published results playground as evidence and keeps method control
   for (const chapter of r.sections) {
     Object.assign(chapter.blocks[0], { kind: "playground", playground: { html: "<table><tr><td>17.4</td></tr></table>" } });
   }
-  render(<PaperGuideReader revision={r} title="FlashAttention" language="zh" onEvidence={vi.fn()} onSelection={vi.fn()} />);
+  render(<PaperGuideReader revision={r} title="FlashAttention" language="zh" onEvidence={vi.fn()} />);
   const results = screen.getByTitle("实验结果对照").closest(".guide-playground") as HTMLElement;
   expect(within(results).getByText("实验结果")).toBeVisible();
   expect(within(results).queryByRole("button", { name: "重载交互" })).toBeNull();

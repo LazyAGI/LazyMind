@@ -95,24 +95,6 @@ type ProgressRequest struct {
 	Offset     int    `json:"offset"`
 	Mode       string `json:"mode"`
 }
-type SelectionRequest struct {
-	SectionKey string `json:"section_key"`
-	BlockID    string `json:"block_id"`
-	Start      int    `json:"start"`
-	End        int    `json:"end"`
-}
-type SelectionContext struct {
-	RevisionID    string          `json:"revision_id"`
-	SectionKey    string          `json:"section_key"`
-	BlockID       string          `json:"block_id"`
-	Text          string          `json:"text"`
-	Evidence      []GuideEvidence `json:"evidence"`
-	Claims        []GuideClaim    `json:"claims"`
-	SourceSHA256  string          `json:"source_sha256"`
-	IRDigest      string          `json:"ir_digest"`
-	SourceCurrent bool            `json:"source_current"`
-}
-
 func view(r orm.PaperGuideRevision) RevisionView {
 	var m ModelIdentity
 	_ = json.Unmarshal([]byte(r.ModelJSON), &m)
@@ -426,77 +408,6 @@ func evidenceDisplay(asset GuideAsset, current *GuideSourceSnapshot) *GuideOrigi
 	return frozen
 }
 
-func (s Service) Selection(ctx context.Context, scope Scope, id string, in SelectionRequest) (SelectionContext, error) {
-	out := SelectionContext{RevisionID: id, SectionKey: in.SectionKey, BlockID: in.BlockID, Evidence: []GuideEvidence{}, Claims: []GuideClaim{}}
-	if e := s.Authorize(ctx, scope, false); e != nil {
-		return out, e
-	}
-	rev, e := s.Repo.Revision(ctx, scope, id)
-	if e != nil {
-		return out, e
-	}
-	var step orm.PaperGuideStep
-	if e = s.Repo.DB.WithContext(ctx).Where("revision_id = ? AND step_key = ? AND published = ?", id, in.SectionKey, true).Take(&step).Error; e != nil {
-		return out, ErrEvidence
-	}
-	var section GuideSection
-	if json.Unmarshal([]byte(step.OutputJSON), &section) != nil {
-		return out, ErrEvidence
-	}
-	var block *GuideBlock
-	for i := range section.Blocks {
-		if section.Blocks[i].ID == in.BlockID {
-			block = &section.Blocks[i]
-			break
-		}
-	}
-	if block == nil || in.Start < 0 || in.End <= in.Start || in.End > len([]rune(block.Text)) || in.End-in.Start > 8000 {
-		return out, ErrEvidence
-	}
-	out.Text = string([]rune(block.Text)[in.Start:in.End])
-	out.SourceSHA256 = rev.SourceSHA256
-	out.IRDigest = rev.IRDigest
-	var planStep orm.PaperGuideStep
-	var plan GuidePlan
-	if s.Repo.DB.WithContext(ctx).Where("revision_id = ? AND step_key = ?", id, "plan").Take(&planStep).Error != nil || json.Unmarshal([]byte(planStep.OutputJSON), &plan) != nil {
-		return out, ErrEvidence
-	}
-	ids := append([]string{}, block.EvidenceIDs...)
-	for _, c := range append(plan.Claims, section.Claims...) {
-		if contains(block.ClaimIDs, c.ID) {
-			out.Claims = append(out.Claims, c)
-			ids = append(ids, c.EvidenceIDs...)
-		}
-	}
-	snapshot, e := s.readSnapshot(ctx, scope, rev)
-	if e != nil {
-		return out, e
-	}
-	current, e := s.Source.Load(ctx, scope, false)
-	if e != nil && !errors.Is(e, ErrSourceChanged) {
-		return out, e
-	}
-	out.SourceCurrent = current.Hash == rev.SourceSHA256 && current.Snapshot != nil && current.Snapshot.IRDigest == rev.IRDigest
-	for _, evID := range unique(ids) {
-		found := false
-		for _, ev := range snapshot.Evidence {
-			if ev.ID != evID {
-				continue
-			}
-			found = true
-			if !out.SourceCurrent {
-				ev.Locator = GuideLocator{Kind: "page", Page: ev.Locator.Page}
-			}
-			out.Evidence = append(out.Evidence, ev)
-			break
-		}
-		if !found {
-			return out, ErrEvidence
-		}
-	}
-
-	return out, nil
-}
 func (s Service) SaveProgress(ctx context.Context, scope Scope, in ProgressRequest) error {
 	if in.Mode != "article" && in.Mode != "source" {
 		return ErrEvidence
@@ -504,13 +415,32 @@ func (s Service) SaveProgress(ctx context.Context, scope Scope, in ProgressReque
 	if in.Offset < 0 {
 		return ErrEvidence
 	}
-	end := in.Offset
-	if end == 0 {
-		end = 1
+	if err := s.Authorize(ctx, scope, false); err != nil {
+		return err
 	}
-	_, e := s.Selection(ctx, scope, in.RevisionID, SelectionRequest{in.SectionKey, in.BlockID, end - 1, end})
-	if e != nil {
-		return e
+	if _, err := s.Repo.Revision(ctx, scope, in.RevisionID); err != nil {
+		return err
+	}
+	var step orm.PaperGuideStep
+	if err := s.Repo.DB.WithContext(ctx).Where("revision_id = ? AND step_key = ? AND published = ?", in.RevisionID, in.SectionKey, true).Take(&step).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrEvidence
+		}
+		return err
+	}
+	var section GuideSection
+	if err := json.Unmarshal([]byte(step.OutputJSON), &section); err != nil {
+		return ErrEvidence
+	}
+	valid := false
+	for _, block := range section.Blocks {
+		if block.ID == in.BlockID && block.Text != "" && in.Offset <= len([]rune(block.Text)) {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return ErrEvidence
 	}
 	row := orm.PaperGuideProgress{OwnerID: scope.OwnerID, RevisionID: in.RevisionID, SectionKey: in.SectionKey, BlockID: in.BlockID, Offset: in.Offset, Mode: in.Mode, UpdatedAt: time.Now().UTC()}
 	return s.Repo.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "owner_id"}, {Name: "revision_id"}}, DoUpdates: clause.AssignmentColumns([]string{"section_key", "block_id", "offset", "mode", "updated_at"})}).Create(&row).Error

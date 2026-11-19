@@ -1,0 +1,50 @@
+:root {
+  color-scheme: light;
+  --paper-ink: #202d3d;
+  --paper-muted: #576979;
+  --paper-border: #d3dbe1;
+  --paper-accent: #365b76;
+  --paper-surface: white;
+  color: var(--paper-ink);
+  background: white;
+  font: 17px/1.75 system-ui, sans-serif;
+}
+body { margin: 0 auto; max-width: 52rem; padding: 3rem clamp(1rem, 5vw, 4rem); overflow-wrap: anywhere }
+h1, h2, h3 { line-height: 1.3; text-wrap: balance; break-after: avoid }
+h1 { font-size: clamp(1.9rem, 5vw, 3rem) }
+h2 { margin-top: 2.5rem }
+.flashpapers-subtitle, figcaption { color: var(--paper-muted) }
+.paper-guide-block--callout { border-inline-start: 3px solid #547891; padding-inline-start: 1rem }
+.paper-guide-block p { white-space: pre-line }
+table { width: 100%; border-collapse: collapse }
+td, th { padding: .4em; border-bottom: 1px solid var(--paper-border) }
+figure { margin: 1.25rem 0; text-align: center; break-inside: avoid }
+img { max-width: 100%; height: auto }
+iframe { width: 100%; border: 1px solid var(--paper-border); box-sizing: border-box }
+summary { cursor: pointer; font-weight: 600 }
+details { padding: .5rem 0 }
+.is-display, .paper-guide-table-scroll { overflow-x: auto }
+.guide-flow { text-align: start }
+.guide-imprint { display: flex; align-items: center; justify-content: flex-end; gap: .42em; color: #687c89; font: 600 11px/1.3 system-ui, sans-serif; letter-spacing: .055em }
+.guide-imprint svg { width: 15px; height: 15px }
+section > .guide-imprint { margin-top: 2rem; padding-top: .55rem; border-top: 1px solid #dce2e6 }
+@page {
+  size: A4;
+  margin: 17mm 16mm 21mm;
+  @bottom-right {
+    content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 18 18' fill='none' stroke='%23687c89' stroke-width='1.25'%3E%3Cpath d='M9 5Q6 2.8 1.8 3.7v9q4.2-.9 7.2 1.3 3-2.2 7.2-1.3v-9Q12 2.8 9 5Zm0 0v9'/%3E%3C/svg%3E") "  LazyMind";
+    color: #687c89;
+    font: 600 8pt system-ui, sans-serif;
+    letter-spacing: .055em;
+  }
+}
+@media print {
+  :root { font-size: 10.5pt }
+  body { max-width: none; padding: 0 }
+  section > .guide-imprint { display: none }
+  .guide-flow { font-size: 9pt; overflow: visible }
+  .guide-flow dl { min-width: 0 !important }
+  img { max-height: 210mm; object-fit: contain }
+  .is-display, .paper-guide-table-scroll { overflow: visible }
+  p { widows: 3; orphans: 3 }
+}

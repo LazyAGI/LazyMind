@@ -93,7 +93,7 @@ func paperGuideOpenAPISchemas() map[string]any {
 		}
 		return map[string]any{"type": "object"}
 	}
-	roots := map[string]any{"PaperGuideStatus": paperguide.StatusResponse{}, "PaperGuideRevision": paperguide.RevisionResponse{}, "PaperGuideGenerateRequest": paperguide.GenerateRequest{}, "PaperGuideProgressRequest": paperguide.ProgressRequest{}, "PaperGuideSelectionRequest": paperguide.SelectionRequest{}, "PaperGuideSelectionContext": paperguide.SelectionContext{}, "PaperGuideRevisionView": paperguide.RevisionView{}, "PaperGuideEvidenceResponse": paperguide.EvidenceResponse{}}
+	roots := map[string]any{"PaperGuideStatus": paperguide.StatusResponse{}, "PaperGuideRevision": paperguide.RevisionResponse{}, "PaperGuideGenerateRequest": paperguide.GenerateRequest{}, "PaperGuideProgressRequest": paperguide.ProgressRequest{}, "PaperGuideRevisionView": paperguide.RevisionView{}, "PaperGuideEvidenceResponse": paperguide.EvidenceResponse{}}
 	for name, value := range roots {
 		r := schema(reflect.TypeOf(value))
 		ref, _ := r["$ref"].(string)
@@ -158,6 +158,5 @@ func paperGuideOpenAPIPaths() map[string]any {
 	add("post", "/paper-guide/runs/{run}:cancel", "", "PaperGuideCancellation", "Cancel future calls; retain published sections")
 	add("post", "/paper-guide/runs/{run}:resume", "", "PaperGuideStatus", "Resume with original model and remaining persisted budget")
 	add("put", "/paper-guide/progress", "PaperGuideProgressRequest", "PaperGuideProgressRequest", "Save independent reading position; offset is a Unicode rune offset")
-	add("post", "/paper-guide/revisions/{revision}:selection-context", "PaperGuideSelectionRequest", "PaperGuideSelectionContext", "Resolve a published block selection; start/end are half-open Unicode rune offsets")
 	return paths
 }

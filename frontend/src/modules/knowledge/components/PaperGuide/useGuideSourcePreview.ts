@@ -107,8 +107,8 @@ export function useGuideSourcePreview(
         try {
           const crop = await session.cache.get(doc, {
             ...target, regions: [{ page: pageNumber, bbox: [b[0] * width, b[1] * height, b[2] * width, b[3] * height] }],
-          }, { exact: !!original, trimWhitespace: original?.kind === "figure" &&
-            b[0] === 0 && b[1] === 0 && b[2] === 1 });
+          }, { exact: !!original, trimWhitespace: original?.kind === "figure"
+            ? (b[0] === 0 && b[1] === 0 && b[2] === 1 ? "all" : "horizontal") : undefined });
           if (!isCurrent()) return;
           if (crop) return { ...crop, mode: "region" };
         } catch {

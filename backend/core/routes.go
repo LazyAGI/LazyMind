@@ -413,7 +413,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/paper-guide/runs/{run}:cancel", []string{"document.read"}, doc.CancelPaperGuide)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/paper-guide/runs/{run}:resume", []string{"document.read"}, doc.ResumePaperGuide)
 	handleAPI(r, "PUT", "/datasets/{dataset}/documents/{document}/paper-guide/progress", []string{"document.read"}, doc.SavePaperGuideProgress)
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}:selection-context", []string{"document.read"}, doc.PaperGuideSelectionContext)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-ir", []string{"document.read"}, doc.GetPDFIR)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation", []string{"document.read"}, doc.ExplainPDFFormula)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation", []string{"document.read"}, doc.ExplainPDFVisual)

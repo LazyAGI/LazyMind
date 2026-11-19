@@ -30,7 +30,7 @@ TASKS = {
     'paper.explainer.chapter': TaskSpec(
         paper_explainer.EXPLAINER_VERSION, paper_explainer.ChapterInput, paper_explainer.Chapter,
         paper_explainer.chapter_prompt, validate_output=paper_explainer.bind_chapter,
-        timeout_seconds=120, reject_duplicate_keys=True, prefer_native_json=True,
+        timeout_seconds=300, reject_duplicate_keys=True, prefer_native_json=True,
     ),
     'paper.formula.explain': TaskSpec('formula-explanation-v7-low-latency', FormulaInput,
                                       FormulaOutput, formula_prompt),

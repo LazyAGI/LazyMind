@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRef } from "react";
-import PdfTemporaryChat, { type PdfTemporaryChatHandle, documentContextForSelection } from "./index";
+import PdfTemporaryChat, { type PdfTemporaryChatHandle } from "./index";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
 
 const requests = vi.hoisted(() => ({ options: [] as Array<{ payload: string }> }));
@@ -592,12 +592,4 @@ it("keeps B's prepare busy until B settles after A's old request settles", async
   expect(screen.getByRole("button", { name: /Prepare document/ })).not.toHaveClass("ant-btn-loading");
   expect(getDocumentParseStatus).toHaveBeenCalledTimes(3);
   expect(ensureDocumentParsed).toHaveBeenNthCalledWith(2, "dataset-a", "document-b");
-});
-
-
-it('sends immutable guide reference and labels its selection separately from the original PDF', async () => {
- const selection = {source:'paper_guide' as const,text:'Suppose 2 apples',guideRef:{revision_id:'old',section_key:'section:contribution:v1',block_id:'b',start:1,end:4,language:'en'}};
- expect(documentContextForSelection('d','p','paper.pdf',selection)).toMatchObject({paper_guide:{dataset_id:'d',document_id:'p',...selection.guideRef}});
- render(<PdfTemporaryChat paperMode datasetId="d" documentId="p" fileName="paper.pdf" selection={selection} onClose={()=>{}}/>);
- expect(await screen.findByText('Guide passage')).toBeInTheDocument();
 });

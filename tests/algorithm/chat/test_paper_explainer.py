@@ -35,6 +35,7 @@ def execute(monkeypatch, task, data, output, *, raw=False):
 def test_plan_keeps_nine_teaching_chapters_without_legacy_roles(monkeypatch):
     result, calls = execute(monkeypatch, 'plan', DATA, PLAN)
     assert result.status == 'succeeded', result.error_code
+    assert 119 < calls[0][1]['timeout'] <= 120
     assert result.output['paper_flow'] == PLAN['paper_flow']
     assert [s['id'] for s in result.output['chapters']] == IDS
     assert len(calls) == result.usage['model_calls'] == 1
@@ -44,6 +45,7 @@ def test_chapter_preserves_custom_executable_scene_in_single_call(monkeypatch):
     data = dict(DATA, plan=PLAN, chapter_id='parameter-playground')
     result, calls = execute(monkeypatch, 'chapter', data, CHAPTER)
     assert result.status == 'succeeded', result.error_code
+    assert 299 < calls[0][1]['timeout'] <= 300
     assert result.output['blocks'][1]['html'] == CHAPTER['blocks'][1]['html']
     assert len(calls) == result.usage['model_calls'] == 1
 

@@ -136,7 +136,6 @@ function Harness({
       dock={null}
       getPdfData={getPdfData}
       getPdfVersion={getPdfVersion}
-      onSelection={() => {}}
       onNavigate={onNavigate}
       ir={withIR ? {
         version: 1,

@@ -228,20 +228,3 @@ func SavePaperGuideProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, in)
 }
-func PaperGuideSelectionContext(w http.ResponseWriter, r *http.Request) {
-	scope, e := guideScope(r, r.URL.Query().Get("language"))
-	var in paperguide.SelectionRequest
-	if e == nil {
-		e = guideBody(w, r, &in)
-	}
-	if e != nil {
-		paperGuideError(w, r, e)
-		return
-	}
-	out, e := paperGuideService().Selection(r.Context(), scope, common.PathVar(r, "revision"), in)
-	if e != nil {
-		paperGuideError(w, r, e)
-		return
-	}
-	common.ReplyOK(w, out)
-}

@@ -127,10 +127,6 @@ func TestPrecisionDigestDisablesHistoricalV4CoordinatesButKeepsBody(t *testing.T
 	if err != nil || same || ev.Text != old.Evidence[1].Text || ev.ID != old.Evidence[1].ID || len(ev.Locator.BBox) != 0 {
 		t.Fatalf("old source reused: %+v %v", ev, err)
 	}
-	selected, err := service.Selection(t.Context(), scope, rev.ID, SelectionRequest{SectionKey: "section:background:v1", BlockID: "b_background", Start: 0, End: 3})
-	if err != nil || selected.SourceCurrent || selected.Text != "The" {
-		t.Fatalf("historical selection changed: %+v %v", selected, err)
-	}
 }
 func TestContainmentMetadataIsRequiredAndBound(t *testing.T) {
 	d, id := fixture(t)

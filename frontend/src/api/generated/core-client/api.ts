@@ -1768,9 +1768,6 @@ export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevis
 export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet200Response {
     'data'?: PaperGuideRevision;
 }
-export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost200Response {
-    'data'?: PaperGuideSelectionContext;
-}
 export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost200Response {
     'data'?: PaperGuideCancellation;
 }
@@ -7502,23 +7499,6 @@ export interface PaperGuideSectionPlan {
     'role': string;
     'terms': Array<string>;
     'title': string;
-}
-export interface PaperGuideSelectionContext {
-    'block_id': string;
-    'claims': Array<PaperGuideClaim>;
-    'evidence': Array<PaperGuideEvidence>;
-    'ir_digest': string;
-    'revision_id': string;
-    'section_key': string;
-    'source_current': boolean;
-    'source_sha256': string;
-    'text': string;
-}
-export interface PaperGuideSelectionRequest {
-    'block_id': string;
-    'end': number;
-    'section_key': string;
-    'start': number;
 }
 export interface PaperGuideStatus {
     'can_generate': boolean;
@@ -24984,58 +24964,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Resolve a published block selection; start/end are half-open Unicode rune offsets
-         * @param {string} dataset
-         * @param {string} document
-         * @param {string} revision
-         * @param {PaperGuideSelectionRequest} paperGuideSelectionRequest
-         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum} [language]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost: async (dataset: string, document: string, revision: string, paperGuideSelectionRequest: PaperGuideSelectionRequest, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'dataset' is not null or undefined
-            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost', 'dataset', dataset)
-            // verify required parameter 'document' is not null or undefined
-            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost', 'document', document)
-            // verify required parameter 'revision' is not null or undefined
-            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost', 'revision', revision)
-            // verify required parameter 'paperGuideSelectionRequest' is not null or undefined
-            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost', 'paperGuideSelectionRequest', paperGuideSelectionRequest)
-            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}:selection-context`
-                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
-                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
-                .replace(`{${"revision"}}`, encodeURIComponent(String(revision)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (language !== undefined) {
-                localVarQueryParameter['language'] = language;
-            }
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(paperGuideSelectionRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary Cancel future calls; retain published sections
          * @param {string} dataset
          * @param {string} document
@@ -37873,23 +37801,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Resolve a published block selection; start/end are half-open Unicode rune offsets
-         * @param {string} dataset
-         * @param {string} document
-         * @param {string} revision
-         * @param {PaperGuideSelectionRequest} paperGuideSelectionRequest
-         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum} [language]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost(dataset: string, document: string, revision: string, paperGuideSelectionRequest: PaperGuideSelectionRequest, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost(dataset, document, revision, paperGuideSelectionRequest, language, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary Cancel future calls; retain published sections
          * @param {string} dataset
          * @param {string} document
@@ -43435,16 +43346,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Resolve a published block selection; start/end are half-open Unicode rune offsets
-         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost200Response> {
-            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost(requestParameters.dataset, requestParameters.document, requestParameters.revision, requestParameters.paperGuideSelectionRequest, requestParameters.language, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary Cancel future calls; retain published sections
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -47365,21 +47266,6 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevi
 }
 
 /**
- * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostRequest {
-    readonly dataset: string
-
-    readonly document: string
-
-    readonly revision: string
-
-    readonly paperGuideSelectionRequest: PaperGuideSelectionRequest
-
-    readonly language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum
-}
-
-/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostRequest {
@@ -50631,17 +50517,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet(requestParameters.dataset, requestParameters.document, requestParameters.revision, requestParameters.language, requestParameters.afterVersion, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Resolve a published block selection; start/end are half-open Unicode rune offsets
-     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPost(requestParameters.dataset, requestParameters.document, requestParameters.revision, requestParameters.paperGuideSelectionRequest, requestParameters.language, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -54175,11 +54050,6 @@ export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionG
     En: 'en'
 } as const;
 export type ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum];
-export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum = {
-    Zh: 'zh',
-    En: 'en'
-} as const;
-export type ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionSelectionContextPostLanguageEnum];
 export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum = {
     Zh: 'zh',
     En: 'en'

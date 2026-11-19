@@ -173,7 +173,9 @@ async function findFallbackRegion(
 
 // For an isolated figure the producer establishes the page strip, while the PDF
 // itself establishes the extent of its ink, including detached legends and labels.
-function trimWhiteMargins(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) {
+type MarginTrim = "horizontal" | "all";
+
+function trimWhiteMargins(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D, mode: MarginTrim) {
   const { width, height } = canvas;
   const pixels = context.getImageData(0, 0, width, height).data;
   let left = width, top = height, right = -1, bottom = -1;
@@ -190,9 +192,10 @@ function trimWhiteMargins(canvas: HTMLCanvasElement, context: CanvasRenderingCon
   if (right < left) return undefined;
   const border = 3;
   left = Math.max(0, left - border);
-  top = Math.max(0, top - border);
+  top = mode === "horizontal" ? 0 : Math.max(0, top - border);
   right = Math.min(width - 1, right + border);
-  bottom = Math.min(height - 1, bottom + border);
+  bottom = mode === "horizontal" ? height - 1 : Math.min(height - 1, bottom + border);
+  if (left === 0 && top === 0 && right === width - 1 && bottom === height - 1) return canvas;
   const trimmed = document.createElement("canvas");
   trimmed.width = right - left + 1;
   trimmed.height = bottom - top + 1;
@@ -202,7 +205,7 @@ function trimWhiteMargins(canvas: HTMLCanvasElement, context: CanvasRenderingCon
   return trimmed;
 }
 
-async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, padding: number, requestedScale = PREVIEW_SCALE, trimWhitespace = false): Promise<RenderedPreview | undefined> {
+async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, padding: number, requestedScale = PREVIEW_SCALE, trimWhitespace?: MarginTrim): Promise<RenderedPreview | undefined> {
   const pages = new Map<number, { page: PreviewPage; base: PreviewViewport; viewport: PreviewViewport; scale: number }>();
   for (const region of target.regions) {
     if (pages.has(region.page)) continue;
@@ -274,7 +277,7 @@ async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitatio
       }
     }
     if (trimWhitespace) {
-      const trimmed = trimWhiteMargins(composition, context);
+      const trimmed = trimWhiteMargins(composition, context, trimWhitespace);
       if (!trimmed) return undefined;
       output = trimmed;
     }
@@ -340,14 +343,14 @@ export function createPdfCitationPreviewCache(options: PdfCitationPreviewOptions
     disposed = true;
     for (const state of liveStates) disposeState(state);
   }
-  function get(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, options?: { exact?: boolean; trimWhitespace?: boolean }): Promise<PdfCitationPreview | undefined> {
+  function get(pdf: PdfCitationPreviewDocument, target: PdfCitationTarget, options?: { exact?: boolean; trimWhitespace?: MarginTrim }): Promise<PdfCitationPreview | undefined> {
     if (disposed || (!target.regions.length && !/^\d{1,4}$/.test(target.referenceKey))) return Promise.resolve(undefined);
     let state = documents.get(pdf);
     if (!state) {
       state = { active: true, resolved: new Map(), inflight: new Map(), missing: new Set(), fallbackPages: new Map() };
       documents.set(pdf, state);
     }
-    const key = JSON.stringify([target.referenceKey, target.regions, target.regions.length ? undefined : target.rawText, target.fallbackPage, options?.exact === true, options?.trimWhitespace === true]);
+    const key = JSON.stringify([target.referenceKey, target.regions, target.regions.length ? undefined : target.rawText, target.fallbackPage, options?.exact === true, options?.trimWhitespace]);
     if (state.missing.has(key)) return Promise.resolve(undefined);
     const existing = state.resolved.get(key);
     if (existing) {

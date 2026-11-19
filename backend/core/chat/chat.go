@@ -20,7 +20,6 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
-	"lazymind/core/paperguide"
 )
 
 const (
@@ -400,11 +399,6 @@ func NewChatServiceWithEndpoint(endpoint string) *ChatService {
 
 // StreamChat text /api/chat_stream，text channel；ctx Unsettext channel text。
 func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-chan *LazyStreamData, string, error) {
-	resolvedContext, err := paperguide.ResolveChatContext(ctx, req.Conversation.UserID, req.DocumentContext)
-	if err != nil {
-		return nil, "", err
-	}
-	req.DocumentContext = resolvedContext
 	bodyBytes, err := json.Marshal(req)
 	if err != nil {
 		return nil, "", err

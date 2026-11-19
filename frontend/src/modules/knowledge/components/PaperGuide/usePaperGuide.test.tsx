@@ -155,7 +155,7 @@ it("uses ordinary polling to refresh source currentness and keeps the same reada
   function Reader() {
     const { revision } = usePaperGuide("ds", "doc", "en", true);
     return revision && (
-      <PaperGuideReader revision={revision} title="Paper" language="en" onEvidence={() => {}} onSelection={() => {}} />
+      <PaperGuideReader revision={revision} title="Paper" language="en" onEvidence={() => {}} />
     );
   }
   vi.useFakeTimers();
@@ -164,8 +164,6 @@ it("uses ordinary polling to refresh source currentness and keeps the same reada
     await act(async () => {});
     const article = screen.getByRole("article");
     const body = screen.getAllByText(/A concrete explanation of the argument/)[0];
-    const followUps = () => screen.getAllByRole("button", { name: "Explain this passage", hidden: true });
-    expect(followUps()[0]).toBeEnabled();
 
     api.status
       .mockResolvedValueOnce({ data: summaries, etag: "after-ir-upgrade" })
@@ -176,7 +174,6 @@ it("uses ordinary polling to refresh source currentness and keeps the same reada
     expect(api.revision).toHaveBeenLastCalledWith(expect.anything(), old.id, old.version, expect.anything());
     expect(screen.getByRole("article")).toBe(article);
     expect(screen.getAllByText(/A concrete explanation of the argument/)[0]).toBe(body);
-    for (const button of followUps()) expect(button).toBeDisabled();
 
     await act(() => vi.advanceTimersByTimeAsync(60000));
     expect(api.status).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ etag: "after-ir-upgrade" }));

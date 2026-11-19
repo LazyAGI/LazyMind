@@ -601,21 +601,13 @@ func TestPaperGuideHTTPQualityStopPreservesPublishedCheckpoints(t *testing.T) {
 				}
 				return payload.Data
 			}
-			readSelection := func() string {
-				t.Helper()
-				w := call(PaperGuideSelectionContext, "POST", `{"section_key":"section:question:v2","block_id":"question-block","start":0,"end":9}`, "owner", vars)
-				if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"text":"Synthetic"`) {
-					t.Fatalf("selection response: %d %s", w.Code, w.Body)
-				}
-				return w.Body.String()
-			}
 			before := readPersisted()
 			status := call(GetPaperGuide, "GET", "", "owner", nil)
 			if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"can_generate":true`) ||
 				!strings.Contains(status.Body.String(), `"resume_block_reason":"`+qualityCode+`"`) {
 				t.Errorf("status omitted the quality resume block or generation availability: %d %s", status.Code, status.Body)
 			}
-			revision, selection := readRevision(), readSelection()
+			revision := readRevision()
 			if len(revision.Sections) != 4 || !revision.SourceCurrent || revision.Plan == nil || revision.ReviewSummary == nil ||
 				revision.Sections[1].Key != "section:question:v2" || revision.Sections[1].PublicationStatus != "correction_required" ||
 				revision.Run.Stage != stage || revision.Run.ErrorCode != qualityCode {
@@ -634,8 +626,8 @@ func TestPaperGuideHTTPQualityStopPreservesPublishedCheckpoints(t *testing.T) {
 				t.Errorf("rejected resume changed persisted state: guide epoch %d -> %d, revision epoch %d -> %d, jobs %d -> %d",
 					before.Guide.Epoch, after.Guide.Epoch, before.Revision.Epoch, after.Revision.Epoch, len(before.Jobs), len(after.Jobs))
 			}
-			if after := readRevision(); !reflect.DeepEqual(revision, after) || selection != readSelection() {
-				t.Error("resume changed the readable revision or selection")
+			if after := readRevision(); !reflect.DeepEqual(revision, after) {
+				t.Error("resume changed the readable revision")
 			}
 			if providerCalls != 0 {
 				t.Errorf("resume dispatched %d provider requests", providerCalls)
@@ -929,7 +921,7 @@ func TestPaperGuideAdapterSelectsHTTPDeadlineWithoutChangingOptions(t *testing.T
 		limit time.Duration
 	}{
 		{"paper.explainer.plan", 120 * time.Second},
-		{"paper.explainer.chapter", 120 * time.Second},
+		{"paper.explainer.chapter", 5 * time.Minute},
 		{"paper.explainer.plan", 2 * time.Second},
 	} {
 		t.Run(tc.task+"/"+tc.limit.String(), func(t *testing.T) {

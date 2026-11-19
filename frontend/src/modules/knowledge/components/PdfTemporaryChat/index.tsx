@@ -66,7 +66,6 @@ export function documentContextForSelection(
     segment_id: selection?.segmentId,
     segment_number: selection?.segmentNumber,
     segment_group: selection?.group,
-    ...(selection?.source === "paper_guide" && selection.guideRef ? {paper_guide: {...selection.guideRef, dataset_id: datasetId, document_id: documentId}} : {}),
     selected_text: selection?.text,
     paragraph_text: selection?.context,
     ...(selection?.quickExplain ? { expand_paper_context: true } : {}),
@@ -475,8 +474,8 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
       </div>}
       {isPaper && activeSelection && <div className="paper-assistant-quote">
         <div className="paper-assistant-quote__heading">
-          <button type="button" disabled={!onNavigateSelection || (activeSelection.source === "paper_guide" && !activeSelection.page)} onClick={() => onNavigateSelection?.(activeSelection)}>
-            {activeSelection.source === "paper_guide" ? (zh ? "导读选段" : "Guide passage") : copy.quote}{activeSelection.page ? (zh ? ` · 第 ${activeSelection.page} 页` : ` · Page ${activeSelection.page}`) : ""}
+          <button type="button" disabled={!onNavigateSelection} onClick={() => onNavigateSelection?.(activeSelection)}>
+            {copy.quote}{activeSelection.page ? (zh ? ` · 第 ${activeSelection.page} 页` : ` · Page ${activeSelection.page}`) : ""}
           </button>
           <Button type="text" size="small" icon={<CloseOutlined />} aria-label={copy.remove} onClick={() => {
             setDismissedSelection(activeSelection);
@@ -485,7 +484,6 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
             onClearSelection?.();
           }} />
         </div>
-        {activeSelection.source === "paper_guide" && activeSelection.guideRef && <small>{zh ? "导读版本" : "Guide revision"}: {activeSelection.guideRef.revision_id.slice(0, 8)}</small>}
         <blockquote>{activeSelection.text}</blockquote>
       </div>}
       <div className="pdf-temporary-chat__body">

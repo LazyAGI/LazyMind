@@ -18,20 +18,18 @@ function renderTable(
     kind,
     text,
   };
-  const select = vi.fn();
   const view = render(
     <PaperGuideReader
       revision={r}
       title="Paper"
       language="en"
       onEvidence={() => {}}
-      onSelection={select}
     />,
   );
   const root = view.container.querySelector(
     '[data-guide-section="section:question:v1"] [data-guide-text]',
   ) as HTMLElement;
-  return { ...view, root, select };
+  return { ...view, root };
 }
 it("renders the real five-column six-row comparison as an accessible table with its caveat", () => {
   const { root } = renderTable();
@@ -51,103 +49,6 @@ it("renders the real five-column six-row comparison as an accessible table with 
     screen.getByRole("region", { name: "Scrollable guide table" }),
   ).toHaveAttribute("tabindex", "0");
 });
-it.each([
-  "cell",
-  "math",
-  "across",
-  "after",
-  "before",
-  "before-math",
-  "after-math",
-])(
-  "preserves exact raw Unicode source when selecting %s around a table",
-  (choice) => {
-    const raw = "| A | B |\n| --- | --- |\n| 😀 | \\(x_1\\) |\n| 😀 | same |";
-    const prefix = "甲😀 \\(a\\)\n\n",
-      suffix = "\n\n尾𐐀文 \\(z\\)";
-    const { root, select } = renderTable(prefix + raw + suffix);
-    const t = screen.getByRole("table"),
-      range = document.createRange();
-    let start: number, end: number, expected: string;
-    const pre = Array.from(prefix).length,
-      size = Array.from(raw).length;
-    if (choice === "before-math" || choice === "after-math") {
-      const parent =
-        choice === "before-math"
-          ? (root.firstChild as Element)
-          : (root.lastChild as Element);
-      const walker = document.createTreeWalker(
-          parent.querySelector(".katex-html")!,
-          NodeFilter.SHOW_TEXT,
-        ),
-        node = walker.nextNode()!;
-      range.setStart(node, 0);
-      range.setEnd(node, 1);
-      start = choice === "before-math" ? 3 : pre + size + 6;
-      end = start + 5;
-      expected = choice === "before-math" ? "\\(a\\)" : "\\(z\\)";
-    } else if (choice === "after") {
-      const node = root.lastChild!.firstChild!.firstChild!;
-      range.setStart(node, 3);
-      range.setEnd(node, 5);
-      start = pre + size + 3;
-      end = start + 1;
-      expected = "𐐀";
-    } else if (choice === "before") {
-      const node = root.firstChild!.firstChild!.firstChild!;
-      range.setStart(node, 1);
-      range.setEnd(node, 3);
-      start = 1;
-      end = 2;
-      expected = "😀";
-    } else if (choice === "across") {
-      range.setStart(root.firstChild!.firstChild!.firstChild!, 1);
-      range.setEnd(root.lastChild!.firstChild!.firstChild!, 3);
-      start = 1;
-      end = pre + size + 3;
-      expected = Array.from(prefix + raw + suffix)
-        .slice(start, end)
-        .join("");
-    } else {
-      const cell =
-        choice === "cell"
-          ? within(t).getAllByRole("cell")[2]
-          : t.querySelector(".katex-html")!;
-      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT),
-        node = walker.nextNode()!;
-      range.setStart(node, 0);
-      range.setEnd(node, 1);
-      start = pre;
-      end = pre + size;
-      expected = raw;
-    }
-    window.getSelection()!.removeAllRanges();
-    window.getSelection()!.addRange(range);
-    fireEvent.mouseUp(root);
-    const toolbar = screen.getByRole("toolbar");
-    expect(
-      toolbar.querySelector(".paper-guide-selection-preview")?.textContent,
-    ).toBe(expected);
-    if (["cell", "math", "across"].includes(choice))
-      expect(toolbar).toHaveTextContent(
-        "The full table is included to preserve row and column context.",
-      );
-    fireEvent.click(
-      within(toolbar).getByRole("button", { name: "Explain this passage" }),
-    );
-    expect(select.mock.calls[0][0]).toMatchObject({
-      text: expected,
-      guideRef: {
-        revision_id: "r1",
-        section_key: "section:question:v1",
-        block_id: "background-block",
-        start,
-        end,
-      },
-    });
-    expect(t.querySelector("[data-guide-source-start]")).toBeNull();
-  },
-);
 it("renders HTML and link-like table content as inert text and keeps an escaped pipe in its cell", () => {
   const raw =
     '| A | B |\n| --- | --- |\n| <img src="https://bad.example" onerror="alert(1)"> | [click](https://bad.example) |\n| a\\|b | safe |';
@@ -196,78 +97,6 @@ it("renders math after an unparsed full-width grid and preserves its literal row
   expect(sourceTextLength(root)).toBe(32);
 });
 
-function explainRange(root: HTMLElement, range: Range, raw: string) {
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
-  fireEvent.mouseUp(root);
-  const toolbar = screen.getByRole("toolbar");
-  expect(
-    toolbar.querySelector(".paper-guide-selection-preview")?.textContent,
-  ).toBe(raw);
-  expect(toolbar).not.toHaveTextContent("The full table is included");
-  fireEvent.click(
-    within(toolbar).getByRole("button", { name: "Explain this passage" }),
-  );
-}
-
-it.each([
-  { choice: "before", start: 16, end: 18, expected: "前😀" },
-  { choice: "math", start: 19, end: 26, expected: fallbackFormula },
-  { choice: "after", start: 27, end: 28, expected: "𐐀" },
-  {
-    choice: "across",
-    start: 17,
-    end: 28,
-    expected: "😀 " + fallbackFormula + " 𐐀",
-  },
-  { choice: "whole", start: 0, end: 32, expected: fallbackText },
-])(
-  "sends exact raw Unicode selection from fallback ($choice)",
-  ({ choice, start, end, expected }) => {
-    const { root, select } = renderTable(fallbackText);
-    const range = document.createRange();
-    if (choice === "whole") {
-      range.selectNodeContents(root);
-    } else if (choice === "math") {
-      const math = root.querySelector(".katex-html");
-      expect(math).toBeVisible();
-      const glyph = document.createTreeWalker(math!, NodeFilter.SHOW_TEXT)
-        .nextNode()!;
-      range.setStart(glyph, 0);
-      range.setEnd(glyph, 1);
-    } else {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      let before: Node | undefined;
-      let after: Node | undefined;
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (node.textContent?.includes("前😀")) before = node;
-        if (node.textContent?.includes("𐐀后")) after = node;
-      }
-      const front = before!.textContent!.indexOf("前😀");
-      const back = after!.textContent!.indexOf("𐐀后");
-      range.setStart(
-        choice === "after" ? after! : before!,
-        choice === "after" ? back : front + (choice === "across" ? 1 : 0),
-      );
-      range.setEnd(
-        choice === "before" ? before! : after!,
-        choice === "before" ? front + 3 : back + 2,
-      );
-    }
-    explainRange(root, range, expected);
-    expect(select.mock.calls[0][0]).toMatchObject({
-      text: expected,
-      guideRef: {
-        revision_id: "r1",
-        section_key: "section:question:v1",
-        block_id: "background-block",
-        start,
-        end,
-      },
-    });
-  },
-);
-
 it("keeps HTML, link syntax, unsafe and invalid TeX literal beside safe fallback math", () => {
   const start = String.raw`列｜值
 甲｜<img src="https://bad.example" onerror="alert(1)">
@@ -294,24 +123,6 @@ it("does not reinterpret pipes in ordinary paragraph blocks", () => {
   expect(screen.queryByRole("table")).toBeNull();
 });
 
-it("preserves CRLF and optional outer pipes as a single source interval", () => {
-  const raw = "A | B\r\n:--- | ---:\r\n1 | 2";
-  const { root, select } = renderTable(raw);
-  const range = document.createRange();
-  range.selectNodeContents(screen.getAllByRole("cell")[0]);
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
-  fireEvent.mouseUp(root);
-  fireEvent.click(
-    within(screen.getByRole("toolbar")).getByRole("button", {
-      name: "Explain this passage",
-    }),
-  );
-  expect(select.mock.calls[0][0]).toMatchObject({
-    text: raw,
-    guideRef: { start: 0, end: raw.length },
-  });
-});
 it("keeps over-limit or multiple tables entirely as raw text", () => {
   const wide =
     Array.from({ length: 17 }, (_, i) => "C" + i).join(" | ") +
@@ -373,7 +184,7 @@ it("uses whole-table geometry for a source offset inside it and resumes exact pr
   }
 });
 
-it("preserves attribution, linked source assets, evidence and whole-block keyboard actions", () => {
+it("preserves attribution, linked source assets, evidence", () => {
   const r = revision(),
     block = r.sections[1].blocks[0];
   Object.assign(block, {
@@ -384,7 +195,6 @@ it("preserves attribution, linked source assets, evidence and whole-block keyboa
     attribution: "paper_statement",
   });
   const onEvidence = vi.fn(),
-    onSelection = vi.fn(),
     renderAsset = vi.fn(() => <figure aria-label="Original source table" />);
   const view = render(
     <PaperGuideReader
@@ -392,7 +202,6 @@ it("preserves attribution, linked source assets, evidence and whole-block keyboa
       title="Paper"
       language="en"
       onEvidence={onEvidence}
-      onSelection={onSelection}
       renderAsset={renderAsset}
     />,
   );
@@ -407,19 +216,6 @@ it("preserves attribution, linked source assets, evidence and whole-block keyboa
   const citation = within(section).getByRole("button", { name: /Source/ });
   fireEvent.click(citation);
   expect(onEvidence).toHaveBeenCalledWith("table-evidence", citation);
-  const menu = section.querySelector(".paper-guide-passage-actions")!;
-  fireEvent.click(menu.querySelector("summary")!);
-  fireEvent.click(
-    within(menu as HTMLElement).getByText("Explain this passage"),
-  );
-  expect(onSelection.mock.calls[0][0]).toMatchObject({
-    text: table,
-    guideRef: {
-      section_key: "section:question:v1",
-      start: 0,
-      end: Array.from(table).length,
-    },
-  });
 });
 
 it.each([
@@ -462,7 +258,7 @@ it.each(["", "甲😀\n\n"])(
     const raw = "| A | B |\n| --- | --- |\n| 1 | 2 |",
       formula = "\\[\n|x|\n\\]",
       footnote = "\nFootnote.\n";
-    const { root, select } = renderTable(prefix + raw + footnote + formula);
+    const { root } = renderTable(prefix + raw + footnote + formula);
     expect(screen.getAllByRole("table")).toHaveLength(1);
     const atom = root.querySelector('[data-guide-atomic="table"]')!;
     expect(atom).toHaveAttribute(
@@ -473,26 +269,8 @@ it.each(["", "甲😀\n\n"])(
       "data-guide-source-end",
       String(Array.from(prefix + raw).length),
     );
-    const math = root.querySelector("[data-guide-math]")!;
-    expect(math).not.toBeNull();
+    expect(root.querySelector("[data-guide-math]")).not.toBeNull();
     expect(root).toHaveTextContent("Footnote.");
-    const range = document.createRange();
-    range.selectNodeContents(math.querySelector(".katex-html")!);
-    window.getSelection()!.removeAllRanges();
-    window.getSelection()!.addRange(range);
-    fireEvent.mouseUp(root);
-    const toolbar = screen.getByRole("toolbar");
-    expect(
-      toolbar.querySelector(".paper-guide-selection-preview")?.textContent,
-    ).toBe(formula);
-    fireEvent.click(
-      within(toolbar).getByRole("button", { name: "Explain this passage" }),
-    );
-    const start = Array.from(prefix + raw + footnote).length;
-    expect(select.mock.calls[0][0]).toMatchObject({
-      text: formula,
-      guideRef: { start, end: start + Array.from(formula).length },
-    });
   },
 );
 
@@ -529,19 +307,12 @@ it.each([
   "preserves the exact rejected table source when $context",
   ({ prefix, formula, latex, suffix }) => {
     const raw = prefix + formula + suffix;
-    const { root, select } = renderTable(raw);
+    const { root } = renderTable(raw);
     expect(screen.queryByRole("table")).toBeNull();
     const math = root.querySelector("[data-guide-math]")!;
     expect(math.querySelector("annotation")?.textContent).toBe(latex);
     expect(math.previousSibling?.textContent ?? "").toBe(prefix);
     expect(math.nextSibling?.textContent ?? "").toBe(suffix);
-    const range = document.createRange();
-    range.selectNodeContents(root);
-    explainRange(root, range, raw);
-    expect(select.mock.calls[0][0]).toMatchObject({
-      text: raw,
-      guideRef: { start: 0, end: raw.length },
-    });
   },
 );
 
