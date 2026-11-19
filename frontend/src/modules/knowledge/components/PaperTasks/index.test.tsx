@@ -370,6 +370,19 @@ describe('paper task startup routes', () => {
         fireEvent.click(screen.getByRole('button', { name: /论文综述/ }));
         expect(await screen.findByRole('menuitem', { name: '指定方向生成' })).toHaveAttribute('aria-disabled', 'true');
     });
+    it('waits for full-text preparation and enables review when the papers are ready', async () => {
+        vi.mocked(resolvePaperSelection).mockResolvedValueOnce({ papers: input.papers, invalid: [], materials: [
+            { paper_id: 'a', status: 'ready', eligible: true }, { paper_id: 'b', status: 'preparing', eligible: false },
+        ] });
+        mount(['a', 'b']);
+        fireEvent.click(screen.getByRole('button', { name: /论文综述/ }));
+        fireEvent.click(await screen.findByText('基于选中论文生成综述'));
+        await waitFor(() => expect(screen.getByText(zhCN.paperTasks.reviewPreparing)).toBeVisible());
+        expect(screen.queryByText(zhCN.paperTasks.reviewMinimumFulltext)).not.toBeInTheDocument();
+        const generate = screen.getByRole('button', { name: '生成综述' });
+        expect(generate).toBeDisabled();
+        await waitFor(() => expect(generate).toBeEnabled(), { timeout: 5500 });
+    }, 8000);
     it('blocks a direct review with fewer than two usable papers', async () => {
         vi.mocked(resolvePaperSelection).mockResolvedValue({ papers: input.papers, invalid: [], materials: [
             { paper_id: 'a', status: 'ready', eligible: true }, { paper_id: 'b', status: 'failed', eligible: false, reason: '全文不可用' },
