@@ -1,9 +1,9 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Input, message, Modal, Popover, Segmented, Select, Tooltip } from "antd";
+import { Alert, Button, Input, message, Modal, Popover, Segmented, Select, Space, Tooltip } from "antd";
 import SkillModuleState from "./SkillModuleState";
 import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import WorkflowInstalledView from "./WorkflowInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
@@ -95,6 +95,7 @@ export default function SkillManagementSection() {
   const [organizeRunStatus, setOrganizeRunStatus] = useState<SkillOrganizeTaskStatus | "">("");
   const [organizeElapsedMs, setOrganizeElapsedMs] = useState(0);
   const [organizeError, setOrganizeError] = useState("");
+  const [organizeErrorCode, setOrganizeErrorCode] = useState("");
   const [organizeBlockingSkills, setOrganizeBlockingSkills] = useState<string[]>([]);
   const [organizeDraftConflict, setOrganizeDraftConflict] = useState(false);
   const [organizePendingReviewWarning, setOrganizePendingReviewWarning] = useState(false);
@@ -565,6 +566,7 @@ export default function SkillManagementSection() {
 
     setOrganizeDepth(mode);
     setOrganizeError("");
+    setOrganizeErrorCode("");
     setOrganizeBlockingSkills([]);
     setOrganizeDraftConflict(false);
     setOrganizeStatus("idle");
@@ -655,6 +657,7 @@ export default function SkillManagementSection() {
         if (!isCurrent()) return;
         if (task.status === "failed") {
           setOrganizeError(skillOrganizeErrorText(task.errorCode, task.error, t));
+          setOrganizeErrorCode(task.errorCode);
           setOrganizeDraftConflict(task.errorCode === "skill_organize_draft_conflict");
           setOrganizeStatus("error");
           return;
@@ -675,6 +678,7 @@ export default function SkillManagementSection() {
         }
         console.error("Skill organize task failed:", error);
         setOrganizeError(describeSkillOrganizeError(error, t));
+        setOrganizeErrorCode(skillOrganizeErrorDetails(error).code);
         setOrganizeStatus("error");
       } finally {
         if (isCurrent()) {
@@ -736,6 +740,7 @@ export default function SkillManagementSection() {
       organizeRequestIdRef.current = "";
       setOrganizeStatus("skipped");
       setOrganizeError("");
+      setOrganizeErrorCode("");
       if (result?.pendingReview) setOrganizePendingReviewWarning(true);
       setOrganizeSubmitting(false);
       setOrganizeRunStatus("");
@@ -745,6 +750,7 @@ export default function SkillManagementSection() {
     } catch (error) {
       if (organizePollingControllerRef.current !== pollingController) return;
       setOrganizeError(describeSkillOrganizeError(error, t));
+      setOrganizeErrorCode(skillOrganizeErrorDetails(error).code);
     } finally {
       organizeCancellingRef.current = false;
     }
@@ -771,6 +777,7 @@ export default function SkillManagementSection() {
     setOrganizeSubmitting(true);
     setOrganizeStatus("running");
     setOrganizeError("");
+    setOrganizeErrorCode("");
     setOrganizeBlockingSkills([]);
     setOrganizeDraftConflict(false);
     // Exit selection mode immediately so the page stays usable while the
@@ -801,6 +808,7 @@ export default function SkillManagementSection() {
       setOrganizeBlockingSkills(detail.blockingSkills);
       setOrganizeDraftConflict(detail.code === "skill_organize_draft_conflict");
       setOrganizeError(describeSkillOrganizeError(error, t));
+      setOrganizeErrorCode(skillOrganizeErrorDetails(error).code);
       setOrganizeStatus("error");
       setOrganizeSubmitting(false);
     }
@@ -1063,6 +1071,7 @@ export default function SkillManagementSection() {
             setOrganizeBlockingSkills([]);
             setOrganizeDraftConflict(false);
             setOrganizeError("");
+            setOrganizeErrorCode("");
             setOrganizeStatus((status) => status === "error" ? "idle" : status);
           }}
           onPendingCountChange={setPendingDraftCount}
@@ -1137,9 +1146,12 @@ export default function SkillManagementSection() {
             {organizeError && organizePendingReviewWarning ? <p>{t("admin.memorySkillOrganizeCancelledPendingReview")}</p> : null}
             {organizeBlockingSkills.length ? <ul>{organizeBlockingSkills.map((path) => <li key={path}>{path}</li>)}</ul> : null}
           </> : undefined}
-          action={organizeDraftConflict || hasPendingOrganizeDrafts
-            ? <Button onClick={() => { cancelSkillOrganize(); setReviewKind(!organizeDraftConflict && pendingOrganizeCount > 0 ? "organize" : "drafts"); setDraftReviewOpen(true); }}>{t("admin.memorySkillDraftReviewTitle")}</Button>
-            : undefined}
+          action={<Space>
+            {["skill_organize_model_unavailable", "skill_organize_model_transport"].includes(organizeErrorCode) &&
+              <Link to="/settings?section=model_defaults">{t("admin.memorySkillOrganizeConfigureModel")}</Link>}
+            {(organizeDraftConflict || hasPendingOrganizeDrafts) &&
+              <Button onClick={() => { cancelSkillOrganize(); setReviewKind(!organizeDraftConflict && pendingOrganizeCount > 0 ? "organize" : "drafts"); setDraftReviewOpen(true); }}>{t("admin.memorySkillDraftReviewTitle")}</Button>}
+          </Space>}
         />
       ) : null}
 

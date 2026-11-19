@@ -1,3 +1,4 @@
+import { chatProviderDisplayName } from "@/modules/chat/utils/providerDisplay";
 import KnowledgeConfirmationCard from "../KnowledgeConfirmationCard";
 import type { KnowledgeConfirmation } from "@/modules/chat/types/knowledgeConfirmation";
 import { SourceImportProvider } from "../SourceImports";
@@ -145,11 +146,13 @@ function ExternalExecutionSummary({
 }
 
 function ModelRouteSummary({ route }: { route?: ChatModelRoute }) {
-  const { t } = useTranslation();
-  if (!route?.provider_name || !route.model_name) {
+  const { t, i18n } = useTranslation();
+  if (!route || !route.model_name) {
     return null;
   }
-  const model = `${route.provider_name} · ${route.model_name}`;
+  const provider = chatProviderDisplayName(route, i18n.language);
+  if (!provider) return null;
+  const model = `${provider} · ${route.model_name}`;
   const label = t(
     route.mode === "auto"
       ? "chat.modelRouteAutoLabel"

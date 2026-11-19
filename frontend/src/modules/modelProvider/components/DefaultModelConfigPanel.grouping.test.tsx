@@ -497,6 +497,22 @@ describe("default capability configuration groups", () => {
     expect(within(row).queryByText("Old embedding · Demo")).not.toBeInTheDocument();
   });
 
+  it.each(["credentials_unavailable", "disabled", "runtime_unsupported", "future_reason", undefined])(
+    "explains unavailable default models and opens provider settings (%s)", async (reason) => {
+      mocks.selections.mockResolvedValue({ data: { selections: [{
+        ...selectedLlm, availability: "unavailable", unavailable_reason: reason,
+      }] } });
+      renderPanel();
+      const row = await screen.findByRole("group", { name: "modelProvider.module.llmChatTitle" });
+      const alert = within(row).getByRole("alert");
+      const key = ["credentials_unavailable", "disabled", "runtime_unsupported"].includes(reason || "") ? reason : "unknown";
+      expect(alert).toHaveTextContent(`modelProvider.unavailableReasons.${key}`);
+      if (reason) expect(within(alert).queryByText(reason, { exact: true })).not.toBeInTheDocument();
+      fireEvent.click(within(alert).getByRole("button", { name: "modelProvider.configureUnavailableModel" }));
+      expect(mocks.configureProviders).toHaveBeenCalledOnce();
+    },
+  );
+
   it.each(["empty", "error"] as const)("retains a saved embedding when provider setup is %s", async (setupState) => {
     mocks.selections.mockResolvedValue({ data: { selections: [{
       ...selectedEmbedding, availability: "unavailable", unavailable_reason: "credentials_unavailable",
@@ -507,7 +523,7 @@ describe("default capability configuration groups", () => {
     const row = await screen.findByRole("group", { name: "modelProvider.module.embeddingTitle" });
     expect(within(row).getByRole("combobox")).toBeDisabled();
     expect(within(row).getByText("Old embedding · Demo")).toBeInTheDocument();
-    expect(within(row).getByText("credentials_unavailable")).toBeInTheDocument();
+    expect(within(row).getByText("modelProvider.unavailableReasons.credentials_unavailable")).toBeInTheDocument();
     expect(row).not.toHaveClass("is-pending");
   });
 

@@ -313,3 +313,21 @@ describe("provider request configuration drawer", () => {
     expect(saveConfig).not.toHaveBeenCalled();
   });
 });
+
+
+it("requires explicit replacement of unreadable legacy options before saving", async () => {
+  vi.clearAllMocks();
+  saveConfig.mockResolvedValue(config());
+  fetchConfig.mockResolvedValueOnce({ ...config(), advanced_unavailable: true });
+  const callbacks = props();
+  render(<ProviderRequestConfigDrawer {...callbacks} />, { wrapper: harness });
+  await screen.findByRole("textbox", { name: "OpenAI" });
+  expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  expect(saveConfig).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("checkbox", { name: "modelProvider.requestConfig.replaceLegacyAdvanced" }));
+  fireEvent.click(screen.getByText("Advanced request options"));
+  fireEvent.change(screen.getByRole("textbox", { name: "Query parameters" }), { target: { value: '{"tenant":"replacement"}' } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(saveConfig).toHaveBeenCalledWith("provider-a", expect.objectContaining({ advanced: expect.objectContaining({ query: {tenant:"replacement"} }) })));
+  await waitFor(() => expect(callbacks.onClose).toHaveBeenCalled());
+});

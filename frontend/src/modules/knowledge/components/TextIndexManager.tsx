@@ -11,7 +11,7 @@ type IndexDocument = { id: string; name: string; parse_status: string; index_sta
 type IndexState = { generation: number; model_name?: string; provider_name?: string; indexed_knowledge_bases: number; operation_phase: string; index_identity: string };
 const statusNames: Record<string, string> = { succeeded: "已完成", pending: "未建立", running: "处理中", processing: "处理中", failed: "失败" };
 
-export default function TextIndexManager({ datasetId, autoOpen = false }: { datasetId?: string; autoOpen?: boolean }) {
+export default function TextIndexManager({ datasetId, autoOpen = false, onAutoOpen }: { datasetId?: string; autoOpen?: boolean; onAutoOpen?: () => void }) {
   const { availability: ragAvailability, refresh: refreshRAG } = useRAGComponent();
   const [open, setOpen] = useState(false);
   const [dataset, setDataset] = useState(datasetId);
@@ -75,11 +75,14 @@ export default function TextIndexManager({ datasetId, autoOpen = false }: { data
     finally { setLibrariesLoading(false); }
   }, [datasetId, dataset]);
   useEffect(() => {
-    if (autoOpen && !autoOpened.current) {
+    if (!autoOpen) {
+      autoOpened.current = false;
+    } else if (!autoOpened.current) {
       autoOpened.current = true;
+      onAutoOpen?.();
       void show();
     }
-  }, [autoOpen, show]);
+  }, [autoOpen, onAutoOpen, show]);
   const reindex = async () => {
     if (!dataset || !selected.length) return;
     setBusy(true);
@@ -121,7 +124,6 @@ export default function TextIndexManager({ datasetId, autoOpen = false }: { data
     <Button icon={<DatabaseOutlined />} onClick={() => void show()}>索引管理</Button>
     <Modal title="文本向量索引管理" open={open} width={960} className="text-index-manager" footer={isAdmin && <section className="text-index-cleanup" aria-label="全局索引清理">
         <div><strong>清理全部文本向量</strong><p>影响所有资料库的向量检索。原文件、解析正文、切片和图片向量保留。</p></div>
-        <Button danger icon={<DeleteOutlined />} disabled={busy || !state || state.operation_phase === "clearing"} onClick={clear}>清理全部向量</Button>
       </section>}
       onCancel={() => { if (!busy) setOpen(false); }} destroyOnHidden>
       <p className="text-index-intro">管理用于语义检索的文档。上传和解析不依赖向量模型。</p>
@@ -156,7 +158,10 @@ export default function TextIndexManager({ datasetId, autoOpen = false }: { data
               options={libraries} value={dataset} loading={librariesLoading} disabled={busy} suffixIcon={<SearchOutlined />}
               onChange={(value: string) => { setDataset(value); setPage(1); setSelected([]); setRows([]); setError(""); }} />
           </div> : <h3>文档索引</h3>}
-          <Button icon={<ReloadOutlined spin={loading} />} onClick={() => void refresh()} disabled={busy || loading}>刷新状态</Button>
+          <div className="text-index-library-actions">
+            <Button icon={<ReloadOutlined spin={loading} />} onClick={() => void refresh()} disabled={busy || loading}>刷新状态</Button>
+            {isAdmin && <Button danger icon={<DeleteOutlined />} disabled={busy || !state || state.operation_phase === "clearing"} onClick={clear}>清理全部向量</Button>}
+          </div>
         </div>
         <div className="text-index-selection-bar">
           <span>{selected.length ? <>已选择 <strong>{selected.length}</strong> 份文档</> : "选择需要参与向量检索的文档"}<small>每次最多 20 份</small></span>

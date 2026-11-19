@@ -118,6 +118,10 @@ def clear_chunks(generation, empty_only=False):
                     WHERE d.deleted_at IS NULL AND ds.deleted_at IS NULL
                       AND (d.document_type IS NULL OR d.document_type <> 'FOLDER')
                       AND (ds.processing_level NOT IN ('stored','parsed','chunked') OR s.index_status='succeeded')
+                      AND NOT (COALESCE(s.index_status, '')='pending'
+                        AND COALESCE(s.embedding_version, '') IN ('reembed:manual','rebuild:manual')
+                        AND COALESCE(s.index_artifact_ref, '')='' AND COALESCE(s.index_fingerprint, '')=''
+                        AND COALESCE(s.index_error_code, '')='' AND COALESCE(s.index_error_message, '')='')
                     """)).scalar_one()
                 if count:
                     raise IndexBusy('knowledge documents changed; confirmation is required')

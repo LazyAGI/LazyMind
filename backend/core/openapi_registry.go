@@ -1261,13 +1261,14 @@ type providerRequestProtocolOpenAPIItem struct {
 }
 
 type providerRequestConfigOpenAPIResponse struct {
-	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
-	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,openai-responses,anthropic"`
-	Protocols       []providerRequestProtocolOpenAPIItem     `json:"protocols"`
+	AdvancedUnavailable bool                                     `json:"advanced_unavailable,omitempty" desc:"Legacy encrypted options could not be read. Preserve them unless the user explicitly chooses to replace or clear them."`
+	Advanced            *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Custom headers, query parameters and extra JSON body, stored locally as plaintext JSON. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
+	DefaultProtocol     string                                   `json:"default_protocol" enum:"openai,openai-responses,anthropic"`
+	Protocols           []providerRequestProtocolOpenAPIItem     `json:"protocols"`
 }
 
 type updateProviderRequestConfigOpenAPIRequest struct {
-	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
+	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Custom headers, query parameters and extra JSON body, stored locally as plaintext JSON. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
 	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,openai-responses,anthropic"`
 	Endpoints       map[string]string                        `json:"endpoints,omitempty" desc:"Optional API-root overrides keyed by openai, openai-responses or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected."`
 }

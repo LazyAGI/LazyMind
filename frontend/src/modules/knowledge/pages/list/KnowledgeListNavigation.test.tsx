@@ -501,7 +501,7 @@ describe("knowledge list URL and data restoration", () => {
     const notice = await screen.findByRole("status", { name: noticeName });
     expect(notice).toHaveTextContent("索引管理");
     expect(notice).toHaveTextContent("原文件、解析结果和切片会保留");
-    fireEvent.click(within(notice).getByRole("link", { name: t("knowledge.goToConfig") }));
+    fireEvent.click(within(notice).getByRole("link", { name: t("knowledge.goToDefaultEmbeddingConfig") }));
     expect(await screen.findByText("默认模型设置")).toBeInTheDocument();
     expect(router.state.location.search).toBe("?section=model_defaults");
     expectNoOnlineCleanup();
@@ -784,4 +784,28 @@ describe("library loading is not empty", () => {
     await act(async () => pending.reject(new Error("offline")));
     expect(document.querySelector(".knowledge-library-empty")).toBeNull();
   });
+});
+
+
+it("consumes the index-manager deep link before repeated library navigation", async () => {
+  const router = await mount("?index_management=open&keyword=手册&page=2&pageSize=20#libraries");
+  const modal = await screen.findByRole("dialog", { name: "文本向量索引管理" });
+  fireEvent.click(within(modal).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "文本向量索引管理" })).not.toBeInTheDocument());
+  for (let visit = 0; visit < 2; visit++) {
+    fireEvent.click(await screen.findByRole("button", { name: "本地手册" }));
+    await screen.findByText("知识库详情");
+    await act(async () => { await router.navigate(-1); });
+    await screen.findByRole("button", { name: "本地手册" });
+    expect(screen.queryByRole("dialog", { name: "文本向量索引管理" })).not.toBeInTheDocument();
+  }
+  const params = new URLSearchParams(router.state.location.search);
+  expect(params.has("index_management")).toBe(false);
+  expect(params.get("keyword")).toBe("手册");
+  expect(params.get("page")).toBe("2");
+  expect(params.get("pageSize")).toBe("20");
+  expect(router.state.location.hash).toBe("#libraries");
+  // A new explicit deep link must still open the manager on the same mount.
+  await act(async () => { await router.navigate(`${router.state.location.pathname}${router.state.location.search}&index_management=open#libraries`); });
+  expect(await screen.findByRole("dialog", { name: "文本向量索引管理" })).toBeInTheDocument();
 });
