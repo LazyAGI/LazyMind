@@ -13,6 +13,11 @@ func TestNativeRetryCompletionExposesNextStep(t *testing.T) {
 		name, driver, step, successor, want, reason string
 	}{
 		{"successful retry", "completed", "succeeded", "", "waiting", "next_step_required"},
+		{"completed without steps", "completed", "", "", "waiting", "next_step_required"},
+		{"failed owner after child success", "failed", "succeeded", "", "failed", "controller_failed"},
+		{"failed without steps", "failed", "", "", "failed", "controller_failed"},
+		{"live owner without steps", "generating", "", "", "running", "preparing"},
+		{"failed owner with live child", "failed", "succeeded", "running", "running", "executing"},
 		{"driver still coordinating", "generating", "succeeded", "", "running", "preparing"},
 		{"missing bound driver", "", "succeeded", "", "running", "preparing"},
 		{"failed retry", "completed", "failed", "", "failed", "failed"},
@@ -34,7 +39,7 @@ func TestNativeRetryCompletionExposesNextStep(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for attempt := 1; attempt <= 3; attempt++ {
+			for attempt := 1; attempt <= 3 && sample.step != ""; attempt++ {
 				status, validity := "failed", "stale"
 				if attempt == 3 {
 					status, validity = sample.step, "effective"

@@ -1941,6 +1941,7 @@
   "2004904": { "en-US": "Event stream is unavailable", "zh-CN": "事件流暂不可用" },
   "2004905": { "en-US": "Workflow state is unavailable", "zh-CN": "工作流状态暂不可用" },
   "2004906": { "en-US": "Task cancellation was rejected", "zh-CN": "任务停止请求被拒绝" },
+  "2004907": { "en-US": "Workflow recovery requires a single-model chat", "zh-CN": "工作流恢复仅支持单模型对话" },
   "2004910": { "en-US": "The workflow is not being repaired", "zh-CN": "工作流当前不在修复中" },
   "2004911": { "en-US": "Failed to stop the workflow repair", "zh-CN": "停止工作流修复失败" },
   "2004912": { "en-US": "The workflow is not being generated", "zh-CN": "工作流当前不在生成中" },

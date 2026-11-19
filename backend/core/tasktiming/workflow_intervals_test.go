@@ -191,7 +191,7 @@ func TestFinalApprovalCompletesFrozenTimingWithoutCountingReviewWait(t *testing.
 
 func TestWorkflowRetryPreservesIntervalsBeforePauseAndFailure(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{},
-		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{})
+		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.ChatHistory{})
 	ctx := t.Context()
 	start := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
 	at := func(seconds int) time.Time { return start.Add(time.Duration(seconds) * time.Second) }

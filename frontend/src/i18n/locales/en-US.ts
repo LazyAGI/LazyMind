@@ -3208,6 +3208,7 @@ const enUS = {
         stopped: "Stopped",
         degraded: "Degraded",
         unsupported: "Unsupported",
+        failed: "Failed",
       },
     },
     wecom: {
@@ -3341,6 +3342,7 @@ const enUS = {
         stopped: "Stopped",
         degraded: "Degraded",
         unsupported: "Unsupported",
+        failed: "Failed",
       },
     },
   },
