@@ -267,7 +267,7 @@ func handleImportBatchJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 			if e := store.DB().WithContext(ctx).Where("id=?", item.ID).Take(&current).Error; e != nil {
 				return asyncjob.Result{}, e
 			}
-			failure := importFailure(err, current.Stage, current.DocumentID != "")
+			failure := importItemFailure(err, current)
 			if code != "already_present" {
 				code = failure.Code
 			}
@@ -349,7 +349,11 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 			return err
 		}
 		if item.DocumentID == "" {
-			existing, err := sourcePresentDocument(store.DB().WithContext(ctx), b.TargetDatasetID, item.AcademicWorkID, "", false)
+			var candidate FulltextCandidate
+			if err := json.Unmarshal(item.SelectedCandidateJSON, &candidate); err != nil {
+				return err
+			}
+			existing, err := sourcePresentDocument(store.DB().WithContext(ctx), b.TargetDatasetID, item.AcademicWorkID, "", true, candidate.Version, candidate.SourceProvider)
 			if err == nil {
 				return completePresentImport(ctx, job, b, item, item.AcademicWorkID, existing.ID)
 			}
@@ -386,7 +390,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 	if err = json.Unmarshal(item.SelectedCandidateJSON, &selected); err != nil {
 		return err
 	}
-	if item.DocumentID == "" && b.EntryType == "conversation_sources" {
+	if item.DocumentID == "" && b.EntryType == "conversation_sources" && !isMetadataEnrichmentBatch(b) {
 		if err := prepareConversationImportCandidate(ctx, job, b, &item, selected, originals); err != nil {
 			return err
 		}
@@ -453,7 +457,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		}
 	}
 	if item.DocumentID == "" {
-		presentWork, presentDocument, err := findEquivalentPresentWork(ctx, item.AcademicWorkID, b.TargetDatasetID, pdfOnly, selected.Version, selected.SourceProvider)
+		presentWork, presentDocument, err := findEquivalentPresentWork(ctx, store.DB(), item.AcademicWorkID, b.TargetDatasetID, pdfOnly, selected.Version, selected.SourceProvider)
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}

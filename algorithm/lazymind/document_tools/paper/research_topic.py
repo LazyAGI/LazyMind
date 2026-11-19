@@ -9,6 +9,7 @@ from lazyllm import AutoModel, ThreadPoolExecutor
 
 from lazymind.common.token_estimation import estimate_tokens
 
+from .model_response import normalize_response
 from .contracts import MissingMaterials, validate_value
 from .prompts.research_topic_prompt import (
     ABSTRACT_PAPER_GUIDANCE,
@@ -99,7 +100,10 @@ def infer_topic(request: str, papers: list[dict]) -> str:
     )
     if estimate_tokens(prompt) > _prompt_token_limit():
         raise MissingMaterials('研究主题提取输入过长，请缩短要求或减少论文。')
-    response = str(AutoModel(model='llm')(prompt) or '').strip()
+    response = normalize_response(AutoModel(model='llm')(prompt)).body
+    if not isinstance(response, str):
+        raise ValueError('研究主题提取模型未返回文本正文。')
+    response = response.strip()
     if not response:
         raise RuntimeError('研究主题提取模型返回空内容。')
     response = re.sub(r'^(?:<think\b[^>]*>.*?</think>\s*)+', '', response,
@@ -185,7 +189,10 @@ def _condense(source: str, paper: dict, prompt_limit: int) -> str:
     prompt = _note_prompt(source, paper)
     if estimate_tokens(prompt) > prompt_limit:
         raise ValueError('研究选题的论文片段或摘要超出模型输入预算。')
-    note = str(AutoModel(model='llm')(prompt) or '').strip()
+    note = normalize_response(AutoModel(model='llm')(prompt)).body
+    if not isinstance(note, str):
+        raise ValueError('论文摘要提炼模型未返回文本正文。')
+    note = note.strip()
     note = re.sub(r'^(?:<think\b[^>]*>.*?</think>\s*)+', '', note,
                   flags=re.IGNORECASE | re.DOTALL)
     if not note or re.match(r'^<think\b', note, flags=re.IGNORECASE):
@@ -255,7 +262,21 @@ def run(inputs: dict) -> dict:
         'topic', 'request', 'papers', 'question', 'evidence', 'writing_materials', 'mode')}
     material['papers'] = [{key: paper[key] for key in ('id', 'title', 'abstract')} for paper in papers]
     from .material_bindings import MaterialBindings
-    bindings = MaterialBindings(papers)
+    from .publication import render_references, split_references
+    references = []
+    for paper in papers:
+        citation = paper.get('citation')
+        if not citation:
+            citation = paper.get('filename') or paper['title']
+            if paper.get('attachment_key') or paper['id'].startswith('upload-'):
+                citation += '（用户上传材料）'
+        references.append({'id': paper['id'], 'citation': citation})
+    markers = {paper['id']: f'[\\[{number}\\]](#paper-ref-{paper["id"]})'
+               for number, paper in enumerate(references, 1)}
+    bindings = MaterialBindings(papers, citation_markers=markers)
+    for key in ('question', 'evidence'):
+        if isinstance(material.get(key), str):
+            material[key] = split_references(material[key])[0]
     material = bindings.model_view(material)
     guidance = ABSTRACT_PAPER_GUIDANCE if papers else NO_PAPER_GUIDANCE
     prompt = QUESTION_PROMPT.format(paper_guidance=guidance, topics='; '.join(CONTENT_TOPICS)) + (
@@ -271,4 +292,11 @@ def run(inputs: dict) -> dict:
         raise ValueError('研究选题输出格式错误：存在未闭合的思考内容。')
     report_progress(90, '正在校验选题结构与引用')
     _validate_question_markdown(markdown)
+    if references:
+        body = re.split(r'(?m)^## (?:参考文献|References)\s*$',
+                        split_references(markdown)[0], maxsplit=1)[0].rstrip()
+        markdown = body + '\n\n' + render_references(references, paper_language='zh')
+        from .runtime_events import current_events
+        if current_events() is not None:
+            current_events().completed_preview(markdown)
     return {'question': markdown, 'is_demo': False}

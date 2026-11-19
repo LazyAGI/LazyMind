@@ -27,8 +27,12 @@ type WorkflowControlCommand struct {
 	StepID          string `json:"step_id,omitempty"`
 	PreferenceScope string `json:"preference_scope,omitempty"`
 	Objective       string `json:"objective,omitempty"`
+	UserInput       string `json:"user_input,omitempty"`
 	Instruction     string `json:"runtime_instruction,omitempty"`
 	RetryOrigin     string `json:"retry_origin,omitempty"`
+	InputArtifactID string `json:"input_artifact_id,omitempty"`
+	InputRevision   int    `json:"input_revision,omitempty"`
+	AnswerText      string `json:"answer_text,omitempty"`
 }
 
 type WorkflowControlReceipt struct {
@@ -88,8 +92,32 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 		}
 		var saved orm.WorkflowCommand
 		if err := tx.Where("command_id = ?", command.CommandID).First(&saved).Error; err == nil {
-			if saved.OwnerUserID != owner || saved.SessionID != sessionID || saved.RequestHash != digest {
+			if saved.OwnerUserID != owner || saved.SessionID != sessionID {
 				return controlstore.Reject("COMMAND_CONFLICT", "command_id was already used for another operation")
+			}
+			if saved.RequestHash != digest {
+				// MCP reads a fresh state version on retry. Recover the version
+				// used by the committed begin and compare the entire request.
+				if command.Kind != "begin" || saved.ContractVersion != controlpolicy.Protocol {
+					return controlstore.Reject("COMMAND_CONFLICT", "command_id was already used for another operation")
+				}
+				var transition orm.WorkflowTransitionCommand
+				err := tx.Select("expected_state_version").First(&transition, "command_id = ? AND session_id = ? AND status = ?", command.CommandID, sessionID, "accepted").Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return controlstore.Reject("COMMAND_CONFLICT", "command_id was already used for another operation")
+				}
+				if err != nil {
+					return err
+				}
+				original := command
+				original.StateVersion = transition.ExpectedStateVersion
+				body, err := json.Marshal(original)
+				if err != nil {
+					return err
+				}
+				if saved.RequestHash != controlstore.Hash(body) {
+					return controlstore.Reject("COMMAND_CONFLICT", "command_id was already used for another operation")
+				}
 			}
 			if err := json.Unmarshal(saved.ResponseJSON, &result.Receipt); err != nil {
 				return err
@@ -108,6 +136,10 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 			return controlstore.Reject("STATE_VERSION_CONFLICT", "refresh the workflow before applying this operation")
 		}
 		switch command.Kind {
+		case "answer_input":
+			if err := answerWorkflowInput(ctx, tx, session, command); err != nil {
+				return err
+			}
 		case "begin":
 			if command.StepID == "" {
 				return controlstore.Reject("INVALID_COMMAND", "step_id is required")
@@ -118,7 +150,16 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 			}
 			transition := transitionCommandRequest{CommandID: command.CommandID, Operation: "advance", RetryOrigin: retryOrigin,
 				TargetStepID: command.StepID, ExpectedStateVersion: session.StateVersion, HandOff: true,
-				Objective: command.Objective, RuntimeInstruction: command.Instruction}
+				Objective: command.Objective, UserInput: command.UserInput, RuntimeInstruction: command.Instruction}
+			if transition.UserInput == "" && (session.WorkflowID == "paper-writing" || session.WorkflowID == "writer-workflow") {
+				var attempts int64
+				if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ?", session.ID).Count(&attempts).Error; err != nil {
+					return err
+				}
+				if attempts == 0 {
+					transition.UserInput = sessionIntentText(session.IntentContext)
+				}
+			}
 			response, updated, tasks, err := applyWorkflowTransition(ctx, tx, session.ID, transition)
 			if err != nil {
 				return err
@@ -230,11 +271,6 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 				return controlstore.Reject("RECOVERY_REJECTED", "recovery did not create one execution")
 			}
 			*session = updated
-			if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND status = ? AND attempt_id IN (?)", session.ID, "pending",
-				tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND validity <> ?", session.ID, "effective")).
-				Updates(map[string]any{"status": "superseded", "decision_command_id": command.CommandID, "updated_at": time.Now().UTC()}).Error; err != nil {
-				return err
-			}
 			var execution orm.WorkflowSessionStep
 			if err := tx.Select("id").Where("task_id = ?", tasks[0]).First(&execution).Error; err != nil {
 				return err

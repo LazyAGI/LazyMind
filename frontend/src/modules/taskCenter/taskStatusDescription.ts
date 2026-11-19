@@ -1,7 +1,6 @@
 import type { TFunction } from 'i18next';
 import type { StepInfo, Task } from './api';
 
-const FAILED_STATUSES = new Set(['failed', 'interrupted']);
 const SUCCEEDED_STATUSES = new Set(['completed', 'succeeded']);
 const MAX_REASON_LENGTH = 120;
 
@@ -52,7 +51,7 @@ export function taskStatusDescription(task: Task, t: TFunction) {
 
 function statusSubject(task: Task, status: string, t: TFunction) {
   if (status === 'failed' || status === 'interrupted') {
-    const failedStep = findLastStep(task.steps, (step) => FAILED_STATUSES.has(step.status.toLowerCase()));
+    const failedStep = findLastStep(task.steps, (step) => step.status.toLowerCase() === status);
     const label = stepLabel(failedStep);
     if (label) return label;
   }
@@ -70,7 +69,7 @@ function statusSubject(task: Task, status: string, t: TFunction) {
 }
 
 function failureReason(task: Task, t: TFunction) {
-  const failedStep = findLastStep(task.steps, (step) => FAILED_STATUSES.has(step.status.toLowerCase()));
+  const failedStep = findLastStep(task.steps, (step) => step.status.toLowerCase() === 'failed');
   const progress = isRecord(task.progress) ? task.progress : undefined;
   const reason = cleanText(failedStep?.summary)
     || cleanText(task.waiting_reason)

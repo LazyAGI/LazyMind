@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 
 from core.deps import current_user, require_internal_service_token
 from core.rbac import permission_required
+from core import rbac
 from core.errors import AppException, ErrorCodes
 from models import User
 from schemas.cloud_oauth import (
@@ -26,14 +27,78 @@ from schemas.cloud_oauth import (
     ManagedConnectionMirrorBody,
     GitHubCLISessionCreateBody,
     GitHubCLISessionResponse,
+    GitHubStarBody,
+    GitHubStarLocalBody,
+    GitHubStarLocalCapability,
+    GitHubStarLocalResult,
+    GitHubStarResult,
+    GitHubStarStatus,
 )
 from services.cloud_oauth_service import cloud_oauth_service
 from services.github_cli_auth import github_cli_auth_service
+from services.github_star_service import GitHubStarService
+
+github_star_service = GitHubStarService(connections=cloud_oauth_service)
 
 
 # The permission exporter also runs under /app, without an auth-service directory.
 _API_PREFIX = '/api/authservice'
 router = APIRouter(prefix='/v1/cloud', tags=['cloud-oauth'])
+
+
+def _github_star_call(function, **kwargs):
+    try:
+        return function(**kwargs)
+    except AppException as exc:
+        return JSONResponse(status_code=exc.http_code,
+                            content={'code': exc.code, 'message': exc.message,
+                                     'reason': getattr(exc, 'reason',
+                                                       'permission_denied' if exc.http_code == 403 else 'unavailable')},
+                            headers={'Cache-Control': 'no-store'})
+    except Exception:
+        status, code, message = ErrorCodes.GITHUB_STAR_UNAVAILABLE
+        return JSONResponse(status_code=status, content={'code': code, 'message': message, 'reason': 'unavailable'},
+                            headers={'Cache-Control': 'no-store'})
+
+
+@router.get('/github/star', response_model=GitHubStarStatus)
+@permission_required('model.read')
+def github_star_status(response: Response, connection_id: str = Query(default='', max_length=64),  # noqa: B008
+                       user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    result = _github_star_call(github_star_service.status, owner_user_id=str(user.id), connection_id=connection_id)
+    if isinstance(result, dict):
+        role = getattr(user, 'role', None)
+        result['can_star'] = (
+            getattr(role, 'name', None) == 'system-admin'
+            or 'model.write' in rbac.get_effective_permission_codes(user)
+        )
+    return result
+
+
+@router.put('/github/star', response_model=GitHubStarResult)
+@permission_required('model.write')
+def github_star(body: GitHubStarBody, response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_star_call(github_star_service.star, owner_user_id=str(user.id),
+                             connection_id=body.connection_id, expected_account_id=body.expected_account_id,
+                             confirmed=body.confirmed)
+
+
+@router.get('/github/star/local', response_model=GitHubStarLocalCapability)
+@permission_required('model.write')
+def github_star_local_capability(response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    probe = github_cli_auth_service.runner.probe if github_cli_auth_service.host_credentials_enabled else None
+    return _github_star_call(github_star_service.local_capability, probe=probe)
+
+
+@router.put('/github/star/local', response_model=GitHubStarLocalResult)
+@permission_required('model.write')
+def github_star_local(body: GitHubStarLocalBody, response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    probe = github_cli_auth_service.runner.probe if github_cli_auth_service.host_credentials_enabled else None
+    return _github_star_call(github_star_service.star_local, confirmed=body.confirmed, probe=probe)
 
 
 def _github_cli_call(function, *args, **kwargs):

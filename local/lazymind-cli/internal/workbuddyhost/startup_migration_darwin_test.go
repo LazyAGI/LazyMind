@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"lazymind/agentconnector/internal/desktopsetup"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -105,9 +104,7 @@ func TestLegacyStartupMigrationRetriesIncompleteJournal(t *testing.T) {
 		t.Fatalf("migration was not completed: %q, port=%s", state, env.value)
 	}
 	// Disabling after migration still restores the original pre-install value.
-	if err := integrationstate.Set(home, "workbuddy", false); err != nil {
-		t.Fatal(err)
-	}
+
 	if err := configureLoginEnvironment(context.Background(), home, 0, false); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +121,7 @@ func TestLegacyStartupMigrationRetriesIncompleteJournal(t *testing.T) {
 }
 
 func TestLegacyStartupMigrationHonorsDisableAndAccount(t *testing.T) {
-	for _, scenario := range []string{"disabled-choice", "disabled-pairing", "different-account", "disabled-pending-migration", "new-install"} {
+	for _, scenario := range []string{"disabled-pairing", "different-account", "disabled-pending-migration"} {
 		t.Run(scenario, func(t *testing.T) {
 			home, pair, env := legacyStartupFixture(t)
 			account := "account"
@@ -134,12 +131,8 @@ func TestLegacyStartupMigrationHonorsDisableAndAccount(t *testing.T) {
 					t.Fatal("expected environment failure")
 				}
 			}
-			if scenario == "disabled-choice" || scenario == "disabled-pending-migration" || scenario == "new-install" {
-				if err := integrationstate.Set(home, "workbuddy", scenario == "new-install"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if scenario == "disabled-pairing" {
+
+			if scenario == "disabled-pairing" || scenario == "disabled-pending-migration" {
 				if err := workflowhost.Disable(home, pair.ConnectorID); err != nil {
 					t.Fatal(err)
 				}
@@ -149,7 +142,7 @@ func TestLegacyStartupMigrationHonorsDisableAndAccount(t *testing.T) {
 			}
 			env.value, env.fail = "", false
 			err := migrateLoginEnvironment(context.Background(), home, account, env)
-			if (scenario == "disabled-pairing" || scenario == "different-account") != (err != nil) {
+			if (scenario == "disabled-pairing" || scenario == "disabled-pending-migration" || scenario == "different-account") != (err != nil) {
 				t.Fatalf("unexpected migration result: %v", err)
 			}
 			if env.value != "" {

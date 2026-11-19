@@ -246,6 +246,10 @@ func externalAgentOperation(method, path string) externallease.Operation {
 		(strings.HasSuffix(path, ":start") || strings.HasSuffix(path, ":finish")) {
 		return externallease.OperationInvocationWrite
 	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/workflow-sessions/") &&
+		strings.Contains(path, "/hosted-attempts/") && strings.HasSuffix(path, "/tools:list") {
+		return externallease.OperationWorkflowRead
+	}
 	if method == http.MethodGet && (path == "/workflow-runtime/v1/workflows" ||
 		strings.HasPrefix(path, "/workflow-runtime/v1/workflows/") || path == "/workflow-sessions" ||
 		strings.HasPrefix(path, "/workflow-input-resources/") || strings.HasPrefix(path, "/workflow-artifacts/") ||
@@ -257,9 +261,13 @@ func externalAgentOperation(method, path string) externallease.Operation {
 		(strings.HasPrefix(path, "/workflow-preparations/") && strings.HasSuffix(path, ":consume")) ||
 		(strings.HasPrefix(path, "/workflow-sessions/") &&
 			(strings.HasSuffix(path, ":stop") || strings.HasSuffix(path, ":resume") ||
+				strings.HasSuffix(path, "/executions:begin") || strings.HasSuffix(path, "/host-binding") ||
+				(strings.Contains(path, "/model-generations/") && (strings.HasSuffix(path, ":claim") || strings.HasSuffix(path, ":respond"))) ||
 				strings.HasSuffix(path, ":advance-step-and-hand-off") ||
 				(strings.Contains(path, "/hosted-attempts/") &&
-					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit")))))) {
+					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit") ||
+						strings.HasSuffix(path, ":complete") || strings.HasSuffix(path, "/artifacts") ||
+						strings.HasSuffix(path, "/workers:grant") || strings.HasSuffix(path, "/preview") || strings.HasSuffix(path, "/tools:call")))))) {
 		return externallease.OperationWorkflowWrite
 	}
 	return ""
@@ -619,6 +627,14 @@ func loadDesktopCredentialManifest(cloudIssuer string) (*credentialvault.Manifes
 func main() {
 	log.Init()
 
+	if len(os.Args) == 2 && os.Args[1] == "--prepare-cluster-component" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if err := systemdeps.PrepareClusterComponent(ctx); err != nil {
+			log.Logger.Fatal().Err(err).Msg("prepare desktop clustering component")
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--export-openapi-to" {
 		if len(os.Args) != 3 || strings.TrimSpace(os.Args[2]) == "" {
 			log.Logger.Fatal().Msg("--export-openapi-to requires one output path")
@@ -924,13 +940,9 @@ func run(ctx context.Context) error {
 		if vocabulary.Enabled() {
 			vocabulary.RegisterCloudSync(store.DB())
 			vocabularyRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
-			backgroundDone = append(backgroundDone, vocabularyRunner.Done())
+			backgroundDone = append(backgroundDone, vocabularyRunner.Done(), vocabulary.StartAnkiSync(runtimeCtx, store.DB()))
 		}
-		excludedJobs := append([]string{doc.ReadingPreparationJob, vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
-		if !systemdeps.PythonComponentActive("rag") {
-			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
-				doc.MarketUpdateAllJobType, "document_pdf_translation")
-		}
+		excludedJobs := defaultAsyncJobExcludedTypes(systemdeps.PythonComponentActive("rag"))
 		runner = asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{
 			Concurrency:     asyncConfig.Concurrency,
 			ExcludeJobTypes: excludedJobs,
@@ -950,6 +962,7 @@ func run(ctx context.Context) error {
 		backgroundDone = append(backgroundDone, resourceupdate.StartIdle(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv()))
 		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, workflow.StartWorkflowRepairRecovery(runtimeCtx, store.DB()))
+		backgroundDone = append(backgroundDone, workflow.StartNativeWorkflowStopRecovery(runtimeCtx, store.DB(), store.State()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
 		if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {

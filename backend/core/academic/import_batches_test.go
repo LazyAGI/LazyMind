@@ -428,3 +428,41 @@ func TestImportOperationReadsEachDocumentBatchOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestImportOperationEnrichmentFailureRetainsSavedBibliography(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	importDraft(t, "papers", "enrichment-failure", libraryDraft("saved-paper", "Saved title", "10.1234/test"))
+	var batch orm.PaperImportBatch
+	if err := db.First(&batch).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.PaperImportBatch{}).Where("id=?", batch.ID).Update("status", "failed").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.PaperImportItem{}).Where("batch_id=?", batch.ID).Updates(map[string]any{
+		"status": "failed", "stage": "pdf_lookup", "error_code": "open_fulltext_not_found",
+		"error_details_json": marshal(importFailureDetails{Message: "未找到可下载的开放全文，论文尚未入库", Detail: "provider returned no PDF"}),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	response := libraryRequest(t, "GET", "/imports/"+batch.ID+"?view=operations", "papers", "owner", nil)
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var detail struct {
+		Items []ImportOperationItem `json:"items"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Items) != 1 {
+		t.Fatalf("missing item: %s", response.Body.String())
+	}
+	item := detail.Items[0]
+	if item.LibraryPaperID == "" || item.CurrentState != "failed" || !item.CanRetry || item.ErrorMessage != "题录已保存，附件补全失败：未找到可下载的开放全文" || item.ErrorDetail != "provider returned no PDF" {
+		t.Fatalf("misleading saved state: %+v", item)
+	}
+	if got := readLibrary(t, "papers"); len(got.Data.Papers) != 1 {
+		t.Fatal("saved bibliography lost")
+	}
+}

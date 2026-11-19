@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -93,6 +94,15 @@ type RuntimeWaitingOperation = "chat" | "workflow";
 
 const MEDIA_CAPABILITY_PENDING_STORAGE_PREFIX = "chat-capability-pending:";
 
+function hasTerminalChatRun(record?: {
+  run_terminal?: { status?: string } | null;
+  run_status?: string | null;
+}): boolean {
+  const status = record?.run_terminal?.status || record?.run_status;
+  return status === "completed" || status === "failed" ||
+    status === "interrupted" || status === "cancelled";
+}
+
 function pendingMediaCapabilityStorageKey(conversationId: string): string {
   return `${MEDIA_CAPABILITY_PENDING_STORAGE_PREFIX}${conversationId}`;
 }
@@ -134,6 +144,7 @@ export function useChatConversation({
   onRequestPendingChange,
   t,
 }: UseChatConversationOptions) {
+  const { i18n } = useTranslation();
   const navigate = useNavigate();
   const [modelFallbackNotification, modelFallbackNotificationHolder] = notification.useNotification({
     placement: "bottomRight", duration: 0, pauseOnHover: false, stack: false,
@@ -567,7 +578,7 @@ export function useChatConversation({
     const latestAssistant = list.findLast(
       (item) => item?.role === RoleTypes.ASSISTANT,
     );
-    return Boolean(latestAssistant?.run_terminal || latestAssistant?.run_status);
+    return hasTerminalChatRun(latestAssistant);
   }
 
   function applyReconciledHistory(conversationId: string, apiList: any[]) {
@@ -638,9 +649,7 @@ export function useChatConversation({
               : latest,
           undefined,
         );
-      const historyHasTerminal = Boolean(
-        latestHistory?.run_terminal || latestHistory?.run_status,
-      );
+      const historyHasTerminal = hasTerminalChatRun(latestHistory);
       const apiList = buildChatMessageListFromHistory(
         history as Parameters<typeof buildChatMessageListFromHistory>[0],
         {
@@ -912,8 +921,8 @@ export function useChatConversation({
       message: t("chat.modelFallbackSucceeded"),
       description: [
         t("chat.modelFallbackDescription", {
-          from: formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow),
-          to: formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow), reason,
+          from: formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow, i18n.language),
+          to: formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow, i18n.language), reason,
         }),
         record.context_compacted === true ? t("chat.modelFallbackContextAdapted") : undefined,
       ].filter(Boolean).join(" "),
@@ -1824,17 +1833,9 @@ export function useChatConversation({
       runtimeWaitInProgressRef.current ||
       loading ||
       isModelSelectionSaving?.() ||
-      isWorkspacePermissionSaving?.() ||
-      !normalizedText
+      isWorkspacePermissionSaving?.()
     ) {
       return false;
-    }
-    setCreationError(undefined);
-    pendingStops.current.delete(currentConversationIdRef.current);
-    if (!currentConversationIdRef.current) {
-      setDraftWorkspace(params.workspace_id
-        ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name }
-        : undefined);
     }
     const normalizedCiteMessages =
       paramsCiteMessages
@@ -1848,12 +1849,6 @@ export function useChatConversation({
     );
 
     const submittedFileList = params.fileList ?? fileList;
-    if (params.fileList) {
-      setFileList(submittedFileList);
-    }
-    if (params?.fileListRef) {
-      fileRef.current = params.fileListRef.current;
-    }
 
     const tempGroup =
       Object.groupBy(submittedFileList, (item) => {
@@ -1869,7 +1864,7 @@ export function useChatConversation({
       }) ?? {};
 
     const inputs = [
-      { input_type: "text", text: textWithCitation },
+      ...(textWithCitation ? [{ input_type: "text", text: textWithCitation }] : []),
       ...getFileUrls(tempFileGroup?.image, tempGroup?.image).map((image) => ({
         input_type: "image",
         uri: image.uri || "",
@@ -1886,6 +1881,16 @@ export function useChatConversation({
     for (const file of params.referencedFiles || []) {
       if (file.uri && !inputs.some(input => 'uri' in input && input.uri === file.uri)) inputs.push(file);
     }
+    if (!normalizedText && !inputs.some(input => input.input_type === 'image' && 'uri' in input && input.uri)) return false;
+    setCreationError(undefined);
+    pendingStops.current.delete(currentConversationIdRef.current);
+    if (!currentConversationIdRef.current) {
+      setDraftWorkspace(params.workspace_id
+        ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name }
+        : undefined);
+    }
+    if (params.fileList) setFileList(submittedFileList);
+    if (params.fileListRef) fileRef.current = params.fileListRef.current;
     if (params.featuredSelection) useFeaturedSelectionStore.getState().setSelection(currentConversationIdRef.current || 'new', params.featuredSelection);
 
     if (clearInput) {
@@ -1903,7 +1908,7 @@ export function useChatConversation({
       ),
       role: RoleTypes.USER,
       images: [...(tempGroup?.image || []), ...(params.referencedFiles || []).filter(file => file.input_type === 'image' && !tempFileGroup?.image?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, base64: file.input_base64 || file.uri }))],
-      files: [...(tempGroup?.file || []), ...(params.referencedFiles || []).filter(file => file.input_type === 'file' && !tempFileGroup?.file?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, name: file.filename }))],
+      files: [...(tempGroup?.file || []).map(file => ({ ...file, uri: tempFileGroup?.file?.find(upload => upload.uid === file.uid)?.uri })), ...(params.referencedFiles || []).filter(file => file.input_type === 'file' && !tempFileGroup?.file?.some(upload => upload.uri === file.uri)).map(file => ({ uid: file.uri, name: file.filename, uri: file.uri }))],
       fileList: submittedFileList,
       inputs,
       finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,

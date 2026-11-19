@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useContext, useMemo, type ReactNode } from 'react';
 import { Dropdown } from 'antd';
 import { CloudUploadOutlined, CopyOutlined, DownOutlined, DownloadOutlined, ExportOutlined, FileTextOutlined } from '@ant-design/icons';
@@ -19,9 +20,9 @@ export function DocumentActions({ documentFooter, actionPending = false, runFoot
       {documentFooter.statusMessages.length > 0 || documentFooter.actionItems.some(item => item.kind === 'link') ? (
         <div className='workflow-panel__footer-meta'>
           {documentFooter.actionItems.filter(item => item.kind === 'link').map(item => item.kind === 'link' && (
-            <a key={item.key} className='workflow-panel__footer-link' href={item.href} target='_blank' rel='noopener noreferrer'>
+            <ExternalLink key={item.key} className='workflow-panel__footer-link' href={item.href} target='_blank' rel='noopener noreferrer'>
               {item.label}<ExportOutlined aria-hidden />
-            </a>
+            </ExternalLink>
           ))}
           {documentFooter.statusMessages.map((message) => (
             <span
@@ -113,7 +114,7 @@ export function DocumentActionScope({ inline, label, children, showTitle = true 
 }) {
   const parent = useContext(SlotEditingContext);
   const { footerActions, registerFooterAction } = useSlotFooterActions();
-  const context = useMemo(() => inline ? { ...parent, registerFooterAction } : parent,
+  const context = useMemo(() => inline ? { ...parent, registerFooterAction, inlineDocumentActions: true } : parent,
     [inline, parent, registerFooterAction]);
   return <SlotEditingContext.Provider value={context}>
     {inline ? <div className='workflow-panel__document-item' role='group' aria-label={label}>

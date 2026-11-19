@@ -5,6 +5,7 @@ export type WorkflowStreamEventType =
   | 'workflow.patch'
   | 'step.patch'
   | 'attempt.patch'
+  | 'artifact.preview'
   | 'artifact.upsert'
   | 'artifact.stale'
   | 'workflow.waiting'
@@ -80,6 +81,7 @@ function payloadProjection(payload: Record<string, unknown>): Record<string, unk
   if (!isRecord(body.projection)) return body;
   return {
     ...body.projection,
+    ...(isRecord(body.artifact_previews) ? { artifact_previews: body.artifact_previews } : {}),
     ...(isRecord(body.display) ? { display: body.display } : {}),
     ...(typeof body.status === 'string' ? { status: body.status } : {}),
     ...(typeof body.current_step_id === 'string' ? { current_step_id: body.current_step_id } : {}),
@@ -111,7 +113,8 @@ export function reduceWorkflowEvent(
   // Cursor is a database-wide ID, not a per-session sequence. Other sessions
   // legitimately create gaps. State versions can also advance without an event.
   if (event.cursor > 0 && event.cursor <= state.cursor) return state;
-  const isProgress = event.type === 'attempt.progress';
+  const isPreview = event.type === 'artifact.preview';
+  const isProgress = event.type === 'attempt.progress' || isPreview;
   const isEntityEvent = event.type === 'attempt.patch' || event.type === 'step.patch' || isProgress;
   // Legacy executors emitted unversioned entity events. Consume their cursor
   // and update attempt history without regressing the workflow projection.
@@ -141,6 +144,13 @@ export function reduceWorkflowEvent(
       return entityId ? { ...next, attempts: { ...state.attempts, [entityId]: deepMerge(state.attempts[entityId] ?? {}, event.payload) } } : next;
     case 'attempt.progress':
       return entityId ? { ...next, progress: { ...state.progress, [entityId]: deepMerge(state.progress[entityId] ?? {}, event.payload) } } : next;
+    case 'artifact.preview': {
+      if (!entityId || event.payload.attempt_id !== entityId) return next;
+      const previews = isRecord(state.projection.artifact_previews) ? state.projection.artifact_previews : {};
+      const previous = isRecord(previews[entityId]) ? previews[entityId] : undefined;
+      if (previous && previous.stream_id === event.payload.stream_id && Number(previous.seq) >= Number(event.payload.seq)) return next;
+      return { ...next, projection: { ...state.projection, artifact_previews: { ...previews, [entityId]: event.payload } } };
+    }
     case 'artifact.upsert':
     case 'artifact.stale':
       return entityId ? { ...next, artifacts: { ...state.artifacts, [entityId]: deepMerge(state.artifacts[entityId] ?? {}, event.payload) } } : next;

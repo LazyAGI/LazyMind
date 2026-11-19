@@ -9,6 +9,8 @@ from typing import Any
 import numpy as np
 from lazyllm import LOG, ThreadPoolExecutor
 
+from lazymind.common.optional_components import ComponentRequiredError
+from lazymind.review.cluster_component import require_umap
 from lazymind.review.skill_review.config import (
     DEFAULT_EMBEDDING_MAX_CHARS,
     DEFAULT_EMBEDDING_RETRIES,
@@ -139,6 +141,21 @@ def cluster_drafts(
                 method='llm',
                 llm_cluster_threshold=llm_cluster_threshold,
             ),
+        )
+
+    try:
+        require_umap()
+    except ComponentRequiredError as exc:
+        clusters = []
+        if artifact_dir is not None:
+            write_json_file(artifact_dir / STAGE_FILES[STAGE_CLUSTER], clusters)
+        return clusters, finish_stage_report(
+            STAGE_CLUSTER,
+            started_at,
+            input_count=input_count,
+            output_count=0,
+            errors=[stage_error(STAGE_CLUSTER, 'embedding_clustering', exc)],
+            status='failed',
         )
 
     texts = [_cluster_text(draft) for draft in drafts]
@@ -402,11 +419,7 @@ def _embedding_cluster_labels(embeddings: np.ndarray) -> tuple[list[int], dict]:
 
 
 def _umap_reduce_embeddings(embeddings: np.ndarray) -> tuple[np.ndarray, dict]:
-    try:
-        from umap import UMAP
-    except ImportError as exc:
-        raise ImportError('umap-learn is required for embedding clustering') from exc
-
+    UMAP = require_umap()
     sample_count = len(embeddings)
     n_neighbors = min(sample_count - 1, min(20, max(10, int(round(sample_count ** 0.5 * 1.5)))))
     n_components = min(15, sample_count - 1)

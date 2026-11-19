@@ -10,7 +10,8 @@ import pytest
 from lazymind.document_tools import writing, execution
 from lazyllm.tools.writer.utils import save_artifact_json
 from lazyllm.tools.writer.tools.base import WriterToolBase
-from lazyllm.tools.writer.data_models import WriterBlock
+from lazyllm.tools.writer.data_models import MediaAssetLibrary, WriterBlock, WriterDocument
+from lazyllm.tools.writer.provider.wechat import WeChatWriterProvider
 
 
 def _tools(tmp_path, monkeypatch):
@@ -122,8 +123,11 @@ def test_body_overlaps_media_and_survives_media_retry(monkeypatch, tmp_path, mod
     assert all(Path(asset['local_path']).is_file() for asset in library['assets'].values())
     if representation == 'ir':
         document = tools._read_json_file(result['draft_document'])
-        assert '"type": "image"' in json.dumps(document)
-        assert '.png' in json.dumps(document)
+        converted = WeChatWriterProvider().convert_document(
+            WriterDocument.model_validate(document),
+            media_assets=MediaAssetLibrary.model_validate(library),
+        )
+        assert '<img ' in converted.content
     else:
         assert '.png' in payload
 

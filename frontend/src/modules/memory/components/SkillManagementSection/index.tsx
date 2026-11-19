@@ -1,9 +1,9 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Input, message, Modal, Popover, Select, Tooltip } from "antd";
+import { Alert, Button, Input, message, Modal, Popover, Segmented, Select, Space, Tooltip } from "antd";
 import SkillModuleState from "./SkillModuleState";
 import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import WorkflowInstalledView from "./WorkflowInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
@@ -80,7 +80,9 @@ export default function SkillManagementSection() {
   const [batchCallModeLoading, setBatchCallModeLoading] = useState(false);
   const batchCallModeLock = useRef(false);
   const [draftReviewOpen, setDraftReviewOpen] = useState(false);
-  const [organizeApprovalOpen, setOrganizeApprovalOpen] = useState(false);
+  const [reviewKind, setReviewKind] = useState<"organize" | "drafts">("drafts");
+  const [pendingOrganizeCount, setPendingOrganizeCount] = useState(0);
+  const [organizeApplying, setOrganizeApplying] = useState(false);
   const [organizeApprovalToken, setOrganizeApprovalToken] = useState(0);
   const [draftApplying, setDraftApplying] = useState(false);
   const [pendingDraftCount, setPendingDraftCount] = useState(0);
@@ -93,6 +95,7 @@ export default function SkillManagementSection() {
   const [organizeRunStatus, setOrganizeRunStatus] = useState<SkillOrganizeTaskStatus | "">("");
   const [organizeElapsedMs, setOrganizeElapsedMs] = useState(0);
   const [organizeError, setOrganizeError] = useState("");
+  const [organizeErrorCode, setOrganizeErrorCode] = useState("");
   const [organizeBlockingSkills, setOrganizeBlockingSkills] = useState<string[]>([]);
   const [organizeDraftConflict, setOrganizeDraftConflict] = useState(false);
   const [organizePendingReviewWarning, setOrganizePendingReviewWarning] = useState(false);
@@ -129,6 +132,7 @@ export default function SkillManagementSection() {
     skillLoading,
     skillListError,
     refreshSkillAssets,
+    refreshSkillMetadata,
     genericColumns,
     cloudSkillLoading,
     cloudSkillError,
@@ -433,7 +437,7 @@ export default function SkillManagementSection() {
   }, [marketBuiltinAssets, marketSkillSource, marketTags]);
 
   const messageCenterCount = incomingPendingCount;
-  const hasPendingOrganizeDrafts = pendingDraftCount > 0 || skillAssets.some((skill: StructuredAsset) => skill.draft?.hasUncommittedDraft);
+  const hasPendingOrganizeDrafts = pendingOrganizeCount > 0 || pendingDraftCount > 0 || skillAssets.some((skill: StructuredAsset) => skill.draft?.hasUncommittedDraft);
   const manualSkillReviewCount = manualSkillReviewSummary?.qualifiedSessionCount ?? 0;
   const manualSkillReviewButtonBusy =
     manualSkillReviewRunning ||
@@ -562,6 +566,7 @@ export default function SkillManagementSection() {
 
     setOrganizeDepth(mode);
     setOrganizeError("");
+    setOrganizeErrorCode("");
     setOrganizeBlockingSkills([]);
     setOrganizeDraftConflict(false);
     setOrganizeStatus("idle");
@@ -652,6 +657,7 @@ export default function SkillManagementSection() {
         if (!isCurrent()) return;
         if (task.status === "failed") {
           setOrganizeError(skillOrganizeErrorText(task.errorCode, task.error, t));
+          setOrganizeErrorCode(task.errorCode);
           setOrganizeDraftConflict(task.errorCode === "skill_organize_draft_conflict");
           setOrganizeStatus("error");
           return;
@@ -665,7 +671,6 @@ export default function SkillManagementSection() {
         await refreshSkillAssetsRef.current({ page: skillListPageRef.current });
         if (!isCurrent()) return;
         setOrganizeStatus("success");
-        setOrganizeApprovalOpen(true);
         setOrganizeApprovalToken((token) => token + 1);
       } catch (error) {
         if (!isCurrent()) {
@@ -673,6 +678,7 @@ export default function SkillManagementSection() {
         }
         console.error("Skill organize task failed:", error);
         setOrganizeError(describeSkillOrganizeError(error, t));
+        setOrganizeErrorCode(skillOrganizeErrorDetails(error).code);
         setOrganizeStatus("error");
       } finally {
         if (isCurrent()) {
@@ -734,6 +740,7 @@ export default function SkillManagementSection() {
       organizeRequestIdRef.current = "";
       setOrganizeStatus("skipped");
       setOrganizeError("");
+      setOrganizeErrorCode("");
       if (result?.pendingReview) setOrganizePendingReviewWarning(true);
       setOrganizeSubmitting(false);
       setOrganizeRunStatus("");
@@ -743,6 +750,7 @@ export default function SkillManagementSection() {
     } catch (error) {
       if (organizePollingControllerRef.current !== pollingController) return;
       setOrganizeError(describeSkillOrganizeError(error, t));
+      setOrganizeErrorCode(skillOrganizeErrorDetails(error).code);
     } finally {
       organizeCancellingRef.current = false;
     }
@@ -769,6 +777,7 @@ export default function SkillManagementSection() {
     setOrganizeSubmitting(true);
     setOrganizeStatus("running");
     setOrganizeError("");
+    setOrganizeErrorCode("");
     setOrganizeBlockingSkills([]);
     setOrganizeDraftConflict(false);
     // Exit selection mode immediately so the page stays usable while the
@@ -799,6 +808,7 @@ export default function SkillManagementSection() {
       setOrganizeBlockingSkills(detail.blockingSkills);
       setOrganizeDraftConflict(detail.code === "skill_organize_draft_conflict");
       setOrganizeError(describeSkillOrganizeError(error, t));
+      setOrganizeErrorCode(skillOrganizeErrorDetails(error).code);
       setOrganizeStatus("error");
       setOrganizeSubmitting(false);
     }
@@ -1023,12 +1033,36 @@ export default function SkillManagementSection() {
 
   return (
     <div className="memory-skill-management">
-      <SkillManagementNavigation t={t} skillView={skillView} onSkillViewChange={handleSkillViewChange} disabled={draftApplying || batchCallModeLoading} />
+      <SkillManagementNavigation t={t} skillView={skillView} onSkillViewChange={handleSkillViewChange} disabled={draftApplying || organizeApplying || batchCallModeLoading} />
       <div className="memory-skill-workspace-main">
       {draftReviewOpen ? (
+        <Segmented
+          style={{ flexShrink: 0, alignSelf: "flex-start", marginBottom: 12 }}
+          value={reviewKind}
+          disabled={draftApplying || organizeApplying}
+          onChange={(value) => setReviewKind(value as "organize" | "drafts")}
+          options={[
+            { value: "organize", label: t("admin.memorySkillOrganizeApprovalTitle") },
+            { value: "drafts", label: t("admin.memorySkillDraftReviewTitle") },
+          ]}
+        />
+      ) : null}
+      {skillView === "installed" ? (
+        <SkillOrganizeApprovalPanel
+          t={t}
+          hiddenRequestId={organizeRunStatus ? organizeRequestIdRef.current : ""}
+          expanded={draftReviewOpen && reviewKind === "organize"}
+          refreshToken={organizeApprovalToken}
+          onExpandedChange={(open) => { if (!draftApplying) setDraftReviewOpen(open); }}
+          onPendingCountChange={setPendingOrganizeCount}
+          onApplyingChange={setOrganizeApplying}
+          onApplied={() => refreshSkillAssetsRef.current({ preserveChangeProposals: true })}
+        />
+      ) : null}
+      {draftReviewOpen ? (reviewKind === "drafts" ? (
         <SkillDraftReviewPanel
           t={t}
-          onClose={() => setDraftReviewOpen(false)}
+          onClose={() => { if (!organizeApplying) setDraftReviewOpen(false); }}
           onApplied={async () => {
             const generation = organizeGenerationRef.current;
             const clearDraftConflict = organizeStatus === "error" && organizeDraftConflict;
@@ -1037,13 +1071,14 @@ export default function SkillManagementSection() {
             setOrganizeBlockingSkills([]);
             setOrganizeDraftConflict(false);
             setOrganizeError("");
+            setOrganizeErrorCode("");
             setOrganizeStatus((status) => status === "error" ? "idle" : status);
           }}
           onPendingCountChange={setPendingDraftCount}
           onApplyingChange={setDraftApplying}
           onOpenSkill={(id) => navigate(`/memory-management/skills/${encodeURIComponent(id)}`)}
         />
-      ) : (<>
+      ) : null) : (<>
       <SkillManagementToolbar
         t={t}
         skillView={skillView}
@@ -1077,8 +1112,8 @@ export default function SkillManagementSection() {
         marketFilters={marketFilters}
         onAdminPublish={() => setAdminPublishOpen(true)}
         onNewWorkflow={() => setNewWorkflowOpen(true)}
-        pendingDraftCount={pendingDraftCount}
-        onReviewDrafts={() => setDraftReviewOpen(true)}
+        pendingDraftCount={pendingDraftCount + pendingOrganizeCount}
+        onReviewDrafts={() => { setReviewKind(pendingOrganizeCount > 0 ? "organize" : "drafts"); setDraftReviewOpen(true); }}
         headingExtra={
           skillView === "installed" ? (
             <ExpandableTitleSearch
@@ -1111,20 +1146,12 @@ export default function SkillManagementSection() {
             {organizeError && organizePendingReviewWarning ? <p>{t("admin.memorySkillOrganizeCancelledPendingReview")}</p> : null}
             {organizeBlockingSkills.length ? <ul>{organizeBlockingSkills.map((path) => <li key={path}>{path}</li>)}</ul> : null}
           </> : undefined}
-          action={organizeDraftConflict || hasPendingOrganizeDrafts
-            ? <Button onClick={() => { cancelSkillOrganize(); setDraftReviewOpen(true); }}>{t("admin.memorySkillDraftReviewTitle")}</Button>
-            : undefined}
-        />
-      ) : null}
-
-      {skillView === "installed" ? (
-        <SkillOrganizeApprovalPanel
-          t={t}
-          hiddenRequestId={organizeRunStatus ? organizeRequestIdRef.current : ""}
-          expanded={organizeApprovalOpen}
-          refreshToken={organizeApprovalToken}
-          onExpandedChange={setOrganizeApprovalOpen}
-          onApplied={() => refreshSkillAssetsRef.current({ preserveChangeProposals: true })}
+          action={<Space>
+            {["skill_organize_model_unavailable", "skill_organize_model_transport"].includes(organizeErrorCode) &&
+              <Link to="/settings?section=model_defaults">{t("admin.memorySkillOrganizeConfigureModel")}</Link>}
+            {(organizeDraftConflict || hasPendingOrganizeDrafts) &&
+              <Button onClick={() => { cancelSkillOrganize(); setReviewKind(!organizeDraftConflict && pendingOrganizeCount > 0 ? "organize" : "drafts"); setDraftReviewOpen(true); }}>{t("admin.memorySkillDraftReviewTitle")}</Button>}
+          </Space>}
         />
       ) : null}
 
@@ -1204,8 +1231,8 @@ export default function SkillManagementSection() {
         t={t}
         onClose={() => setAdminPublishOpen(false)}
         onPublished={async () => {
-          await refreshSkillAssets({ page: skillListPage });
-          await Promise.all([loadMarketCatalog(), loadMarketTags()]);
+          refreshSkillMetadata?.();
+          await Promise.all([refreshSkillAssets({ page: skillListPage }), loadMarketCatalog(), loadMarketTags()]);
         }}
       />
 

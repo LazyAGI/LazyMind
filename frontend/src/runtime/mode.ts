@@ -43,8 +43,7 @@ export function isDesktopRuntime(): boolean {
   return getRuntimeMode() === "desktop";
 }
 
-export function isVocabularyEnabled(env: RuntimeEnv = readRuntimeEnv()): boolean {
-  return ["1", "true", "yes", "on"].includes(
-    String(env.VITE_VOCABULARY_ENABLED || "true").trim().toLowerCase(),
-  );
+// Vocabulary is available in every runtime. The legacy build flag is ignored.
+export function isVocabularyEnabled(_env?: RuntimeEnv): boolean {
+  return true;
 }

@@ -28,10 +28,6 @@ import (
 	"lazymind/core/workflow/graphengine"
 )
 
-type chatStatusCacheEntry struct {
-	Status string `json:"status"`
-}
-
 // WorkflowStepParams is the shared launch payload used by the v2 transition
 // handler and the isolated pre-v2 task_created compatibility entry point.
 type WorkflowStepParams struct {
@@ -70,6 +66,9 @@ type WorkflowStepParams struct {
 	// It is appended to the step objective before the SubAgent runs, and is NOT persisted
 	// back to state.yml — it only affects the current execution.
 	RetryHint string `json:"retry_hint,omitempty"`
+	// RetryExistingOutputs is set by Core only for a failed attempt retried
+	// without a new requirement. Tools must still validate their saved inputs.
+	RetryExistingOutputs bool `json:"retry_existing_outputs,omitempty"`
 
 	// PartialIndices maps slot → list of list_index values that should be
 	// overwritten (not appended) when the SubAgent saves those artifacts.
@@ -125,6 +124,9 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	}
 	if p.WorkflowMode != "" {
 		m["workflow_mode"] = p.WorkflowMode
+	}
+	if p.RetryExistingOutputs {
+		m["retry_existing_outputs"] = true
 	}
 	if p.RevisionID != "" {
 		m["revision_id"] = p.RevisionID
@@ -405,7 +407,6 @@ func HandleWorkflowStepCreated(
 			return "", taskID, false, fmt.Errorf("plugin: complete legacy session: %w", updateErr)
 		}
 		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, params.SessionID, "succeeded")
-		clearGeneratingChatStatus(ctx, stateStore, convID)
 		return params.SessionID, taskID, true, nil
 	}
 	return launchWorkflowAttempt(
@@ -575,6 +576,9 @@ func launchWorkflowAttempt(
 		"user_input":    params.UserInput,
 		"is_cold_start": isCold,
 	}
+	if params.RetryExistingOutputs {
+		rawParamsMap["retry_existing_outputs"] = true
+	}
 	// Keep request identity separate from control text such as "continue".
 	if params.LaunchUserInput != "" {
 		rawParamsMap["launch_user_input"] = params.LaunchUserInput
@@ -717,6 +721,9 @@ func launchWorkflowAttempt(
 		"step_id":     stepID,
 		"session_id":  sessionID,
 	}
+	if params.RetryHint != "" {
+		runParams["retry_hint"] = params.RetryHint
+	}
 	if params.TraceID != "" && params.ParentSpanID != "" {
 		runParams["trace_id"] = params.TraceID
 		runParams["parent_span_id"] = params.ParentSpanID
@@ -843,7 +850,6 @@ func OnSubAgentDone(
 				return
 			}
 			_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "failed")
-			clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
 			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 		}
 		// Publish only after authoritative state is durable; consumers may reload
@@ -886,7 +892,8 @@ func OnSubAgentDone(
 		// paper expansion results) also catch up after a manual retry.
 		NotifyWorkflowRuntimeUpdated(ctx, db, pctx.SessionID, taskID, "completed")
 		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "succeeded")
-		clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
+		// Chat may still be consuming the tool result or writing its final reply.
+		// Only the Chat run owner may settle its generating status.
 		onSSE("workflow_completed", map[string]any{
 			"session_id": pctx.SessionID,
 			"step_id":    pctx.StepID,
@@ -967,6 +974,17 @@ func OnSubAgentDone(
 		if !admitted {
 			return
 		}
+		if status == subagent.StatusSucceeded {
+			recovering, err := startNativeChatRecovery(ctx, db, stateStore, pctx.SessionID, onSSE)
+			if err != nil {
+				onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+				return
+			}
+			if recovering {
+				go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+				return
+			}
+		}
 		onSSE("step_waiting", map[string]any{
 			"session_id": pctx.SessionID,
 			"step_id":    pctx.StepID,
@@ -1013,30 +1031,6 @@ func OnSubAgentDone(
 	}
 	// Write content_snapshot to all selected revisions for this step.
 	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
-}
-
-func clearGeneratingChatStatus(ctx context.Context, stateStore state.Store, convID string) {
-	if stateStore == nil || strings.TrimSpace(convID) == "" {
-		return
-	}
-	key := fmt.Sprintf("rag/chat/status:%s", convID)
-	entries, err := stateStore.HGetAll(ctx, key)
-	if err != nil {
-		return
-	}
-	var fields []string
-	for historyID, raw := range entries {
-		var st chatStatusCacheEntry
-		if json.Unmarshal([]byte(raw), &st) != nil {
-			continue
-		}
-		if st.Status == "generating" {
-			fields = append(fields, historyID)
-		}
-	}
-	if len(fields) > 0 {
-		_ = stateStore.HDel(ctx, key, fields...)
-	}
 }
 
 // advanceAutoMode calls DriverAgent and forwards its natural-language assessment to ChatAgent.
@@ -1137,6 +1131,7 @@ func triggerNextChatTurn(
 	convID, sessionID, workflowID, currentStep, workflowMode, userID, syntheticMsg string,
 	onReady func(),
 	syntheticSource string,
+	recovery ...NativeChatRecovery,
 ) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
 	workflowCtx := map[string]any{
@@ -1147,6 +1142,9 @@ func triggerNextChatTurn(
 	}
 	if syntheticSource != "" {
 		workflowCtx["synthetic_source"] = syntheticSource
+	}
+	if len(recovery) > 0 {
+		workflowCtx["recovery"] = recovery[0]
 	}
 	reqBody := map[string]any{
 		"query":           syntheticMsg,

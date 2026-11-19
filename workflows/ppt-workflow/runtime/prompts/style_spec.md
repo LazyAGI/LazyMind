@@ -44,7 +44,8 @@ keep the user colors in palette and primary_color.hex. The catalog hex and
 compatibility rules below apply only to unspecified properties. Do not infer a
 dark/cyan scheme just because the topic is technical.
 
-The built-in 科研风格 / academic default uses a plain white #FFFFFF canvas,
+Without an uploaded template or an explicit user palette, the built-in
+科研风格 / academic default uses a plain white #FFFFFF canvas,
 black #111111 titles and body text, and restrained blue/teal/orange/purple chart
 accents. Choose the Academic catalog style with Light tone, unless a user
 explicitly requests another direction. Write background and text colors into
@@ -108,4 +109,4 @@ Do not invent facts or decorative KPI values to implement the concept.
 - Do NOT generate separate palettes for individual slides.
 - JSON must be valid.
 
-Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. Font resources must be embedded in the delivered HTML and editable PPTX; do not claim portability from a font name alone.
+Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. HTML must load verified font resources by URL; the exporter embeds the same fonts in editable PPTX. Do not inline font bytes in HTML or claim portability from a font name alone.

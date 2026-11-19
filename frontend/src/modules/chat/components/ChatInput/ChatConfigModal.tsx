@@ -462,12 +462,14 @@ export default function ChatConfigPopover({
     >
       <button
         type="button"
-        className="input-bottom-actions-left-item"
+        className="input-bottom-actions-left-item chat-config-trigger"
         disabled={disabled}
         aria-label={t('chat.conversationConfig')}
+        aria-expanded={!disabled && open}
+        title={t('chat.conversationConfig')}
       >
-        <SettingOutlined style={{ marginRight: 4 }} />
-        {t('chat.conversationConfig')}
+        <SettingOutlined aria-hidden />
+        <span className="chat-config-trigger-label">{t('chat.conversationConfig')}</span>
       </button>
     </Popover>
   );

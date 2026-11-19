@@ -1,87 +1,541 @@
 id: paper-writing
 name: 论文写作
-description: 支持选题、综述、实验、分析、写作、审稿与阅读心得；轻量实验可授权运行，复杂实验提供模拟数据，结果可继续分析绘图。
+description: 支持选题、综述、实验、分析、写作、审稿与阅读心得；轻量实验按环境受限运行，按研究目标准备数据，结果可继续分析绘图。
 when_to_use: >
-  按用户明确要求且尚未完成的工作选择入口；同时要求检索、分析与写作时，先综述，再 F3 数据准备、F4 分析、论文大纲与成稿。
-  仅要求实验或数据分析时，先选择 experiment（F3 实验与数据准备），再按阶段确认规则进入 data_analysis。
-  F3 从材料池中读取已提取的依据和完整数据表；已有结果仅整理展示，需要新计算时才运行实验。
-  补传附件先提取有效信息入池，已处理的附件不重复读取，不将原文全文复制到后续上下文。
-  Use when the user requests the paper-writing workflow or review of an uploaded academic manuscript.
-  Start broad paper-writing requests at research_topic, retaining the supplied study methods and results.
-  Literature reviews retain supplied papers and expand references through available academic sources and knowledge bases.
+  按用户明确要求且尚未完成的工作选择入口；同时要求检索、分析与写作时，先综述，再 F3 数据准备、F4 分析、论文大纲与成稿。 仅要求实验或数据分析时，先选择 experiment（F3
+  实验与数据准备），再按阶段确认规则进入 data_analysis。 F3 从材料池中读取已提取的依据和完整数据表；已有结果仅整理展示，需要新计算时才运行实验。
+  补传附件先提取有效信息入池，已处理的附件不重复读取，不将原文全文复制到后续上下文。 Use when the user requests the paper-writing workflow or review of
+  an uploaded academic manuscript. Select the earliest unfinished stage explicitly requested by the user. For a
+  new paper requiring literature retrieval, start at literature_review, even with research notes, data or a
+  tentative title. Use research_topic for requested topic development, not as a mandatory first step. Literature
+  reviews retain supplied papers and expand references through available academic sources and knowledge bases.
   Honor explicit source restrictions, dates, counts and focus. Frozen review handoffs use only their selection
-  unless the user explicitly asks to expand it. Never substitute model knowledge for missing literature.
-  Start review handoffs at literature_review with the frozen selection.
-  Do not ask about experiment data or execution when starting unrelated stages (F1/F2/F5/F6/F7).
-  When reaching experiment (F3), inspect the current request, attachments and material pool for usable
-  user experiment data/results. Read existing materials when needed; filenames alone and reference-paper
-  tables are not evidence of user measurements.
-  If usable user data exists, directly use it in F3 without ask_user, a data-choice confirmation,
-  or an execution-permission question just to organize existing results.
-  Only when usable data is absent and the user has not already specified how to proceed, use framework
-  ask_user to ask whether they will supply real data or want labeled simulation, then wait for the answer.
-  Tailor the question to the actual research goal and missing data; do not use a fixed environment questionnaire.
-  If the user chooses to supply data, wait for it. If they already requested simulation, reuse that answer.
-  Preserve the answer and original research goal through the existing request_context/user_input mechanism.
-  Do not add a required input field, data-mode binding, or preparation node for this decision.
-  Only for a requested new computation needing code execution, ask about unresolved execution permission
-  in the current LazyMind deployment: bounded CPU execution, no network, dependency installation or GPU,
-  and at most 30 seconds. Bind the existing experiment_execution to allow_local only for explicit consent,
-  otherwise simulate_only. Refusing execution does not request synthetic data.
-  Failed computations on real data must report missing results, never substitute synthetic results.
-  If ask_user is unavailable, ask in Chat only for the missing information. A tool validation failure is
-  not a user answer: report it and stop.
-  For direct experiment entry, bind the user's stated goal to experiment_question; ask if missing for
-  a new experiment. Existing data does not require a new experimental question.
-  F1/F2 entries reuse the accumulated question and evidence. F3 returns final results for F4.
-  Never separately run generated code through Chat tools.
-  For an existing manuscript to review or revise, bind the exact attachment filename to manuscript_file;
-  do not first summarize or copy the manuscript through Chat.
-  Bind pasted manuscript text to manuscript_text; paper_topic and review_request are optional.
-  Choose the entry stage by the user's requested unfinished work, never by attachment format.
+  unless the user explicitly asks to expand it. Never substitute model knowledge for missing literature. Start
+  review handoffs at literature_review with the frozen selection. New experiment execution requires explicit
+  permission for this task. Bind experiment_execution to allow_local only after that permission; bind
+  simulate_only for refusal. Analysis of supplied data does not authorize new experiments. No network,
+  dependency installation or GPU; new experiment code is limited to 30 seconds. Never simulate when the user
+  prohibits it, and never replace failed real-data results with simulation.  Execution takes place in the
+  current LazyMind deployment, not necessarily the browser user's computer. For direct experiment entry, bind
+  the user's stated goal to experiment_question; ask if missing for a new experiment. Existing data does not
+  require a new experimental question. F1/F2 entries reuse the accumulated question and evidence. F3 returns
+  final results for F4. Never separately run generated code through Chat tools. For an existing manuscript to
+  review or revise, bind the exact attachment filename to manuscript_file; do not first summarize or copy the
+  manuscript through Chat. Bind pasted manuscript text to manuscript_text; paper_topic and review_request are
+  optional. Choose the entry stage by the user's requested unfinished work, never by attachment format.
   Requested literature search/review precedes requested data preparation/analysis, then outlining and drafting.
   A new-paper request for literature retrieval and analysis of existing results starts at literature_review,
-  then experiment (organize supplied results), data_analysis, write_outline and write_document.
-  Markdown materials, images or existing data do not establish that literature retrieval or analysis is complete.
-  Enter write_outline directly only for an outline-only request, or when required earlier work is complete
-  or explicitly out of scope. Do not skip requested research or analysis just because the final deliverable is a paper.
-  Bind existing manuscripts to manuscript_file, regardless of format. Do not bind background/data/outline materials
-  as manuscripts or transcribe them into paper_input; steps read actual attachments and initialize their pool.
-  write_outline publishes an editable outline and
-  requires user confirmation before write_document. Stop after the outline even when the launch request
-  also asks for a complete manuscript or peer review. Continue only after the user confirms the outline.
-  Choose peer_review only when the user requests a review; uploading or having a manuscript does not request review.
-  Use write_document only to draft from the confirmed outline. Use revise_document for all existing-manuscript edits.
-  Respect native approval checkpoints. On Continue, resume the earliest unfinished requested stage.
-  Pass the current editing request unchanged through the existing request_context/user_input mechanism.
-  Direct edits go to revise_document and use the public Writer to plan changes from that request.
-  For review followed by revision, run peer_review first and honor its approval checkpoint, then proceed to revision.
-  When the user requests revision according to the review, use all current issues by default; honor explicit issue numbers, exclusions, or categories for selective revision.
-  Direct edits must ignore historical review advice. Never broaden a partial-review request to all issues; clarify only ambiguous selections. Missing materials or experiments remain pending and must not block other executable text edits.
-  A manuscript or historical review alone does not request review-driven revision.
-  If the request does not distinguish review from editing, clarify the intended action before execution.
-  Keep the file's request; pass additions through request_context. review_request is for peer review.
-  Ask which manuscript to review only when multiple attachments make the target ambiguous.
-  Never substitute a filename or summary for the manuscript.
-  For complete-paper tasks, call finish after the last requested stage is approved.
-  If optional review-driven revision yields no accepted change, deliver the current valid manuscript.
-  After the requested steps succeed and their artifacts are published, acknowledge completion in one
-  short sentence in the user's language and direct them to the workflow.
-  For the last step requested in the current turn, call the existing advance_step_and_hand_off tool
-  so execution publishes its result without another Chat model round. For earlier requested steps,
-  use advance_step and continue only along the requested path; do not hand off early in a multi-step task.
-  Do not repeat the document, review, or JSON, or list issues, conclusions, or next-step options.
-  Do not call list_artifacts, read_artifact, read_file_resource, or similar tools merely to summarize,
-  repeat, or reconfirm successfully published artifacts.
-  Read results when explicitly asked to explain them; continue subsequent steps when explicitly requested,
-  then acknowledge briefly once the current request is fulfilled.
-  For a review-only request, stop after successful review without automatically revising or finishing the workflow.
-  On failure or missing required input, explain the actual cause and wait for user action; do not claim success.
-  Never automatically retry a failed step or reread its error files to plan another attempt.
-  Retry only when the user explicitly requests a retry after seeing the failure.
-  Always relay necessary user_notice messages from tools.
+  then experiment (organize supplied results), data_analysis, write_outline and write_document. Markdown
+  materials, images or existing data do not establish that literature retrieval or analysis is complete. Enter
+  write_outline directly only for an outline-only request, or when required earlier work is complete or
+  explicitly out of scope. Do not skip requested research or analysis just because the final deliverable is a
+  paper. Bind existing manuscripts to manuscript_file, regardless of format. Bind raw research notes, background
+  and measurement attachments to research_materials, not seed_pool or manuscript_file. Do not put local file
+  paths in paper_input.writing_materials. seed_pool accepts only an existing paper-material-pool.v2 JSON pool.
+  Steps extract research_materials into source passages and complete tables. write_outline publishes an editable
+  outline and requires user confirmation before write_document. Stop after the outline even when the launch
+  request also asks for a complete manuscript or peer review. Continue only after the user confirms the outline.
+  Choose peer_review only when the user requests a review; uploading or having a manuscript does not request
+  review. Use write_document only to draft from the confirmed outline. Use revise_document for all
+  existing-manuscript edits. Respect native approval checkpoints. On Continue, resume the earliest unfinished
+  requested stage. Pass the current editing request unchanged through the existing request_context/user_input
+  mechanism. Direct edits go to revise_document and use the public Writer to plan changes from that request. For
+  review followed by revision, run peer_review first and honor its approval checkpoint, then proceed to
+  revision. When the user requests revision according to the review, use all current issues by default; honor
+  explicit issue numbers, exclusions, or categories for selective revision. Direct edits must ignore historical
+  review advice. Never broaden a partial-review request to all issues; clarify only ambiguous selections.
+  Missing materials or experiments remain pending and must not block other executable text edits. A manuscript
+  or historical review alone does not request review-driven revision. If the request does not distinguish review
+  from editing, clarify the intended action before execution. Keep the file's request; pass additions through
+  request_context. review_request is for peer review. Ask which manuscript to review only when multiple
+  attachments make the target ambiguous. Never substitute a filename or summary for the manuscript. For
+  complete-paper tasks, call finish after the last requested stage is approved. If optional review-driven
+  revision yields no accepted change, deliver the current valid manuscript. After the requested steps succeed
+  and their artifacts are published, acknowledge completion in one short sentence in the user's language and
+  direct them to the workflow. For the last step requested in the current turn, call the existing
+  advance_step_and_hand_off tool so execution publishes its result without another Chat model round. For earlier
+  requested steps, use advance_step and continue only along the requested path; do not hand off early in a
+  multi-step task. Do not repeat the document, review, or JSON, or list issues, conclusions, or next-step
+  options. Do not call list_artifacts, read_artifact, read_file_resource, or similar tools merely to summarize,
+  repeat, or reconfirm successfully published artifacts. Read results when explicitly asked to explain them;
+  continue subsequent steps when explicitly requested, then acknowledge briefly once the current request is
+  fulfilled. For a review-only request, stop after successful review without automatically revising or finishing
+  the workflow. On failure or missing required input, explain the actual cause and wait for user action; do not
+  claim success. Never automatically retry a failed step or reread its error files to plan another attempt.
+  Retry only when the user explicitly requests a retry after seeing the failure. Always relay necessary
+  user_notice messages from tools.
+
 runtime:
-  trigger_inputs: [manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - The executing step Agent owns all reasoning, generation, semantic checks and bounded repair. LazyMind tools
+      never ask for model responses.
+    - Read the full pinned contract, actual input versions and both launch/current requests; preserve user scope and
+      approval checkpoints.
+    - Register actual host-retrieved sources with paper_import_sources; use paper_search as fallback, never merely for receipts.
+    - Use audited paper tools for sources and actual computations; publish the exact validated artifact bundle. Program
+      checks are not scientific/visual checks.
+    steps:
+      research_topic:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/research_topic.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+        - name: paper_import_sources
+          source: package
+        - name: paper_search
+          source: package
+        - name: paper_read_paper
+          source: package
+      literature_review:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/literature_review.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+        - name: paper_import_sources
+          source: package
+        - name: paper_search
+          source: package
+        - name: paper_read_paper
+          source: package
+      refine_topic:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/refine_topic.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+        - name: paper_import_sources
+          source: package
+        - name: paper_search
+          source: package
+        - name: paper_read_paper
+          source: package
+      experiment:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/experiment.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+        - name: paper_execution_status
+          source: package
+        - name: paper_cancel_execution
+          source: package
+        - name: paper_run_experiment
+          source: package
+      data_analysis:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/data_analysis.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+        - name: paper_execution_status
+          source: package
+        - name: paper_cancel_execution
+          source: package
+        - name: paper_analyze
+          source: package
+        - name: paper_plot
+          source: package
+      write_outline:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/write_outline.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+      write_document:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/write_document.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+      peer_review:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/peer_review.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+      revise_document:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/revise_document.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+        - name: paper_preview_revision
+          source: package
+      reading_reflection:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/reading_reflection.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+        - name: paper_import_sources
+          source: package
+        - name: paper_search
+          source: package
+        - name: paper_read_paper
+          source: package
+      finish:
+        output_validator: paper-agent-v1
+        skills:
+        - scenario/methods/finish.md
+        tools:
+        - name: paper_prepare_inputs
+          source: package
+        - name: paper_read_material
+          source: package
+        - name: paper_knowledge_documents
+          source: package
+        - name: paper_knowledge_read
+          source: package
+        - name: paper_prepare_candidate
+          source: package
+  trigger_inputs: [research_materials, manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
+  input_contracts:
+    research_materials:
+      description: >
+        Raw research/background/data attachments (Markdown, TXT, PDF or DOCX), in source order.
+        Steps preserve source identities, selected passages and complete tables. An attachment does not
+        mean literature retrieval or data analysis is complete. Do not use seed_pool or manuscript_file
+        for these materials, or put local file paths in paper_input.writing_materials.
+    seed_pool:
+      description: >
+        Existing structured paper-material-pool.v2 JSON pool, not a raw attachment.
+        For Markdown research notes and supplied observations use research_materials instead.
+      schema:
+        $defs:
+          ref:
+            type: object
+            required: [id, version]
+            properties:
+              id: {type: string, minLength: 1}
+              version: {type: integer, minimum: 1}
+          pool:
+            type: object
+            required: [schema, topic, sequence, materials, current, history]
+            properties:
+              schema: {const: paper-material-pool.v2}
+              topic: {type: string, pattern: '\S'}
+              sequence: {type: integer, minimum: 0}
+              materials:
+                type: array
+                items:
+                  type: object
+                  required: [id, kind, version, content, source_refs, derived_from, mock]
+                  properties:
+                    id: {type: string, minLength: 1}
+                    kind: {enum: [papers, question, evidence, writing_materials, data, source_data, experiment, code_files, result_meta, data_context, study_design, analysis, charts, outline, manuscript, review, review_data, media_assets, reflection]}
+                    version: {type: integer, minimum: 1}
+                    content: {}
+                    source_refs: {type: array, items: {type: string, minLength: 1}}
+                    derived_from: {type: array, items: {$ref: '#/$defs/ref'}}
+                    mock: {type: boolean}
+              current: {type: object, additionalProperties: {$ref: '#/$defs/ref'}}
+              history:
+                type: array
+                items:
+                  type: object
+                  required: [node, inputs, outputs]
+                  properties:
+                    node: {enum: [F1, F2, F3, F4, F5, F6, F7]}
+                    inputs: {type: array, items: {$ref: '#/$defs/ref'}}
+                    outputs: {type: array, items: {$ref: '#/$defs/ref'}}
+        anyOf:
+          - {$ref: '#/$defs/pool'}
+          - type: object
+            not: {required: [topic]}
+            anyOf:
+              - required: [data]
+                properties: {data: {$ref: '#'}}
+              - required: [text]
+                properties: {text: {$ref: '#'}}
+    paper_topic:
+      description: >
+        Plain-text research topic. For research_topic, bind the user's topic here and retain
+        the full requirements in request_context. This input can be used on its own.
+        If paper_input.topic is also supplied, equivalent topics are accepted after ignoring
+        whitespace, case, character width and common quote differences. Different topics conflict.
+    paper_input:
+      description: >
+        Optional structured business JSON matching this schema. For a plain-text topic,
+        use paper_topic and request_context. Writing preferences belong in constraints.
+        Experiment execution is decided from the request, materials and current environment.
+        constraints.citation_style must be one of APA 7, Chicago Author-Date, MLA 9, IEEE,
+        Vancouver or GB/T 7714; abbreviations such as APA are not accepted.
+      schema:
+        $defs:
+          business:
+            type: object
+            additionalProperties: false
+            dependentRequired:
+              execution_preference: [experiment, result_meta]
+              execution_available: [experiment, result_meta]
+              notice: [experiment, result_meta]
+            properties:
+              topic: {type: string, minLength: 1}
+              request: {type: string}
+              demo: {type: boolean}
+              selected_issue_ids: {type: array, items: {type: string, minLength: 1}, uniqueItems: true}
+              constraints:
+                type: object
+                additionalProperties: false
+                properties:
+                  paper_language: {enum: [zh-CN, en]}
+                  word_target: {type: [integer, 'null'], minimum: 1}
+                  paper_type: {enum: [null, research, empirical, literature_review, theoretical, case_study, conference]}
+                  citation_style: {enum: ['APA 7', 'Chicago Author-Date', 'MLA 9', IEEE, Vancouver, 'GB/T 7714']}
+                  focus: {type: array, items: {type: string, minLength: 1}}
+                  required_sections:
+                    type: array
+                    uniqueItems: true
+                    items: {enum: [abstract, introduction, methods, evaluation, results, discussion, limitations, conclusion]}
+              papers: {}
+              question: {}
+              evidence: {}
+              writing_materials: {}
+              data: {}
+              source_data: {}
+              data_context: {}
+              study_design: {}
+              result_meta: {}
+              analysis: {}
+              charts: {}
+              experiment: {}
+              code_files: {}
+              outline: {}
+              manuscript: {}
+              review: {}
+              review_data: {}
+              media_assets: {}
+              reflection: {}
+              execution_preference: {}
+              execution_available: {}
+              notice: {}
+            examples:
+              - topic: 研究主题
+                request: 用户的研究要求与证据限制
+        anyOf:
+          - {$ref: '#/$defs/business'}
+          - type: object
+            not: {required: [topic]}
+            anyOf:
+              - required: [data]
+                properties: {data: {$ref: '#'}}
+              - required: [text]
+                properties: {text: {$ref: '#'}}
+    paper_source_policy:
+      description: Structured source limits from the actual user request. Set allow_academic_search=false for attachments-only,
+        frozen papers or knowledge-base-only tasks. Never broaden user scope.
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          allow_academic_search:
+            type: boolean
+          year_from:
+            type: integer
+            minimum: 1
+            maximum: 9999
+          year_to:
+            type: integer
+            minimum: 1
+            maximum: 9999
+    paper_execution_policy:
+      description: Actual current-task permission for labeled simulation; absent means no new simulation. Never infer permission from a request to write a paper.
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          allow_simulation: {type: boolean}
+  execution_limits:
+    research_topic:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+        paper_import_sources: 4
+        paper_search: 6
+        paper_read_paper: 32
+    literature_review:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+        paper_import_sources: 4
+        paper_search: 12
+        paper_read_paper: 32
+    refine_topic:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+        paper_import_sources: 4
+        paper_search: 6
+        paper_read_paper: 32
+    experiment:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+        paper_execution_status: 12
+        paper_run_experiment: 3
+    data_analysis:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+        paper_execution_status: 12
+        paper_analyze: 3
+        paper_plot: 12
+    write_outline:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+    write_document:
+      rounds: 32
+      timeout: 1800
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+    peer_review:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+    revise_document:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+    reading_reflection:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
+        paper_import_sources: 4
+        paper_search: 6
+        paper_read_paper: 32
+    finish:
+      rounds: 32
+      timeout: 1200
+      tool_calls:
+        paper_prepare_candidate: 3
+        paper_submit_candidate: 3
+        paper_read_material: 80
   transactional_outputs: true
   recovery_inputs:
     experiment:
@@ -112,8 +566,24 @@ runtime:
       recovery_revise_document_pool: revise_document_pool
       recovery_revise_document_document: revise_document_document
 tool_scripts:
-  - path: scripts/tools.py
-    functions: [run_paper_step]
+- path: scripts/agent_tools.py
+  functions:
+  - paper_prepare_inputs
+  - paper_read_material
+  - paper_prepare_candidate
+  - paper_import_sources
+  - paper_search
+  - paper_read_paper
+  - paper_run_experiment
+  - paper_execution_status
+  - paper_cancel_execution
+  - paper_analyze
+  - paper_plot
+  - paper_submit_candidate
+  - paper_read_result
+  - paper_preview_revision
+  - paper_knowledge_documents
+  - paper_knowledge_read
 steps:
   - {id: research_topic, label: "研究选题"}
   - {id: literature_review, label: "文献综述"}
@@ -152,7 +622,8 @@ slots:
   - {id: recovery_research_document, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_review_pool, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_review_document, type: file, cardinality: single, external: true, exposed: false}
-  - {id: seed_pool, label: 输入材料池, type: file, cardinality: single, external: true, exposed: false}
+  - {id: research_materials, label: 原始研究材料, type: file, cardinality: list, external: true}
+  - {id: seed_pool, label: 输入材料池, type: json, cardinality: single, external: true, exposed: false}
   - {id: research_topic_pool, label: "研究选题材料池", type: file, cardinality: single, exposed: false}
   - {id: research_topic_document, label: "研究选题", type: file, cardinality: single}
   - {id: literature_review_pool, label: "文献综述材料池", type: file, cardinality: single, exposed: false}
@@ -178,8 +649,22 @@ slots:
   - {id: revision_fact_check_document, label: "修订后事实核对", type: file, cardinality: single}
   - {id: reading_reflection_pool, label: "阅读心得材料池", type: file, cardinality: single, exposed: false}
   - {id: reading_reflection_document, label: "阅读心得", type: file, cardinality: single}
+  - {id: analysis_execution, label: 统计执行记录, type: file, cardinality: single, exposed: false}
   - {id: analysis_chart, label: 分析图表, type: file, cardinality: list, ordered: true}
   - {id: finish_document, label: 结束说明, type: file, cardinality: single, exposed: true}
+  - {id: research_topic_receipt, type: json, cardinality: single, exposed: false}
+  - {id: literature_review_receipt, type: json, cardinality: single, exposed: false}
+  - {id: refine_topic_receipt, type: json, cardinality: single, exposed: false}
+  - {id: experiment_receipt, type: json, cardinality: single, exposed: false}
+  - {id: data_analysis_receipt, type: json, cardinality: single, exposed: false}
+  - {id: write_outline_receipt, type: json, cardinality: single, exposed: false}
+  - {id: write_document_receipt, type: json, cardinality: single, exposed: false}
+  - {id: peer_review_receipt, type: json, cardinality: single, exposed: false}
+  - {id: revise_document_receipt, type: json, cardinality: single, exposed: false}
+  - {id: reading_reflection_receipt, type: json, cardinality: single, exposed: false}
+  - {id: finish_receipt, type: json, cardinality: single, exposed: false}
+  - {id: paper_source_policy, label: 文献来源范围, type: json, cardinality: single, external: true, exposed: false}
+  - {id: paper_execution_policy, label: 模拟数据许可, type: json, cardinality: single, external: true, exposed: false}
 ui:
   follow_mode:
     default: following

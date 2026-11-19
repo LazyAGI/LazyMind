@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RecordList from "./index";
+import { WORKFLOW_TASKS_CHANGED } from '@/modules/taskCenter/events';
 import SidebarGroups, { type GroupBatchSelection } from "../../conversationOrganizer/SidebarGroups";
 import { assignConversation, emitConversationGroupsChanged, getConversationGroup, listConversationGroups, type ConversationGroup } from "../../conversationOrganizer/api";
 vi.mock("../../conversationOrganizer/api", () => ({ assignConversation: vi.fn(), getConversationGroup: vi.fn(), listConversationGroups: vi.fn().mockResolvedValue([]), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), renameGroupConversation: (...args: unknown[]) => mocks.renameConversation(...args), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed" }));
@@ -178,6 +179,26 @@ function ArchiveLocation() {
 }
 
 describe("RecordList conversation pinning", () => {
+  it.each(['focus', WORKFLOW_TASKS_CHANGED])('discovers newly published external results after %s', async event => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [newerConversation] } });
+    renderRecordList();
+    await screen.findByText(newerConversation.display_name);
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [newerConversation, {
+      ...olderConversation, display_name: 'External paper results', external_workflow_session_id: 'published-run',
+    }] } });
+    act(() => window.dispatchEvent(new Event(event)));
+    expect(await screen.findByText('External paper results')).toBeVisible();
+    expect(screen.getByLabelText('chat.externalWorkflowResult')).toBeInTheDocument();
+  });
+  it('labels external workflow results and preserves the normal conversation selection', async () => {
+    const external = { ...newerConversation, external_workflow_session_id: 'run-42', execution_owner: 'external_agent', source_type: 'external_workflow' };
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [external] } });
+    const selected = vi.fn();
+    renderRecordList('', selected);
+    await screen.findByLabelText('chat.externalWorkflowResult');
+    fireEvent.click(screen.getByText(external.display_name));
+    expect(selected).toHaveBeenCalledWith(expect.objectContaining({ conversation_id: external.conversation_id, external_workflow_session_id: 'run-42' }));
+  });
   it.each([
     { kind: "group", task: false, canPin: false },
     { kind: "group", task: true, canPin: false },
@@ -287,6 +308,79 @@ describe("RecordList conversation pinning", () => {
     fireEvent.mouseEnter(more);
     await act(async () => vi.advanceTimersByTimeAsync(300));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it.each(["click", "hover", "contextMenu"])("dismisses a %s menu after leaving the whole conversation row", async trigger => {
+    renderRecordList();
+    const title = await screen.findByText(newerConversation.display_name);
+    const row = title.closest(".record")!;
+    if (trigger === "contextMenu") fireEvent.contextMenu(row);
+    else if (trigger === "hover") fireEvent.mouseEnter(moreActionsFor(newerConversation.display_name));
+    else fireEvent.click(moreActionsFor(newerConversation.display_name));
+    await screen.findByRole("menu");
+    // Right-clicking a row need not ever enter the Dropdown's button or popup.
+    fireEvent.pointerMove(row);
+    fireEvent.pointerMove(document.body);
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("keeps the menu and its portaled group picker usable while crossing the popup gap", async () => {
+    const onSelected = vi.fn();
+    renderRecordList("", onSelected);
+    const title = await screen.findByText(newerConversation.display_name);
+    fireEvent.contextMenu(title.closest(".record")!);
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(menu).toBeVisible());
+    vi.useFakeTimers();
+    fireEvent.pointerMove(document.body);
+    await act(async () => vi.advanceTimersByTimeAsync(50));
+    fireEvent.pointerMove(menu);
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    expect(menu).toBeVisible();
+    vi.useRealTimers();
+    fireEvent.mouseEnter(within(menu).getByRole("menuitem", { name: /conversationOrganizer.moveToGroup/ }));
+    const search = await screen.findByPlaceholderText("conversationOrganizer.searchGroups");
+    await waitFor(() => expect(search).toBeVisible());
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /conversationOrganizer.moveToGroup/ }));
+    expect(onSelected).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    fireEvent.pointerMove(document.body);
+    await act(async () => vi.advanceTimersByTimeAsync(50));
+    fireEvent.pointerMove(search);
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    expect(menu).toBeVisible();
+    expect(search).toBeVisible();
+    fireEvent.wheel(search);
+    expect(menu).toBeVisible();
+    fireEvent.keyDown(search, { key: "Escape" });
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("does not let an old row's delayed close dismiss a newly opened menu", async () => {
+    renderRecordList();
+    const title = await screen.findByText(newerConversation.display_name);
+    fireEvent.contextMenu(title.closest(".record")!);
+    const menu = await screen.findByRole("menu");
+    await waitFor(() => expect(menu).toBeVisible());
+    vi.useFakeTimers();
+    fireEvent.pointerMove(document.body);
+    fireEvent.contextMenu(screen.getByText(olderConversation.display_name).closest(".record")!);
+    fireEvent.pointerMove(screen.getByText(olderConversation.display_name));
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    fireEvent.wheel(document.body);
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("dismisses a context menu when the pointer leaves the browser content", async () => {
+    renderRecordList();
+    const title = await screen.findByText(newerConversation.display_name);
+    fireEvent.contextMenu(title.closest(".record")!);
+    await screen.findByRole("menu");
+    fireEvent.pointerOut(document.body, { relatedTarget: null });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });
 
   it.each([false, true])("renames Chat/Work from a dialog without changing ordering (work=%s)", async (work) => {

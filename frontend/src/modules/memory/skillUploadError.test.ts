@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { isSkillAlreadyExistsError } from "./skillUploadError";
+import { isSkillAlreadyExistsError, isSkillPackageTooLargeError, isSkillSourceAmbiguousError } from "./skillUploadError";
+
+describe("skill URL import error recovery", () => {
+  it.each([
+    { response: { status: 413, data: {} } },
+    { response: { status: 400, data: { data: { code: "payload_too_large" } } } },
+    { response: { data: { error: { code: "payload_too_large" } } } },
+  ])("recognizes size failures without depending on English server messages", (error) => {
+    expect(isSkillPackageTooLargeError(error)).toBe(true);
+  });
+
+  it.each([
+    { response: { status: 400, data: { data: { code: "github_multiple_skills" } } } },
+    { response: { status: 422, data: { data: { code: "skill_md_ambiguous" } } } },
+    { response: { status: 400, data: { data: { code: "skill_source_ambiguous" } } } },
+    { response: { data: { error: { code: "github_multiple_skills" } } } },
+  ])("recognizes repositories or packages with multiple possible skill roots", (error) => {
+    expect(isSkillSourceAmbiguousError(error)).toBe(true);
+  });
+
+  it("does not offer package recovery actions for unrelated failures", () => {
+    const error = { response: { status: 500, data: { message: "database unavailable" } } };
+    expect(isSkillPackageTooLargeError(error)).toBe(false);
+    expect(isSkillSourceAmbiguousError(error)).toBe(false);
+  });
+});
 
 describe("isSkillAlreadyExistsError", () => {
   it("recognizes the dedicated duplicate-skill semantic code", () => {

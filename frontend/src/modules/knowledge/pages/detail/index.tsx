@@ -1,3 +1,4 @@
+import KnowledgeLibraryLogo from "@/modules/knowledge/components/KnowledgeLibraryLogo";
 import type { PaperUploadContext } from "../../api/academicReferences";
 import {
   Alert,
@@ -22,6 +23,7 @@ import { useParams } from "react-router-dom";
 import {
   CopyOutlined,
   DownOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
 import { useKnowledgeListReturn } from "../../hooks/useKnowledgeListNavigation";
@@ -52,7 +54,6 @@ import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import { inspectFinishedImportTasks, mergeTrackedImportTasks, reconcileImportTaskFailures, type ImportTaskFailure, type ImportTaskState } from "./importTaskFailures";
 import { TaskTab } from "./components/ImportTaskList";
 import { createPaperPdfUploader } from "@/modules/knowledge/paper/pdfUpload";
-import { RuntimeReadinessError, waitForRuntimeCapability } from "@/runtime/readiness";
 import { DocumentServiceApi, TaskServiceApi } from "../../utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import {
@@ -66,10 +67,7 @@ import {
 
 import { DetailPageHeader } from "@/components/ui";
 import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
-import {
-  effectiveProcessingLevel,
-  type ProcessingLevel,
-} from "@/modules/knowledge/utils/processingLevel";
+import type { ProcessingLevel } from "@/modules/knowledge/utils/processingLevel";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 
 import "./index.scss";
@@ -126,11 +124,6 @@ const Detail = () => {
   const { t } = useTranslation();
   const { availability: ragAvailability } = useRAGComponent();
   const ragReady = ragAvailability === "ready";
-  const ragUnavailableReason = ragAvailability === "checking"
-    ? "正在检查本地知识库组件状态"
-    : ragAvailability === "error"
-      ? "无法确认本地知识库组件状态，请重试"
-      : "请先安装本地知识库组件，并重启本地服务";
   const knowledgeListRef = useRef<IKnowledgeListRef>(null);
   const createFolderRef = useRef<RenameModalRef>(null);
   const importKnowledgeRef = useRef<IImportKnowledgeModalRef>();
@@ -430,15 +423,6 @@ const Detail = () => {
     if (!file.name.toLowerCase().endsWith(".pdf")) throw new Error("请选择 PDF 文件");
     if (file.size > 500 * 1024 * 1024) throw new Error("单个 PDF 文件不能超过 500 MB");
 
-    try {
-      if (effectiveProcessingLevel(detail?.processing_level) !== "stored") {
-        await waitForRuntimeCapability("parser");
-      }
-    } catch (error) {
-      if (error instanceof RuntimeReadinessError) throw new Error(t("runtime.initializationFailed"));
-      throw error;
-    }
-
     const { documentId, tasks } = await uploadPaperPdfTask(file, hasWritePermission ? "DEFAULT" : "UPLOAD", importContext);
     if (activeDatasetIdRef.current === id) {
       importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, tasks);
@@ -448,17 +432,10 @@ const Detail = () => {
     return documentId;
   }
 
-  const isDocumentParsingUnavailable = documentParsingEnabled !== true;
   const storageOnly = !ragReady || detail?.processing_level === "stored";
-  const importDisabled = ragAvailability === "checking" || ragAvailability === "error" ||
-    (!storageOnly && (isDocumentParsingUnavailable || embeddingReady === false || multimodalEmbeddingReady === false));
-  const importDisabledReason = ragAvailability === "checking" || ragAvailability === "error"
-    ? ragUnavailableReason
-    : !storageOnly && isDocumentParsingUnavailable
-      ? documentParsingEnabled === false
-        ? "文档解析已暂停，请在设置中重新启用"
-        : "正在读取文档解析状态"
-      : undefined;
+  // Upload permissions are independent of downstream processing services.
+  const importDisabled = false;
+  const importDisabledReason: string | undefined = undefined;
   const showDataSourceSync = isDatasetCreatedByDataSource(
     detail as DatasetWithDataSourceFlag | undefined,
   );
@@ -484,7 +461,7 @@ const Detail = () => {
         className="knowledge-detail-header"
         title={
           <span className="knowledge-detail-title-copy">
-            <strong>{detail?.display_name}</strong>
+            <strong><KnowledgeLibraryLogo scene={detail?.scene} compact />{detail?.display_name}</strong>
             {detail?.desc ? <small>{detail.desc}</small> : null}
           </span>
         }
@@ -525,19 +502,32 @@ const Detail = () => {
       />}
       {(taskPollingError || importTaskFailures.length > 0) && (
         <Alert
-          className="knowledge-parsing-notice"
+          className="knowledge-parsing-notice knowledge-import-error"
           type="error"
           showIcon
-          message={importTaskFailures.length ? "文献导入出现错误" : "无法获取导入进度"}
-          description={
-            <div style={{ maxHeight: 180, overflowY: "auto", whiteSpace: "pre-wrap" }}>
-              {taskPollingError && <div>{taskPollingError}</div>}
-              {importTaskFailures.map((failure) => <div key={failure.taskId}>{failure.message}</div>)}
+          message={
+            <div className="knowledge-import-error__heading">
+              <span>{t(importTaskFailures.length ? "knowledge.importFailedTitle" : "knowledge.importProgressUnavailable")}</span>
+              {importTaskFailures.length > 0 && (
+                <span className="knowledge-import-error__count">
+                  {t("knowledge.importFailureCount", { count: importTaskFailures.length })}
+                </span>
+              )}
             </div>
           }
+          description={
+            <details className="knowledge-import-error__details">
+              <summary>{t("knowledge.importErrorDetails")}<DownOutlined aria-hidden /></summary>
+              <div className="knowledge-import-error__messages">
+                {taskPollingError && <div>{taskPollingError}</div>}
+                {importTaskFailures.map((failure) => <div key={failure.taskId}>{failure.message}</div>)}
+              </div>
+            </details>
+          }
           action={
-            <Button size="small" onClick={() => importTaskRef.current?.handleOpen({ dataset_id: id, initialTab: TaskTab.Failed })}>
-              查看失败任务
+            <Button size="small" icon={<RightOutlined />} iconPosition="end"
+              onClick={() => importTaskRef.current?.handleOpen({ dataset_id: id, initialTab: TaskTab.Failed })}>
+              {t("knowledge.viewFailedImportTasks")}
             </Button>
           }
         />
@@ -563,9 +553,7 @@ const Detail = () => {
             onOpenAttachment={documentId => navigate(`/lib/knowledge/knowledge/${encodeURIComponent(id)}/${encodeURIComponent(documentId)}`)}
             onBack={() => returnToList()}
             onUploadPdf={uploadPaperPdf}
-            processingLevel={effectiveProcessingLevel(detail.processing_level)}
-            parsers={detail.parsers}
-            canParse={ragReady && documentParsingEnabled !== false}
+            canParse={documentParsingEnabled !== false}
           />
         </div>
       ) : null}
@@ -586,7 +574,6 @@ const Detail = () => {
               <KnowledgeBaseSyncNow
                 datasetId={detail.dataset_id}
                 documentParsingEnabled={documentParsingEnabled}
-                enabled={ragReady}
                 onSyncComplete={refreshKnowledgeAfterSync}
               />
             ) : null}
@@ -595,8 +582,6 @@ const Detail = () => {
                 color="primary"
                 variant="outlined"
                 ghost
-                disabled={!ragReady}
-                title={!ragReady ? ragUnavailableReason : undefined}
                 onClick={() => {
                   createFolderRef.current?.onOpen({
                     title: t("knowledge.createFolder"),
@@ -711,7 +696,6 @@ const Detail = () => {
                             )}
                           </>
                         ),
-                        disabled: !ragReady,
                       },
                     ],
                     onClick: ({ key }: { key: string }) => {
@@ -765,7 +749,6 @@ const Detail = () => {
                     {
                       key: "batchMove",
                       label: t("knowledge.batchMove"),
-                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.openBatchMove?.();
                       },
@@ -773,7 +756,6 @@ const Detail = () => {
                     {
                       key: "batchDelete",
                       label: t("knowledge.batchDelete"),
-                      disabled: !ragReady,
                       onClick: () => {
                         knowledgeListRef.current?.deleteKnowledge();
                       },
@@ -781,7 +763,6 @@ const Detail = () => {
                     {
                       key: "batchReparse",
                       label: t("knowledge.batchReparse"),
-                      disabled: !ragReady || isDocumentParsingUnavailable,
                       onClick: () => {
                         knowledgeListRef.current?.restartCheckedKnowledge();
                       },

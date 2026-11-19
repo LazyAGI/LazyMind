@@ -191,7 +191,7 @@ func (s *Service) CloudOperations(ctx context.Context, owner string) ([]CloudOpe
 	return rows, err
 }
 func enqueueCloudWord(ctx context.Context, tx *gorm.DB, c CloudConnection, word Word) (bool, error) {
-	if word.Language != "en" || word.Provider != "local" || word.ArchivedAt != nil {
+	if word.Language != "en" || word.ArchivedAt != nil {
 		return false, nil
 	}
 	var op CloudOperation
@@ -249,7 +249,7 @@ func (s *Service) BackfillCloud(ctx context.Context, owner, provider string) (in
 	lastID := ""
 	for {
 		var words []Word
-		if err := s.db.WithContext(ctx).Where("owner_id = ? AND provider = ? AND language = ? AND archived_at IS NULL AND id > ?", owner, "local", "en", lastID).Order("id").Limit(100).Find(&words).Error; err != nil {
+		if err := s.db.WithContext(ctx).Where("owner_id = ? AND language = ? AND archived_at IS NULL AND id > ?", owner, "en", lastID).Order("id").Limit(100).Find(&words).Error; err != nil {
 			return count, err
 		}
 		if len(words) == 0 {

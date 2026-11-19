@@ -154,7 +154,12 @@ func TestExpansionStatusFollowsWorkflowLifecycle(t *testing.T) {
 				return
 			}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
+				// The cancel request is accepted, but the executor has not exited yet.
+				// ConfirmNativeStop below supplies the final stop acknowledgement.
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true, "executor_stopped": false}); err != nil {
+					t.Error(err)
+				}
 			}))
 			defer srv.Close()
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)

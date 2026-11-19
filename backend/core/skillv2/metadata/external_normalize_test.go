@@ -149,3 +149,15 @@ func TestNormalizeExternalMetadataLeavesValidBoundedInputUnchanged(t *testing.T)
 		t.Fatalf("valid input changed: warnings=%#v err=%v content=%q", warnings, err, normalized)
 	}
 }
+
+func TestNormalizeExternalMetadataAllowsVerifiedNameFallbackAfterCompaction(t *testing.T) {
+	original := []byte("---\ndescription: " + strings.Repeat("授权材料。", 300) + "\n---\n# Original body\n")
+	normalized, _, err := NormalizeExternalDocument(original, "verified-name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := Resolve(normalized, "verified-name")
+	if err != nil || resolved.Name != "verified-name" || utf8.RuneCountInString(resolved.Description) > 1024 {
+		t.Fatalf("resolved fallback=%#v, %v", resolved, err)
+	}
+}

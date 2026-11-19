@@ -202,7 +202,7 @@ INSERT INTO chat_histories (id, conversation_id, run_terminal) VALUES ('history-
 	if err := json.Unmarshal(extRow.Ext, &extObject); err != nil {
 		t.Fatal(err)
 	}
-	if !hasInjectionTimestamp(extObject, manifest.BundleID) {
+	if readInjectionMarker(extObject).BundleID != manifest.BundleID || readInjectionMarker(extObject).Fingerprint == "" {
 		t.Fatalf("injection timestamp metadata missing: %s", extRow.Ext)
 	}
 	if err := db.Exec("UPDATE conversations SET display_name = 'stale title', is_task_conv = TRUE WHERE id = 'conversation-1'").Error; err != nil {
@@ -254,19 +254,17 @@ INSERT INTO chat_histories (id, conversation_id, run_terminal) VALUES ('history-
 		t.Fatalf("repaired payload = %q, %v", body, err)
 	}
 
-	// Simulate a database populated by an older importer: the bundle dates are
-	// still present and there is no one-time injection timestamp marker.
+	// A conversation with the same ID but without an injection marker may be
+	// the original conversation from which this bundle was exported.
 	legacyTime := time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC)
 	if err := db.Exec(
-		"UPDATE conversations SET created_at = ?, updated_at = ?, ext = ? WHERE id = 'conversation-1'",
-		legacyTime, legacyTime, []byte(`{"source":"bundle"}`),
+		"UPDATE conversations SET created_at = ?, updated_at = ?, display_name = 'original', ext = ? WHERE id = 'conversation-1'",
+		legacyTime, legacyTime, []byte(`{"source":"user"}`),
 	).Error; err != nil {
 		t.Fatal(err)
 	}
-	upgradeStarted := time.Now().UTC()
 	upgraded, err := Apply(t.Context(), db, BundleSource{Path: bundle, Manifest: manifest},
 		TargetOwner{ID: "target-user", Username: "admin"}, RuntimeRoots{Uploads: uploads, Subagent: t.TempDir()})
-	upgradeFinished := time.Now().UTC()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,10 +278,14 @@ INSERT INTO chat_histories (id, conversation_id, run_terminal) VALUES ('history-
 	if err := db.Raw("SELECT created_at, updated_at FROM conversations WHERE id = 'conversation-1'").Scan(&upgradedTimestamps).Error; err != nil {
 		t.Fatal(err)
 	}
-	if upgradedTimestamps.CreatedAt.Before(upgradeStarted) || upgradedTimestamps.CreatedAt.After(upgradeFinished) ||
-		!upgradedTimestamps.CreatedAt.Equal(upgradedTimestamps.UpdatedAt) {
-		t.Fatalf("legacy timestamps were not upgraded to injection time: %#v, window %s..%s",
-			upgradedTimestamps, upgradeStarted, upgradeFinished)
+	if !upgradedTimestamps.CreatedAt.Equal(legacyTime) || !upgradedTimestamps.UpdatedAt.Equal(legacyTime) {
+		t.Fatalf("unmarked conversation timestamps were modified: %#v", upgradedTimestamps)
+	}
+	if err := db.Raw("SELECT display_name FROM conversations WHERE id = 'conversation-1'").Scan(&conversation.DisplayName).Error; err != nil {
+		t.Fatal(err)
+	}
+	if conversation.DisplayName != "original" || upgraded.FilesCopied != 0 {
+		t.Fatalf("unmarked conversation was modified: %q, %#v", conversation.DisplayName, upgraded)
 	}
 }
 

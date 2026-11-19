@@ -68,6 +68,61 @@ function selectMessageText(text: string) {
   fireEvent.mouseUp(selected);
 }
 
+describe("external workflow control notifications", () => {
+  // Emitted by the Codex / WorkBuddy dispatcher, then imported with role=user.
+  const notification = "[LazyMind action_id=test-action]\nLazyMind workflow mcp-test-session has a control notification. Call workflow.state first; the notification may be delayed. When control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step. Execute only a granted external step_contract and publish/submit using its execution_handle. If executor_host is lazymind, let Core execute it. After submission, use the returned state to continue. Yield when awaiting_user, awaiting_executor, draining, stopped, binding_required, completed, or failed; do not poll while waiting. A human step requires review AFTER execution. Do not assume this notification means a review was approved. Do not create a new workflow.";
+  const props = {
+    sendMessage: vi.fn(), regenerate: vi.fn(), stopGeneration: vi.fn(),
+    renderText: (item: any) => <span>{item.delta}</span>, updateAssistantMessage: vi.fn(),
+  };
+
+  it.each(["history", "cached"])("hides the transport bubble but preserves replies and user requests (%s)", (source) => {
+    const records = [
+      { id: "request", query: "制作四页 PPT", result: "正在生成大纲" },
+      { id: "continuation", query: notification, result: "PPT 已生成" },
+      { id: "follow-up", query: "修改第二页", result: "已修改第二页" },
+    ];
+    const messages = source === "history"
+      ? buildChatMessageListFromHistory(records, { reverseHistory: false })
+      : records.flatMap(record => [
+        { role: RoleTypes.USER, history_id: record.id, delta: record.query, display_delta: record.query },
+        { role: RoleTypes.ASSISTANT, history_id: record.id, delta: record.result },
+      ]);
+    const view = render(<MessageList {...props} messageList={messages} />);
+    expect(view.container).not.toHaveTextContent("[LazyMind action_id=");
+    expect(view.container.querySelectorAll('[data-chat-role="user"]')).toHaveLength(2);
+    expect(view.container.querySelector('[data-chat-history-id="continuation"][data-chat-role="assistant"]')).toHaveTextContent("PPT 已生成");
+    expect(screen.getByText("制作四页 PPT")).toBeInTheDocument();
+    expect(screen.getByText("修改第二页")).toBeInTheDocument();
+    expect(screen.getByText("已修改第二页")).toBeInTheDocument();
+    expect(messages).toHaveLength(6);
+  });
+
+  it("keeps a pending notification hidden when its reply is synced later", () => {
+    const record = { id: "continuation", query: notification, external_user_only: true };
+    const view = render(<MessageList {...props} messageList={buildChatMessageListFromHistory([record])} />);
+    expect(view.container.querySelectorAll(".chat-item")).toHaveLength(0);
+    view.rerender(<MessageList {...props} messageList={buildChatMessageListFromHistory([
+      { ...record, external_user_only: false, result: "继续生成幻灯片" },
+    ], { isGenerating: true })} />);
+    expect(view.container.querySelectorAll('[data-chat-role="user"]')).toHaveLength(0);
+    expect(screen.getByText("继续生成幻灯片")).toBeInTheDocument();
+  });
+
+  it.each([
+    "请解释这条通知：\n" + notification,
+    "```text\n" + notification + "\n```",
+    "[LazyMind action_id=test-action]\n这是我想了解的 action_id",
+    notification.replace("[LazyMind action_id=test-action]\n", ""),
+  ])("preserves ordinary user messages that quote or discuss the protocol (%s)", (text) => {
+    const view = render(<MessageList {...props} messageList={[
+      { role: RoleTypes.USER, delta: text },
+    ]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="user"]')).toHaveLength(1);
+    expect(view.container).toHaveTextContent("LazyMind");
+  });
+});
+
 describe("native workflow Chat control wiring", () => {
   it("hides only the empty old placeholder while accepted steering awaits its stream boundary", () => {
     const assistant = { role: RoleTypes.ASSISTANT, history_id: "h", delta: "", reasoning_content: "thinking" };

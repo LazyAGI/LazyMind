@@ -11,23 +11,23 @@ func TestDefaultsValidationAndIsolation(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.UserReadingPolicy{})
 	ctx := context.Background()
 	p, e := Load(ctx, db.DB, "one")
-	if e != nil || p.Preset != "demand" || p.Limits.DailyDocuments != 5 || p.Modes[Formula] != OnDemand {
+	if e != nil || p.Preset != "demand" || p.Limits.DailyPDFDocuments != 100 || p.Limits.DailyStudyDocuments != 50 || p.Modes[AIStudy] != OnDemand {
 		t.Fatalf("defaults: %+v %v", p, e)
 	}
 	p.Preset = "full"
 	saved, e := Save(ctx, db.DB, "one", p)
-	if e != nil || saved.Modes[ChatPrepare] != OnDemand || saved.Modes[Figure] != Automatic || saved.AutomaticEligibleAfter == nil {
+	if e != nil || saved.Modes[AIStudy] != Automatic || saved.AutomaticEligibleAfter == nil {
 		t.Fatalf("full: %+v %v", saved, e)
 	}
 	other, _ := Load(ctx, db.DB, "two")
-	if other.Modes[Figure] != OnDemand {
+	if other.Modes[AIStudy] != OnDemand {
 		t.Fatal("policy leaked")
 	}
 	p = saved
 	p.Preset = "custom"
 	p.Modes[PDFParse] = Disabled
-	if _, e = Save(ctx, db.DB, "one", p); e == nil {
-		t.Fatal("automatic studies need parser")
+	if _, e = Save(ctx, db.DB, "one", p); e != nil {
+		t.Fatal("automatic study may use cached structure", e)
 	}
 	p = saved
 	p.Limits.AutomaticConcurrency = 2
@@ -45,6 +45,14 @@ func TestDefaultsValidationAndIsolation(t *testing.T) {
 	p, _ = Save(ctx, db.DB, "one", p)
 	if Eligible(p, time.Now().Add(time.Second)) {
 		t.Fatal("stopped automatic still eligible")
+	}
+}
+
+func TestRegistryDoesNotAdvertiseRemovedPaperOverview(t *testing.T) {
+	for _, capability := range Registry() {
+		if capability.ID == "overview" {
+			t.Fatal("removed paper overview is still advertised")
+		}
 	}
 }
 

@@ -1,5 +1,6 @@
 import os
 import lazyllm
+from lazymind.parsing.service.opensearch_compat import install as install_opensearch_compat
 from copy import deepcopy
 from typing import NamedTuple, Optional
 from lazyllm.tracing import set_trace_context
@@ -25,8 +26,11 @@ from lazymind.parsing.engine.readers.retained import RetainedReader
 from lazymind.parsing.engine.transform import GeneralParser, LineSplitter, NodeParser
 from lazymind.common.database.postgres import create_database_engine
 from lazymind.common.database.sqlite_proxy import install_lazyllm_sqlite_proxy
+from lazymind.parsing.service.embedding_input_compat import install as install_embedding_input_compat
 
 install_lazyllm_sqlite_proxy()
+install_opensearch_compat()
+install_embedding_input_compat()
 
 ALGO_ID = 'general_algo'
 _CODE_CHUNK_SIZE = 512
@@ -54,7 +58,18 @@ def _quiet_trace(kbs):
         from lazymind.model_config import inject_model_config
         inject_model_config(llm_config)
         args, kwargs = mark_embedding_query_arguments(args, kwargs)
-        return kbs[kb_group](*args, **kwargs)
+        from lazymind.parsing.service.embedding_reset import index_operation
+        # LazyLLM registers the algorithm through _lazy_init during startup.
+        # Keep registration under the lock even when vector operations are blocked.
+        with index_operation((llm_config or {}).get('_embedding_generation'),
+                             initializing=args == ('_lazy_init',)) as generation:
+            doc = kbs[kb_group]
+            if getattr(doc, '_lazymind_store_generation', None) != generation:
+                if getattr(doc, '_lazy_init', None) is not None and doc._lazy_init.flag:
+                    doc._store = _build_store_config(EMBED_INDEX_KWARGS)
+                    doc._create_store()
+                doc._lazymind_store_generation = generation
+            return doc(*args, **kwargs)
     return call
 
 

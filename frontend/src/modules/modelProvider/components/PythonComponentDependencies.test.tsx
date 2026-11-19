@@ -1,5 +1,6 @@
 import { RAGComponentProvider } from "../contexts/RAGComponentContext";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import i18n from "@/i18n";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ConfigProvider, message } from "antd";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -18,7 +19,8 @@ async function begin() {
   fireEvent.click(await screen.findByRole("button", { name: "安装组件" }));
   fireEvent.click(screen.getByRole("button", { name: /下载并安装/ }));
 }
-beforeEach(() => {
+beforeEach(async () => {
+  await i18n.changeLanguage("zh-CN");
   vi.resetAllMocks();
   usePythonComponentTask.setState({ phase: "idle", id: null, error: "" });
   mocks.get.mockResolvedValue([missing]);
@@ -28,6 +30,38 @@ beforeEach(() => {
   vi.spyOn(message, "error");
 });
 afterEach(() => { cleanup(); message.destroy(); vi.restoreAllMocks(); });
+
+it("localizes the installed component and its source instructions", async () => {
+  await i18n.changeLanguage("en-US");
+  mocks.get.mockResolvedValue([{ ...enabled, installMethod: "source" }]);
+  mount();
+  expect(await screen.findByRole("heading", { name: "Local knowledge base (RAG)" })).toBeVisible();
+  expect(screen.getByText("Enabled")).toBeVisible();
+  expect(screen.getByText("Install dependencies from the local source configuration")).toBeVisible();
+});
+
+it("installs Skill Clustering independently of RAG", async () => {
+  const cluster = { ...missing, id: "cluster", filename: "cluster.zip", url: "https://modelscope.cn/cluster.zip" };
+  mocks.get.mockResolvedValue([enabled, cluster]);
+  mocks.install.mockResolvedValue({ ...cluster, installed: true, restartRequired: true });
+  mocks.restart.mockImplementation(async () => {
+    mocks.get.mockResolvedValue([enabled, { ...cluster, installed: true, active: true }]);
+    return { ok: true };
+  });
+
+  const view = mount();
+  expect(await screen.findByRole("heading", { name: "技能聚类" })).toBeVisible();
+  const row = view.container.querySelector<HTMLElement>("#python-cluster-dependency")!;
+  const rag = view.container.querySelector<HTMLElement>("#python-rag-dependency")!;
+  fireEvent.click(within(row).getByRole("button", { name: "安装组件" }));
+  await waitFor(() => expect(screen.getByRole("dialog", { name: "安装技能聚类" })).toBeVisible());
+  expect(screen.getByLabelText("组件下载来源")).toHaveTextContent(cluster.url);
+  fireEvent.click(screen.getByRole("button", { name: /下载并安装/ }));
+  await waitFor(() => expect(within(row).getByText("已启用")).toBeVisible());
+  expect(within(rag).getByText("已启用")).toBeVisible();
+  expect(mocks.install).toHaveBeenCalledOnce();
+  expect(mocks.install).toHaveBeenCalledWith("cluster", expect.any(AbortSignal));
+});
 
 it("offers source RAG installation without a bundle URL", async () => {
   mocks.get.mockResolvedValue([{ ...missing, url: undefined, installMethod: "source" }]);

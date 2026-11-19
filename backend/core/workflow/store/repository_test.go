@@ -76,6 +76,42 @@ func TestWaitTaskStatusesReturnsConcreteFailureReason(t *testing.T) {
 	}
 }
 
+func TestWaitTaskStatusesWaitsForAllPauseReceipts(t *testing.T) {
+	for _, pendingTask := range []string{"selected", "parallel"} {
+		t.Run(pendingTask, func(t *testing.T) {
+			repo := testRepo(t)
+			if err := repo.db.AutoMigrate(&orm.SubAgentTask{}, &orm.SubAgentStep{}, &orm.WorkflowSessionStep{}); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"selected", "parallel"} {
+				code := "WORKFLOW_STOPPED"
+				if id == pendingTask {
+					code = "WORKFLOW_STOP_REQUESTED"
+				}
+				if err := repo.db.Create(&orm.WorkflowSessionStep{
+					ID: id, SessionID: "session", TaskID: id, StepID: id, Attempt: 1,
+					Status: "interrupted", TerminalCode: code,
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+			defer cancel()
+			if _, err := repo.WaitTaskStatuses(ctx, "session", []string{"selected"}); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Chat was released before executor exit: %v", err)
+			}
+			if err := repo.db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", pendingTask).
+				Update("terminal_code", "WORKFLOW_STOPPED").Error; err != nil {
+				t.Fatal(err)
+			}
+			statuses, err := repo.WaitTaskStatuses(t.Context(), "session", []string{"selected"})
+			if err != nil || statuses["selected"].TerminalCode != "WORKFLOW_STOPPED" {
+				t.Fatalf("confirmed pause did not release Chat: %+v, %v", statuses, err)
+			}
+		})
+	}
+}
+
 func TestAttemptFailureReasonFallsBackToHostedResult(t *testing.T) {
 	row := orm.WorkflowSessionStep{
 		Status:       "failed",

@@ -1,3 +1,5 @@
+@use '../../../../styles/taskStatus' as status;
+
 .workflow-task-progress {
   margin: 12px; padding: 12px;
   header, summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -5,4 +7,11 @@
   li { padding: 10px 0; }
   summary { cursor: pointer; }
   p { color: var(--text-secondary, #64748b); }
+  &.is-paused header > span {
+    color: status.$paused-text;
+    background: status.$paused-soft;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  li.is-paused summary > span { color: status.$paused-text; }
 }

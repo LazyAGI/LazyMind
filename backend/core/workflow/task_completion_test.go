@@ -167,3 +167,31 @@ func TestFinalizationPreservesNativePauseBeforeCallback(t *testing.T) {
 		t.Fatalf("completion overrode explicit pause: run=%s view=%+v err=%v", session.Status, view, err)
 	}
 }
+
+func TestInputCheckpointPreventsCompletionUntilAnswered(t *testing.T) {
+	graph := graphengine.CompiledStateGraph{StartRoute: "all", Nodes: map[string]graphengine.CompiledNode{"collect": {ID: "collect", Mode: "auto"}}, ControlEdges: []graphengine.CompiledEdge{{From: "__start__", To: "collect"}, {From: "collect", To: "__end__"}}, Runtime: graphengine.RuntimePolicy{InputCheckpoint: &graphengine.InputCheckpoint{AfterStep: "collect", Slot: "questions", BeforeSteps: []string{"outline"}}}}
+	db, session := newControllerTestSession(t, "native", graph)
+	if err := db.AutoMigrate(&orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotRevision{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSessionStep{ID: "input-attempt", SessionID: session.ID, StepID: "collect", TaskID: "input-task", Status: "succeeded", Validity: "effective", CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	slot := orm.WorkflowSlotRevision{ID: "input-slot", SessionID: session.ID, SlotID: "questions", Slot: "questions", Selected: true, Validity: "effective", ContentSnapshot: json.RawMessage(`{"checkpoint_token":"card","questions":[{"text":"Date?"}]}`)}
+	if err := db.Create(&slot).Error; err != nil {
+		t.Fatal(err)
+	}
+	session.Status = "active"
+	projected, err := projectSession(t.Context(), db.DB, &session)
+	if err != nil || projected.Display.Status != "waiting_input" || projected.Projection.Completed {
+		t.Fatalf("unanswered input cannot complete: %+v %v", projected, err)
+	}
+	if err := db.Model(&slot).Update("content_snapshot", json.RawMessage(`{"checkpoint_token":"card","questions":[{"text":"Date?"}],"answer_text":"Tomorrow"}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	projected, err = projectSession(t.Context(), db.DB, &session)
+	if err != nil || !projected.Projection.Completed {
+		t.Fatalf("answered final checkpoint can complete: %+v %v", projected, err)
+	}
+}

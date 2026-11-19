@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import mimetypes
+import io
+import zipfile
 from typing import Dict, Iterable, Mapping, Optional
 
 from .document import (
@@ -144,9 +145,17 @@ class SkillRemoteStore:
             'action': 'create',
         }
 
+    def install_url(self, source_url: str) -> dict:
+        """Use Core's shared source adapters and atomic disabled installation."""
+        if not isinstance(source_url, str) or not source_url.strip():
+            raise ValueError('A non-empty skill source URL is required.')
+        return self.fs.install_skill(url=source_url.strip())
+
     def install_package(self, category: str, name: str, files: Mapping[str, bytes]) -> dict:
+        """Install complete bytes atomically; a failed request never trashes a path."""
         normalized_category, normalized_name = _require_storage_identity(category, name)
-        package_dir = f'{self.root}/{normalized_category}/{normalized_name}'
+        if normalized_category != 'external':
+            raise ValueError('Imported skill packages must use the external category.')
         skill_md = files.get('SKILL.md')
         if skill_md is None:
             raise ValueError('Skill package must contain SKILL.md.')
@@ -155,41 +164,27 @@ class SkillRemoteStore:
         except UnicodeDecodeError as exc:
             raise ValueError('SKILL.md must be valid UTF-8.') from exc
         require_valid_skill_document(skill_content, expected_name=normalized_name)
-
-        if self.fs.exists(package_dir):
-            raise FileExistsError(
-                f'Skill package {normalized_category}/{normalized_name} already exists.'
-            )
-        self.fs.mkdir(package_dir, create_parents=True)
-        try:
-            for rel_path in sorted(path for path in files if path != 'SKILL.md'):
-                normalized_path = normalize_skill_package_path(rel_path)
-                content_type = mimetypes.guess_type(normalized_path)[0] or 'application/octet-stream'
-                self.fs.write_file(
-                    f'{package_dir}/{normalized_path}',
-                    files[rel_path],
-                    content_type=content_type,
-                )
-            self.fs.write(
-                f'{package_dir}/SKILL.md',
-                skill_content,
-                content_type='text/markdown; charset=utf-8',
-            )
-        except Exception as exc:
-            try:
-                self.fs.trash(package_dir)
-            except Exception as cleanup_exc:
-                raise RuntimeError(
-                    f'Failed to install skill package: {exc}; cleanup also failed: {cleanup_exc}'
-                ) from exc
-            raise
-        return {
-            'persisted': 'remote_fs',
-            'path': package_dir,
-            'name': normalized_name,
-            'category': normalized_category,
-            'action': 'install',
-        }
+        if len(files) > 512:
+            raise ValueError('Skill package exceeds the 512 file limit.')
+        total = 0
+        for rel_path, content in files.items():
+            if normalize_skill_package_path(rel_path) != rel_path or '\x00' in rel_path:
+                raise ValueError(f'Invalid skill package path: {rel_path!r}')
+            if len(content) > 32 << 20:
+                raise ValueError(f'Skill file exceeds the 32 MiB limit: {rel_path}')
+            total += len(content)
+        if total > 128 << 20:
+            raise ValueError('Skill package exceeds the 128 MiB expanded size limit.')
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            for rel_path in sorted(files):
+                info = zipfile.ZipInfo(rel_path)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, files[rel_path])
+        package_zip = output.getvalue()
+        if len(package_zip) > 100 << 20:
+            raise ValueError('Skill ZIP exceeds the 100 MiB download limit.')
+        return self.fs.install_skill(package_zip=package_zip, expected_name=normalized_name)
 
     def rename(
         self,

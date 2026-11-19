@@ -14,11 +14,6 @@ func (s *Service) GetWord(ctx context.Context, owner, id string) (VocabularyItem
 	if err := s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, id).First(&word).Error; err != nil {
 		return VocabularyItem{}, err
 	}
-	if word.Provider == "local" {
-		if err := requireLocalRuntime(); err != nil {
-			return VocabularyItem{}, err
-		}
-	}
 	items, err := s.ListWords(ctx, owner, word.Provider)
 	if err != nil {
 		return VocabularyItem{}, err
@@ -32,14 +27,6 @@ func (s *Service) GetWord(ctx context.Context, owner, id string) (VocabularyItem
 }
 
 func (s *Service) SearchWords(ctx context.Context, owner string, q WordQuery) ([]VocabularyItem, error) {
-	if err := validateProvider(q.Provider); err != nil {
-		return nil, err
-	}
-	if q.Provider == "local" {
-		if err := requireLocalRuntime(); err != nil {
-			return nil, err
-		}
-	}
 	items, err := s.ListWords(ctx, owner, q.Provider)
 	if err != nil {
 		return nil, err
@@ -100,11 +87,6 @@ func (s *Service) UpdateWord(ctx context.Context, owner, id string, in WordUpdat
 	if err := s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, id).First(&word).Error; err != nil {
 		return word, err
 	}
-	if word.Provider == "local" {
-		if err := requireLocalRuntime(); err != nil {
-			return word, err
-		}
-	}
 	updates := map[string]any{"updated_at": time.Now().UTC()}
 	if in.Term != nil {
 		updates["term"] = strings.TrimSpace(*in.Term)
@@ -145,34 +127,16 @@ func (s *Service) UpdateWord(ctx context.Context, owner, id string, in WordUpdat
 		if err := tx.Where("owner_id = ? AND id = ?", owner, id).First(&word).Error; err != nil {
 			return err
 		}
-		return nil
+		_, err := enqueueAnkiWord(ctx, tx, word)
+		return err
 	})
 	if err != nil {
 		return word, err
-	}
-	if word.Provider == ProviderAnki && word.ProviderNoteID != "" {
-		fields := map[string]string{"Word": word.Term, "Phonetic": word.Phonetic, "PartOfSpeech": word.PartOfSpeech, "Meaning": word.Meaning, "Definition": word.Definition, "UserNote": word.UserNote}
-		setting, settingErr := s.Setting(ctx, owner)
-		if settingErr != nil {
-			return word, settingErr
-		}
-		client, clientErr := newAnkiClient(setting.AnkiEndpoint)
-		if clientErr == nil {
-			clientErr = client.updateNote(ctx, word.ProviderNoteID, fields)
-		}
-		if clientErr != nil {
-			if queueErr := s.queueMutation(ctx, owner, "update_word", word.ID, queuedMutation{NoteID: word.ProviderNoteID, Fields: fields, Tags: in.Tags}, clientErr); queueErr != nil {
-				return word, queueErr
-			}
-		}
 	}
 	return word, nil
 }
 
 func (s *Service) ResetWord(ctx context.Context, owner, id string) error {
-	if err := requireLocalRuntime(); err != nil {
-		return err
-	}
 	now := time.Now().UTC()
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("owner_id = ? AND word_id = ?", owner, id).Delete(&ReviewCard{}).Error; err != nil {
@@ -189,9 +153,6 @@ func (s *Service) ResetWord(ctx context.Context, owner, id string) error {
 // ResetWords returns the selected words to their initial learning state. Scope may
 // be "today" (words reviewed since local midnight) or "wordbook".
 func (s *Service) ResetWords(ctx context.Context, owner, scope, wordbookID string) (int64, error) {
-	if err := requireLocalRuntime(); err != nil {
-		return 0, err
-	}
 	var ids []string
 	query := s.db.WithContext(ctx).Model(&Word{}).Where("owner_id = ?", owner)
 	switch scope {
@@ -218,9 +179,6 @@ func (s *Service) ResetWords(ctx context.Context, owner, scope, wordbookID strin
 	return int64(len(ids)), nil
 }
 func (s *Service) ResumeWord(ctx context.Context, owner, id string) error {
-	if err := requireLocalRuntime(); err != nil {
-		return err
-	}
 	if err := s.db.WithContext(ctx).Model(&Word{}).Where("owner_id = ? AND id = ?", owner, id).Update("mastered_at", nil).Error; err != nil {
 		return err
 	}

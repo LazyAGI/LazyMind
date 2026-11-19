@@ -1011,9 +1011,9 @@ export function buildTextElement(node) {
     }
   }
 
-  // keep-all only changes word breaking; pre-line still wraps. A short
-  // measured line is not evidence that the author requested nowrap.
-  options.wrap = !['nowrap', 'pre'].includes(s.whiteSpace);
+  // Office can reflow tight text boxes using different font metrics. Keep
+  // browser-measured single lines intact, including shrink-to-content labels.
+  options.wrap = !node.singleLine && !['nowrap', 'pre'].includes(s.whiteSpace);
 
   // Runs contain text/styles, not child coordinates, so their parent padding
   // must be retained too. Always set margins: Office's default inset otherwise
@@ -2236,12 +2236,13 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
  * @param {Array<{path: string, ir: object}>} pages - 页面 IR 数组
  * @param {string} deckDir - deck 目录路径
  * @param {string} outputPath - PPTX 输出路径
+ * @param {{embedFonts?: boolean}} [options] - 是否将字体嵌入 PPTX
  */
-export async function buildPptx(pages, deckDir, outputPath) {
+export async function buildPptx(pages, deckDir, outputPath, { embedFonts = true } = {}) {
   const temporary = await mkdtemp(join(dirname(resolve(outputPath)), '.pptx-export-'));
   try {
     const candidate = join(temporary, 'presentation.pptx');
-    const result = await buildPptxCandidate(pages, deckDir, candidate);
+    const result = await buildPptxCandidate(pages, deckDir, candidate, embedFonts);
     await rename(candidate, outputPath);
     return result;
   } finally {
@@ -2249,7 +2250,7 @@ export async function buildPptx(pages, deckDir, outputPath) {
   }
 }
 
-async function buildPptxCandidate(pages, deckDir, outputPath) {
+async function buildPptxCandidate(pages, deckDir, outputPath, embedFonts) {
   const pptx = new PptxGenJS();
 
   // 设置 16:9 画布（10" × 5.625"）
@@ -2344,16 +2345,18 @@ async function buildPptxCandidate(pages, deckDir, outputPath) {
   // open fonts from Google Fonts; without a font part PowerPoint only receives
   // the family name and silently substitutes a standard local font.
   let embeddedFonts = [];
-  try {
-    const { embedGoogleFontsFromPages } = await import('./font_embedding.mjs');
-    embeddedFonts = await embedGoogleFontsFromPages(outputPath, pages);
-  } catch (error) {
-    if (error.fontPortability) {
-      throw error;
+  if (embedFonts) {
+    try {
+      const { embedGoogleFontsFromPages } = await import('./font_embedding.mjs');
+      embeddedFonts = await embedGoogleFontsFromPages(outputPath, pages);
+    } catch (error) {
+      if (error.fontPortability) {
+        throw error;
+      }
+      // Font download/embedding is visual fidelity enhancement. Keep the
+      // editable PPTX usable during network outages or for restricted fonts.
+      process.stderr.write(`[fonts] Web font embedding skipped: ${error.message}\n`);
     }
-    // Font download/embedding is visual fidelity enhancement. Keep the
-    // editable PPTX usable during network outages or for restricted fonts.
-    process.stderr.write(`[fonts] Web font embedding skipped: ${error.message}\n`);
   }
 
   return {

@@ -1,6 +1,9 @@
 package agentintegration
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type State string
 
@@ -25,8 +28,10 @@ type Action struct {
 }
 
 type Issue struct {
-	Code string `json:"code"`
-	Path string `json:"path,omitempty"`
+	Code        string `json:"code"`
+	Path        string `json:"path,omitempty"`
+	Stage       string `json:"stage,omitempty"`
+	OperationID string `json:"operation_id,omitempty"`
 }
 
 type LoginStatus struct {
@@ -35,20 +40,35 @@ type LoginStatus struct {
 }
 
 type Status struct {
-	Enabled       *bool             `json:"enabled,omitempty"`
-	Login         *LoginStatus      `json:"login,omitempty"`
-	Connection    *ConnectionStatus `json:"connection,omitempty"`
-	RetryAction   string            `json:"retry_action,omitempty"`
-	Issue         *Issue            `json:"issue,omitempty"`
-	CanConnect    bool              `json:"can_connect,omitempty"`
-	CanDisconnect bool              `json:"can_disconnect,omitempty"`
-	Profiles      []ProfileStatus   `json:"profiles,omitempty"`
-	Agent         string            `json:"agent"`
-	DisplayName   string            `json:"display_name"`
-	State         State             `json:"state"`
-	Requirements  []Requirement     `json:"requirements,omitempty"`
-	Action        *Action           `json:"action,omitempty"`
-	Message       string            `json:"message,omitempty"`
+	DiagnosticReason  string             `json:"-"`
+	DiagnosticID      string             `json:"diagnostic_id,omitempty"`
+	DiagnosticLog     string             `json:"diagnostic_log,omitempty"`
+	DiagnosticContext *DiagnosticContext `json:"diagnostic_context,omitempty"`
+	Enabled           *bool              `json:"enabled,omitempty"`
+	Login             *LoginStatus       `json:"login,omitempty"`
+	Connection        *ConnectionStatus  `json:"connection,omitempty"`
+	RetryAction       string             `json:"retry_action,omitempty"`
+	Issue             *Issue             `json:"issue,omitempty"`
+	CanConnect        bool               `json:"can_connect,omitempty"`
+	CanDisconnect     bool               `json:"can_disconnect,omitempty"`
+	Profiles          []ProfileStatus    `json:"profiles,omitempty"`
+	Agent             string             `json:"agent"`
+	DisplayName       string             `json:"display_name"`
+	State             State              `json:"state"`
+	Requirements      []Requirement      `json:"requirements,omitempty"`
+	Action            *Action            `json:"action,omitempty"`
+	Message           string             `json:"message,omitempty"`
+}
+
+// DiagnosticContext describes this status snapshot, not an inferred last repair.
+// It reuses allowlisted inspection data; no log contents or credentials are read.
+type DiagnosticContext struct {
+	Action        string            `json:"action"`
+	Stage         string            `json:"stage,omitempty"`
+	CurrentCLI    string            `json:"current_cli,omitempty"`
+	AppVersion    string            `json:"app_version,omitempty"`
+	Environment   map[string]string `json:"environment,omitempty"`
+	Configuration []Inspection      `json:"configuration,omitempty"`
 }
 
 type ProfileStatus struct {
@@ -82,7 +102,22 @@ func Fail(status Status, message string) Status {
 	return status
 }
 
-// Connection reports runtime health separately from the user's enabled setting.
+// RequireQuit preserves the actual configuration and connection while setup
+// waits for an explicit user retry. It must not advertise installation success.
+func RequireQuit(status Status, retryAction string) Status {
+	if retryAction == "" {
+		retryAction = "connect"
+	}
+	status.State = ActionRequired
+	status.Action = &Action{Kind: "quit_agent"}
+	status.Issue = &Issue{Code: "quit_required"}
+	status.RetryAction = retryAction
+	status.DiagnosticReason = ""
+	status.Message = fmt.Sprintf("Save your work and fully quit %s from its application or system tray menu, then retry.", status.DisplayName)
+	return status
+}
+
+// Connection reports runtime health separately from installed configuration.
 type ConnectionStatus struct {
 	RuntimeState       string `json:"runtime_state,omitempty"`
 	MCPTrusted         bool   `json:"mcp_trusted"`

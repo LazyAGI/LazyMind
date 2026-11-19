@@ -9,7 +9,7 @@ func TestKnowledgeDefaultReleaseReplacesUntrustedConfig(t *testing.T) {
 	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
 	t.Setenv("LAZYMIND_BROWSER_ENABLED", "false")
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "")
-	body := map[string]any{"system_mcp_config": []any{map[string]any{"id": "untrusted"}}}
+	body := map[string]any{"system_mcp_config": []any{map[string]any{"id": "untrusted"}}, "disabled_tools": []string{"vocabulary"}}
 	if err := applySystemMCPConfig("user", body); err != nil {
 		t.Fatal(err)
 	}
@@ -35,14 +35,14 @@ func TestKnowledgeDisabledOnlyAffectsRunConfiguration(t *testing.T) {
 	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
 	t.Setenv("LAZYMIND_BROWSER_ENABLED", "false")
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "true")
-	body := map[string]any{"disabled_tools": []string{"knowledge_management"}}
+	body := map[string]any{"disabled_tools": []string{"knowledge_management", "vocabulary"}}
 	if err := applySystemMCPConfig("alice", body); err != nil {
 		t.Fatal(err)
 	}
 	if configs, ok := body["system_mcp_config"].([]any); ok && len(configs) != 0 {
 		t.Fatalf("disabled provider loaded: %v", configs)
 	}
-	delete(body, "disabled_tools")
+	body["disabled_tools"] = []string{"vocabulary"}
 	if err := applySystemMCPConfig("bob", body); err != nil {
 		t.Fatal(err)
 	}

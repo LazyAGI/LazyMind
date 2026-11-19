@@ -161,3 +161,13 @@ it('renders a document-menu slot during PDF loading without passing a function a
  expect(screen.getByRole('button',{name:'Document menu'})).toBeInTheDocument();
  expect(menu).toHaveBeenCalledWith(null);
 });
+
+it('updates selectable PDF text independently of selection actions', async () => {
+ const props={file:'https://example.test/translated.pdf',fileName:'translated.pdf'};
+ const {rerender}=render(<FileViewer {...props} pdfToolbarMode="navigation" pdfSelectableText/>);
+ await waitFor(()=>expect(pdfProps.current).toMatchObject({pdfSelectableText:true,pdfToolbarMode:'navigation'}));
+ expect(pdfProps.current.onAskSelection).toBeUndefined();
+ expect(pdfProps.current.onTranslateSelection).toBeUndefined();
+ rerender(<FileViewer {...props} pdfToolbarMode="full" pdfSelectableText={false}/>);
+ await waitFor(()=>expect(pdfProps.current).toMatchObject({pdfSelectableText:false,pdfToolbarMode:'full'}));
+});

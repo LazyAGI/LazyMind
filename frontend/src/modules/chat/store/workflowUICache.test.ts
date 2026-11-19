@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
-import { useWorkflowStore } from './workflowPanel';
+import { loadWorkflowUI, useWorkflowStore } from './workflowPanel';
 import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 
 const api = vi.hoisted(() => ({ getWorkflow: vi.fn() }));
@@ -27,6 +27,23 @@ beforeEach(async () => {
 });
 
 describe('revision-scoped workflow UI cache', () => {
+  it('shares the same in-flight definition across Chat and Task Center consumers', async () => {
+    const pending = deferred<ReturnType<typeof response>>();
+    api.getWorkflow.mockReturnValueOnce(pending.promise);
+    const chat = useWorkflowStore.getState().fetchWorkflowUI('smoke', 'v1');
+    const detail = loadWorkflowUI('smoke', 'v1', { language: 'zh-CN', silentError: true });
+    pending.resolve(response('prepare'));
+    expect(await detail).toBe(await chat);
+    expect(api.getWorkflow).toHaveBeenCalledOnce();
+  });
+
+  it('propagates a failed definition read to strict consumers and does not cache the rejection', async () => {
+    api.getWorkflow.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce(response('retry'));
+    await expect(loadWorkflowUI('smoke', 'v1')).rejects.toThrow('unavailable');
+    expect((await loadWorkflowUI('smoke', 'v1')).tabs?.[0].id).toBe('retry');
+    expect(api.getWorkflow).toHaveBeenCalledTimes(2);
+  });
+
   it('reads and reuses only the session-pinned revision, not an earlier workflow cache', async () => {
     useWorkflowStore.setState({ workflowUIByWorkflow: { 'smoke:zh-CN': { tabs: [{ id: 'stale', slots: [] }] } } });
     api.getWorkflow.mockResolvedValueOnce(response('result', 'prepare'))

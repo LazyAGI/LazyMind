@@ -13,7 +13,6 @@ import (
 
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
-	"lazymind/agentconnector/internal/integrationstate"
 )
 
 type RecoveryRequest struct {
@@ -101,7 +100,19 @@ func EnsurePresentation(ctx context.Context, home, thread string) (bool, error) 
 // Only execution admission requests a window. Health checks remain read-only.
 // A brief retry lets an existing CDP connection recover without restarting Codex.
 func EnsureConnection(ctx context.Context, home string) error {
-	err := CheckConnection(ctx, home)
+	store, err := credentials.NewStore(home, "")
+	if err != nil {
+		return err
+	}
+	scope, err := store.AccountScope()
+	if err != nil {
+		return err
+	}
+	if _, _, err = Load(home, scope); err != nil {
+		return err
+	}
+
+	err = CheckConnection(ctx, home)
 	var issue *ConnectionIssue
 	if err == nil || !errors.As(err, &issue) || issue.Code == "CODEX_INTEGRATION_DISABLED" {
 		return err
@@ -254,7 +265,7 @@ func reconnect(ctx context.Context, home string, progress func(string), restore 
 			case <-ticker.C:
 				current, e := store.AccountScope()
 				_, latest, loadErr := Load(home, current)
-				if e != nil || current != scope || loadErr != nil || latest.Token != pair.Token || !integrationstate.Allowed(home, "codex") {
+				if e != nil || current != scope || loadErr != nil || latest.Token != pair.Token {
 					cancel()
 					return
 				}

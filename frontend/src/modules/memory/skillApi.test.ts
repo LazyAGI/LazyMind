@@ -1,12 +1,46 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ apiCoreSkillsGet: vi.fn(), apiCoreSkillsSkillIdGet: vi.fn(), apiCoreSkillOrganizePost: vi.fn() }));
+const api = vi.hoisted(() => ({ apiCoreSkillsGet: vi.fn(), apiCoreSkillsPost: vi.fn(), apiCoreSkillsSkillIdGet: vi.fn(), apiCoreSkillOrganizePost: vi.fn(), apiCoreSkillMarketAdminItemsPost: vi.fn() }));
 const http = vi.hoisted(() => ({get: vi.fn(), post: vi.fn()}));
 vi.mock("@/api/generated/core-client", () => ({
   Configuration: class {}, SkillsApiFactory: () => api,
-  SkillDraftsApiFactory: () => ({}), SkillFsApiFactory: () => ({}), SkillRevisionsApiFactory: () => ({}), SkillSharesApiFactory: () => ({}), SkillMarketApiFactory: () => ({}), SkillDiffApiFactory: () => ({}),
+  SkillDraftsApiFactory: () => ({}), SkillFsApiFactory: () => ({}), SkillRevisionsApiFactory: () => ({}), SkillSharesApiFactory: () => ({}), SkillMarketApiFactory: () => api, SkillDiffApiFactory: () => ({}),
 }));
 vi.mock("@/components/request", () => ({ axiosInstance: http, BASE_URL: "", localizeErrorCode: vi.fn() }));
-import { buildSkillUpdatePayload, cancelSkillOrganizeTask, getSkillOrganizeTask, listSkillOrganizeApprovals, listSkillOrganizeTasks, getSkillAssetDetail, listSkillAssetsPage, normalizeSkillCallMode, organizeSkills, resolveSkillOrganizeApprovals } from "./skillApi";
+import { buildSkillUpdatePayload, cancelSkillOrganizeTask, createSkillAsset, getSkillOrganizeTask, listSkillOrganizeApprovals, listSkillOrganizeTasks, getSkillAssetDetail, listSkillAssetsPage, normalizeSkillCallMode, organizeSkills, publishSkillToMarket, resolveSkillOrganizeApprovals } from "./skillApi";
+
+describe("skill import request lifetime", () => {
+  it("forwards cancellation for personal and admin source imports", async () => {
+    const signal = new AbortController().signal;
+    api.apiCoreSkillsPost.mockResolvedValue({ data: { data: { skill_id: "imported" } } });
+    api.apiCoreSkillMarketAdminItemsPost.mockResolvedValue({ data: { data: { market_item_id: "market", source_skill_id: "imported" } } });
+    await createSkillAsset({ name: "writer", description: "", category: "external", tags: [], source: { type: "url", url: "https://github.com/example/skill" } }, { signal });
+    await publishSkillToMarket({ source: { type: "url", url: "https://github.com/example/skill" } }, { signal });
+    expect(api.apiCoreSkillsPost.mock.lastCall?.[1].signal).toBe(signal);
+    expect(api.apiCoreSkillMarketAdminItemsPost.mock.lastCall?.[1].signal).toBe(signal);
+  });
+
+  it("allows personal URL imports enough time to download a large skill package", async () => {
+    api.apiCoreSkillsPost.mockResolvedValue({ data: { data: { skill_id: "imported" } } });
+    expect(await createSkillAsset({
+      name: "writer", description: "", category: "external", tags: [],
+      source: { type: "url", url: "https://github.com/example/skills/tree/main/writer" },
+    }, { silentError: true })).toBe("imported");
+    expect(api.apiCoreSkillsPost).toHaveBeenLastCalledWith(expect.anything(), { timeout: 300_000, silentError: true });
+  });
+
+  it("allows market URL imports the same download time", async () => {
+    api.apiCoreSkillMarketAdminItemsPost.mockResolvedValue({ data: { data: { market_item_id: "market", source_skill_id: "imported" } } });
+    expect(await publishSkillToMarket({ source: { type: "url", url: "https://github.com/example/skill" } }))
+      .toEqual({ marketItemId: "market", sourceSkillId: "imported" });
+    expect(api.apiCoreSkillMarketAdminItemsPost).toHaveBeenLastCalledWith(expect.anything(), { timeout: 300_000 });
+  });
+
+  it("lets the publishing form handle actionable URL import errors inline", async () => {
+    api.apiCoreSkillMarketAdminItemsPost.mockResolvedValue({ data: { data: { market_item_id: "market", source_skill_id: "imported" } } });
+    await publishSkillToMarket({ source: { type: "url", url: "https://github.com/example/skill" } }, { silentError: true });
+    expect(api.apiCoreSkillMarketAdminItemsPost).toHaveBeenLastCalledWith(expect.anything(), { timeout: 300_000, silentError: true });
+  });
+});
 describe("organize cancellation review marker", () => {
   it.each([true, false, undefined])("preserves pending_review=%s from cancellation response", async (pendingReview) => {
     http.post.mockResolvedValue({data: {data: {status: "cancelled", requestid: "r", pending_review: pendingReview}}});

@@ -14,7 +14,6 @@ import (
 
 	"lazymind/agentconnector/internal/codexhost"
 	"lazymind/agentconnector/internal/credentials"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -75,7 +74,7 @@ func TestCodexRecoveryRequiresCurrentPairingAndCoalescesUntilDismissed(t *testin
 	if third.Request.ID == first.Request.ID {
 		t.Fatal("new operation did not get a new request")
 	}
-	if err := integrationstate.Set(server.store.Directory(), "codex", false); err != nil {
+	if err := workflowhost.Disable(server.store.Directory(), pair.ConnectorID); err != nil {
 		t.Fatal(err)
 	}
 	if w := call("GET", "/v1/codex/recovery?wait=0", pair.Token, ""); w.Code != 403 {

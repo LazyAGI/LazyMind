@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "./index";
 
-vi.mock("../newChat", () => ({
+vi.mock("./ConversationContent", () => ({
   default: () => <div>New chat</div>,
 }));
 

@@ -96,8 +96,8 @@ describe('paper Chat navigation', () => {
         await tick();
         expect(screen.getByText('论文综述 · 资料准备')).toBeVisible();
         expect(screen.getByText('还需要补充可用全文')).toBeVisible();
-        const flow = within(screen.getByRole('region', { name: '综述材料准备与交接' }));
-        for (const stage of ['论文扩展', '补齐论文正文', '交接综述材料']) expect(flow.getByText(stage)).toBeVisible();
+        const flow = within(screen.getByRole('region', { name: '综述流程' }));
+        for (const stage of ['确认论文与主题', '论文扩展', '生成综述']) expect(flow.getByText(stage)).toBeVisible();
         await tick(3000);
         expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/);
         fireEvent.click(screen.getByRole('button', { name: '查看论文综述' }));
@@ -108,7 +108,7 @@ describe('paper Chat navigation', () => {
         get.mockResolvedValue({ data: { ...summary, kind: 'review' } });
         render(<MemoryRouter><Page conversation="review-chat" /></MemoryRouter>);
         await tick();
-        expect(screen.getByRole('region', { name: '综述材料准备与交接' })).toBeVisible();
+        expect(screen.getByRole('region', { name: '综述流程' })).toBeVisible();
         expect(screen.getByText('已接收本次确认的论文、主题与补充要求。')).toBeVisible();
         expect(screen.queryByText('论文综述已生成')).not.toBeInTheDocument();
     });
@@ -121,7 +121,7 @@ describe('paper Chat navigation', () => {
         await tick(3000);
         await tick(9000);
         expect(get).toHaveBeenCalledTimes(2);
-        expect(screen.queryByRole('region', { name: '综述材料准备与交接' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: '综述流程' })).not.toBeInTheDocument();
     });
 
     it('refreshes a failed expansion through retry and completion without focus or navigation', async () => {

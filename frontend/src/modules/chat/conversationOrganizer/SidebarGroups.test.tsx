@@ -157,6 +157,16 @@ describe("group sidebar", () => {
     expect(screen.getByRole("button", { name: "a对话0", exact: true })).toBeInTheDocument();
   });
 
+  it.each(["group", "project"])("dismisses a %s member's context menu when the pointer leaves without entering the button", async kind => {
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><SidebarGroups groups={[{ ...groups[0], kind }]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
+    const title = await screen.findByRole("button", { name: "a对话0", exact: true });
+    fireEvent.contextMenu(title.closest(".conversation-group-member")!);
+    await screen.findByRole("menu");
+    fireEvent.pointerMove(title);
+    fireEvent.pointerMove(document.body);
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
   it('selects and clears only one group, including its remaining pages', async () => {
     const member = (id: string) => ({ conversation_id: id, display_name: id, pinned_at: '', membership_revision: 1 });
     vi.mocked(api.getConversationGroup).mockImplementation(async (id, token) => ({ group: groups.find(g => g.id === id)!, conversations: id === 'b' ? [member('b-0')] : token ? [member('a-1')] : [member('a-0')], nextPageToken: id === 'a' && !token ? 'next' : '' }));

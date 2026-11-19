@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"lazymind/core/asyncjob"
+	"lazymind/core/capability"
 	"lazymind/core/common/orm"
 	"lazymind/core/paperlibrary"
 )
@@ -166,7 +167,16 @@ func TestBibliographyTitleMatchingRequiresUnambiguousAuthorAndYear(t *testing.T)
 			http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"message":{"items":[` + tc.items + `]}}`)), Request: r}, nil
 			})
-			doi, err := findBibliographyDOI(t.Context(), paperlibrary.Metadata{Title: "A useful paper", Authors: []string{"Jane Doe"}, Year: 2024})
+			works, err := searchCrossrefTitle(t.Context(), "A useful paper")
+			doi := ""
+			for _, w := range works {
+				if selectionMetadataMatches(capability.PaperSelection{Title: "A useful paper", Authors: []string{"Jane Doe"}, Year: 2024}, w.Title, w.Authors, w.Year) {
+					doi = w.DOI
+				}
+			}
+			if doi == "" {
+				err = fmt.Errorf("no match")
+			}
 			if (err == nil) != tc.ok || tc.ok && doi != "10.1234/test" {
 				t.Fatalf("doi=%s error=%v", doi, err)
 			}
@@ -289,5 +299,50 @@ func TestBibliographyFormatsDiscoverPDFForeachBatchItem(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBibliographyTitleOnlyResolvesInBackground(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	p := libraryDraft("title-only", "A useful paper", "")
+	p.Metadata.Authors = nil
+	p.Metadata.Year = 0
+	p.Metadata.Venue = ""
+	importDraft(t, "papers", "title-only", p)
+	var batch orm.PaperImportBatch
+	db.First(&batch)
+	var item orm.PaperImportItem
+	db.Where("batch_id=?", batch.ID).First(&item)
+	db.Model(&orm.AsyncJob{}).Where("id=?", batch.AsyncJobID).Updates(map[string]any{"status": "running", "attempt_count": 1})
+	old := http.DefaultTransport
+	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "api.crossref.org" {
+			if strings.Contains(r.URL.Path, "/works/") {
+				return paperTestResponse(r, 503, `{}`), nil
+			}
+			return paperTestResponse(r, 200, `{"message":{"items":[{"title":["A useful paper"],"DOI":"10.1234/confirmed","author":[{"given":"Jane","family":"Doe"}],"issued":{"date-parts":[[2024]]}}]}}`), nil
+		}
+		return old.RoundTrip(r)
+	})
+	t.Cleanup(func() { http.DefaultTransport = old })
+	ctx, err := prepareSourceTarget(t.Context(), sourceImportCaller(batch), batch.TargetDatasetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = context.WithValue(ctx, paperPDFClientKey{}, contextWithNoPDF(t).Value(paperPDFClientKey{}))
+	err = enrichBibliographyItem(ctx, asyncjob.Job{ID: batch.AsyncJobID, AttemptCount: 1}, batch, &item, sourceImportCaller(batch))
+	if err == nil || !strings.Contains(err.Error(), "题录已保存") {
+		t.Fatalf("PDF outage should retain resolved metadata: %v", err)
+	}
+	var entry orm.PaperLibraryEntry
+	db.Where("id=?", p.ID).First(&entry)
+	var matched orm.AcademicWork
+	db.Where("id=?", entry.AcademicWorkID).First(&matched)
+	metadata, metadataErr := paperlibrary.EffectiveMetadata(db, entry, matched)
+	if metadataErr != nil {
+		t.Fatal(metadataErr)
+	}
+	if metadata.Identifiers.DOI != "10.1234/confirmed" || metadata.Year != 2024 || len(metadata.Authors) != 1 {
+		t.Fatalf("title-only metadata not resolved: %+v", metadata)
 	}
 }

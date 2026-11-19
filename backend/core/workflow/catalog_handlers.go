@@ -26,11 +26,24 @@ func loadWorkflowCatalogSpec(r *http.Request, refOrID, revisionID string, includ
 	if db == nil {
 		return nil, errors.New("store not initialized")
 	}
-	pkg, err := workflowstore.New(db).GetWorkflowPackage(r.Context(), store.UserID(r), refOrID, revisionID)
+	repository := workflowstore.New(db)
+	owner := store.UserID(r)
+	pkg, err := repository.GetWorkflowPackage(r.Context(), owner, refOrID, revisionID)
 	if err != nil {
 		return nil, err
 	}
 	body := pkg.Files["workflow.yaml"]
+	detachedSample := revisionID != "" && pkg.SourceType == "builtin" && len(pkg.Files) == 0 && len(pkg.CompiledGraph) > 0
+	if detachedSample {
+		// History bundles pin the compiled graph but omit the Workflow package.
+		// The installed built-in supplies presentation only. The session still
+		// resolves execution and artifacts against its original revision.
+		head, err := repository.GetWorkflowPackage(r.Context(), owner, pkg.WorkflowRef, "")
+		if err != nil {
+			return nil, err
+		}
+		body = head.Files["workflow.yaml"]
+	}
 	if len(body) == 0 {
 		return nil, errors.New("workflow.yaml missing from revision")
 	}
@@ -40,6 +53,13 @@ func loadWorkflowCatalogSpec(r *http.Request, refOrID, revisionID string, includ
 	}
 	// Catalog ownership is authoritative; package YAML cannot impersonate a builtin.
 	spec["source_type"] = pkg.SourceType
+	if detachedSample {
+		applyWorkflowCatalogLocale(spec, r.Header.Get("Accept-Language"))
+		return workflowCatalogSpec{
+			"id": pkg.WorkflowID, "name": spec["name"], "source_type": pkg.SourceType,
+			"ui": spec["ui"], "slots": spec["slots"], "steps": spec["steps"],
+		}, nil
+	}
 	if includeRawFiles {
 		spec["workflow_yaml_raw"] = string(body)
 		spec["state_yaml_raw"] = string(pkg.Files["scenario/state.yml"])
@@ -91,6 +111,15 @@ func applyWorkflowCatalogLocale(spec workflowCatalogSpec, acceptLanguage string)
 	applyCatalogLabels(spec["slots"], selected["slots"])
 	if ui := catalogStringMap(spec["ui"]); ui != nil {
 		applyCatalogLabels(ui["tabs"], selected["tabs"])
+		tabs, _ := ui["tabs"].([]any)
+		translations := catalogStringMap(selected["tabs"])
+		for _, value := range tabs {
+			tab := catalogStringMap(value)
+			id, _ := tab["id"].(string)
+			if reason, ok := catalogStringMap(translations[id])["skip_reason"].(string); ok && reason != "" {
+				tab["skip_reason"] = reason
+			}
+		}
 	}
 }
 

@@ -27,9 +27,9 @@ export default function ResearchRecords({ expansions, reviews, open, loading, er
     const ids = reviews.map(review => review.conversation_id).join(',');
     useEffect(() => {
         const store = useConversationRunningStore.getState();
-        store.watch(watcher, open && filter !== 'expansion' ? ids.split(',').filter(Boolean) : []);
+        store.watch(watcher, open ? ids.split(',').filter(Boolean) : []);
         return () => store.unwatch(watcher);
-    }, [watcher, ids, open, filter]);
+    }, [watcher, ids, open]);
     const rows = [
         ...expansions.map(record => ({ kind: 'expansion' as const, record })),
         ...reviews.map(record => ({ kind: 'review' as const, record })),
@@ -53,12 +53,15 @@ export default function ResearchRecords({ expansions, reviews, open, loading, er
                 const related = reviews.filter(review => review.expansion_id === record.id).length;
                 const phase = row.kind === 'expansion' ? paperMaterialPhase(row.record) : undefined;
                 const materialBadge = phase && phase !== 'done' ? materialBadges[phase] : undefined;
+                const automaticReviewId = row.kind === 'expansion' && row.record.goal === 'review' ? row.record.auto_review_id : undefined;
+                const automaticReview = automaticReviewId ? reviews.find(review => review.id === automaticReviewId) : undefined;
                 return <List.Item><button type="button" className="paper-expansion-history-row paper-research-record" aria-label={`${t(row.kind === 'review' ? 'paperTasks.viewReviewRecord' : 'paperTasks.viewResult')}: ${record.title}`}
                     onClick={() => row.kind === 'review' ? onReview(row.record) : onExpansion(record.id)}>
                     <span className="paper-expansion-history-content">
                         <span className="paper-research-record-kind">{row.kind === 'review' ? <ReadOutlined /> : <BranchesOutlined />}{t(row.kind === 'expansion' ? 'paperTasks.recordsExpansion' : 'paperTasks.task.review')}
                             <span className="paper-research-record-status">{row.kind === 'review' ? <ReviewRecordStatus conversationId={record.conversation_id} />
-                                : <PaperTaskStatus status={materialBadge?.status ?? row.record.status}>
+                                : row.record.goal === 'review' && row.record.auto_review_id ? <ReviewRecordStatus conversationId={automaticReview?.conversation_id || ''} />
+                                    : <PaperTaskStatus status={materialBadge?.status ?? row.record.status}>
                                     {materialBadge ? t(`paperTasks.${materialBadge.label}`) : statusLabel(row.record.status)}
                                 </PaperTaskStatus>}</span>
                         </span>

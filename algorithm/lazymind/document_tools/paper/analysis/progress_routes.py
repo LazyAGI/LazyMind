@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import time
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -17,8 +18,26 @@ from lazymind.common.token_estimation import estimate_tokens
 from .live import MAX_REASONING, public_error
 
 router = APIRouter()
-WORKSPACES = Path(os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE_ROOT', '/data/subagent'))
-GATEWAY = os.environ.get('LAZYMIND_F4_GATEWAY_URL', 'http://kong:8000').rstrip('/')
+
+
+def _default_gateway():
+    # Local runtimes (desktop) have no Kong: the local proxy replaces it and validates
+    # the bearer the same way. Connect via loopback even if it binds a wildcard address.
+    port = os.environ.get('LAZYMIND_LOCAL_PROXY_PORT', '').strip()
+    if not port:
+        return 'http://kong:8000'
+    host = os.environ.get('LAZYMIND_LOCAL_PROXY_ADDRESS', '').strip() or '127.0.0.1'
+    if host in ('0.0.0.0', '::', '[::]'):
+        host = '127.0.0.1'
+    if ':' in host and not host.startswith('['):
+        host = f'[{host}]'
+    return f'http://{host}:{port}'
+
+
+# LAZYMIND_SUBAGENT_WORKSPACE is the subagent root every launcher sets (see lazymind/config.py).
+WORKSPACES = Path(os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE_ROOT')
+                  or os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE') or '/data/subagent')
+GATEWAY = (os.environ.get('LAZYMIND_F4_GATEWAY_URL') or _default_gateway()).rstrip('/')
 
 
 async def authorized_task(task_id, authorization):
@@ -42,6 +61,22 @@ async def authorized_task(task_id, authorization):
         if (task.get('task_id') != task_id or task.get('agent_type') != 'workflow_step'
                 or task.get('title') != 'paper-writing:data_analysis'):
             raise HTTPException(404, 'Task not found')
+        # Reuse Core's owner-checked durable Agent history; no second execution trace or model call.
+        conversation_id = task.get('conversation_id')
+        if conversation_id:
+            async with httpx.AsyncClient(timeout=10, trust_env=False, follow_redirects=False) as client:
+                response = await client.get(
+                    GATEWAY + '/api/core/conversations/' + quote(conversation_id, safe='') + '/tasks',
+                    headers={'Authorization': authorization})
+            if response.status_code != 200:
+                raise HTTPException(503, 'Analysis history is temporarily unavailable')
+            body = response.json()
+            value = body.get('data', body)
+            for item in value.get('tasks', []):
+                if (item.get('task_id') == task_id
+                        and item.get('execution_id') == task.get('execution_id')):
+                    task['analysis_steps'] = item.get('steps', [])
+                    break
         return task
     except (httpx.HTTPError, ValueError, TypeError, AttributeError):
         raise HTTPException(503, 'Progress is temporarily unavailable') from None
@@ -96,6 +131,11 @@ def read_snapshot(task_id, task):
                         value['error'] = public_error(saved.get('error'))
         except (OSError, ValueError, KeyError, TypeError):
             pass  # Startup and atomic replacement may briefly have no readable public snapshot.
+    if not value['process_steps']:
+        from .agent_progress import project
+        progress = project(task)
+        if progress:
+            value.update(progress)
     value['status'] = task['status']
     if value['status'] in ('succeeded', 'failed', 'canceled', 'interrupted') and not value['timing']['finished_at']:
         value['timing']['finished_at'] = task.get('updated_at')

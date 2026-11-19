@@ -1,7 +1,7 @@
 """Named, offline presentation assets shared by HTML/PDF and native PPTX.
 
-Only the cloud-hosted, checksummed catalog is accepted. Icons are visual aids, not
-document evidence, and never consume the one-evidence-image slot.
+Only the cloud-hosted, checksummed catalog is accepted. Icons are small visual
+labels or decoration and have their own size limits.
 """
 from copy import deepcopy
 from functools import lru_cache
@@ -9,9 +9,18 @@ from hashlib import sha256
 from html import escape
 from html.parser import HTMLParser
 import json
+import math
 from pathlib import Path
 import re
 import tempfile
+
+
+ICON_MAX_PX = 96
+ICON_MAX_INCHES = 0.8
+
+
+class InvalidNamedIcon(ValueError):
+    """A named icon placeholder cannot be used as authored."""
 
 
 def asset_root():
@@ -52,10 +61,10 @@ def search(query='', collection='', limit=12):
 
 def resolve(name):
     if not isinstance(name, str) or not re.fullmatch(r'[a-z0-9-]+:[a-z0-9-]+', name):
-        raise ValueError('Asset name must be collection:icon-name; paths and URLs are not accepted')
+        raise InvalidNamedIcon('Asset name must be collection:icon-name; paths and URLs are not accepted')
     entry = next((a for a in catalog()['assets'] if a['name'] == name), None)
     if entry is None:
-        raise ValueError(f'Unknown presentation asset {name!r}; use ppt_search_assets for exact names')
+        raise InvalidNamedIcon(f'Unknown presentation asset {name!r}; use ppt_search_assets for exact names')
     return entry
 
 
@@ -106,8 +115,12 @@ class _ImageTag(HTMLParser):
         self.attrs = dict(attrs)
 
 
-def resolve_html(html, deck):
-    """Resolve explicit named placeholders to offline files, without changing other images."""
+def _image_tag(attrs):
+    return '<img ' + ' '.join(f'{k}="{escape(v or "", quote=True)}"' for k, v in attrs.items()) + '>'
+
+
+def resolve_html(html, deck, *, omitted=None):
+    """Resolve named placeholders; an explicit omitted list permits an unknown-icon fallback."""
     used = []
 
     def replace(match):
@@ -117,19 +130,42 @@ def resolve_html(html, deck):
         parser = _ImageTag()
         parser.feed(tag)
         attrs = parser.attrs
-        name = attrs.get('data-ppt-asset')
-        if name is None:
+        if 'data-ppt-asset' not in attrs:
             return tag
-        if len(used) >= 16:
-            raise ValueError('At most 16 named icons per page; simplify repeated decoration')
-        asset = stage(name, Path(deck) / 'images')
+        name = attrs['data-ppt-asset']
+        try:
+            if len(used) >= 16:
+                raise InvalidNamedIcon('At most 16 named icons per page; simplify repeated decoration')
+            asset = stage(name, Path(deck) / 'images')
+        except InvalidNamedIcon:
+            if omitted is None:
+                raise
+            omitted.append(name or '')
+            if not any((attrs.get(key) or '').strip() for key in ('src', 'srcset')):
+                return ''
+            # A real source may be a registered material. Keep it subject to
+            # the normal image validation even when its icon annotation is wrong.
+            attrs.pop('data-ppt-asset')
+            if attrs.get('data-ppt-kind') == 'icon':
+                attrs.pop('data-ppt-kind')
+            return _image_tag(attrs)
         attrs['src'] = '../images/' + Path(asset['path']).name
+        attrs.pop('srcset', None)
+        attrs.pop('sizes', None)
         attrs.setdefault('alt', '')
         attrs['data-ppt-kind'] = 'icon'
-        style = re.sub(r'(?:^|;)\s*(?:object-fit|aspect-ratio)\s*:[^;]*', '', attrs.get('style') or '', flags=re.I)
-        attrs['style'] = style.rstrip(';') + ';object-fit:contain;aspect-ratio:auto;'
+        style = re.sub(
+            r'(?:^|;)\s*(?:object-fit|aspect-ratio|min-width|min-height|max-width|max-height)\s*:[^;]*',
+            '', attrs.get('style') or '', flags=re.I,
+        ).rstrip(';')
+        limits = (
+            'object-fit:contain!important;aspect-ratio:auto!important;'
+            'min-width:0!important;min-height:0!important;'
+            f'max-width:{ICON_MAX_PX}px!important;max-height:{ICON_MAX_PX}px!important;'
+        )
+        attrs['style'] = (style + ';' if style else '') + limits
         used.append(name)
-        return '<img ' + ' '.join(f'{k}="{escape(v or "", quote=True)}"' for k, v in attrs.items()) + '>'
+        return _image_tag(attrs)
 
     return re.sub(r'<img\b(?:[^>"\']|"[^"]*"|\'[^\']*\')*>', replace, html, flags=re.I), used
 
@@ -142,24 +178,40 @@ def prompt_catalog(query):
         entries = search('需求 素材 大纲 图片 编辑 方法 图表', 'fluent-color', limit=12)['assets']
     return '\nNAMED PRESENTATION ASSETS (offline; optional, choose one consistent family):\n' + json.dumps(
         [{'name': e['name'], 'style': e['style'], 'meaning': ' '.join(e['tags'])} for e in entries], ensure_ascii=False
-    ) + '\nInsert <img data-ppt-asset="exact-name" alt="short label">; keep object-fit:contain. '
+    ) + (f'\nInsert <img data-ppt-asset="exact-name" alt="short label"> as a small label or '
+         f'decoration (up to {ICON_MAX_PX} CSS px on either side). Use actual content or registered '
+         'evidence for the main visual. Omit the icon if no exact catalog name fits. ')
 
 
-def native_pages(pages, assets, directory):
+def native_pages(pages, assets, directory, *, omitted=None):
     """Translate named icons to the existing aspect-preserving native image path."""
     pages = deepcopy(pages)
     assets = dict(assets)
-    for page in pages or []:
+    for page_no, page in enumerate(pages or [], 1):
         icons = page.pop('icons', [])
         if not isinstance(icons, list) or len(icons) > 8:
             raise ValueError('icons must be a list of at most 8 {name,box} placements per page')
         for icon in icons:
             if not isinstance(icon, dict):
                 raise ValueError('Each icon requires name and box')
-            entry = stage(icon.get('name'), directory, 'png')
+            box = icon.get('box')
+            if (not isinstance(box, list) or len(box) != 4
+                    or any(type(value) not in (int, float) or not math.isfinite(value) for value in box)):
+                raise ValueError('Icon box must be [x, y, width, height] in inches')
+            x, y, width, height = box
+            try:
+                entry = stage(icon.get('name'), directory, 'png')
+            except InvalidNamedIcon:
+                if omitted is None:
+                    raise
+                omitted.append({'page': page_no, 'name': str(icon.get('name') or '')[:120]})
+                continue
             index = -1 - len(assets)
             while index in assets:
                 index -= 1
             assets[index] = entry
-            page.setdefault('images', []).append({'material_index': index, 'box': icon.get('box')})
+            page.setdefault('images', []).append({
+                'material_index': index,
+                'box': [x, y, min(width, ICON_MAX_INCHES), min(height, ICON_MAX_INCHES)],
+            })
     return pages, assets

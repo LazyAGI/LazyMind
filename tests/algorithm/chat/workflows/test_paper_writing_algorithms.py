@@ -633,7 +633,9 @@ def test_f2_feedback_refines_f1_question_without_overwriting_evidence(monkeypatc
     assert model_input['evidence'] == edited
     assert [paper['abstract'] for paper in model_input['papers']] == ['原有摘要', '新证据']
     assert tools.material(result['pool'], 'papers')['content'] == [*papers, {**added, 'abstract': '新证据'}]
-    assert result['document'] == REFINED_TOPIC_MARKDOWN
+    from lazymind.document_tools.paper.publication import render_references
+    expected_references = render_references(papers + [added], paper_language='zh')
+    assert result['document'] == REFINED_TOPIC_MARKDOWN + '\n\n' + expected_references
 
 
 def test_one_real_algorithm_replacement_preserves_storage_and_next_input(monkeypatch):
@@ -731,6 +733,7 @@ def test_demo_provenance_cannot_be_erased_by_real_algorithm(monkeypatch):
 
 @pytest.mark.usefixtures('mock_topic_model')
 def test_plugin_contains_only_thin_entry_and_calls_shared_runtime(tmp_path, monkeypatch):
+    import ast
     from lazymind.workflow_toolkit import load_workflow_package_tools
     files = {}
     for source in PACKAGE.rglob('*'):
@@ -741,10 +744,20 @@ def test_plugin_contains_only_thin_entry_and_calls_shared_runtime(tmp_path, monk
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
         files[relative.as_posix()] = base64.b64encode(source.read_bytes()).decode()
-    assert sorted(p.relative_to(PACKAGE).as_posix() for p in (PACKAGE / 'scripts').rglob('*.py')) == ['scripts/tools.py']
+    scripts = PACKAGE / 'scripts'
+    assert {path.relative_to(scripts).as_posix() for path in scripts.rglob('*.py')} == {
+        'tools.py', 'agent_tools.py', 'external_academic_tools.py', 'external_knowledge_tools.py',
+    }
+    for adapter in ('external_academic_tools.py', 'external_knowledge_tools.py'):
+        declarations = ast.parse((scripts / adapter).read_text(encoding='utf-8')).body
+        assert len(declarations) == 1 and isinstance(declarations[0], ast.Assign)
+        target, = declarations[0].targets
+        assert isinstance(target, ast.Name) and target.id == 'ADAPTER_ID'
+        assert isinstance(declarations[0].value, ast.Constant)
     assert len((PACKAGE / 'scripts/tools.py').read_text().splitlines()) < 15
-    loaded = load_workflow_package_tools({'files': files}, ['run_paper_step'],
+    from lazymind.document_tools.paper import agent_tools
+    monkeypatch.setattr(agent_tools, 'paper_prepare_inputs', lambda: {'status': 'shared-runtime'})
+    loaded = load_workflow_package_tools({'files': files}, ['paper_prepare_inputs'],
                                         'paper-writing', 'isolated-revision', package_root=tmp_path)
-    monkeypatch.setattr(tools, 'run_paper_step', lambda: {'status': 'shared-runtime'})
-    assert loaded['run_paper_step']() == {'status': 'shared-runtime'}
+    assert loaded['paper_prepare_inputs']() == {'status': 'shared-runtime'}
     assert api.run_algorithm('research_topic', {'topic': 'T'})['question']

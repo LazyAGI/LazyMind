@@ -1,19 +1,29 @@
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useLayoutEffect } from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { load } from 'js-yaml';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { message } from 'antd';
+import { setupAntdStaticCleanup } from '@/test/antdStatic';
 import i18n from '@/i18n';
-import type { SlotRevision, WorkflowSession, WorkflowUI } from '@/modules/chat/store/workflowPanel';
+import { hydrateWorkflowUI, type SlotRevision, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
 import { WorkflowPanel } from './index';
-import { controlActions, externalPanelAction, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
+import { controlActions, externalPanelAction, externalContinuationStep, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
 import { ArtifactPreviewContext, useArtifactPreviewController } from '../ArtifactPreview/context';
+
+setupAntdStaticCleanup();
 
 // Use the same transport boundary as WorkflowRunPage; the panel never receives
 // capabilities, reviews or delivery state.
 function panelAdapter(control: WorkflowControlView, execute: (intent: WorkflowActionIntent) => Promise<void>) {
   const session = fixture.session;
-  return { execute: (intent: WorkflowPanelActionIntent) => execute(externalPanelAction(intent, session, control)) };
+  return {
+    execute: (intent: WorkflowPanelActionIntent) => execute(externalPanelAction(intent, session, control)),
+    continuationStep: () => externalContinuationStep(fixture.session, control),
+  };
 }
 
 vi.mock('../ArtifactPreview', () => ({ PreviewContent: ({ target, close }: any) => <section aria-label={target.filename}>
@@ -31,7 +41,24 @@ const fixture = vi.hoisted(() => ({
   setFocusedTab: vi.fn(),
   focusedTab: undefined as string | undefined,
   documentAction: vi.fn(),
+  onSlotMount: vi.fn(),
   registerFooterAction: undefined as SlotEditingContextValue['registerFooterAction'] | undefined,
+  getPaperProgress: vi.fn(),
+  openPaperProgress: vi.fn(),
+  closePaperProgress: vi.fn(),
+}));
+// The data-analysis tab has its own HTTP snapshot and SSE connection, separate
+// from useWorkflowSession. Keep both transports inside this layout fixture.
+vi.mock('@/components/request', async (original) => {
+  const actual = await original<typeof import('@/components/request')>();
+  return { ...actual, axiosInstance: { ...actual.axiosInstance, get: fixture.getPaperProgress } };
+});
+vi.mock('@/modules/chat/utils/sse', () => ({
+  Method: { GET: 'GET' },
+  SSE: class {
+    constructor(url: string) { fixture.openPaperProgress(url); }
+    close = fixture.closePaperProgress;
+  },
 }));
 vi.mock('@/modules/chat/hooks/useWorkflow', () => ({
   useWorkflowSession: () => ({ session: fixture.session, loading: false, refresh: fixture.refresh }),
@@ -61,6 +88,7 @@ vi.mock('./SlotComponents', () => ({
   SlotDownloadContext: React.createContext(true),
   SlotMarkdownStream: ({ stream }: { stream: TaskArtifactStream }) => <div data-testid='live-preview'>{stream.content}</div>,
   SlotRenderer: ({ slotId, slot, readOnly, widget }: { widget?: { widgetType?: string }; slotId: string; slot: SlotRevision; readOnly?: boolean }) => {
+    useLayoutEffect(() => { fixture.onSlotMount(); }, []);
     const context = useContext(SlotEditingContext);
     fixture.registerFooterAction = context.registerFooterAction;
     const active = useContext(WorkflowPanelTabActiveContext);
@@ -84,7 +112,9 @@ vi.mock('./SlotComponents', () => ({
       });
       return () => { unregisterFlush(); unregisterAction(); };
     }, [active, context.registerFlush, context.registerFooterAction, slotId, slot.document, slot.list_index]);
-    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}<button onClick={() => context.onBrowse?.()}>查看历史</button></article>;
+    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}
+      {slot.artifact_value?.url && <a href={String(slot.artifact_value.url)} download={String(slot.artifact_value.filename)}>下载原始文件</a>}
+      <button onClick={() => context.onBrowse?.()}>查看历史</button></article>;
   },
 }));
 
@@ -95,6 +125,13 @@ beforeEach(async () => {
   fixture.fetchWorkflowUI.mockReset().mockImplementation(async () => fixture.ui);
   fixture.flush.mockReset().mockResolvedValue(true);
   fixture.pause.mockReset().mockResolvedValue(undefined);
+  fixture.onSlotMount.mockReset();
+  fixture.getPaperProgress.mockReset().mockResolvedValue({ data: {
+    task_id: 'owner', execution_id: 'current-attempt', revision: 1, status: 'running',
+    process_steps: [{ step_id: 'f4-analysis', order: 1, title: '正在分析数据', status: 'running',
+      started_at: null, finished_at: null, elapsed_ms: null }],
+    timing: { started_at: null, finished_at: null, measured_at: '2026-09-16T00:00:00Z' },
+  } });
   fixture.focusedTab = undefined;
   fixture.setFocusedTab.mockImplementation((_id: string, tab: string) => { fixture.focusedTab = tab; });
   localStorage.clear();
@@ -128,6 +165,120 @@ async function waitForCompletedContinueButton() {
 }
 
 describe('shared workflow compact layout', () => {
+  it('preserves a tab selected before the initial follow effect runs', async () => {
+    fixture.ui.tabs!.push({ id: 'optional', label: '可选步骤', slots: [] });
+    fixture.session.projection!.nodes = { optional: {
+      execution: 'none', branch: 'pruned', validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable',
+    } };
+    // Select the newly mounted tab before passive effects synchronize runtime progress.
+    fixture.onSlotMount.mockImplementationOnce(() => {
+      screen.getByRole('tab', { name: /可选步骤/ }).click();
+    });
+    render(<WorkflowPanel conversationId='layout-test' />);
+
+    const panel = await screen.findByRole('tabpanel', { name: /可选步骤/ });
+    expect(within(panel).getByText('本次流程的分支决策跳过了此步骤，无需等待执行结果。')).toBeVisible();
+    expect(screen.getByRole('button', { name: '自由浏览' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it.each(['pruned', 'bypassed'])('explains a %s step in native Chat without waiting for nonexistent output', async branch => {
+    fixture.ui.tabs!.push({ id: 'prompts', step_id: 'plan_prompts', label: '每页提示词', layout: 'composite', slots: [{ id: 'prompts', label: '每页提示词', type: 'text' }],
+      skip_reason: '本次选择了快速生成，因此跳过提示词规划，直接生成幻灯片。' });
+    fixture.session.projection!.nodes = { plan_prompts: {
+      execution: 'none', branch, validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable',
+    } };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const tab = await screen.findByRole('tab', { name: /每页提示词/ });
+    expect(tab.querySelector('.workflow-panel__step-status')).toBeNull();
+    fireEvent.click(tab);
+    const panel = screen.getByRole('tabpanel', { name: /每页提示词/ });
+    expect(within(panel).getByText('已跳过')).toBeVisible();
+    expect(within(panel).getByText(/本次选择了快速生成/)).toBeVisible();
+    expect(within(panel).queryByText('正在等待步骤结果…')).not.toBeInTheDocument();
+  });
+
+  it('explains skipped steps with a generic branch reason when the pinned package has no custom reason', async () => {
+    fixture.ui.tabs!.push({ id: 'optional', label: '可选步骤', slots: [] });
+    fixture.session.projection!.nodes = { optional: {
+      execution: 'none', branch: 'pruned', validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable',
+    } };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    fireEvent.click(await screen.findByRole('tab', { name: /可选步骤/ }));
+    expect(within(screen.getByRole('tabpanel', { name: /可选步骤/ })).getByText('本次流程的分支决策跳过了此步骤，无需等待执行结果。')).toBeVisible();
+  });
+
+  it('reveals the full Writer path only after preparation has a committed route', async () => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/writer-workflow/workflow.yaml'), 'utf8')) as object;
+    fixture.ui = hydrateWorkflowUI({ ...spec, source_type: 'builtin' });
+    fixture.session = { ...fixture.session, workflow_id: 'writer-workflow', workflow_mode: 'dynamic',
+      status: 'active', current_step_id: 'prepare', steps: [], slots: [], projection: {
+        display: { status: 'running', reason: 'running', approval_step_id: '' }, current: ['prepare'],
+      } };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: /Preparation/ });
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    // Finishing preparation does not mean its outgoing choice is committed yet.
+    fixture.session = { ...fixture.session, projection: { ...fixture.session.projection, current: [], past: ['prepare'] } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    // Reveal the whole chosen path, including steps with no execution attempt.
+    fixture.session = { ...fixture.session, projection: {
+      ...fixture.session.projection, decided_routes: ['prepare'], pruned: ['write_flat_document'],
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['1Preparation', '2Outline', '3Final Document']);
+    fixture.session = { ...fixture.session, projection: { ...fixture.session.projection, decided_routes: [], pruned: [] } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+  });
+
+  it.each([
+    ['write_document', 'write_flat_document', 'outline', 'draft_document'],
+    ['write_flat_document', 'write_document', 'prepare', 'flat_draft_document'],
+  ])('keeps the future Writer %s stage visible, hides the skipped branch, and shows its own output', async (stepId, otherId, previousId, slotId) => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/writer-workflow/workflow.yaml'), 'utf8')) as object;
+    fixture.ui = hydrateWorkflowUI({ ...spec, source_type: 'builtin' });
+    const resultTab = fixture.ui.tabs!.find(tab => tab.step_id === stepId)!;
+    const otherTab = fixture.ui.tabs!.find(tab => tab.step_id === otherId)!;
+    const base = { validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable' };
+    fixture.session = { ...fixture.session, workflow_id: 'writer-workflow', workflow_mode: 'dynamic',
+      status: 'active', current_step_id: previousId, steps: [], slots: [], projection: {
+        display: { status: 'running', reason: 'running', approval_step_id: '' },
+        decided_routes: ['prepare'],
+        current: [previousId], nodes: {
+          [previousId]: { ...base, execution: 'running', branch: 'active' },
+          [stepId]: { ...base, execution: 'none', branch: 'active' },
+          [otherId]: { ...base, execution: 'none', branch: 'pruned' },
+        },
+      } };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: new RegExp(fixture.ui.tabs!.find(tab => tab.step_id === previousId)!.label), selected: true });
+    expect(screen.getByRole('tab', { name: new RegExp(resultTab.label) })).toBeVisible();
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, current_step_id: stepId, projection: {
+      ...fixture.session.projection, current: [stepId], past: [previousId], nodes: {
+        ...fixture.session.projection!.nodes,
+        [previousId]: { ...base, execution: 'succeeded', branch: 'active' },
+        [stepId]: { ...base, execution: 'running', branch: 'active' },
+      },
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: new RegExp(resultTab.label), selected: true });
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+    expect(screen.queryByText('已跳过')).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, status: 'completed', projection: {
+      ...fixture.session.projection, completed: true, current: [], past: [previousId, stepId],
+      display: { status: 'completed', reason: 'completed', approval_step_id: '' },
+      nodes: { ...fixture.session.projection!.nodes, [stepId]: { ...base, execution: 'succeeded', branch: 'active' } },
+    }, slots: [{ slot_id: slotId, slot: slotId, step_id: stepId, selected: true, revision: 1, artifact_value: { text: '正文' } }] as WorkflowSession['slots'] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    const panel = screen.getByRole('tabpanel', { name: new RegExp(resultTab.label) });
+    expect(within(panel).getByText(`正文 ${slotId}`)).toBeVisible();
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+  });
+
   it('replaces the UI for a new pinned version of the same workflow without displaying the old tabs', async () => {
     fixture.session.pinned_revision_id = 'v1';
     const view = render(<WorkflowPanel conversationId='layout-test' />);
@@ -190,10 +341,13 @@ describe('shared workflow compact layout', () => {
   });
 
   it('preserves a user-selected page when a workflow completes', async () => {
-    fixture.focusedTab = 'prepare';
-    fixture.session.current_step_id = '';
-    render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('tab', { name: '写作准备', selected: true });
+    fixture.session = { ...fixture.session, status: 'active', current_step_id: 'write_document' };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
+    fixture.session = { ...fixture.session, status: 'completed', current_step_id: '' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
   });
 
   it('keeps automatic grids from reintroducing hidden output when every tab is hidden', async () => {
@@ -269,7 +423,7 @@ describe('shared workflow compact layout', () => {
     expect(editor).toBeInTheDocument();
     expect(editor).not.toBeVisible();
     expect(fixture.refresh).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^成稿/ }));
     expect(screen.queryByRole('region', { name: 'plan.json' })).not.toBeInTheDocument();
     expect(editor).toBeVisible();
   });
@@ -427,7 +581,7 @@ describe('shared workflow compact layout', () => {
     expect(fixture.documentAction).toHaveBeenLastCalledWith('document:-1', 'copy', 'markdown');
     fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
     expect(screen.queryByRole('button', { name: '复制内容' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^成稿/ }));
     expect(within(await screen.findByRole('group', { name: '论文初稿' })).getByRole('button', { name: '下载' })).toBeVisible();
     // Revisions of the same document update without accumulating old actions.
     fixture.session = { ...fixture.session, slots: fixture.session.slots!.map(slot => ({ ...slot, revision: 2 })) };
@@ -590,6 +744,124 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByText('正文 notes')).toBeVisible();
   });
 
+  function configureFileAndPreviews() {
+    fixture.ui.tabs = [{
+      id: 'slides', label: '幻灯片', layout: 'composite', slot_scope: 'selected', composite_tab_position: 'left',
+      slots: [
+        { id: 'native_file', label: '演示文件', type: 'file', cardinality: 'single' },
+        { id: 'preview', label: '预览', type: 'text', cardinality: 'list', ordered: true, widget: { widgetType: 'html-slide' } },
+        { id: 'notes', label: '备注', type: 'text', cardinality: 'list', ordered: true },
+      ],
+      composite_layout: { direction: 'column', children: [{ slot: 'native_file' }, { slot: 'preview', weight: 3 }, { slot: 'notes' }] },
+    }];
+    fixture.session.slots = [
+      { slot: 'native_file', slot_id: 'native_file', sort_order: 0, selected: true,
+        artifact_value: { url: '/artifacts/original-editable.pptx', filename: 'original-editable.pptx' } },
+      ...[1, 2, 3, 4].flatMap(sort_order => ['preview', 'notes'].map(slot => ({
+        slot, slot_id: slot, sort_order, list_index: sort_order - 1, selected: true,
+        artifact_value: { text: `${slot}-${sort_order}` },
+      }))),
+    ] as WorkflowSession['slots'];
+  }
+
+  it.each(['native', 'external'])('separates the original file delivery from four actual preview pages on %s surfaces', async surface => {
+    configureFileAndPreviews();
+    const original = JSON.stringify(fixture.session.slots);
+    render(<WorkflowPanel conversationId='layout-test' {...(surface === 'external' ? { embedded: true, resultsOnly: true, externalPresentation: { activities: {} } } : {})} />);
+    const first = await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(first).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-1');
+    expect(screen.getByText('正文 notes')).toHaveAttribute('data-value', 'notes-1');
+    const delivery = screen.getByRole('region', { name: '演示文件' });
+    expect(delivery.closest('.composite-grid--paged')).toBeNull();
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toHaveAttribute('href', '/artifacts/original-editable.pptx');
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toHaveAttribute('download', 'original-editable.pptx');
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-2');
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toBeVisible();
+    expect(JSON.stringify(fixture.session.slots)).toBe(original);
+  });
+
+  it.each([0, undefined])('keeps a file-only result downloadable without inventing a slide (file order=%s)', async sort_order => {
+    configureFileAndPreviews();
+    fixture.session.slots = [{ ...fixture.session.slots![0], sort_order }];
+    render(<WorkflowPanel conversationId='layout-test' />);
+    expect(await screen.findByRole('link', { name: '下载原始文件' })).toHaveAttribute('href', '/artifacts/original-editable.pptx');
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下一张幻灯片' })).not.toBeInTheDocument();
+    expect(screen.queryByText('等待生成结果...')).not.toBeInTheDocument();
+  });
+
+  it('keeps preview selection stable when the original file is published later', async () => {
+    configureFileAndPreviews();
+    const file = fixture.session.slots!.shift()!;
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.queryByRole('region', { name: '演示文件' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    fixture.session.slots!.unshift(file);
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(await screen.findByRole('link', { name: '下载原始文件' })).toBeVisible();
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-2');
+  });
+
+  it('keeps partially published notes pages and their original sort orders', async () => {
+    configureFileAndPreviews();
+    fixture.session.slots = fixture.session.slots!.filter(slot => slot.slot !== 'preview' || slot.sort_order === 1);
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    fireEvent.click(screen.getByRole('listitem', { name: '第 4 行' }));
+    expect(screen.getByText('正文 notes')).toHaveAttribute('data-value', 'notes-4');
+    expect(screen.queryByText('正文 preview')).not.toBeInTheDocument();
+  });
+
+  it('preserves files explicitly declared as repeated page material', async () => {
+    configureFileAndPreviews();
+    fixture.ui.tabs![0].composite_behavior = { repeat_single_slots: ['native_file'] };
+    fixture.session.slots![0].sort_order = 1;
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.queryByRole('region', { name: '演示文件' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByRole('link', { name: '下载原始文件' }).closest('.composite-grid--paged')).not.toBeNull();
+  });
+
+  it('keeps a repeated status visible without giving it a separate media page', async () => {
+    fixture.ui.tabs = [{
+      id: 'enhance_image', label: '增强', layout: 'composite', slot_scope: 'selected',
+      composite_tab_position: 'left',
+      slots: [
+        { id: 'enhancement_status', label: '后处理状态', type: 'json', cardinality: 'single' },
+        { id: 'gif_output', label: '动态 GIF', type: 'image', cardinality: 'list', ordered: true },
+      ],
+      composite_behavior: { repeat_single_slots: ['enhancement_status'] },
+    }];
+    const status = {
+      slot: 'enhancement_status', slot_id: 'enhancement_status', sort_order: 0, selected: true,
+      artifact_value: { data: { status: 'completed' } },
+    } as SlotRevision;
+    fixture.session.slots = [status];
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    expect(await screen.findByText('正文 enhancement_status')).toBeVisible();
+
+    fixture.session.slots = [status, ...[1, 2].map(sortOrder => ({
+      ...status, slot: 'gif_output', slot_id: 'gif_output', sort_order: sortOrder,
+      list_index: sortOrder - 1, artifact_value: { text: `sticker-${sortOrder}` },
+    }))];
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByText('正文 gif_output')).toHaveAttribute('data-value', 'sticker-1');
+    fireEvent.click(screen.getByRole('listitem', { name: '第 2 行' }));
+    expect(screen.getByText('正文 gif_output')).toHaveAttribute('data-value', 'sticker-2');
+    expect(screen.getByText('正文 enhancement_status')).toBeVisible();
+  });
+
   it.each(['preview', 'slide_outline'])('keeps stale %s content visible after an upstream edit', async slot => {
     fixture.session.workflow_id = 'ppt-workflow';
     fixture.ui.tabs = [{
@@ -609,6 +881,54 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByText('上游内容已修改，当前显示旧版本；重新生成后才会反映最新修改。')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
     expect(screen.getByText(`正文 ${slot}`)).toHaveAttribute('data-value', 'saved-1');
+  });
+
+  it.each(['succeeded', 'failed'])('keeps saved slides visible while retrying a %s slide step', async status => {
+    const generateStep = { ...fixture.session.steps![0], step_id: 'generate_ppt', status };
+    const slots = [1, 2, 3].flatMap(sort_order => ['preview_html', 'preview_notes'].map(slot => ({
+      slot, slot_id: slot, list_index: sort_order - 1, sort_order, step_id: 'generate_ppt',
+      selected: true, revision: 1, created_at: '', artifact_value: { text: `${slot}-${sort_order}` },
+    })));
+    fixture.session = {
+      ...fixture.session, workflow_id: 'ppt-workflow', status: status === 'succeeded' ? 'completed' : 'failed',
+      current_step_id: 'generate_ppt', steps: [generateStep], slots,
+    };
+    fixture.ui.tabs = [{
+      id: 'composite_preview', step_id: 'generate_ppt', label: '幻灯片', layout: 'composite',
+      composite_tab_position: 'left', composite_behavior: { empty_column_scope: 'selected' },
+      slots: [{ id: 'preview_html', label: '幻灯片', type: 'text' }, { id: 'preview_notes', label: '讲稿', type: 'text' }],
+      composite_layout: { direction: 'column', children: [{ slot: 'preview_html' }, { slot: 'preview_notes' }] },
+    }];
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 3 行' });
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-value', 'preview_html-2');
+
+    const retry = { ...generateStep, attempt: 2, status: 'running' };
+    fixture.session = {
+      ...fixture.session, status: 'active',
+      steps: [retry, { ...generateStep, validity: 'stale' }], slots: [],
+    };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('listitem', { name: '第 3 行' })).toBeVisible();
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-readonly', 'true');
+    expect(screen.getByText('正文 preview_notes')).toHaveAttribute('data-value', 'preview_notes-2');
+
+    const updated = slots.map(slot => slot.sort_order === 2
+      ? { ...slot, revision: 2, artifact_value: { text: `updated-${slot.slot}` } } : slot);
+    fixture.session = { ...fixture.session, slots: updated.filter(slot => slot.sort_order === 2) };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-value', 'updated-preview_html');
+    expect(screen.getByRole('listitem', { name: '第 3 行' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-value', 'preview_html-3');
+
+    fixture.session = {
+      ...fixture.session, status: 'completed', steps: [{ ...retry, status: 'succeeded' }], slots: updated,
+    };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByText('正文 preview_html')).toHaveAttribute('data-readonly', 'false');
   });
 
   it('keeps non-PPT selected-only composite visibility unchanged', async () => {
@@ -860,6 +1180,7 @@ describe('shared workflow compact layout', () => {
   });
 
   it('shows a successful dynamic yield without failed or approval controls', async () => {
+    fixture.session.workflow_mode = 'dynamic';
     fixture.session.status = 'waiting';
     fixture.session.projection!.display = { status: 'waiting', reason: 'next_step_required', approval_step_id: '' };
     fixture.session.projection!.current = [];
@@ -867,9 +1188,15 @@ describe('shared workflow compact layout', () => {
     fixture.session.projection!.nodes = { write_document: {
       execution: 'succeeded', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '',
     } };
-    render(<WorkflowPanel conversationId='layout-test' onSendMessage={vi.fn()} />);
+    const send = vi.fn(async () => true);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
     await screen.findByRole('tab', { name: '成稿' });
     expect(screen.getByText('等待下一步')).toBeInTheDocument();
+    const proceed = screen.getByRole('button', { name: '继续' });
+    expect(proceed).toBeEnabled();
+    await act(async () => fireEvent.click(proceed));
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('继续', undefined);
     expect(screen.queryByText('执行失败')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
@@ -901,6 +1228,63 @@ describe('shared workflow compact layout', () => {
     // A refused Chat request must not optimistically start the workflow.
     expect(retry).toBeEnabled();
     expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+  });
+
+  it.each(['paused', 'failed'] as const)('classifies step interruptions from the authoritative %s display state', async status => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status, reason: status === 'paused' ? 'user_stopped' : 'interrupted', approval_step_id: '' };
+    fixture.session.steps![1].status = 'interrupted';
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    const tab = await screen.findByRole('tab', { name: /成稿/ });
+    expect(tab.querySelector(`.workflow-panel__step-status--${status}`)).toHaveAttribute('title', status === 'paused' ? '已暂停' : '已失败');
+    expect(view.container.querySelector('.workflow-panel__step-status--interrupted')).not.toBeInTheDocument();
+  });
+
+  it('explains an external startup failure and retries through the original Chat executor', async () => {
+    fixture.session.status = 'active';
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.steps = [];
+    fixture.session.slots = [];
+    fixture.session.projection!.display = { status: 'failed', reason: 'execution_not_started', approval_step_id: '' };
+    const send = vi.fn(async () => false);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const retry = await screen.findByRole('button', { name: '重试' });
+    expect(screen.getByText('启动失败')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('本轮回复已结束，但工作流未能启动。可点击“重试”继续原工作流。');
+    expect(screen.queryByText('等待下一步')).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(retry));
+    // The external executor resumes this session; native control rejects it.
+    expect(send).toHaveBeenCalledWith('重试');
+    expect(retry).toBeEnabled();
+  });
+
+  it('keeps external retry disabled while another Chat turn is running', async () => {
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.projection!.display = { status: 'failed', reason: 'external_driver_failed', approval_step_id: '' };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} chatBusy />);
+    const retry = await screen.findByRole('button', { name: '重试' });
+    expect(screen.getByRole('alert')).toHaveTextContent('执行未能继续，工作流尚未完成。已有内容已保留，可点击“重试”继续。');
+    expect(retry).toBeDisabled();
+    fireEvent.click(retry);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('resumes a stopped external driver through Chat without a native control command', async () => {
+    fixture.session.status = 'active';
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.steps = [];
+    fixture.session.slots = [];
+    fixture.session.projection = {
+      current: [], past: [], ready: ['prepare'],
+      display: { status: 'paused', reason: 'user_stopped', approval_step_id: '' },
+    };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const resume = await screen.findByRole('button', { name: '继续' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(resume));
+    expect(send).toHaveBeenCalledWith('继续');
   });
 
   it('offers retry after pausing a parallel run with an already failed branch', async () => {
@@ -1082,6 +1466,10 @@ describe('external workflow surface boundary', () => {
       } as WorkflowControlView;
       const view = render(<WorkflowPanel conversationId='layout-test' />);
       await screen.findByRole('button', { name: '发布' });
+      if (interrupted) {
+        expect(view.container.querySelector('.workflow-panel__step-status--paused')).toHaveAttribute('title', '已暂停');
+        expect(view.container.querySelector('.workflow-panel__step-status--interrupted')).not.toBeInTheDocument();
+      }
       const footerButtons = () => within(screen.getByRole('group', { name: '工作流会话操作' }))
         .getAllByRole('button').map(button => ({ label: button.textContent, disabled: (button as HTMLButtonElement).disabled }));
       const native = footerButtons();
@@ -1139,6 +1527,33 @@ describe('external workflow surface boundary', () => {
       await act(async () => finishStop());
     },
   );
+
+  it.each([false, true])('offers idle external continuation and rechecks execution before sending with advanced=%s', async advanced => {
+    fixture.session.status = 'active';
+    fixture.session.steps?.forEach(step => Reflect.deleteProperty(step, 'id'));
+    fixture.session.projection = { display: { status: 'running', reason: 'preparing', approval_step_id: '' },
+      past: ['prepare', 'write_document'], current: [], ready: ['finish'], nodes: {
+        write_document: { execution: 'succeeded', validity: 'effective', requires_approval: false,
+          reachability: 'reachable', readiness: 'not_applicable', branch: 'active' },
+      } };
+    const control: WorkflowControlView = {
+      protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 8,
+      continuation: 'continue', reviews: [], active_executions: 0, active_execution_ids: [],
+      binding: { bound: true }, admission: { can_begin: true }, available_actions: ['continue'],
+      delivery: { id: 'finished', kind: 'continue', status: 'accepted', execution_id: 'pss-completed' },
+    };
+    const execute = vi.fn(async () => {});
+    render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={panelAdapter(control, execute)} />);
+    await screen.findByText('正文 document');
+    const button = await screen.findByRole('button', { name: '继续' });
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute('title', '继续');
+    if (advanced) fixture.refresh.mockImplementationOnce(async () => { control.active_executions = 1; });
+    await act(async () => fireEvent.click(button));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    if (advanced) expect(execute).not.toHaveBeenCalled();
+    else expect(execute).toHaveBeenCalledWith({ kind: 'continue' });
+  });
 
   it('uses the native running footer and routes stop without saving editors', async () => {
     fixture.session.status = 'active';
@@ -1256,6 +1671,21 @@ describe('external workflow surface boundary', () => {
 
 
 describe('external presentation opt-in', () => {
+  it('keeps conversation results on persisted artifacts even when execution and developer activity are available', async () => {
+    fixture.session.status = 'active';
+    fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };
+    fixture.ui.tabs![0].slots = [{ id: 'internal_prompt', label: '生成提示词', type: 'text', user_visible: false }];
+    fixture.session.slots!.push({ ...fixture.session.slots![0], slot_id: 'internal_prompt', slot: 'internal_prompt', step_id: 'prepare' });
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    setDeveloperModeActive(true);
+    render(<WorkflowPanel conversationId='layout-test' resultsOnly externalPresentation={{ activities: {
+      task: { kind: 'tool', tool: 'search', artifacts: [{ slot: 'document', content_type: 'text', seq: 2, value: { text: 'provisional' } }] },
+    } }} />);
+    expect(await screen.findByText('正文 document')).toHaveAttribute('data-value', '正文');
+    expect(screen.queryByText('正文 internal_prompt')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在调用工具：search')).not.toBeInTheDocument();
+    expect(screen.queryByText('生成中预览')).not.toBeInTheDocument();
+  });
   it('shows activity and readonly previews only for the external surface, without changing stored artifacts', async () => {
     fixture.session.status = 'active';
     fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };
@@ -1402,12 +1832,121 @@ it('keeps saved output visible after execution fails and retries through externa
 });
 
 describe('workflow follow and session presentation', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   function enableFollowing() {
     fixture.ui = { ...fixture.ui, source_type: 'builtin', follow_mode: { default: 'following' } };
     fixture.session = { ...fixture.session, status: 'active', current_step_id: 'prepare', steps: [], projection: undefined };
   }
   const following = () => screen.getByRole('button', { name: '跟随进度' });
   const browsing = () => screen.getByRole('button', { name: '自由浏览' });
+
+  it('points the browse marker at the completed retry instead of an earlier step', async () => {
+    fixture.ui.follow_mode = { default: 'following' };
+    fixture.session.current_step_id = '';
+    fixture.session.steps = [
+      { ...fixture.session.steps![0], updated_at: '2026-11-06T09:52:38Z' },
+      { ...fixture.session.steps![1], status: 'interrupted', validity: 'stale', updated_at: '2026-11-06T10:11:14Z' },
+      { ...fixture.session.steps![1], id: 'retry', attempt: 2, updated_at: '2026-11-06T10:15:33Z' },
+    ];
+    fixture.session.projection = { completed: true, stale: ['write_document'], nodes: {
+      prepare: { execution: 'succeeded', validity: 'effective', branch: 'active', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable' },
+      write_document: { execution: 'succeeded', validity: 'effective', branch: 'active', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable' },
+    } };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    const earlier = screen.getByRole('tab', { name: '写作准备' });
+    fireEvent.click(earlier);
+    expect(within(screen.getByRole('tab', { name: /成稿.*当前/ })).getByLabelText('当前')).toBeVisible();
+    expect(within(earlier).queryByLabelText('当前')).not.toBeInTheDocument();
+  });
+
+  it('follows and browses the academic research workflow without a viewing mode in its revision', async () => {
+    const workflowId = 'academic_research_pipeline';
+    const spec = load(readFileSync(resolve(process.cwd(), `../workflows/${workflowId}/workflow.yaml`), 'utf8')) as object;
+    fixture.ui = hydrateWorkflowUI({ ...spec, source_type: 'builtin' });
+    fixture.session = { ...fixture.session, workflow_id: workflowId, pinned_revision_id: 'published-revision',
+      status: 'active', current_step_id: 'build_paper_outline', projection: undefined, steps: [], slots: [] };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '大纲生成', selected: true });
+    expect(following()).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('tab', { name: '研究设计' }));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    fixture.session = { ...fixture.session, current_step_id: 'write_paper_draft' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByRole('tab', { name: '研究设计', selected: true })).toBeVisible();
+
+    fireEvent.click(following());
+    await screen.findByRole('tab', { name: '全文生成', selected: true });
+    expect(following()).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('explains each explicit mode change without notifying on mount or repeated selection', async () => {
+    enableFollowing();
+    const notice = vi.spyOn(message, 'info');
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('button', { name: '跟随进度' });
+    expect(notice).not.toHaveBeenCalled();
+    fireEvent.click(following());
+    await waitFor(() => expect(following()).toBeEnabled());
+    expect(notice).not.toHaveBeenCalled();
+    fireEvent.click(browsing());
+    expect(await screen.findByText('已切换为自由浏览，可手动查看各步骤，页面不再随进度自动跳转。')).toBeVisible();
+    expect(notice).toHaveBeenCalledTimes(1);
+    fireEvent.click(browsing());
+    expect(notice).toHaveBeenCalledTimes(1);
+    fireEvent.click(following());
+    await waitFor(() => expect(following()).toHaveAttribute('aria-pressed', 'true'));
+    expect(await screen.findByText('已切换为跟随进度，页面将自动跟随工作流当前步骤。')).toBeVisible();
+    expect(notice).toHaveBeenCalledTimes(2);
+    fireEvent.click(following());
+    await waitFor(() => expect(following()).toBeEnabled());
+    expect(notice).toHaveBeenCalledTimes(2);
+  });
+
+  it('resumes following a failed retry even when its previous attempt is stale', async () => {
+    enableFollowing();
+    fixture.session = { ...fixture.session, status: 'failed', current_step_id: '', slots: [],
+      steps: [
+        { id: 'old', session_id: 'layout-test', step_id: 'write_document', attempt: 1, task_id: '',
+          status: 'failed', validity: 'stale', created_at: '2026-09-16T00:00:00Z', updated_at: '' },
+        { id: 'retry', session_id: 'layout-test', step_id: 'write_document', attempt: 2, task_id: '',
+          status: 'failed', validity: 'effective', created_at: '2026-09-16T00:01:00Z', updated_at: '' },
+      ],
+      projection: { current: ['write_document'], stale: ['write_document'], nodes: {
+        write_document: { execution: 'failed', validity: 'effective', branch: 'active',
+          requires_approval: false, reachability: 'reachable', readiness: 'not_applicable' },
+      } },
+    };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('button', { name: '跟随进度' });
+    fireEvent.click(screen.getByRole('tab', { name: /写作准备/ }));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(following());
+    await waitFor(() => expect(screen.getByRole('tab', { name: /成稿/ })).toHaveAttribute('aria-selected', 'true'));
+    expect(following()).toHaveAttribute('aria-pressed', 'true');
+    expect(send).not.toHaveBeenCalled();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+  });
+
+  it('shows the retried step on the first render with the new runtime position', async () => {
+    enableFollowing();
+    fixture.ui.tabs!.splice(1, 0, { id: 'outline', step_id: 'write_outline', label: '大纲', slots: [] });
+    const selectedTab = vi.fn();
+    function Host({ retried }: { retried: boolean }) {
+      useLayoutEffect(() => {
+        if (retried) selectedTab(screen.getByRole('tab', { selected: true }).textContent);
+      }, [retried]);
+      return <WorkflowPanel conversationId='layout-test' />;
+    }
+    const view = render(<Host retried={false} />);
+    await screen.findByRole('tab', { name: '写作准备', selected: true });
+    fixture.session = { ...fixture.session, current_step_id: 'write_outline' };
+    view.rerender(<Host retried />);
+    expect(selectedTab).toHaveBeenCalledWith(expect.stringContaining('大纲'));
+  });
 
   it('freezes the current tab before any manual tab selection and resumes without execution', async () => {
     enableFollowing();
@@ -1448,6 +1987,7 @@ describe('workflow follow and session presentation', () => {
   });
 
   it('enters browse for editing and history and protects edits when resume saving fails', async () => {
+    const notice = vi.spyOn(message, 'info');
     enableFollowing();
     fixture.session.current_step_id = 'write_document';
     const view = render(<WorkflowPanel conversationId='layout-test' />);
@@ -1462,8 +2002,11 @@ describe('workflow follow and session presentation', () => {
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     fixture.flush.mockResolvedValue(false);
     fixture.flush.mockClear();
+    notice.mockClear();
     fireEvent.click(following());
     await waitFor(() => expect(fixture.flush).toHaveBeenCalledOnce());
+    expect(await screen.findByText('保存未完成，请保存成功后再恢复跟随。')).toBeVisible();
+    expect(notice).not.toHaveBeenCalled();
     expect(browsing()).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('tab', { name: '成稿', selected: true })).toBeVisible();
     fixture.flush.mockResolvedValue(true);
@@ -1472,17 +2015,20 @@ describe('workflow follow and session presentation', () => {
   });
 
   it('ignores a late save after the user browses elsewhere or changes workflow runs', async () => {
+    const notice = vi.spyOn(message, 'info');
     enableFollowing();
     fixture.session.current_step_id = 'write_document';
     const view = render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('button', { name: '自由浏览' });
     fireEvent.click(browsing());
+    notice.mockClear();
     let complete!: (saved: boolean) => void;
     fixture.flush.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
     fireEvent.click(following());
     expect(following()).toBeDisabled();
     fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
     await act(async () => complete(true));
+    expect(notice).not.toHaveBeenCalled();
     expect(browsing()).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
     expect(following()).toBeEnabled();
@@ -1492,7 +2038,9 @@ describe('workflow follow and session presentation', () => {
     fixture.session = { ...fixture.session, session_id: 'next-run', current_step_id: 'prepare' };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     fireEvent.click(await screen.findByRole('button', { name: '自由浏览' }));
+    notice.mockClear();
     await act(async () => complete(true));
+    expect(notice).not.toHaveBeenCalled();
     expect(browsing()).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
     expect(following()).toBeEnabled();
@@ -1527,7 +2075,7 @@ describe('workflow follow and session presentation', () => {
     fixture.session.status = 'active';
     let view = render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('button', { name: '缩小工作流面板' });
-    expect(screen.queryByRole('button', { name: '跟随进度' })).not.toBeInTheDocument();
+    expect(following()).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: '缩小工作流面板' }));
     fixture.session = { ...fixture.session, status: 'completed' };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
@@ -1561,6 +2109,15 @@ it.each(['research_topic', 'refine_topic', 'literature_review', 'experiment', 'd
     useTaskCenterStore.getState().upsertTask('layout-test', { task_id: 'owner', status: 'running', artifact_streams: [preview] });
     const view = render(<WorkflowPanel conversationId='layout-test' />);
     await waitFor(() => expect(screen.getByTestId('live-preview')).toHaveTextContent('已经返回的完整预览'));
+    if (stepId === 'data_analysis') {
+      expect(await screen.findByText('正在分析数据', { selector: '[role="status"]' })).toBeVisible();
+      expect(fixture.getPaperProgress).toHaveBeenCalledOnce();
+      expect(fixture.getPaperProgress).toHaveBeenCalledWith(
+        expect.stringContaining('/api/chat/paper-f4/tasks/owner/progress'), expect.any(Object));
+      expect(fixture.openPaperProgress).toHaveBeenCalledOnce();
+      expect(fixture.openPaperProgress).toHaveBeenCalledWith(
+        expect.stringContaining('/api/chat/paper-f4/tasks/owner/progress?stream=1'));
+    }
     fixture.session.steps![0].status = 'succeeded';
     fixture.session.slots = [{ ...fixture.session.slots![0], revision: 2, attempt: 2,
       producer_attempt_id: 'current-attempt', artifact_value: { text: '完整正式文档' } }];
@@ -1568,6 +2125,8 @@ it.each(['research_topic', 'refine_topic', 'literature_review', 'experiment', 'd
     await waitFor(() => expect(screen.queryByTestId('live-preview')).not.toBeInTheDocument());
     expect(view.container.querySelector('article[data-value="完整正式文档"]')).toBeInTheDocument();
     expect(fixture.refresh).not.toHaveBeenCalled();
+    view.unmount();
+    if (stepId === 'data_analysis') expect(fixture.closePaperProgress).toHaveBeenCalledOnce();
   },
 );
 
@@ -1667,4 +2226,46 @@ it('does not approve obsolete results when saving edits invalidates the checkpoi
   expect(await screen.findByText('等待重新生成')).toBeVisible();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新生成' })));
   expect(send).toHaveBeenCalledWith('继续', { session_id: 'layout-test', kind: 'continue', expected_state_version: 1 });
+});
+
+
+it.each([false, true])('shows the scientific plan, code and error instead of tool rows (external=%s)', async external => {
+  fixture.ui = { tabs: [{ id: 'data_analysis', step_id: 'data_analysis', label: '数据分析', layout: 'list', slots: [] }] };
+  fixture.session = { ...fixture.session, workflow_id: 'paper-writing', status: 'active', current_step_id: 'data_analysis',
+    projection: { current: ['data_analysis'] }, slots: [],
+    steps: [{ id: 'analysis-attempt', session_id: 'layout-test', step_id: 'data_analysis', task_id: 'owner',
+      attempt: 2, status: 'running', created_at: '', updated_at: '' }] };
+  const base = { order: 1, started_at: null, finished_at: null, elapsed_ms: null };
+  fixture.getPaperProgress.mockResolvedValue({ data: { task_id: 'owner', execution_id: 'agent-run', revision: 10,
+    status: 'failed', process_steps: [
+      { ...base, step_id: 'f4-agent-1', title: '分析方案 · 第 1 次', status: 'succeeded', summary: '比较真实样本的平均得分。' },
+      { ...base, step_id: 'f4-agent-2', title: '统计代码 · 第 1 次', status: 'succeeded',
+        output: { text: 'def analyze(tables, plan, rng): return missing_value', format: 'python', mode: 'complete', estimated_tokens: 12 } },
+      { ...base, step_id: 'f4-agent-3', title: '统计执行与结果校验 · 第 1 次', status: 'failed', summary: 'NameError: missing_value' },
+    ], timing: { started_at: null, finished_at: null, measured_at: '' } } });
+  useTaskCenterStore.getState().upsertTask('layout-test', { task_id: 'owner', status: 'running', execution_log: [
+    { type: 'tool_calls', content: '', tool_calls: [{ id: 'analysis', name: 'paper_analyze', args: {} }] }] });
+  render(<WorkflowPanel conversationId='layout-test' controlAdapter={external ? { execute: vi.fn() } : undefined} />);
+  expect(await screen.findByText('本次分析未完成', { selector: '[role="status"]' })).toBeVisible();
+  fireEvent.click(screen.getByText('查看执行记录'));
+  expect(screen.getByText('比较真实样本的平均得分。')).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('NameError: missing_value');
+  expect(screen.getByText('查看本轮代码')).toBeVisible();
+  expect(screen.getByText('def analyze(tables, plan, rng): return missing_value')).toBeInTheDocument();
+  expect(screen.queryByText('paper_analyze')).not.toBeInTheDocument();
+  expect(screen.queryByText(/次工具调用/)).not.toBeInTheDocument();
+});
+
+it('places the analysis empty state outside the narrow timeline marker column', async () => {
+  fixture.ui = { tabs: [{ id: 'data_analysis', step_id: 'data_analysis', label: '数据分析', layout: 'list', slots: [] }] };
+  fixture.session = { ...fixture.session, workflow_id: 'paper-writing', status: 'active', current_step_id: 'data_analysis',
+    projection: { current: ['data_analysis'] }, slots: [],
+    steps: [{ id: 'analysis-attempt', session_id: 'layout-test', step_id: 'data_analysis', task_id: 'owner',
+      attempt: 1, status: 'running', created_at: '', updated_at: '' }] };
+  fixture.getPaperProgress.mockResolvedValue({ data: { task_id: 'owner', execution_id: 'pending', revision: 0,
+    status: 'running', process_steps: [], timing: { started_at: null, finished_at: null, measured_at: '' } } });
+  render(<WorkflowPanel conversationId='layout-test' />);
+  const empty = await screen.findByText('当前任务尚无可展示的执行记录。');
+  expect(empty.tagName).toBe('P');
+  expect(empty.closest('li')).toBeNull();
 });

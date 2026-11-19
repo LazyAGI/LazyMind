@@ -27,7 +27,9 @@ vi.mock('react-i18next', async importOriginal => ({
         'channelGateway.feishu.accountsEmpty': '暂无已连接的飞书账号',
         'channelGateway.wechat.accountStatusMap.connected': '已连接',
         'channelGateway.wechat.accountStatusMap.pendingActivation': '待激活',
-        'notifications.wecomAuthorizationExpired': '待授权',
+        'notifications.connected': '已连接',
+        'notifications.pendingActivation': '待激活',
+        'notifications.notAuthorized': '未授权',
         'notifications.wecomRepairAuthorization': '处理授权',
         'channelGateway.wechat.runtimeStatusMap.running': '运行中',
       };
@@ -201,9 +203,21 @@ it('shows WeCom awaiting authorization and opens management instead of creating 
   const count = await screen.findByRole('button', { name: /0 个已连接/ });
   fireEvent.click(screen.getByRole('tab', { name: '企业微信' }));
   fireEvent.click(count);
-  expect(await screen.findByText(/待授权/)).toBeInTheDocument();
+  expect(await screen.findByText(/未授权/)).toBeInTheDocument();
   const previousScans = mocks.startScan.mock.calls.length;
   fireEvent.click(screen.getByRole('button', { name: '处理授权' }));
   expect(onManage).toHaveBeenCalledTimes(1);
   expect(mocks.startScan).toHaveBeenCalledTimes(previousScans);
+});
+
+it('keeps an expired WeChat login visible with reconnect guidance', async () => {
+  mocks.listChannelAccounts.mockImplementation(async (provider: string) => ({ items: provider === 'wechat' ? [{
+    id: 'expired-login', provider: 'wechat', label: 'Expired account', status: 'connected',
+    runtime_status: 'running', updated_at: '2026-11-03', capabilities: { connection_error_code: 'WECHAT_REAUTHORIZATION_REQUIRED' },
+  }] : [] }));
+  render(<TerminalConnectionQuickPanel onManage={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: /0 个已连接/ }));
+  expect(await screen.findByText('Expired account')).toBeInTheDocument();
+  expect(screen.getByText(/notifications.notConnected/)).toBeInTheDocument();
+  expect(screen.getByText('notifications.wechatReconnectHint')).toBeInTheDocument();
 });

@@ -127,12 +127,14 @@ def extract_paper(paper, request):
                                       'columns': t['table']['columns']} for t in tables]}, ensure_ascii=False)
         )
         from .research_topic import _prompt_token_limit
+        from .model_response import normalize_response
         from lazymind.common.token_estimation import estimate_tokens
         if estimate_tokens(prompt) > _prompt_token_limit():
             raise MissingMaterials('附件超过当前提取预算，请拆分材料；未截断或导入全文。')
         writer = WriterToolBase(llm=AutoModel(model='llm'))
         model = writer._build_structured_llm(writer._structured_output_prompt(EvidenceSelection), apply_formatter=False)
-        selection = EvidenceSelection.model_validate(writer._parse_structured_response(model(prompt), EvidenceSelection))
+        response = normalize_response(model(prompt)).body
+        selection = EvidenceSelection.model_validate(writer._parse_structured_response(response, EvidenceSelection))
         if review_role != 'background' and selection.review_role is not None:
             review_role = selection.review_role
         invalid = any(i < 0 or i >= len(blocks) for i in selection.blocks)
@@ -192,6 +194,26 @@ def sync_attachments(pool, history, request, *, read_papers):
                      paper_source_ids(papers))
     pool['imported_attachments'] = sorted(set(pool.get('imported_attachments', [])).union(imported))
     return bool(imported)
+
+
+def sync_bound_materials(pool, paths, request):
+    """Import Runtime-bound research files through the same evidence/table extractor."""
+    from .entry import read_manuscript
+
+    paths = [paths] if isinstance(paths, str) else paths
+    if not isinstance(paths, list) or not paths or any(not isinstance(path, str) for path in paths):
+        raise ValueError('research_materials 必须是已绑定的研究附件路径列表')
+    papers = {}
+    for path in paths:
+        text = read_manuscript(path)
+        name = Path(path).name
+        digest = text_digest(text)
+        # Attempt workspaces change on retry; source identity follows the source content.
+        key = f'bound:{digest}:{name}'
+        papers[key] = {'id': f'upload-{digest}', 'title': Path(name).stem, 'filename': name,
+                       'text': text, 'attachment_key': text_digest(key), 'review_role': 'background'}
+    return sync_attachments(pool, {'0': list(papers)}, request,
+                            read_papers=lambda history: [papers[key] for keys in history.values() for key in keys])
 
 
 def read_tabular(path):

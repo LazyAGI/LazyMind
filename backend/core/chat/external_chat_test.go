@@ -890,7 +890,7 @@ func TestExternalChatRewritesHostLocalWorkflowArtifactLink(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	message := externalChatEvent{EventID: "artifact-message", Type: "message", Text: "[下载原图](/Users/agent/workspace/kitten.png)"}
+	message := externalChatEvent{EventID: "artifact-message", Type: "message", Text: "[下载原图](/Users/agent/workspace/kitten.png) [相对路径](output/kitten.png) [远程](https://example.com/kitten.png)"}
 	if _, err := app.appendEvent(context.Background(), "user-1", job.RunID, "host-1", job.LeaseToken, message); err != nil {
 		t.Fatal(err)
 	}
@@ -902,13 +902,14 @@ func TestExternalChatRewritesHostLocalWorkflowArtifactLink(t *testing.T) {
 	if err := db.First(&history, "id = ?", job.HistoryID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(history.Result, "/Users/") || !strings.Contains(history.Result, "/static-files/workflow-artifacts/") {
+	if strings.Contains(history.Result, "/Users/") || strings.Contains(history.Result, "output/kitten.png") ||
+		strings.Count(history.Result, "/static-files/workflow-artifacts/") != 2 || !strings.Contains(history.Result, "https://example.com/kitten.png") {
 		t.Fatalf("history did not use LazyMind artifact reference: %s", history.Result)
 	}
 }
 
 func TestExternalAgentPromptContainsOnlyTheCurrentUserMessage(t *testing.T) {
-	if prompt := externalAgentPrompt("  make an image  "); prompt != "make an image" {
+	if prompt := externalAgentPrompt("  make an image  ", nil); prompt != "make an image" {
 		t.Fatalf("prompt=%q", prompt)
 	}
 }

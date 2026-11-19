@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { Modal, type ModalFuncProps } from 'antd';
+import { message, Modal, type ModalFuncProps } from 'antd';
+import { CHANNEL_ACCOUNTS_CHANGED_EVENT } from '@/modules/channelGateway/api';
 import { TerminalConnectionPage } from '@/modules/channelGateway';
 
 const mocks = vi.hoisted(() => ({ accounts: vi.fn(), create: vi.fn(), detail: vi.fn(), refs: vi.fn(),
@@ -15,7 +16,7 @@ vi.mock('@/modules/channelGateway/api', async importOriginal => ({
 vi.mock('./api', async importOriginal => ({ ...await importOriginal<typeof import('./api')>(),
   getAccountDetail: mocks.detail, getReferences: mocks.refs }));
 vi.mock('react-i18next', async importOriginal => {
-  const t = (key: string) => key;
+  const t = (key: string, values?: { count?: number }) => key === 'notifications.enabledCount' ? `${values?.count} accounts` : key;
   return { ...await importOriginal<typeof import('react-i18next')>(), useTranslation: () => ({ t }) };
 });
 
@@ -60,6 +61,55 @@ it('reconnect restores the selected paused robot without a QR registration', asy
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
   await waitFor(() => expect(mocks.resume).toHaveBeenCalledWith(original.id, { silentError: true }));
   expect(mocks.create).not.toHaveBeenCalled();
+});
+
+it.each(['feishu', 'wechat', 'wecom'] as const)('waits for %s runtime readiness before reporting reconnect success', async provider => {
+  const success = vi.spyOn(message, 'success').mockImplementation(() => undefined as never);
+  const info = vi.spyOn(message, 'info').mockImplementation(() => undefined as never);
+  let row = { ...original, provider, status: 'disconnected', runtime_status: 'stopped' };
+  mocks.accounts.mockImplementation((p: string) => Promise.resolve({ items: p === provider ? [row] : [] }));
+  mocks.detail.mockImplementation(() => Promise.resolve({ ...row, notification_reference_count: 0 }));
+  mocks.resume.mockImplementation(() => {
+    row = { ...row, status: 'connected', runtime_status: 'starting' };
+    return Promise.resolve(row);
+  });
+  render(<MemoryRouter><TerminalConnectionPage initialProvider={provider} /></MemoryRouter>);
+  await expand();
+  fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
+  await waitFor(() => expect(info).toHaveBeenCalledWith('notifications.connectingHint'));
+  expect(success).not.toHaveBeenCalled();
+  expect(document.querySelector('.notification-connection-count')).toHaveTextContent('0 accounts');
+  expect(screen.getAllByText('notifications.connecting').length).toBeGreaterThan(0);
+
+  row = { ...row, runtime_status: 'running' };
+  act(() => { window.dispatchEvent(new Event(CHANNEL_ACCOUNTS_CHANGED_EVENT)); });
+  await waitFor(() => expect(success).toHaveBeenCalledWith('notifications.connected'));
+  expect(document.querySelector('.notification-connection-count')).toHaveTextContent('1 accounts');
+  act(() => { window.dispatchEvent(new Event(CHANNEL_ACCOUNTS_CHANGED_EVENT)); });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.disconnect' })).toBeVisible());
+  expect(success).toHaveBeenCalledTimes(1);
+});
+
+it.each(['feishu', 'wechat', 'wecom'] as const)('never reports success when %s reconnect starts then fails', async provider => {
+  const success = vi.spyOn(message, 'success').mockImplementation(() => undefined as never);
+  vi.spyOn(message, 'info').mockImplementation(() => undefined as never);
+  const error = vi.spyOn(message, 'error').mockImplementation(() => undefined as never);
+  let row = { ...original, provider, status: 'disconnected', runtime_status: 'stopped' };
+  mocks.accounts.mockImplementation((p: string) => Promise.resolve({ items: p === provider ? [row] : [] }));
+  mocks.detail.mockImplementation(() => Promise.resolve({ ...row, notification_reference_count: 0 }));
+  mocks.resume.mockImplementation(() => {
+    row = { ...row, status: 'connected', runtime_status: 'starting' };
+    return Promise.resolve(row);
+  });
+  render(<MemoryRouter><TerminalConnectionPage initialProvider={provider} /></MemoryRouter>);
+  await expand();
+  fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
+  await waitFor(() => expect(screen.getAllByText('notifications.connecting').length).toBeGreaterThan(0));
+  row = { ...row, runtime_status: 'failed' };
+  act(() => { window.dispatchEvent(new Event(CHANNEL_ACCOUNTS_CHANGED_EVENT)); });
+  await waitFor(() => expect(error).toHaveBeenCalledWith('notifications.connectionFailed'));
+  expect(success).not.toHaveBeenCalled();
+  expect(document.querySelector('.notification-connection-count')).toHaveTextContent('0 accounts');
 });
 
 it('a paused account only exposes reconnect in its card footer', async () => {
@@ -123,13 +173,22 @@ it('connected account cards only expose disconnect even when a return callback e
 
 it('missing credentials offer original-robot reauthorization after resume fails', async () => {
   mocks.resume.mockRejectedValueOnce({ response: { data: { error: { code: 'FEISHU_REAUTHORIZATION_REQUIRED' } } } });
+  // Keep reauthorization pending until its UI and original-account request are observed.
+  let finishReauthorization!: () => void;
+  mocks.create.mockImplementationOnce(() => new Promise(resolve => {
+    finishReauthorization = () => resolve({ id: 'reauthorized-session', provider: 'feishu', mode: 'qr_code',
+      status: 'connected', account: original, allowed_actions: [] });
+  }));
   mount('disconnected'); await expand();
-  fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
+  const reconnect = await screen.findByRole('button', { name: 'notifications.reconnect' });
+  await act(async () => { fireEvent.click(reconnect); });
   await screen.findByText('notifications.reconnectPlatform');
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({
     accountId: original.id, reauthorize: true,
   })));
   expect(mocks.unbind).not.toHaveBeenCalled();
+  await act(async () => { finishReauthorization(); });
+  expect(screen.queryByText('notifications.reconnectPlatform')).not.toBeInTheDocument();
 });
 
 it('an unbound account can reauthorize the original robot without creating another app', async () => {

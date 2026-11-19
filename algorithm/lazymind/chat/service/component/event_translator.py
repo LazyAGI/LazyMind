@@ -5,6 +5,8 @@ import copy
 import re
 import time
 from typing import Any, Optional
+from lazyllm.tools.agent.functionCall import _tool_result_observation
+from lazymind.chat.engine.agent_runtime.message_fields import canonical_history_message
 
 from lazymind.config import config as _cfg
 from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
@@ -130,6 +132,7 @@ class AgentEventFrameTranslator:
         self._mail_drafts: dict[str, dict[str, Any]] = {}
         self._ordinary_ask: dict[str, Any] | None = None
         self.streamed_text = False
+        self.include_reasoning = True
         self.ask_pending_emitted = False
         self.capability_dependency_emitted = False
         self.tool_call_turns = 0
@@ -243,6 +246,11 @@ class AgentEventFrameTranslator:
     def _feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         event_type = str(event.get('tag', '') or '')
+        if event_type == 'assistant_message':
+            message = event.get('assistant_message')
+            if isinstance(message, dict):
+                frames.append(_stream_frame(extra={'canonical_messages': [canonical_history_message(message)]}))
+            return frames
         if event_type == 'model_fallback_failed':
             code = event.get('fallback_code')
             if code not in {'model_fallback_exhausted', 'model_context_not_fit', 'runtime_failure', 'model_failure'}:
@@ -375,7 +383,8 @@ class AgentEventFrameTranslator:
             if delta:
                 self.run.semantic_output = True
                 self.metrics.mark_output()
-                frames.append(_stream_frame(think=delta))
+                if self.include_reasoning:
+                    frames.append(_stream_frame(think=delta))
             return frames
 
         if event_type == 'text':
@@ -390,7 +399,8 @@ class AgentEventFrameTranslator:
                 self.citation_plugin,
             ):
                 self.streamed_text = self.streamed_text or has_text
-                frames.append(self._export_frame(frame))
+                if self.include_reasoning or not frame.get('think'):
+                    frames.append(self._export_frame(frame))
             return frames
 
         if event_type in ('tool_calls', 'tool_results') and self.export_stream is not None:
@@ -400,6 +410,15 @@ class AgentEventFrameTranslator:
         if event_type == 'tool_calls':
             tool_calls = [tc for tc in (event.get('tool_calls', []) or []) if isinstance(tc, dict)]
             if tool_calls:
+                message = event.get('assistant_message')
+                if not isinstance(message, dict):
+                    # Host-generated calls (for example upload parsing) also
+                    # belong in replay, even though no model produced them.
+                    message = {'role': 'assistant', 'content': '', 'tool_calls': [
+                        {'id': call.get('id', ''), 'type': 'function', 'function': call.get('function') or {
+                            'name': call.get('name', ''), 'arguments': call.get('args', {}),
+                        }} for call in tool_calls
+                    ]}
                 self.run.semantic_output = True
                 self.tool_call_turns += 1
                 self.metrics.on_tool_calls(len(tool_calls))
@@ -410,6 +429,7 @@ class AgentEventFrameTranslator:
                     if pv:
                         self._pending_previews[str(tc.get('id', ''))] = pv
                 frames.append(_stream_frame(text=''.join(parts)))
+                frames.append(_stream_frame(extra={'canonical_messages': [canonical_history_message(message)]}))
             return frames
 
         if event_type == 'tool_results':
@@ -440,12 +460,20 @@ class AgentEventFrameTranslator:
                         if dependency is not None else None
                     ),
                 ))
+                frames.append(_stream_frame(extra={'canonical_messages': [
+                    {'role': 'tool', 'tool_call_id': result.get('id'), 'name': result.get('name', ''),
+                     'content': (observation if isinstance(observation, str)
+                                 else json.dumps(observation, ensure_ascii=False, default=str))}
+                    for result in tool_results
+                    for observation in [_tool_result_observation(result.get('result'))]
+                ]}))
 
         if event_type == 'subagent_think':
             think = str(event.get('think') or '')
             if think:
                 self.run.semantic_output = True
-                frames.append(_stream_frame(think=think))
+                if self.include_reasoning:
+                    frames.append(_stream_frame(think=think))
 
         return frames
 
@@ -509,7 +537,8 @@ class AgentEventFrameTranslator:
             self.citation_plugin,
         ):
             self.streamed_text = self.streamed_text or has_text
-            frames.append(self._export_frame(frame))
+            if self.include_reasoning or not frame.get('think'):
+                frames.append(self._export_frame(frame))
         return frames
 
     def _collect_sources(self) -> Any:
@@ -549,7 +578,7 @@ class AgentEventFrameTranslator:
 
         if not self.streamed_text:
             think = str(output.get('think') or '')
-            if think:
+            if think and self.include_reasoning:
                 for chunk in _iter_text_chunks(think, chunk_size):
                     frames.append(_stream_frame(think=chunk))
 

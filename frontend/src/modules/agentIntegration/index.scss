@@ -468,7 +468,7 @@
       flex: 0 0 auto;
     }
 
-    &.is-enabled {
+    &.is-ready {
       border-color: #c8e5d5;
       background: #f5fbf7;
     }
@@ -601,6 +601,11 @@
       background: #fff2f0;
       color: #c53b32;
     }
+
+    &.is-warning {
+      background: #fffbe6;
+      color: #916900;
+    }
   }
 
   .agent-integration-methods {
@@ -702,6 +707,24 @@
   .agent-integration-installation-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
   .agent-integration-installation-image { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; img { display: block; width: 100%; border-radius: 8px; } }
   .agent-integration-installation-note { margin: 10px 0 0; font-size: 12px; }
+}
+
+.agent-integration-dsh-guide .agent-integration-installation-image {
+  margin-top: 16px;
+}
+
+.agent-integration-dsh-guide .ant-steps .ant-steps-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  .ant-steps-icon {
+    position: static;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
 }
 
 .external-capability-result-modal {
@@ -888,5 +911,26 @@
       grid-column: 3;
       grid-row: 1;
     }
+  }
+}
+
+.agent-integration-node-prerequisite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 20px;
+  padding: 12px 14px;
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+  background: #f8fafc;
+
+  &__copy {
+    flex: 1 1 240px;
+    min-width: 0;
+    strong { margin-right: 8px; font-size: 13px; }
+    .ant-typography { display: block; margin-top: 4px; font-size: 12px; }
+    .ant-tag { margin-inline-end: 0; }
   }
 }

@@ -178,7 +178,7 @@ export async function revokeBrowserDevice(deviceID: string) {
 }
 
 export interface PythonComponentStatus {
-  id: "rag";
+  id: "rag" | "cluster";
   installMethod?: "source";
   installed: boolean;
   active: boolean;
@@ -204,4 +204,21 @@ export async function installPythonComponent(id: PythonComponentStatus["id"], si
     { ...pythonComponentRequestOptions, timeout: 40 * 60 * 1000, signal },
   );
   return unwrapApiData<PythonComponentStatus>(response.data);
+}
+
+export interface NodeDependencyStatus {
+  installed: boolean;
+  version?: string;
+  path?: string;
+  installSupported: boolean;
+}
+
+export async function getNodeDependencyStatus(): Promise<NodeDependencyStatus> {
+  const response = await axiosInstance.get(`${basePath}/api/core/system-dependencies/node`);
+  return unwrapApiData<NodeDependencyStatus>(response.data);
+}
+
+export async function installNodeDependency(): Promise<NodeDependencyStatus> {
+  const response = await axiosInstance.post(`${basePath}/api/core/system-dependencies/node:install`, {}, { timeout: 15 * 60 * 1000 });
+  return unwrapApiData<NodeDependencyStatus>(response.data);
 }

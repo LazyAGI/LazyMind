@@ -15,6 +15,28 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func TestWorkflowCatalogLocalizesSkipReason(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		t.Run(language, func(t *testing.T) {
+			tab := map[string]any{"id": "prompts", "label": "Page Prompts", "skip_reason": "Quick generation skips prompt planning."}
+			spec := workflowCatalogSpec{
+				"ui": map[string]any{"tabs": []any{tab}},
+				"i18n": map[string]any{"zh-CN": map[string]any{"tabs": map[string]any{
+					"prompts": map[string]any{"label": "每页提示词", "skip_reason": "快速生成跳过提示词规划。"},
+				}}},
+			}
+			applyWorkflowCatalogLocale(spec, language)
+			want := "Quick generation skips prompt planning."
+			if language == "zh-CN" {
+				want = "快速生成跳过提示词规划。"
+			}
+			if tab["skip_reason"] != want {
+				t.Fatalf("skip reason=%q want=%q", tab["skip_reason"], want)
+			}
+		})
+	}
+}
+
 func TestWorkflowCatalogReadsPinnedRevisionInsteadOfLatestHead(t *testing.T) {
 	db := newHandlerTestDB(t)
 	seedCatalogWorkflow(t, db, "versioned-ui")
@@ -25,6 +47,8 @@ func TestWorkflowCatalogReadsPinnedRevisionInsteadOfLatestHead(t *testing.T) {
 	now := time.Now().UTC()
 	for _, row := range []any{
 		&orm.WorkflowRevision{ID: "revision-v2", WorkflowResourceID: "resource-versioned-ui", RevisionNo: 2, TreeHash: hash, CreatedAt: now},
+		&orm.WorkflowRevision{ID: "sample-runtime-revision", WorkflowResourceID: "resource-versioned-ui",
+			RevisionNo: 3, TreeHash: "sample-tree", CompiledGraph: json.RawMessage(`{"schema_version":"3"}`), CreatedAt: now},
 		&orm.WorkflowBlob{Hash: hash, Size: int64(len(body)), Content: body, CreatedAt: now},
 		&orm.WorkflowRevisionEntry{RevisionID: "revision-v2", Path: "workflow.yaml", EntryType: "file", BlobHash: &hash, Size: int64(len(body))},
 	} {
@@ -43,6 +67,7 @@ func TestWorkflowCatalogReadsPinnedRevisionInsteadOfLatestHead(t *testing.T) {
 		{"new run", "revision-v2", "en-US", "Version Two", "review,result"},
 		{"new localized run", "revision-v2", "zh-CN", "Version Two", "review,result"},
 		{"catalog without pin", "", "en-US", "Version Two", "review,result"},
+		{"detached history sample", "sample-runtime-revision", "zh-CN", "Version Two", "review,result"},
 		{"old localized run after reading new", "revision-versioned-ui", "zh-CN", "测试工作流", "result"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,7 +100,10 @@ func TestWorkflowCatalogReadsPinnedRevisionInsteadOfLatestHead(t *testing.T) {
 			if tc.revision == "revision-v2" && spec.Raw != string(body) {
 				t.Fatal("raw files must come from the same pinned revision as the UI")
 			}
-			if tc.language == "zh-CN" && tc.revision == "revision-v2" && spec.UI.Tabs[0].Label != "审核" {
+			if tc.revision == "sample-runtime-revision" && spec.Raw != "" {
+				t.Fatal("a sample must not receive head files as though they were pinned")
+			}
+			if tc.language == "zh-CN" && tc.wantName == "Version Two" && spec.UI.Tabs[0].Label != "审核" {
 				t.Fatalf("pinned revision was not localized: %#v", spec.UI.Tabs)
 			}
 		})

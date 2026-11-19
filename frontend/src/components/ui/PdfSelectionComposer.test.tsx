@@ -91,9 +91,9 @@ it('uses a new note id if the draft changes after a failed save',async()=>{
  await waitFor(()=>expect(close).toHaveBeenCalledOnce());
  expect(note.mock.calls[0][3]).not.toBe(note.mock.calls[1][3]);
 });
-it('closes on Escape and exposes optional actions in a compact menu',()=>{
- const close=vi.fn(),action=vi.fn();render(<PdfSelectionComposer selection={{text:'quote',page:1}} onClose={close} actions={[{key:'reference',label:'打开链接',onClick:action}]}/>);
- fireEvent.click(screen.getByText('更多操作'));fireEvent.click(screen.getByRole('button',{name:'打开链接'}));expect(action).toHaveBeenCalledOnce();
+it('closes on Escape without exposing More or paragraph retranslation',()=>{
+ const close=vi.fn(),action=vi.fn();render(<PdfSelectionComposer selection={{text:'quote',page:1}} onClose={close} actions={[{key:'reference',label:'打开链接',onClick:action},{key:'retranslate',label:'重译此段',onClick:action}]}/>);
+ expect(screen.queryByText('更多操作')).toBeNull();expect(screen.queryByText('重译此段')).toBeNull();expect(action).not.toHaveBeenCalled();
  fireEvent.keyDown(screen.getByRole('textbox'),{key:'Escape'});expect(close).toHaveBeenCalled();
 });
 

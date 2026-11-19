@@ -77,7 +77,7 @@ async def search_knowledge(
             llm_config=request.llm_config,
         )
     except knowledge_search_service.KnowledgeSearchError as exc:
-        status = 400 if exc.code == 'INVALID_ARGUMENT' else 503
+        status = {'INVALID_ARGUMENT': 400, 'CAPABILITY_REQUIRED': 422}.get(exc.code, 503)
         raise HTTPException(status_code=status, detail={'code': exc.code, 'message': str(exc)}) from exc
     return KnowledgeSearchResponse(
         hits=[

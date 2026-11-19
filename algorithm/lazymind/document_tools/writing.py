@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
@@ -48,6 +49,7 @@ from lazyllm.tools.tools.search import (
     TavilySearch,
 )
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+from lazymind.provider_request import request_read_timeout
 from .artifacts import (
     WRITER_BLOCK_SCHEMA,
     WRITER_IR_SCHEMA,
@@ -63,6 +65,7 @@ from .artifacts import (
     _set_document_editable,
     _temp_root,
     cleanup_writer_temporary,
+    markdown_to_writer_document,
     _write_document_input,
     _write_input_artifact,
     normalize_generated_markdown,
@@ -215,7 +218,7 @@ _EXPLICIT_REWRITE_REQUEST = re.compile(
     re.IGNORECASE,
 )
 _EXPLICIT_NEW_DOCUMENT_REQUEST = re.compile(
-    r'(?:(?<![改重续扩])写|撰写|创作|生成|产出).{0,32}'
+    r'(?:(?<![改重续扩])写(?!回)|撰写|创作|生成|产出).{0,32}'
     r'(?:文章|报告|小说|故事|文案|稿件|正文|文档)'
     r'|(?:\b(?:write|draft|create|produce)\b.{0,32}'
     r'\b(?:article|report|story|novel|copy|draft|document)\b)',
@@ -601,6 +604,7 @@ def stream_short_document(
         context=writing_context_path,
         visual_plan=visual_plan_path or None,
         media_assets=media_assets_path or None,
+        idle_timeout=request_read_timeout(),
     ) as stream:
         for delta in stream:
             if on_delta is not None:
@@ -614,12 +618,12 @@ def stream_short_document(
     document = _primary_data(result)
     task = _read_artifact_data(writing_task_path)
     if (task.get('output') or {}).get('representation') == 'ir':
-        from lazyllm.tools.writer.utils import parse_document_markdown
         # Resolve placeholders before parsing Markdown images into IR.
-        document = finalize_short_document(
-            document, _read_artifact_data(media_assets_path) if media_assets_path else None,
+        media_assets = _read_artifact_data(media_assets_path) if media_assets_path else None
+        document = finalize_short_document(document, media_assets)
+        return markdown_to_writer_document(
+            document, document_id=task['task_id'], stage='draft', media_assets=media_assets,
         )
-        return parse_document_markdown(document, document_id=task['task_id'], stage='draft')
     return document
 
 
@@ -644,6 +648,7 @@ def stream_whole_document(
             task=writing_task_path, context=writing_context_path,
             instructions=section_instructions_path or None,
             visual_plan=visual_plan_path or None, media_assets=media_assets_path or None,
+            idle_timeout=request_read_timeout(),
             **({'defer_media': True} if defer_media else {}),
         ) as stream:
             for delta in stream:
@@ -1692,7 +1697,8 @@ class WriterWritingCapabilities:
         stream = None
         status = 'error'
         try:
-            with planning.stream_outline(task=task_path, context=context_path) as stream:
+            with planning.stream_outline(task=task_path, context=context_path,
+                                         idle_timeout=request_read_timeout()) as stream:
                 for delta in stream:
                     try:
                         on_delta(delta)
@@ -2364,6 +2370,10 @@ class WriterWritingCapabilities:
             1.0,
             float(os.getenv('LAZYMIND_WRITER_SECTION_STREAM_IDLE_TIMEOUT', '180')),
         )
+        model_timeout = request_read_timeout()
+        if model_timeout is not None:
+            # External Agents return a complete response after their generation finishes.
+            section_stream_idle_timeout = max(section_stream_idle_timeout, model_timeout)
         first_section_idle_timeout = max(
             section_stream_idle_timeout,
             float(os.getenv('LAZYMIND_WRITER_FIRST_SECTION_IDLE_TIMEOUT', '180')),
@@ -2416,15 +2426,15 @@ class WriterWritingCapabilities:
                 return None
 
         def save_checkpoint(path: Path, section: Any) -> None:
-            temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
-            if representation == 'markdown':
-                temporary.write_text(str(section), encoding='utf-8')
-            else:
-                temporary.write_text(
-                    json.dumps(section, ensure_ascii=False, indent=2),
-                    encoding='utf-8',
-                )
-            temporary.replace(path)
+            # Keep the temporary name short enough for Windows paths near MAX_PATH.
+            descriptor, temporary = tempfile.mkstemp(prefix='cp-', suffix='.tmp', dir=path.parent)
+            try:
+                with os.fdopen(descriptor, 'w', encoding='utf-8', newline='') as stream:
+                    stream.write(str(section) if representation == 'markdown' else
+                                 json.dumps(section, ensure_ascii=False, indent=2))
+                os.replace(temporary, path)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
 
         def cached_preview(section: Any) -> str:
             if representation == 'markdown':

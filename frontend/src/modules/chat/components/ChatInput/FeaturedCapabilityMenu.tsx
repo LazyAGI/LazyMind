@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppstoreOutlined, ArrowRightOutlined, CheckOutlined, FileTextOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, ArrowRightOutlined, CheckOutlined, DownOutlined, FileTextOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { Popover, Spin } from 'antd';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -114,8 +114,11 @@ export default function FeaturedCapabilityMenu({ menuHeight, selectionKey, contr
         {selection ? <button className='chat-featured-clear' type='button' onClick={() => { controls?.onClear?.(); setSelection(selectionKey); onBindingChange([], false); setLevel('case'); onOpenChange(false); }}>{t('showcase.clearCase')}</button> : null}
       </div> : null}
     </div>}>
-    <button ref={triggerRef} type='button' className='input-bottom-actions-left-item' disabled={disabled} aria-label={t('chat.featuredCapabilities')} aria-expanded={open} title={title}>
-      <AppstoreOutlined />{t('chat.featuredCapabilities')}{title ? <span className='chat-featured-current'>{title}</span> : null}
+    <button ref={triggerRef} type='button' className='input-bottom-actions-left-item chat-featured-trigger' disabled={disabled} aria-label={t('chat.featuredCapabilities')} aria-description={title} aria-expanded={open} title={title || t('chat.featuredCapabilities')}>
+      <AppstoreOutlined aria-hidden />
+      <span className='chat-featured-trigger-label'>{t('chat.featuredCapabilities')}</span>
+      {title ? <span className='chat-featured-current'>{title}</span> : null}
+      <DownOutlined className='chat-featured-trigger-arrow' aria-hidden />
     </button>
   </Popover>;
 }

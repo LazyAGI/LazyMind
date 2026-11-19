@@ -460,7 +460,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		if metadataChanged && next.Name != before.Name && isTextEmbeddingModelType(next.ModelType) && tx.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
 			if err := tx.Model(&orm.EmbeddingIndexState{}).
-				Where("scope = ? AND active_model_id = ?", globalEmbeddingScope, before.ID).
+				Where("scope = ? AND active_source = ? AND active_model_id = ?", globalEmbeddingScope, "own", before.ID).
 				Updates(map[string]any{"active_model_name": next.Name, "updated_at": now}).Error; err != nil {
 				return err
 			}
@@ -473,8 +473,11 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
 		switch {
-		case errors.Is(err, errModelAlreadyExists), errors.Is(err, errConnectionChanged), errors.Is(err, errModelDefaultReference), errors.Is(err, errModelConversationReference), errors.Is(err, errEmbeddingIdentityInUse):
+		case errors.Is(err, errModelAlreadyExists), errors.Is(err, errConnectionChanged), errors.Is(err, errModelDefaultReference), errors.Is(err, errModelConversationReference):
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, errUnsupportedModelType), errors.Is(err, errSupplierModelType), errors.Is(err, errInvalidModelName):
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -852,7 +855,6 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var clearMultimodalSelection bool
-	confirmationRequired := errEmbeddingInUse
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -871,11 +873,8 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 			return errConnectionChanged
 		}
 		clearMultimodalSelection = isMultimodalEmbeddingModelType(row.ModelType)
-		removeTextEmbedding := isTextEmbeddingModelType(row.ModelType)
-		if removeTextEmbedding {
-			if err := guardEmbeddingRemoval(tx, userID, row.ID); err != nil {
-				return err
-			}
+		if err := detachEmbeddingForModelRemoval(tx, row.ID); err != nil {
+			return err
 		}
 
 		deleted := tx.Model(&orm.UserModelProviderGroupModel{}).
@@ -895,12 +894,12 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 			Delete(&orm.UserSelectedModel{}).Error; err != nil {
 			return err
 		}
-		if removeTextEmbedding {
-			return clearEmbeddingStateAfterRemoval(tx, row.ID)
-		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, confirmationRequired) || errors.Is(err, errConnectionChanged) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
+		if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
 			common.ReplyErr(w, "delete model failed", http.StatusInternalServerError)

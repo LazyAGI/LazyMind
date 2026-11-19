@@ -153,7 +153,7 @@ function Invoke-Doctor {
         throw 'LazyMind Windows Desktop currently supports Windows x64 only.'
     }
     Assert-Command 'git.exe' 'Install Git for Windows.'
-    Assert-Command 'go.exe' 'Install Go 1.25 or newer.'
+    Assert-Command 'go.exe' 'Install Go 1.27.3 or newer.'
     Assert-Command 'uv.exe' 'Install uv.'
     Assert-Command 'node.exe' 'Install Node.js 20 or newer.'
     Assert-Command 'pnpm.cmd' 'Install pnpm.'
@@ -279,6 +279,9 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot '.github'),
         (Join-Path $repoRoot 'docs'),
         (Join-Path $repoRoot 'algorithm\lazyllm\docs'),
+        (Join-Path $repoRoot 'algorithm\lazyllm\Tutorial'),
+        (Join-Path $repoRoot 'output'),
+        (Join-Path $repoRoot 'outputs'),
         (Join-Path $repoRoot 'tests'),
         (Join-Path $repoRoot 'local\build'),
         (Join-Path $repoRoot 'local\runtime'),
@@ -310,8 +313,12 @@ function Copy-RuntimeApp {
     foreach ($relativePath in @('skills\research', 'skills\review', 'skills\search')) {
         Remove-GeneratedPath (Join-Path $appRoot $relativePath)
     }
-    foreach ($relativePath in @('backend\core\core', 'backend\core\core.exe', 'algorithm\lazyllm\docs')) {
+    foreach ($relativePath in @('backend\core\core', 'backend\core\core.exe', 'algorithm\lazyllm\docs', 'algorithm\lazyllm\Tutorial', 'output', 'outputs')) {
         Remove-GeneratedPath (Join-Path $appRoot $relativePath)
+    }
+    # The packaged Core binary embeds these dictionaries. Keep their notices.
+    foreach ($filename in @('ecdict-common.json.gz', 'freedict-eng-zho.json.gz')) {
+        Remove-GeneratedPath (Join-Path $appRoot "backend\core\vocabulary\dictionary_data\$filename")
     }
     if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'frontend\dist\index.html') -PathType Leaf)) {
         throw 'Desktop frontend dist is missing from staged runtime app.'
@@ -520,6 +527,15 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Write-Host '==> Building Go desktop runtime binaries'
     Build-GoBinary (Join-Path $repoRoot 'backend\feishu-credential-helper') (Join-Path $runtimeRoot 'bin\feishu-credential-helper.exe') @('.')
     (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $runtimeRoot 'bin\feishu-credential-helper.exe')).Hash.ToLowerInvariant() | Set-Content -Encoding ascii -NoNewline -LiteralPath (Join-Path $runtimeRoot 'bin\feishu-credential-helper.sha256')
+    $githubAuthModule = Join-Path $repoRoot 'backend\github-auth-helper'
+    $githubAuthBinary = Join-Path $runtimeRoot 'bin\github-auth-helper.exe'
+    Build-GoBinary $githubAuthModule $githubAuthBinary @('.')
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $githubAuthBinary).Hash.ToLowerInvariant() | Set-Content -Encoding ascii -NoNewline -LiteralPath (Join-Path $runtimeRoot 'bin\github-auth-helper.sha256')
+    $githubCLISource = (& go.exe -C $githubAuthModule list -m -f '{{.Dir}}' github.com/cli/cli/v2).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $githubCLISource) { throw 'Could not locate the GitHub CLI dependency license' }
+    $githubLicenseDir = Join-Path $runtimeRoot 'licenses\gh'
+    New-Item -ItemType Directory -Force -Path $githubLicenseDir | Out-Null
+    Copy-Item -LiteralPath (Join-Path $githubCLISource 'LICENSE') -Destination (Join-Path $githubLicenseDir 'LICENSE') -Force
     $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'
     Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') $desktopManager -WindowsGUI
     Assert-WindowsGUISubsystem $desktopManager
@@ -531,7 +547,14 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Build-GoBinary (Join-Path $repoRoot 'backend\scan-control-plane') (Join-Path $runtimeRoot 'bin\scan-control-plane.exe') @('.\cmd\scan-control-plane')
     Build-GoBinary (Join-Path $repoRoot 'backend\file-watcher') (Join-Path $runtimeRoot 'bin\file-watcher.exe') @('.\cmd\main.go')
     Install-GoTool 'github.com/f1bonacc1/process-compose@v1.116.0'
-    Install-GoTool 'github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2'
+    $caddyPreviousExperiment = $env:GOEXPERIMENT
+    try {
+        # Caddy 2.10.2 identifies json.RawMessage by its pre-JSONv2 reflection type.
+        $env:GOEXPERIMENT = 'nojsonv2'
+        Install-GoTool 'github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2'
+    } finally {
+        $env:GOEXPERIMENT = $caddyPreviousExperiment
+    }
 
     Write-Host '==> Building frontend desktop dist'
     $env:VITE_LAZYMIND_MODE = 'desktop'
@@ -590,10 +613,12 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Invoke-Native $algorithmPython $pythonPruneArgs
     $components = Join-Path $repoRoot 'desktop\dist\python-components\windows-amd64'
     Remove-GeneratedPath $components
-    Invoke-Native $algorithmPython @(
+    $splitArgs = @(
         (Join-Path $repoRoot 'desktop\scripts\build-python-components.py'),
         $runtimeRoot, '--output', $components, '--slim-providers'
     )
+    if ($env:LAZYMIND_DESKTOP_DEFER_CLUSTER -ne 'false') { $splitArgs += '--defer-cluster' }
+    Invoke-Native $algorithmPython $splitArgs
     Copy-Item -LiteralPath (Join-Path $runtimeRoot 'config\milvus-windows-patch.json') -Destination $components
 
     Finalize-Desktop $PackageKind

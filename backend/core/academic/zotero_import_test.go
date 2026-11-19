@@ -1,6 +1,7 @@
 package academic
 
 import (
+	"encoding/json"
 	"fmt"
 	"gorm.io/gorm"
 	"net/http"
@@ -146,5 +147,110 @@ func TestBackupReceiptBatchesLargeImports(t *testing.T) {
 		if item.TitleSnapshot == "" || item.LibraryPaperID == "" {
 			t.Fatal("incomplete receipt", item)
 		}
+	}
+}
+
+func TestSnapshotImportReceiptsCoverMigrationAndNormalizedBackupIdentities(t *testing.T) {
+	for _, source := range []string{"browser-local-v3", "library-backup", "local:personal"} {
+		t.Run(source, func(t *testing.T) {
+			db, _ := zoteroStorageFixture(t)
+			existing := paperlibrary.EmptyData()
+			existing.Papers = []paperlibrary.Paper{*libraryDraft("existing", "Existing paper", "10.1234/normalized"), *libraryDraft("arxiv-existing", "arXiv paper", "")}
+			existing.Papers[1].Metadata.Identifiers.Arxiv = "2404.06654"
+			if err := paperlibrary.ImportSnapshot(t.Context(), db, "papers", "owner", marshal(existing)); err != nil {
+				t.Fatal(err)
+			}
+			incoming := paperlibrary.EmptyData()
+			incoming.Papers = []paperlibrary.Paper{*libraryDraft("alias", "Imported title", "https://doi.org/10.1234/NORMALIZED"), *libraryDraft("new", "New paper", ""), *libraryDraft("arxiv-alias", "arXiv paper", "")}
+			incoming.Papers[2].Metadata.Identifiers.Arxiv = "https://arxiv.org/abs/2404.06654v2"
+			body := string(marshal(map[string]any{"data": incoming, "source_id": source, "idempotency_key": "receipt"}))
+			for range 2 {
+				r := httptest.NewRequest(http.MethodPost, "/academic/zotero/import?target_dataset_id=papers", strings.NewReader(body))
+				r.Header.Set("X-User-Id", "owner")
+				w := httptest.NewRecorder()
+				ImportZoteroSnapshot(w, r)
+				if w.Code != 200 {
+					t.Fatal(w.Code, w.Body.String())
+				}
+			}
+			w := libraryRequest(t, "GET", "/imports?view=operations", "papers", "owner", nil)
+			var result struct{ Items []ImportOperation }
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String(), err)
+			}
+			if len(result.Items) != 1 || result.Items[0].Summary.Total != 3 {
+				t.Fatalf("missing or unrelated receipts: %s", w.Body.String())
+			}
+			wantKind := map[string]string{"browser-local-v3": "library_migration", "library-backup": "library_backup", "local:personal": "zotero"}[source]
+			if result.Items[0].EntryType != wantKind {
+				t.Fatalf("source mislabeled: got %q, want %q", result.Items[0].EntryType, wantKind)
+			}
+			var items []orm.PaperImportItem
+			db.Where("batch_id=?", result.Items[0].ID).Find(&items)
+			ids := map[string]bool{}
+			for _, item := range items {
+				ids[item.LibraryPaperID] = true
+			}
+			if !ids["existing"] || !ids["new"] || !ids["arxiv-existing"] || ids["paper"] {
+				t.Fatal(ids)
+			}
+		})
+	}
+}
+
+func TestSnapshotReceiptReflectsAlreadyStoredPDF(t *testing.T) {
+	db, path := zoteroStorageFixture(t)
+	if _, err := storeZoteroFile(t.Context(), db, "papers", "paper", "zotero-attachment", path, "article.pdf", "owner", "Owner"); err != nil {
+		t.Fatal(err)
+	}
+	incoming := paperlibrary.EmptyData()
+	incoming.Papers = []paperlibrary.Paper{*libraryDraft("paper", "Restored paper", "")}
+	if err := recordZoteroImport(t.Context(), db, "papers", "owner", "library-backup", "restore-pdf", nil, marshal(incoming)); err != nil {
+		t.Fatal(err)
+	}
+	w := libraryRequest(t, "GET", "/imports?view=operations", "papers", "owner", nil)
+	var result struct{ Items []ImportOperation }
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String(), err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Summary.Ready != 1 || result.Items[0].Summary.MetadataOnly != 0 {
+		t.Fatalf("stored PDF reported as metadata only: %s", w.Body.String())
+	}
+}
+
+func TestSnapshotReceiptPrefersExistingIDOverConflictingIdentifiers(t *testing.T) {
+	for _, identifier := range []string{"doi", "arxiv"} {
+		t.Run(identifier, func(t *testing.T) {
+			db, _ := zoteroStorageFixture(t)
+			existing := paperlibrary.EmptyData()
+			existing.Papers = []paperlibrary.Paper{*libraryDraft("a", "Paper A", "10.1234/a"), *libraryDraft("b", "Paper B", "10.1234/b")}
+			existing.Papers[0].Metadata.Identifiers.Arxiv = "2404.06654"
+			existing.Papers[1].Metadata.Identifiers.Arxiv = "2404.06655"
+			if err := paperlibrary.ImportSnapshot(t.Context(), db, "papers", "owner", marshal(existing)); err != nil {
+				t.Fatal(err)
+			}
+			incoming := paperlibrary.EmptyData()
+			incoming.Papers = []paperlibrary.Paper{*libraryDraft("a", "Changed title", "")}
+			if identifier == "doi" {
+				incoming.Papers[0].Metadata.Identifiers.DOI = "10.1234/b"
+			} else {
+				incoming.Papers[0].Metadata.Identifiers.Arxiv = "2404.06655"
+			}
+			body := string(marshal(map[string]any{"data": incoming, "source_id": "library-backup", "idempotency_key": "conflicting-id"}))
+			r := httptest.NewRequest(http.MethodPost, "/academic/zotero/import?target_dataset_id=papers", strings.NewReader(body))
+			r.Header.Set("X-User-Id", "owner")
+			w := httptest.NewRecorder()
+			ImportZoteroSnapshot(w, r)
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			var items []orm.PaperImportItem
+			if err := db.Find(&items).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 || items[0].LibraryPaperID != "a" {
+				t.Fatalf("receipt includes papers not imported: %+v", items)
+			}
+		})
 	}
 }

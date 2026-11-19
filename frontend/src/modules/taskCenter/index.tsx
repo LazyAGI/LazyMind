@@ -6,7 +6,6 @@ import Workbench from './Workbench';
 import TaskList from './TaskList';
 import ScheduleList from './ScheduleList';
 import './index.scss';
-import { useWorkflowChanges } from './useWorkflowChanges';
 
 type TaskCenterTab = 'workbench' | 'tasks' | 'schedules';
 
@@ -19,7 +18,6 @@ interface TaskCenterPageProps {
 }
 
 export default function TaskCenterPage({ embedded = false }: TaskCenterPageProps) {
-  useWorkflowChanges();
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = parseTaskCenterTab(searchParams.get('tab'));
@@ -38,12 +36,6 @@ export default function TaskCenterPage({ embedded = false }: TaskCenterPageProps
     setActiveTab(tab);
   };
 
-  const showTasksByStatus = (status: 'failed' | 'canceled') => {
-    setTaskStatus(status);
-    setTaskPage(1);
-    selectTab('tasks');
-  };
-
   return (
     <div className={`task-center-page${embedded ? ' is-embedded' : ''}`}>
       {!embedded ? <header className='task-center-header'>
@@ -55,7 +47,7 @@ export default function TaskCenterPage({ embedded = false }: TaskCenterPageProps
         </div>
       </header> : null}
       <Tabs className='task-center-tabs' activeKey={activeTab} onChange={(key: string) => selectTab(key as TaskCenterTab)} items={[
-        { key: 'workbench', label: t('taskCenter.workbench'), children: <Workbench active={activeTab === 'workbench'} onViewAllStatus={showTasksByStatus} /> },
+        { key: 'workbench', label: t('taskCenter.workbench'), children: <Workbench active={activeTab === 'workbench'} /> },
         { key: 'tasks', label: t('taskCenter.allTasks'), children: <TaskList active={activeTab === 'tasks'} status={taskStatus} onStatusChange={setTaskStatus} page={taskPage} onPageChange={setTaskPage} /> },
         { key: 'schedules', label: t('taskCenter.schedulePlans'), children: <ScheduleList active={activeTab === 'schedules'} /> },
       ]} />

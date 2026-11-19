@@ -1,4 +1,5 @@
 import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from '@/modules/taskCenter/events';
+import { useWorkflowChanges } from '@/modules/taskCenter/useWorkflowChanges';
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -54,6 +55,7 @@ import RecordList, {
   type RecordListImperativeProps,
 } from "@/modules/chat/components/RecordList";
 import { useConversationRunningSync } from "@/modules/chat/store/conversationRunning";
+import GitHubStarProvider from '@/modules/githubStar/GitHubStarProvider';
 import {
   CHAT_CONVERSATION_FILTER_EVENT,
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
@@ -80,6 +82,7 @@ import {
   openCloudRegister,
   reserveCloudLoginPopup,
 } from "@/runtime/desktopBridge";
+import { useAppVersion } from "@/runtime/useAppVersion";
 import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
 import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
 import { isPaperLibrary } from "@/modules/knowledge/paper/store";
@@ -138,6 +141,7 @@ export default function MainLayout() {
       .conversationId || "";
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
+  const appVersion = useAppVersion();
   const isLoggedIn = Boolean(userInfo?.token);
   const datasetUserKey = JSON.stringify([
     userInfo?.userId || userInfo?.username || '',
@@ -169,6 +173,7 @@ export default function MainLayout() {
     return () => { disposed = true; window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, changed); };
   }, [isLoggedIn, directoryUser]);
   useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
+  useWorkflowChanges(isLoggedIn ? userInfo?.userId || userInfo?.username || '' : '');
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
   const hideLocalUserControls = shouldHideLocalUserControls();
@@ -216,7 +221,7 @@ export default function MainLayout() {
   const isPaperPage = Boolean(
     knowledgeDatasetReady && isPaperLibrary(currentKnowledgeDataset?.scene),
   );
-  const startsWithCompactSidebar = isWorkflowDetail || isPaperPage;
+  const startsWithCompactSidebar = isWorkflowDetail || isPaperPage || Boolean(matchPath("/document-directories/:directoryId", pathname));
   const defaultSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
   const [sidebarSize, setSidebarSize] = useState({
     pathname,
@@ -304,7 +309,7 @@ export default function MainLayout() {
     },
     ...(isVocabularyEnabled() ? [{
       key: "/lib/vocabulary",
-      label: "生词表",
+      label: t("vocabularyPage.title"),
       icon: <BookOutlined />,
     }] : []),
     ...(developerActive ? [{
@@ -1309,6 +1314,13 @@ export default function MainLayout() {
                 </Tooltip>
               </Popover>
             )}
+            {!isMenuCollapsed && appVersion && (
+              <Tooltip title={t("settingsPage.appVersion", { version: appVersion })}>
+                <span className="sider-app-version" aria-label={t("settingsPage.appVersion", { version: appVersion })}>
+                  v{appVersion}
+                </span>
+              </Tooltip>
+            )}
             <div className="sider-account-actions">
               <Popover
                 content={(
@@ -1354,6 +1366,7 @@ export default function MainLayout() {
       <Layout className={contentClassName}>
         <Content className="main-layout-body">
           <div className="sub-app-container">
+            <GitHubStarProvider key={userInfo?.userId || ''} userId={isLoggedIn ? userInfo?.userId || '' : ''} conversationId={routeConversationId}>
             <Suspense fallback={<div className="main-layout-page-loading"><Spin /></div>}>
               {pathname.startsWith("/document-directories") && !directoriesEnabled ? (
                 directoriesEnabled === false ? <Navigate to="/settings?section=knowledge" replace /> : <Spin />
@@ -1364,6 +1377,7 @@ export default function MainLayout() {
                 }}
               />}
             </Suspense>
+            </GitHubStarProvider>
           </div>
         </Content>
       </Layout>

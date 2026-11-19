@@ -3,3 +3,38 @@
 .vocabulary-cloud-operations li { padding: 8px 0; border-bottom: 1px solid var(--ant-color-border-secondary, #eee); overflow-wrap: anywhere; }
 .vocabulary-cloud-details { margin: 16px 0; }
 .vocabulary-cloud-details > summary { cursor: pointer; color: #1677ff; margin-bottom: 12px; }
+
+.external-apps-grid { display: grid; gap: 12px; }
+.external-app-card {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--ant-color-border-secondary, #e8e8e8);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container, #fff);
+}
+.external-app-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: transparent;
+  img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  color: var(--ant-color-text-secondary, #666);
+  font-size: 20px;
+}
+.external-app-copy {
+  min-width: 0;
+  h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  p { margin: 0; color: var(--ant-color-text-secondary, #666); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+}
+.external-app-status { margin: 0; white-space: normal; text-align: center; }
+@media (max-width: 640px) {
+  .external-app-card { grid-template-columns: 32px minmax(0, 1fr) auto; gap: 12px; padding: 16px; }
+  .external-app-icon { width: 32px; height: 32px; font-size: 18px; }
+  .external-app-status { grid-column: 2; justify-self: start; }
+  .external-app-card > .ant-btn { grid-column: 3; grid-row: 1 / span 2; }
+}

@@ -366,11 +366,10 @@ func loadSelectedProviders(ctx context.Context, db *gorm.DB, userID string) ([]s
 		return nil, err
 	}
 	for _, row := range rows {
-		row.APIKey, err = ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
-		if err != nil {
-			return nil, err
-		}
-		if !isSelectableProviderGroup(ctx, db, row.DefaultProviderID, row.BaseURL, row.APIKey) {
+		apiKey, credentialErr := ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+		// Preserve selected metadata when a credential is unavailable; runtime readiness
+		// reports that failure without blocking the rest of the default settings page.
+		if credentialErr == nil && !isSelectableProviderGroup(ctx, db, row.DefaultProviderID, row.BaseURL, apiKey) {
 			continue
 		}
 		out = append(out, selectedProviderItem{

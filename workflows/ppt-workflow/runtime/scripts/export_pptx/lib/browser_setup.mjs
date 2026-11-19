@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readlinkSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { delimiter, isAbsolute, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync, execSync } from 'node:child_process';
@@ -7,6 +7,34 @@ const require = createRequire(import.meta.url);
 const hiddenProcessOptions = { windowsHide: true };
 let hiddenHooksInstalled = false;
 const patchedModules = new WeakSet();
+
+export const externalOfflineMode = () => process.env.LAZYMIND_PPT_EXTERNAL_OFFLINE === '1';
+
+/** External tools render supplied bytes without allowing document network/file access. */
+export async function loadOfflineSlide(page, htmlPath) {
+  await page.route('**/*', route => route.abort());
+  const policy = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'";
+  await page.setContent(`<meta http-equiv="Content-Security-Policy" content="${policy}">` + readFileSync(htmlPath, 'utf8'),
+    { waitUntil: 'load' });
+}
+
+/** Prevent the PPTX writer from resolving input-controlled filesystem image paths. */
+export function assertOfflineIR(value) {
+  if (!value || typeof value !== 'object') return;
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'src' && typeof item === 'string' && item && !item.startsWith('data:')) {
+      throw new Error('External slide image sources must be inline data');
+    }
+    if (key === 'backgroundImage' && typeof item === 'string') {
+      for (const match of item.matchAll(/url\(["']?([^"')]+)["']?\)/g)) {
+        if (!match[1].startsWith('data:') && !match[1].startsWith('#')) {
+          throw new Error('External slide background sources must be inline data');
+        }
+      }
+    }
+    if (typeof item === 'object') assertOfflineIR(item);
+  }
+}
 
 /** Force child processes created by Playwright internals to stay backgrounded on Windows. */
 export function installHiddenProcessHooks() {
@@ -70,6 +98,7 @@ export function ensureDependencies(baseDir) {
   const playwrightMarker = resolve(nodeModules, 'playwright');
 
   if (!existsSync(pptxgenMarker) || !existsSync(playwrightMarker)) {
+    if (externalOfflineMode()) throw new Error('External PPT tools require installed Node dependencies');
     console.error('[setup] 首次运行，正在安装 npm 依赖...');
     try {
       execSync('npm install --omit=dev', { ...hiddenProcessOptions, cwd: depsDir, stdio: 'inherit' });
@@ -89,6 +118,7 @@ export function ensureDependencies(baseDir) {
   }
 
   console.error('[setup] 正在安装 Playwright Chromium（仅首次）...');
+  if (externalOfflineMode()) throw new Error('External PPT tools require installed Chromium');
   try {
     const playwrightCli = resolve(nodeModules, 'playwright', 'cli.js');
     execFileSync(process.execPath, [playwrightCli, 'install', 'chromium'], {

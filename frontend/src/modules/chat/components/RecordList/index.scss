@@ -7,7 +7,7 @@
     font-size: 12px;
     color: var(--ant-color-primary, #1677ff);
 
-    &--unknown { color: var(--color-text-secondary, #666); }
+    &--checking, &--unknown { color: var(--color-text-secondary, #666); }
     &--completed { color: var(--ant-color-success, #52c41a); }
     &--failed { color: var(--ant-color-error, #ff4d4f); }
     &--canceled { color: var(--ant-color-text-tertiary, #8c8c8c); }
@@ -208,7 +208,8 @@
     }
 
     &:hover,
-    &:focus-within {
+    &:focus-visible,
+    &:has(:focus-visible) {
       background: var(--color-primary-bg);
       border-radius: 4px;
 

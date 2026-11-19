@@ -8,7 +8,7 @@ const source = readFileSync(new URL('../electron/src/main.js', import.meta.url),
 const declarations = source.match(/^const agent(?:Connector\w+TimeoutMs|Logins) = .+;$/gm).join('\n');
 const functions = source.slice(source.indexOf('function runAgentConnector('), source.indexOf('\nfunction readAgentBindings('));
 
-function harness(platform = 'darwin') {
+function harness(platform = 'darwin', agent = 'codex') {
   const children = [];
   const timers = new Map();
   const treeKills = [];
@@ -45,8 +45,8 @@ function harness(platform = 'darwin') {
   vm.runInContext(`${declarations}\n${functions}`, context);
   return {
     children, timers, treeKills, get restarts() { return restarts; },
-    start: () => context.runAgentConnector('codex', 'login'),
-    status: () => context.runAgentConnector('codex', 'status'),
+    start: () => context.runAgentConnector(agent, 'login'),
+    status: () => context.runAgentConnector(agent, 'status'),
     all: () => context.runAgentConnector('all', 'status'),
     bind: (target = 'codex-cli') => context.runAgentBinding(target, 'set', '/fixture/codex'),
   };
@@ -208,5 +208,17 @@ for (const action of ['timeout', 'retry', 'rebind']) {
       assert.equal((await h.status()).login?.state,
         action === 'timeout' ? 'failed' : action === 'retry' ? 'running' : undefined);
     }
+  });
+}
+
+for (const platform of ['darwin', 'win32']) {
+  test(`WorkBuddy ${platform} login timeout stops only the waiter, preserving the desktop`, async () => {
+    const h = harness(platform, 'workbuddy');
+    assert.equal((await h.start()).login.state, 'running');
+    const timer = [...h.timers.values()][0];
+    timer.callback();
+    assert.equal((await h.status()).login.state, 'failed');
+    assert.equal(h.children[0].killed, true);
+    assert.equal(h.treeKills.length, 0);
   });
 }

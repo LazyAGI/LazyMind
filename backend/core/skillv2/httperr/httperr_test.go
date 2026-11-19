@@ -94,6 +94,8 @@ func TestCodeForMessage(t *testing.T) {
 		{"already exists", http.StatusBadRequest, CodePathExists},
 		{"write file over directory", http.StatusBadRequest, CodeEntryTypeConflict},
 		{"skill package must contain", http.StatusBadRequest, CodeSkillPackageInvalid},
+		{"skills.sh skill name is ambiguous", http.StatusBadRequest, CodeSkillSourceAmbiguous},
+		{"SkillsMP page declares multiple different skill sources", http.StatusBadRequest, CodeSkillSourceAmbiguous},
 		{"diff refs must belong", http.StatusBadRequest, CodeDiffRefMismatch},
 		{"unknown message", http.StatusBadRequest, CodeInvalidRequest},
 		{"empty", http.StatusNotFound, CodeNotFound},

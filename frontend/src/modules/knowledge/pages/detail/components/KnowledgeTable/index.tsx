@@ -19,6 +19,7 @@ import {
   normalizeProxyableUrl,
 } from "@/modules/knowledge/utils/request";
 import { localizeErrorCode } from "@/components/request";
+import DocumentPdfParseStatus from "@/modules/knowledge/paper/DocumentPdfParseStatus";
 import {
   Button,
   Checkbox,
@@ -129,6 +130,7 @@ const DocumentStageEnum = {
   CANCELED: "knowledge.stageCanceled",
   DELETING: "knowledge.stageDeleting",
   DELETED: "knowledge.stageDeleted",
+  DOCUMENT_REPARSE_REQUIRED: "knowledge.stageReparseRequired",
 
   [DocDocumentStageEnum.DocumentUploaded]: "knowledge.pending",
   [DocDocumentStageEnum.DocumentQueued]: "knowledge.pending",
@@ -150,6 +152,7 @@ const DocumentStageTagColorMap = {
   CANCELED: "warning",
   DELETING: "processing",
   DELETED: "default",
+  DOCUMENT_REPARSE_REQUIRED: "warning",
 
   [DocDocumentStageEnum.DocumentUploaded]: "default",
   [DocDocumentStageEnum.DocumentQueued]: "default",
@@ -900,6 +903,12 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
       dataIndex: "document_stage",
       width: 100,
       render: (document_stage: string, record: TreeNode) => {
+        const structure = detail.dataset_id && record.document_id && record.type !== DocTypeEnum.Folder && /\.pdf$/i.test(record.display_name || '') &&
+          <DocumentPdfParseStatus dataset={detail.dataset_id} document={record.document_id}
+            disabledReason={!hasWritePermission ? '当前文档为只读'
+              : documentParsingEnabled === false ? '文档解析服务当前不可用' : undefined} />;
+        const withStructure = (retrievalStatus: React.ReactNode) =>
+          structure ? <div className="knowledge-pdf-processing"><div>{retrievalStatus}</div>{structure}</div> : retrievalStatus;
         if (
           (ragAvailability !== "ready" || detail.processing_level === "stored") &&
           record.type !== DocTypeEnum.Folder
@@ -908,11 +917,9 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
             DocDocumentStageEnum.DocumentParseSuccessfully,
             "SUCCESS",
           ].includes(document_stage);
-          return (
-            <Tag color="success">
-              {t(parsed ? "knowledge.stageParsed" : "knowledge.stageStored")}
-            </Tag>
-          );
+          return withStructure(<Tag color="success">
+            {t(parsed ? "knowledge.stageParsed" : "knowledge.stageStored")}
+          </Tag>);
         }
         const text =
           (DocumentStageEnum[document_stage as keyof typeof DocumentStageEnum]
@@ -935,19 +942,17 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
           "FAILED",
         ].includes(document_stage);
         const tag = <Tag color={color}>{text}</Tag>;
-        if (!isFailed) return tag;
+
 
         const reason = record.document_id
           ? parseFailureReasons[record.document_id]
           : "";
-        return (
-          <Tooltip
-            title={reason || t("knowledge.parseFailureReasonUnavailable")}
-            placement="top"
-          >
+        const retrievalStatus = isFailed ? (
+          <Tooltip title={reason || t("knowledge.parseFailureReasonUnavailable")} placement="top">
             <span>{tag}</span>
           </Tooltip>
-        );
+        ) : tag;
+        return withStructure(retrievalStatus);
       },
     },
     {

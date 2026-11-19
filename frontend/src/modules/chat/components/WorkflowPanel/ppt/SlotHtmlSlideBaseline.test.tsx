@@ -4,6 +4,7 @@ import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 
 const workflowApi = vi.hoisted(() => ({ executeArtifactAction: vi.fn() }));
 const dialogRender = vi.hoisted(() => vi.fn());
+const previewToken = vi.hoisted(() => ({ value: 'commit-1' }));
 
 vi.mock('@/modules/chat/utils/request', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/modules/chat/utils/request')>(),
@@ -26,7 +27,7 @@ vi.mock('../ArtifactRewriteDialog', () => ({
           preview: { old_text: 'Old', new_text: 'New' },
           patch: { type: 'string_replace_set', payload: {} },
           artifact: { content_type: 'text', value: '<div data-el="title">New</div>' },
-          commit: { token: 'commit-1' },
+          commit: { token: previewToken.value },
           candidate_html: '<div data-el="title">New</div>',
         })}
       >
@@ -45,6 +46,7 @@ describe('SlotHtmlSlide mutation baseline', () => {
       disconnect() {}
     });
     dialogRender.mockReset();
+    previewToken.value = 'commit-1';
     workflowApi.executeArtifactAction.mockReset();
     workflowApi.executeArtifactAction.mockResolvedValue({
       data: {
@@ -72,6 +74,37 @@ describe('SlotHtmlSlide mutation baseline', () => {
     enlarged.contentDocument!.body.innerHTML = canvas;
     fireEvent.load(enlarged);
     await waitFor(() => expect(enlarged).toHaveStyle({ width: '1280px', height: '720px' }));
+  });
+
+  it('fills normal and enlarged previews when the canvas is declared on html/body', async () => {
+    const source = '<html><head><style>html,body{width:1280px;height:720px;margin:0}img{width:1280px;height:720px}</style></head><body><img alt="Page preview"></body></html>';
+    const slot = { slot_id: 'preview_html', slot: 'preview_html', revision: 1, selected: true,
+      created_at: '', content_type: 'text', artifact_value: source,
+    } as SlotRevision;
+    render(<SlotHtmlSlide slot={slot} />);
+    const frame = await screen.findByTitle('slide-1') as HTMLIFrameElement;
+    frame.contentDocument!.documentElement.innerHTML = source;
+    fireEvent.load(frame);
+    await waitFor(() => expect(frame).toHaveStyle({ width: '1280px', height: '720px' }));
+    fireEvent.click(screen.getByRole('button', { name: '放大幻灯片' }));
+    const enlarged = await screen.findByTitle('放大预览-1') as HTMLIFrameElement;
+    enlarged.contentDocument!.documentElement.innerHTML = source;
+    fireEvent.load(enlarged);
+    await waitFor(() => expect(enlarged).toHaveStyle({ width: '1280px', height: '720px' }));
+  });
+
+  it('requires confirmation before saving an external candidate', async () => {
+    previewToken.value = 'external:test-job';
+    const slot = { slot_id: 'slides', slot: 'slides', revision: 1, draft_version: 1,
+      list_index: 0, selected: true, created_at: '', content_type: 'text',
+      artifact_value: '<html><body>Old</body></html>',
+    } as SlotRevision;
+    render(<SlotHtmlSlide slot={slot} sessionId='ppt-session' slotId='slides' />);
+    fireEvent.click(await screen.findByRole('button', { name: 'apply slide rewrite' }));
+    const confirm = await screen.findByRole('button', { name: '确认修改' });
+    expect(workflowApi.executeArtifactAction).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(workflowApi.executeArtifactAction).toHaveBeenCalledOnce());
   });
 
   it('uses the applied revision and draft version for the next rewrite on the same mount', async () => {

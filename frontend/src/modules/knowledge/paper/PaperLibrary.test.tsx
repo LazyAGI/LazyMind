@@ -10,12 +10,12 @@ import { libraryFixture, paperFixture } from './__tests__/fixtures';
 import { emptyLibrary, type PaperLibraryData } from './libraryModel';
 import type { PaperRecord } from './model';
 import * as paperModel from './model';
-import { importLibraryPapers, loadPersistedPaperLibrary, previewLibraryPapers, patchLibraryPaper, confirmLibraryPdf, createLibraryFolder, moveLibraryPapers, deleteLibraryPapers } from './store';
+import { importLibraryPapers, loadPersistedPaperLibrary, previewLibraryPapers, patchLibraryPaper, confirmLibraryPdf, createLibraryFolder, moveLibraryPapers, deleteLibraryPapers, deleteLibraryFolder } from './store';
 import { paperFromPdf } from './pdfMeta';
 import { setPaperImportance } from '../api/paperWorkflows';
-import { TaskServiceApi } from '../utils/request';
+import { requestPdfIR } from '../api/pdfIR';
 import { previewPaperLink, previewPaperPDF, importPaperLink, type ImportPreviewItem, getAcademicImportBatch, listAcademicImportBatches, type ImportOperation } from '../api/academicReferences';
-vi.mock('../utils/request', async original => ({ ...await original<typeof import('../utils/request')>(), TaskServiceApi: vi.fn() }));
+vi.mock('../api/pdfIR', async original => ({ ...await original<typeof import('../api/pdfIR')>(), requestPdfIR: vi.fn() }));
 vi.mock('@/runtime/readiness', () => ({ waitForRuntimeCapability: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../components/PaperTasks', () => ({ default: vi.fn(() => null) }));
 vi.mock('./pdfMeta', () => ({ paperFromPdf: vi.fn() }));
@@ -95,6 +95,62 @@ function captureDownload() {
         return content;
     };
 }
+it('adds tags from the whole collection and removes only the current paper association', async () => {
+    const data = readLibrary(datasetId);
+    data.papers[0].tags = ['paper', 'arxiv:2302.04761', '方法'];
+    data.papers[1].tags = ['方法', '推理'];
+    writeLibrary(datasetId, data);
+    await renderLibrary();
+    const row = within(screen.getByRole('row', { name: /Folder paper/ }));
+    const openPicker = async () => {
+        fireEvent.click(row.getByRole('button', { name: '添加标签' }));
+        return within(await screen.findByRole('dialog', { name: '添加标签' }));
+    };
+    const picker = await openPicker();
+    const applied = within(picker.getByRole('group', { name: '已添加' })).getByRole('checkbox', { name: '方法' });
+    expect(applied).toBeChecked();
+    expect(applied).toBeDisabled();
+    expect(picker.queryByRole('checkbox', { name: 'paper' })).not.toBeInTheDocument();
+    fireEvent.click(within(picker.getByRole('group', { name: '可添加' })).getByRole('checkbox', { name: '推理' }));
+    fireEvent.change(picker.getByRole('textbox', { name: '搜索或新建标签' }), { target: { value: '工具调用' } });
+    fireEvent.click(picker.getByRole('button', { name: '＋ 新建「工具调用」' }));
+    fireEvent.click(picker.getByRole('button', { name: '添加' }));
+    expect(await row.findByRole('button', { name: '移除标签 工具调用' })).toBeInTheDocument();
+    expect(readLibrary(datasetId).papers[0].tags).toEqual(['paper', 'arxiv:2302.04761', '方法', '推理', '工具调用']);
+
+    fireEvent.click(row.getByRole('button', { name: '移除标签 方法' }));
+    await waitFor(() => expect(row.queryByRole('button', { name: '移除标签 方法' })).not.toBeInTheDocument());
+    fireEvent.click(row.getByRole('button', { name: '移除标签 工具调用' }));
+    await waitFor(() => expect(row.queryByRole('button', { name: '移除标签 工具调用' })).not.toBeInTheDocument());
+    const reopened = await openPicker();
+    expect(within(reopened.getByRole('group', { name: '可添加' })).getByRole('checkbox', { name: '方法' })).toBeEnabled();
+    expect(reopened.queryByRole('checkbox', { name: '工具调用' })).not.toBeInTheDocument();
+});
+
+it('combines any or all selected tags with the other paper filters', async () => {
+    const data = readLibrary(datasetId);
+    data.papers[0].tags = ['方法', '推理'];
+    data.papers[1].tags = ['方法'];
+    data.papers[2].tags = ['推理'];
+    writeLibrary(datasetId, data);
+    await renderLibrary();
+    fireEvent.click(libraryTools().getByRole('button', { name: '筛选' }));
+    const filter = within(await screen.findByRole('dialog', { name: '筛选文献' }));
+    const tags = within(filter.getByRole('group', { name: '标签' }));
+    fireEvent.click(tags.getByRole('button', { name: '方法' }));
+    fireEvent.click(tags.getByRole('button', { name: '推理' }));
+    expect(tags.getByRole('button', { name: '任一（OR）' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('table', { name: '论文列表' })).getAllByRole('checkbox')).toHaveLength(4);
+    fireEvent.click(tags.getByRole('button', { name: '全部（AND）' }));
+    expect(within(screen.getByRole('table', { name: '论文列表' })).getAllByRole('checkbox')).toHaveLength(2);
+    expect(screen.getByRole('row', { name: /Folder paper/ })).toBeInTheDocument();
+    fireEvent.click(within(filter.getByRole('group', { name: '全文附件' })).getByRole('button', { name: '待补 PDF' }));
+    expect(within(screen.getByRole('table', { name: '论文列表' })).getAllByRole('checkbox')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '移除标签筛选 方法' }));
+    expect(within(screen.getByRole('table', { name: '论文列表' })).getAllByRole('checkbox')).toHaveLength(2);
+    expect(screen.getByRole('row', { name: /Unfiled paper/ })).toBeInTheDocument();
+});
+
 it('shows paper import methods and sources only in detail', async () => {
     const data = readLibrary(datasetId);
     Object.assign(data.papers[0], { importMethod: 'bibliography', source: 'local' });
@@ -139,6 +195,22 @@ describe('paper library behavior', () => {
         fireEvent.click(detail.getByRole('button', { name: '关闭' }));
         expect(screen.getByRole('combobox', { name: 'Folder paper 的阅读状态' })).toBeEnabled();
     });
+    it('marks an unread paper as reading when its detail opens and keeps a read paper unchanged', async () => {
+        vi.mocked(loadPersistedPaperLibrary).mockImplementation(async id => snapshot(readLibrary(id), false));
+        await renderLibrary();
+        fireEvent.click(screen.getByRole('button', { name: 'Folder paper' }));
+        await waitFor(() => expect(readLibrary(datasetId).papers[0].status).toBe('reading'));
+        expect(patchLibraryPaper).toHaveBeenCalledWith(datasetId, expect.objectContaining({ id: 'a' }), { status: 'reading', status_if_unread: true });
+        const detail = within(await screen.findByRole('dialog', { name: '文献详情' }));
+        fireEvent.mouseDown(detail.getByRole('combobox', { name: '论文阅读状态' }));
+        fireEvent.click(await screen.findByText('已读', { selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content' }));
+        await waitFor(() => expect(readLibrary(datasetId).papers[0].status).toBe('read'));
+        fireEvent.click(detail.getByRole('button', { name: '关闭' }));
+        vi.mocked(patchLibraryPaper).mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Folder paper' }));
+        expect(patchLibraryPaper).not.toHaveBeenCalled();
+        expect(readLibrary(datasetId).papers[0].status).toBe('read');
+    });
     it('applies batch successes immediately and retries only the failed papers', async () => {
         const original = vi.mocked(patchLibraryPaper).getMockImplementation()!;
         let attempts = 0;
@@ -161,32 +233,14 @@ describe('paper library behavior', () => {
         expect(vi.mocked(patchLibraryPaper).mock.calls.map(call => call[1].id)).toEqual(['a', 'b', 'c', 'b']);
         expect(screen.queryByRole('button', { name: '仅重试失败项' })).not.toBeInTheDocument();
     });
-    it('keeps list display preferences across remounts and isolates them when users switch', async () => {
-        const switchUser = async (userId: string) => act(async () => {
-            localStorage.setItem('lazymind:user', JSON.stringify({ userId, username: userId, token: 'test' }));
-            window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT));
-        });
-        await switchUser('alice');
-        const first = await renderLibrary();
-        fireEvent.click(libraryTools().getByRole('button', { name: '列表显示设置' }));
-        const display = within(await screen.findByRole('dialog', { name: '列表显示设置' }));
-        fireEvent.click(display.getByRole('checkbox', { name: '显示阅读状态' }));
-        fireEvent.click(display.getByRole('checkbox', { name: '显示重要标记' }));
-        expect(screen.queryByRole('combobox', { name: 'Folder paper 的阅读状态' })).not.toBeInTheDocument();
-        expect(readLibrary(datasetId).papers[0].important).toBe(true);
-        expect(patchLibraryPaper).not.toHaveBeenCalled();
-        first.unmount();
+    it('always shows reading state and importance despite obsolete display preferences', async () => {
+        localStorage.setItem('lazymind:user', JSON.stringify({ userId: 'alice', username: 'alice', token: 'test' }));
+        localStorage.setItem('paper-library-display:alice', JSON.stringify({ status: false, importance: false }));
         await renderLibrary();
-        expect(screen.queryByRole('combobox', { name: 'Folder paper 的阅读状态' })).not.toBeInTheDocument();
-        fireEvent.click(libraryTools().getByRole('button', { name: '筛选' }));
-        const filter = within(await screen.findByRole('dialog', { name: '筛选文献' }));
-        fireEvent.click(within(filter.getByRole('group', { name: '阅读状态' })).getByRole('button', { name: '未读' }));
-        expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
-        await switchUser('bob');
-        expect(await screen.findByRole('combobox', { name: 'Folder paper 的阅读状态' })).toBeEnabled();
-        await switchUser('alice');
-        await waitFor(() => expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument());
-        expect(screen.queryByRole('combobox', { name: 'Folder paper 的阅读状态' })).not.toBeInTheDocument();
+        expect(libraryTools().queryByRole('button', { name: '列表显示设置' })).not.toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: 'Folder paper 的阅读状态' })).toBeEnabled();
+        expect(document.querySelector('.paper-library-view-heading')?.textContent).toBe('全部论文');
+        expect(patchLibraryPaper).not.toHaveBeenCalled();
     });
     it('does not apply an old users pending status response after switching users', async () => {
         let finish!: (value: Awaited<ReturnType<typeof patchLibraryPaper>>) => void;
@@ -222,16 +276,11 @@ describe('paper library behavior', () => {
         expect(confirmLibraryPdf).toHaveBeenCalledWith(datasetId, expect.objectContaining({ metadata: expect.objectContaining({ authors: ['DeepSeek-AI', 'Ke Xu', 'Ke Xu'] }) }), 'original-pdf', 'upload-key', undefined);
         expect(upload).not.toHaveBeenCalled();
     });
-    it('opens directory papers as full pages and list papers as drawers', async () => {
+    it('lists folders without paper leaves and opens list papers as drawers', async () => {
         await renderLibrary();
         const tree = browse().getByRole('tree', { name: '论文目录' });
-        fireEvent.click(within(tree).getByText('Folder paper', { selector: '.paper-directory-node-name' }));
-        const detail = await screen.findByRole('region', { name: '文献详情' });
-        expect(within(detail).getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
-        expect(screen.queryByRole('dialog', { name: '文献详情' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('table', { name: '论文列表' })).not.toBeInTheDocument();
-        fireEvent.click(within(detail).getByRole('button', { name: /返回目录/ }));
-        expect(screen.getByRole('table', { name: '论文列表' })).toBeInTheDocument();
+        expect(within(tree).queryByText('Folder paper')).not.toBeInTheDocument();
+        expect(within(tree).queryByText('论文库')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Folder paper' }));
         expect(await screen.findByRole('dialog', { name: '文献详情' })).toBeInTheDocument();
     });
@@ -261,6 +310,16 @@ describe('paper library behavior', () => {
         fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
         expect(await screen.findByText('已入库')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: '关闭通知' }));
+        fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '彻底删除' }));
+        const firstConfirmation = await screen.findByRole('dialog', { name: '彻底删除 1 篇论文？' });
+        const beforeCancel = readLibrary(datasetId);
+        const deleteCalls = vi.mocked(deleteLibraryPapers).mock.calls.length;
+        fireEvent.click(within(firstConfirmation).getByRole('button', { name: /取\s*消|Cancel/ }));
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+        expect(deleteLibraryPapers).toHaveBeenCalledTimes(deleteCalls);
+        expect(readLibrary(datasetId)).toEqual(beforeCancel);
+        expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
         fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '彻底删除' }));
         const confirmation = await screen.findByRole('dialog', { name: '彻底删除 1 篇论文？' });
@@ -383,25 +442,20 @@ describe('paper library behavior', () => {
         await act(async () => focusAfterIdle());
         await waitFor(() => expect(bell).toHaveAccessibleName(/0 条待处理/));
     });
-    it('keeps a failed reparse submission in the modal and clears its notice after retry', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {});
-        const createTasks = vi.fn().mockRejectedValueOnce(new Error('parser unavailable')).mockResolvedValue({ data: { tasks: [{ task_id: 'parse-task' }] } });
-        const startTasks = vi.fn().mockResolvedValue({ data: { started_count: 1 } });
-        vi.mocked(TaskServiceApi).mockReturnValue({ createTasks, startTasks } as unknown as ReturnType<typeof TaskServiceApi>);
+    it('submits reparse from the overflow directly and clears its failure notice on retry', async () => {
+        vi.mocked(requestPdfIR).mockRejectedValueOnce(new Error('parser unavailable')).mockResolvedValueOnce({ status: 'queued' });
         await renderLibrary();
-        fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
-        fireEvent.click(await screen.findByRole('menuitem', { name: '重新解析' }));
-        const dialog = await screen.findByRole('dialog', { name: '重新解析' });
-        const confirm = within(dialog).getByRole('button', { name: /确\s*定|OK/ });
-        fireEvent.click(confirm);
-        expect(await within(dialog).findByText('解析任务尚未提交，请重试或查看通知。')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /通知：.*1 条待处理/ })).toBeInTheDocument();
-        expect(startTasks).not.toHaveBeenCalled();
-        await waitFor(() => expect(confirm).toBeEnabled());
-        fireEvent.click(confirm);
-        await waitFor(() => expect(screen.queryByRole('dialog', { name: '重新解析' })).not.toBeInTheDocument());
-        expect(startTasks).toHaveBeenCalledOnce();
-        expect(screen.getByRole('button', { name: /通知：.*0 条待处理/ })).toBeInTheDocument();
+        async function reparse() {
+            fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
+            fireEvent.click(await screen.findByRole('menuitem', { name: '重新解析' }));
+        }
+        await reparse();
+        expect(await screen.findByRole('button', { name: /通知：.*1 条待处理/ })).toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: '重新解析' })).not.toBeInTheDocument();
+        await reparse();
+        await waitFor(() => expect(screen.getByRole('button', { name: /通知：.*0 条待处理/ })).toBeInTheDocument());
+        expect(requestPdfIR).toHaveBeenCalledTimes(2);
+        expect(requestPdfIR).toHaveBeenLastCalledWith(datasetId, 'stored-pdf-a', true);
     });
     it('defers a focus refresh until the active write finishes', async () => {
         let finish!: (value: Awaited<ReturnType<typeof patchLibraryPaper>>) => void;
@@ -428,8 +482,8 @@ describe('paper library behavior', () => {
         writeLibrary(datasetId, data);
         await renderLibrary({ title: '我的论文知识库' });
         const tree = browse().getByRole('tree', { name: '论文目录' });
-        expect(within(tree).getByText('我的论文知识库')).toBeInTheDocument();
-        expect(within(tree).getByText('Unfiled paper')).toBeInTheDocument();
+        expect(within(tree).queryByText('我的论文知识库')).not.toBeInTheDocument();
+        expect(within(tree).queryByText('Unfiled paper')).not.toBeInTheDocument();
         expect(within(tree).queryByText('待整理')).not.toBeInTheDocument();
         fireEvent.click(folderTitle(/第一个文件夹/));
         expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
@@ -439,7 +493,7 @@ describe('paper library behavior', () => {
         expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
         fireEvent.click(browse().getByRole('button', { name: /收藏/ }));
         expect(screen.getByRole('heading', { name: 'Other favorite' })).toBeInTheDocument();
-        fireEvent.click(folderTitle(/我的论文知识库/));
+        fireEvent.click(browse().getByRole('button', { name: /全部/ }));
         expect(screen.getByRole('heading', { name: 'Unfiled paper' })).toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
     });
@@ -458,7 +512,7 @@ describe('paper library behavior', () => {
         expect(screen.getByRole('heading', { name: '主题8' })).toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'Unfiled paper' })).toBeInTheDocument();
         expect(screen.queryByRole('heading', { name: 'Folder paper' })).not.toBeInTheDocument();
-        fireEvent.click(folderTitle(/论文库/));
+        fireEvent.click(browse().getByRole('button', { name: /全部/ }));
         directories = within(screen.getByRole('region', { name: '子目录' }));
         expect(directories.getByRole('button', { name: '展开全部（8）' })).toHaveAttribute('aria-expanded', 'false');
         expect(directories.queryByRole('button', { name: /主题8/ })).not.toBeInTheDocument();
@@ -589,8 +643,8 @@ describe('paper library behavior', () => {
     it("groups search, filter, export and import notifications in the document toolbar", async () => {
         await renderLibrary();
         const tools = libraryTools();
-        expect(tools.getAllByRole("button")).toHaveLength(6);
-        for (const name of ["搜索", "筛选", "导出", "预设 / AI 阅读准备", "列表显示设置"])
+        expect(tools.getAllByRole("button")).toHaveLength(5);
+        for (const name of ["搜索", "筛选", "导出", "预设 / AI 阅读准备"])
             expect(tools.getByRole("button", { name })).toBeInTheDocument();
         expect(tools.getByRole("button", { name: /通知/ })).toHaveAttribute("aria-expanded", "false");
         expect(screen.queryByRole("textbox", { name: "搜索文献" })).not.toBeInTheDocument();
@@ -686,6 +740,24 @@ describe('paper library behavior', () => {
         await waitFor(() => expect(folderTitle(/新主题/).closest(".ant-tree-treenode")).toHaveClass("ant-tree-treenode-selected"));
         expect(readLibrary(datasetId).folders.find((folder) => folder.name === "新主题")?.parentId).toBe('second');
         expect(browse().getByRole("button", { name: "删除文件夹「新主题」" })).toBeEnabled();
+    });
+    it('returns to all papers after deleting the selected top-level folder', async () => {
+        vi.mocked(deleteLibraryFolder).mockImplementation(async (id, folder) => {
+            const data = readLibrary(id);
+            data.folders = data.folders.filter(item => item.id !== folder.id);
+            data.papers = data.papers.map(paper => paper.folderId === folder.id ? { ...paper, folderId: null } : paper);
+            writeLibrary(id, data);
+            return { data, removedFolderIds: [folder.id] };
+        });
+        await renderLibrary();
+        fireEvent.click(folderTitle(/第一个文件夹/));
+        fireEvent.click(browse().getByRole('button', { name: '删除文件夹「第一个文件夹」' }));
+        const dialog = await screen.findByRole('dialog');
+        fireEvent.click(within(dialog).getByRole('button', { name: '删除目录' }));
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+        expect(document.querySelector('.paper-library-view-heading')?.textContent).toBe('全部论文');
+        expect(screen.getByRole('heading', { name: 'Other favorite' })).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
     });
     it("keeps the folder and its papers when deletion is cancelled", async () => {
         const before = readLibrary(datasetId);
@@ -862,7 +934,11 @@ describe('paper library behavior', () => {
     });
     it("protects an edit draft while saving and restores editing after a failed write", async () => {
         let fail!: (error: Error) => void;
-        vi.mocked(patchLibraryPaper).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+        const patch = vi.mocked(patchLibraryPaper).getMockImplementation()!;
+        vi.mocked(patchLibraryPaper).mockImplementation(async (...args) => {
+            if (args[2].metadata && !fail) return new Promise((_, reject) => { fail = reject; });
+            return patch(...args);
+        });
         await renderLibrary();
         const notificationButton = libraryTools().getByRole("button", { name: /^通知：/ });
         fireEvent.mouseEnter(screen.getByRole("button", { name: "Folder paper 的更多操作" }));
@@ -876,7 +952,7 @@ describe('paper library behavior', () => {
         const closeButton = details.getByRole("button", { name: "关闭" });
         fireEvent.change(titleInput, { target: { value: "Keep this draft" } });
         fireEvent.click(saveButton);
-        await waitFor(() => expect(patchLibraryPaper).toHaveBeenCalledOnce());
+        await waitFor(() => expect(vi.mocked(patchLibraryPaper).mock.calls.filter(([, , patch]) => patch.metadata)).toHaveLength(1));
         for (const input of details.getAllByRole("textbox"))
             expect(input).toBeDisabled();
         expect(closeButton).toBeDisabled();
@@ -908,7 +984,7 @@ describe('paper library behavior', () => {
         await renderLibrary();
         expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
         expect(browse().getByRole("button", { name: /导入/ })).toBeDisabled();
-        expect(browse().getByRole("button", { name: "在「论文库」中新建文件夹" })).toBeDisabled();
+        expect(browse().getByRole("button", { name: "新建顶层文件夹" })).toBeDisabled();
         expect(within(screen.getByRole("heading", { name: "Folder paper" }).parentElement!).getByRole("button", { name: /取消收藏|取消收藏|paperTasks.unmarkImportant/ })).toBeEnabled();
         expect(screen.getByRole("alert")).toHaveTextContent("只读");
         expect(confirmLibraryPdf).not.toHaveBeenCalled();
@@ -1035,6 +1111,7 @@ it('opens the PDF using app navigation instead of document navigation', async ()
   await renderLibrary({ onOpenAttachment: open });
   fireEvent.click(screen.getByRole('link', { name: 'Folder paper' }));
   expect(open).toHaveBeenCalledOnce();
+  await waitFor(() => expect(readLibrary(datasetId).papers[0].status).toBe('reading'));
 });
 
 it('keeps the cached library visible while revalidating after returning from a reader', async () => {
@@ -1048,4 +1125,41 @@ it('keeps the cached library visible while revalidating after returning from a r
   expect(browse().getByRole('button', { name: /导入/ })).toBeEnabled();
   expect(screen.queryByText('正在加载文献…')).not.toBeInTheDocument();
   await act(async () => finish(snapshot(readLibrary(datasetId))));
+});
+
+it('persists corrected PDF metadata from the confirmation form', async () => {
+    const upload = vi.fn().mockResolvedValue('corrected-pdf-document');
+    vi.mocked(paperFromPdf).mockResolvedValueOnce(makePaper('corrected-pdf', 'Recognized PDF', null));
+    await renderLibrary({ onUploadPdf: upload });
+    const dialog = await openImportDialog('直接上传', '上传文献');
+    fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['pdf'], 'corrected.pdf')] } });
+    const title = await within(dialog).findByRole('textbox', { name: '题名' });
+    fireEvent.change(title, { target: { value: '' } });
+    expect(within(dialog).getByRole('button', { name: '加入论文库' })).toBeDisabled();
+    fireEvent.change(title, { target: { value: '  Corrected system card  ' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '作者（分号分隔）' }), { target: { value: 'OpenAI; Research' } });
+    fireEvent.change(within(dialog).getByRole('spinbutton', { name: '年份' }), { target: { value: '2025' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'DOI' }), { target: { value: '10.1234/card' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '加入论文库' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(upload).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({
+        title: 'Corrected system card',
+        paper: expect.objectContaining({ metadata: expect.objectContaining({ title: 'Corrected system card' }) }),
+    }));
+    expect(readLibrary(datasetId).papers.find(paper => paper.id === 'corrected-pdf')?.metadata).toMatchObject({ title: 'Corrected system card', authors: ['OpenAI', 'Research'], year: 2025, identifiers: { doi: '10.1234/card' } });
+});
+
+it('does not let a corrected DOI bypass verified PDF identity', async () => {
+    const upload = vi.fn();
+    const recognized = makePaper('verified-pdf', 'Verified PDF', null);
+    recognized.metadata.identifiers = { doi: '10.1234/original' };
+    vi.mocked(paperFromPdf).mockResolvedValueOnce({ ...recognized, identityVerified: true });
+    await renderLibrary({ onUploadPdf: upload });
+    const dialog = await openImportDialog('直接上传', '上传文献');
+    fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['pdf'], 'verified.pdf')] } });
+    fireEvent.change(await within(dialog).findByRole('textbox', { name: 'DOI' }), { target: { value: '10.1234/other' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '加入论文库' }));
+    expect(await within(dialog).findByText('PDF 与目标论文身份冲突，未添加附件')).toBeVisible();
+    expect(upload).not.toHaveBeenCalled();
+    expect(confirmLibraryPdf).not.toHaveBeenCalled();
 });

@@ -30,7 +30,7 @@ def find_root():
 ROOT = find_root()
 MODELS_DEV_URL = 'https://models.dev/api.json?type=all'
 OPENROUTER_URL = 'https://openrouter.ai/api/v1/models?output_modalities=all'
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 PROVIDER_SOURCES = {
     'Claude': ['anthropic'],
@@ -237,10 +237,28 @@ def utc_now():
     return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
-def build_catalog(models_dev, openrouter):
+def apply_builtin_catalog(payload):
+    # Ark does not expose a compatible model discovery endpoint. Keep its
+    # reviewed official IDs available in both fresh and offline/cached builds.
+    with open(os.path.join(os.path.dirname(__file__), 'volcengine_models.json'), encoding='utf-8') as handle:
+        builtin = json.load(handle)
+    models = {model['name']: model for model in payload['providers'].get('Doubao', [])}
+    models.update((model['name'], model) for model in builtin['models'])
+    payload['providers']['Doubao'] = [models[name] for name in sorted(models)]
+    recognition = payload.setdefault('recognition_models', [])
+    for model in builtin['models']:
+        if model not in recognition:
+            recognition.append(model)
+    sources = payload.setdefault('sources', [])
+    if builtin['source'] not in sources:
+        sources.append(builtin['source'])
+    return payload
+
+
+def build_catalog(models_dev, openrouter=None, cached_openrouter=None):
     if not isinstance(models_dev, dict) or not models_dev:
         raise ValueError('models.dev returned an empty or invalid provider catalog')
-    if not isinstance(openrouter, dict) or not isinstance(openrouter.get('data'), list) or not openrouter['data']:
+    if openrouter is not None and (not isinstance(openrouter, dict) or not isinstance(openrouter.get('data'), list) or not openrouter['data']):
         raise ValueError('OpenRouter returned an empty or invalid model catalog')
     providers = {}
     for provider_name, keys in PROVIDER_SOURCES.items():
@@ -252,8 +270,8 @@ def build_catalog(models_dev, openrouter):
     if not any(providers.values()):
         raise ValueError('models.dev has no models for supported providers')
     metadata = collect_models_dev(models_dev, ['openrouter'])
-    openrouter_models = {}
-    for entry in openrouter.get('data') or []:
+    openrouter_models = {model['name']: model for model in (cached_openrouter or [])} if openrouter is None else {}
+    for entry in (openrouter or {}).get('data') or []:
         if not isinstance(entry, dict):
             continue
         model = from_openrouter(entry)
@@ -267,15 +285,15 @@ def build_catalog(models_dev, openrouter):
         openrouter_models[model['name']] = model
     providers['OpenRouter'] = [finalize(openrouter_models[name]) for name in sorted(openrouter_models)]
 
-    if not openrouter_models:
+    if openrouter is not None and not openrouter_models:
         raise ValueError('OpenRouter has no valid model IDs')
-    return {
+    return apply_builtin_catalog({
         'schema_version': SCHEMA_VERSION,
         'generated_at': utc_now(),
-        'sources': [MODELS_DEV_URL, OPENROUTER_URL],
+        'sources': [MODELS_DEV_URL] + ([OPENROUTER_URL] if openrouter is not None else []),
         'providers': providers,
         'recognition_models': collect_recognition_models(models_dev, openrouter_models),
-    }
+    })
 
 
 def read_snapshot(path):
@@ -283,7 +301,7 @@ def read_snapshot(path):
         with open(path, encoding='utf-8') as handle:
             payload = json.load(handle)
         version = payload.get('schema_version', 0)
-        if version not in (0, 1, 2, 3, SCHEMA_VERSION):
+        if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
             return None
         payload['schema_version'] = version
         providers = payload['providers']
@@ -331,6 +349,7 @@ def read_snapshot(path):
 
 
 def write_snapshot(paths, payload):
+    payload = apply_builtin_catalog(payload)
     encoded = json.dumps(payload, ensure_ascii=False, indent=2) + '\n'
     for path in paths:
         directory = os.path.dirname(os.path.abspath(path))
@@ -356,7 +375,14 @@ def generate(paths, refresh=False):
             write_snapshot(paths, previous)
             return
     try:
-        payload = build_catalog(fetch_json(MODELS_DEV_URL), fetch_json(OPENROUTER_URL))
+        # Temporarily opt out of OpenRouter discovery; keep existing model
+        # metadata usable offline. Explicit opt-in supports restoring discovery.
+        router_enabled = os.environ.get('LAZYMIND_CATALOG_OPENROUTER_ENABLED', '').lower() == 'true'
+        payload = build_catalog(
+            fetch_json(MODELS_DEV_URL),
+            fetch_json(OPENROUTER_URL) if router_enabled else None,
+            (previous or {}).get('providers', {}).get('OpenRouter', []),
+        )
     except (OSError, http.client.HTTPException, ValueError, TypeError, AttributeError) as error:
         if not previous:
             raise
@@ -370,7 +396,7 @@ def generate(paths, refresh=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Fetch the models.dev and OpenRouter catalog; reuse a valid snapshot for 24 hours.',
+        description='Fetch models.dev; OpenRouter discovery is paused unless LAZYMIND_CATALOG_OPENROUTER_ENABLED=true. Reuse a valid snapshot for 24 hours.',
     )
     parser.add_argument('--backend-out')
     parser.add_argument('--frontend-out')

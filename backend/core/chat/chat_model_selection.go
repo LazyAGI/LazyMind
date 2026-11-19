@@ -59,30 +59,36 @@ type patchConversationModelRequest struct {
 }
 
 type chatModelSnapshot struct {
-	ModelID         string `json:"model_id"`
-	ProviderID      string `json:"provider_id"`
-	ProviderName    string `json:"provider_name"`
-	ProviderGroupID string `json:"provider_group_id"`
-	GroupName       string `json:"group_name"`
-	ModelName       string `json:"model_name"`
-	Source          string `json:"source"`
-	SuccessfulRunID string `json:"successful_run_id,omitempty"`
+	// Display identity is independent of ProviderName, the runtime adapter.
+	ProviderDisplayName string `json:"provider_display_name,omitempty"`
+	ProviderIsCustom    bool   `json:"provider_is_custom,omitempty"`
+	ModelID             string `json:"model_id"`
+	ProviderID          string `json:"provider_id"`
+	ProviderName        string `json:"provider_name"`
+	ProviderGroupID     string `json:"provider_group_id"`
+	GroupName           string `json:"group_name"`
+	ModelName           string `json:"model_name"`
+	Source              string `json:"source"`
+	SuccessfulRunID     string `json:"successful_run_id,omitempty"`
 }
 
 type availableChatModel = modelconfig.AvailableChatModel
 
 type chatModelRoute struct {
-	Mode             string `json:"mode"`
-	Strategy         string `json:"strategy"`
-	TaskClass        string `json:"task_class"`
-	Reason           string `json:"reason"`
-	ModelID          string `json:"model_id"`
-	ProviderID       string `json:"provider_id"`
-	ProviderName     string `json:"provider_name"`
-	ModelName        string `json:"model_name"`
-	Source           string `json:"source"`
-	SelectionVersion *int64 `json:"selection_version,omitempty"`
-	snapshot         *chatModelSnapshot
+	// Display identity is independent of ProviderName, the runtime adapter.
+	ProviderDisplayName string `json:"provider_display_name,omitempty"`
+	ProviderIsCustom    bool   `json:"provider_is_custom,omitempty"`
+	Mode                string `json:"mode"`
+	Strategy            string `json:"strategy"`
+	TaskClass           string `json:"task_class"`
+	Reason              string `json:"reason"`
+	ModelID             string `json:"model_id"`
+	ProviderID          string `json:"provider_id"`
+	ProviderName        string `json:"provider_name"`
+	ModelName           string `json:"model_name"`
+	Source              string `json:"source"`
+	SelectionVersion    *int64 `json:"selection_version,omitempty"`
+	snapshot            *chatModelSnapshot
 }
 
 type chatModelSelectionResponse struct {
@@ -263,6 +269,8 @@ func successfulChatModelSnapshot(conversation *orm.Conversation, histories []cha
 		snapshot.ModelID = route.ModelID
 		snapshot.ProviderID = route.ProviderID
 		snapshot.ProviderName = route.ProviderName
+		snapshot.ProviderDisplayName = route.ProviderDisplayName
+		snapshot.ProviderIsCustom = route.ProviderIsCustom
 		snapshot.ModelName = route.ModelName
 		snapshot.Source = route.Source
 		snapshot.SuccessfulRunID = history.RunID
@@ -370,7 +378,7 @@ func fixedChatModelRoute(model *availableChatModel) *chatModelRoute {
 	}
 	return &chatModelRoute{
 		Mode: chatModelModeFixed, Strategy: "fixed", TaskClass: "fixed", Reason: "fixed",
-		ModelID: model.ID, ProviderID: model.ProviderID, ProviderName: model.ProviderName,
+		ModelID: model.ID, ProviderID: model.ProviderID, ProviderName: model.ProviderName, ProviderDisplayName: model.ProviderDisplayName, ProviderIsCustom: model.ProviderIsCustom,
 		ModelName: model.ModelName, Source: model.Source,
 	}
 }
@@ -421,7 +429,7 @@ func chatModelSnapshotForModel(model *availableChatModel) *chatModelSnapshot {
 		return nil
 	}
 	return &chatModelSnapshot{
-		ModelID: model.ID, ProviderID: model.ProviderID, ProviderName: model.ProviderName,
+		ModelID: model.ID, ProviderID: model.ProviderID, ProviderName: model.ProviderName, ProviderDisplayName: model.ProviderDisplayName, ProviderIsCustom: model.ProviderIsCustom,
 		ProviderGroupID: model.ProviderGroupID, GroupName: model.GroupName,
 		ModelName: model.ModelName, Source: model.Source,
 	}
@@ -681,8 +689,8 @@ func conversationModelSwitchBlock(ctx context.Context, db *gorm.DB, userID, conv
 		}
 		var session orm.WorkflowSession
 		err := db.WithContext(ctx).Where(
-			"id = ? AND conversation_id = ? AND create_user_id = ? AND dismissed = ? AND status = ? AND controller_host = ?",
-			*task.WorkflowSessionID, conversationID, userID, false, workflow.SessionStatusWaiting, "lazymind",
+			"id = ? AND conversation_id = ? AND create_user_id = ? AND dismissed = ? AND controller_host = ?",
+			*task.WorkflowSessionID, conversationID, userID, false, "lazymind",
 		).Take(&session).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "background_task_running", nil
@@ -690,12 +698,14 @@ func conversationModelSwitchBlock(ctx context.Context, db *gorm.DB, userID, conv
 		if err != nil {
 			return "", err
 		}
-		// Workflow task rows stay running while their execution is waiting for the user.
+		// Resumable workflow task rows stay running while waiting or paused.
+		// Use execution facts: live attempts and an unconfirmed stop still block
+		// switching even if the session already carries a stop marker.
 		view, err := displaystate.Read(db.WithContext(ctx), session)
 		if err != nil {
 			return "", err
 		}
-		if view.Status != "waiting" {
+		if view.Status != "waiting" && view.Status != "paused" {
 			return "background_task_running", nil
 		}
 	}
@@ -1186,7 +1196,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 		state.candidates = []modelconfig.ChatModelCandidate{*current}
 	}
 	if unavailableSticky != nil && modelconfig.ChatCandidateID(unavailableSticky.Source, unavailableSticky.ModelID) != current.CandidateID {
-		from := &chatModelRoute{Mode: mode, Strategy: route.Strategy, TaskClass: route.TaskClass, Reason: "model_unavailable", SelectionVersion: route.SelectionVersion, ModelID: unavailableSticky.ModelID, ProviderID: unavailableSticky.ProviderID, ProviderName: unavailableSticky.ProviderName, ModelName: unavailableSticky.ModelName, Source: unavailableSticky.Source, snapshot: unavailableSticky}
+		from := &chatModelRoute{Mode: mode, Strategy: route.Strategy, TaskClass: route.TaskClass, Reason: "model_unavailable", SelectionVersion: route.SelectionVersion, ModelID: unavailableSticky.ModelID, ProviderID: unavailableSticky.ProviderID, ProviderName: unavailableSticky.ProviderName, ProviderDisplayName: unavailableSticky.ProviderDisplayName, ProviderIsCustom: unavailableSticky.ProviderIsCustom, ModelName: unavailableSticky.ModelName, Source: unavailableSticky.Source, snapshot: unavailableSticky}
 		var window *int64
 		if prior := findAvailableChatModelBySource(models, from.ModelID, from.Source); prior != nil {
 			window = modelconfig.ConfiguredChatWindow(prior.MaxInputTokens)

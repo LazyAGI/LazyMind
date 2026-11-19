@@ -102,6 +102,9 @@ func diagnoseStepIOFidelity(workflowYAML, stateYAML string) []repairDiagnostic {
 			candidates := optionalExternalTextInputs(graph, node)
 			if len(candidates) == 1 {
 				materialID := candidates[0]
+				if explicitOptionalRuntimeText(workflowYAML, stateYAML, stepID, materialID, node.Prompt) {
+					continue
+				}
 				out = append(out, repairDiagnostic{
 					Code:       stepIODiagnosticStartInputOptional,
 					Path:       "scenario/state.yml.steps." + stepID + ".inputs",
@@ -115,6 +118,54 @@ func diagnoseStepIOFidelity(workflowYAML, stateYAML string) []repairDiagnostic {
 		}
 	}
 	return out
+}
+
+// Compiled optional inputs also include legacy inputs with no required flag.
+// Only preserve an explicit optional declaration with a usable runtime fallback;
+// a mandatory slot or step input must never be weakened by the prompt.
+func explicitOptionalRuntimeText(workflowYAML, stateYAML, stepID, materialID, prompt string) bool {
+	if !strings.Contains(prompt, "{{user_input}}") {
+		return false
+	}
+	var workflow, state map[string]any
+	if yaml.Unmarshal([]byte(workflowYAML), &workflow) != nil || yaml.Unmarshal([]byte(stateYAML), &state) != nil {
+		return false
+	}
+	explicitOptional := false
+	check := func(item map[string]any) bool {
+		if required, ok := item["required"].(bool); ok {
+			if required {
+				return false
+			}
+			explicitOptional = true
+		}
+		return true
+	}
+	for _, raw := range listValue(workflow["slots"]) {
+		slot := mapValue(raw)
+		if scalarAny(slot["id"]) == materialID && !check(slot) {
+			return false
+		}
+	}
+	var step map[string]any
+	switch steps := state["steps"].(type) {
+	case map[string]any:
+		step = mapValue(steps[stepID])
+	case []any:
+		for _, raw := range steps {
+			if item := mapValue(raw); scalarAny(item["id"]) == stepID {
+				step = item
+				break
+			}
+		}
+	}
+	for _, raw := range listValue(step["inputs"]) {
+		input := mapValue(raw)
+		if scalarAny(firstNonNilAny(input["slot"], input["material"], input["id"])) == materialID && !check(input) {
+			return false
+		}
+	}
+	return explicitOptional
 }
 
 func applyDeterministicStepIORepairs(workflowYAML, stateYAML string) (string, string, []string, bool) {

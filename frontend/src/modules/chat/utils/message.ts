@@ -220,6 +220,7 @@ export interface ExternalExecutionProjection {
   run_id: string;
   history_id: string;
   provider: string;
+  model?: string;
   status: "pending" | "running" | "completed" | "failed" | "stopped";
   host_id?: string;
   host_online: boolean;
@@ -379,6 +380,7 @@ export function buildChatMessageListFromHistory(
           name: file.filename || file?.uri?.split("/").pop(),
           ...(file.fork_unavailable ? { unavailable: true } : {}),
           uid: file.file_id,
+          uri: file.fork_unavailable ? undefined : file.uri,
         })),
       finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       inputs: normalizedInputs,

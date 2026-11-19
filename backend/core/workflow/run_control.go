@@ -1,30 +1,93 @@
 package workflow
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
+	"lazymind/core/workflow/graphengine"
 )
+
+type runAdvanceRecovery struct {
+	replacesInput      bool
+	replacesReviewStep string
+}
+
+// Resume and dispatch share the transition transaction. Invalid targets, pending
+// reviews and version conflicts must leave the paused session untouched.
+func resumeForRerun(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, req transitionCommandRequest) error {
+	if req.ExpectedStateVersion != session.StateVersion {
+		return controlstore.Reject("STATE_VERSION_CONFLICT", "workflow changed since the rerun request")
+	}
+	if controlstore.Controlled(*session) || req.RetryOrigin != "user" || len(req.Targets) != 1 ||
+		(req.Operation != "retry" && req.Operation != "rewind") {
+		return controlstore.Reject("INVALID_RERUN", "explicit native rerun requires one previously executed step")
+	}
+	display, err := displaystate.Read(tx, *session)
+	if err != nil {
+		return err
+	}
+	if display.Status != "paused" || session.Status == "pausing" {
+		return controlstore.Reject("WORKFLOW_NOT_PAUSED", "only a settled paused workflow can resume for rerun")
+	}
+	var history orm.ChatHistory
+	if req.TriggerHistoryID == "" {
+		return controlstore.Reject("INVALID_RERUN", "rerun must belong to the requesting Chat turn")
+	}
+	if err := tx.Where("id = ? AND conversation_id = ?", req.TriggerHistoryID, session.ConversationID).First(&history).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return controlstore.Reject("INVALID_RERUN", "rerun Chat turn does not belong to this conversation")
+		}
+		return err
+	}
+	binding, err := json.Marshal(nativeTurnBinding{HistoryID: history.ID})
+	if err != nil {
+		return err
+	}
+	if err := acceptRunControl(ctx, tx, session, "resume", map[string]any{"control_binding_json": string(binding)}, &req.ExpectedStateVersion); err != nil {
+		return err
+	}
+	session.ControlBindingJSON = string(binding)
+	return nil
+}
 
 // guardRunAdvance is the native execution admission rule for every controller.
 // Target selection, recovery and retry budgets are checked by the same graph
 // transition below this boundary. Host binding is only a delivery prerequisite.
-func guardRunAdvance(tx *gorm.DB, session orm.WorkflowSession) error {
+func guardRunAdvance(tx *gorm.DB, session orm.WorkflowSession, recovery ...runAdvanceRecovery) error {
+	var replacing runAdvanceRecovery
+	if len(recovery) > 0 {
+		replacing = recovery[0]
+	}
 	if session.Status == "pausing" {
 		return controlstore.Reject("WORKFLOW_PAUSING", "wait for execution to stop before continuing")
+	}
+	input, err := displaystate.PendingInput(tx, session)
+	if err != nil {
+		return err
+	}
+	if input != nil && session.Status != "stopped" && !replacing.replacesInput {
+		return controlstore.Reject("WORKFLOW_INPUT_REQUIRED", "answer the workflow questions before continuing")
 	}
 	display, err := displaystate.Read(tx, session)
 	if err != nil {
 		return err
 	}
-	approvalRequired := display.ApprovalRequired()
+	approvalRequired := display.ApprovalRequired() && display.ApprovalStepID != replacing.replacesReviewStep
 	if controlstore.Controlled(session) {
-		// Running siblings take precedence in display state, but pending reviews
-		// still block new grants. Existing grants drain through GuardClaim.
+		// Pending reviews block new grants even while siblings drain. Explicit
+		// user recovery may replace the review belonging to its exact target.
 		var pendingReviews int64
-		if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).
-			Where("session_id = ? AND status = ?", session.ID, "pending").Count(&pendingReviews).Error; err != nil {
+		reviews := tx.Model(&orm.WorkflowReviewCheckpoint{}).
+			Where("session_id = ? AND status = ?", session.ID, "pending")
+		if replacing.replacesReviewStep != "" {
+			reviews = reviews.Where("step_id <> ?", replacing.replacesReviewStep)
+		}
+		if err := reviews.Count(&pendingReviews).Error; err != nil {
 			return err
 		}
 		approvalRequired = approvalRequired || pendingReviews > 0
@@ -47,4 +110,33 @@ func guardRunAdvance(tx *gorm.DB, session orm.WorkflowSession) error {
 		}
 	}
 	return nil
+}
+
+// Explicit recovery may replace a bad question producer or an upstream step.
+// It cannot use an unrelated/downstream retry to cross the input barrier.
+func replacesInputCheckpoint(graph *graphengine.CompiledStateGraph, req transitionCommandRequest) bool {
+	checkpoint := graph.Runtime.InputCheckpoint
+	if checkpoint == nil || req.RetryOrigin != "user" ||
+		(req.Operation != "rewind" && req.Operation != "retry" && req.Operation != "advance") || len(req.Targets) > 1 {
+		return false
+	}
+	seen := map[string]bool{}
+	queue := []string{checkpoint.AfterStep}
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		if seen[node] {
+			continue
+		}
+		seen[node] = true
+		if node == req.TargetStepID {
+			return true
+		}
+		for _, edge := range graph.ControlEdges {
+			if edge.To == node {
+				queue = append(queue, edge.From)
+			}
+		}
+	}
+	return false
 }

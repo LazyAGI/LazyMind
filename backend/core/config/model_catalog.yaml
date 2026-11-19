@@ -555,9 +555,9 @@ model_providers:
         - name: Speech-2.8-Turbo
           type: tts
         - name: image-01
-          type: image_editing
+          type: text2image
         - name: image-01-live
-          type: image_editing
+          type: text2image
 
     - name: OpenAI
       description:

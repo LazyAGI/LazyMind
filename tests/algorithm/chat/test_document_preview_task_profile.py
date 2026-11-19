@@ -26,3 +26,17 @@ def test_preview_document_is_available_to_request_assessment(context, surface, a
     profile = resolve_task_profile(**inputs, enable_llm_fallback=False)
     missing = [issue for issue in profile.request_assessment.issues if issue.issue_type == 'missing_input']
     assert bool(missing) is not available
+
+
+@pytest.mark.parametrize('query', [
+    '精读《Attention Is All You Need》这篇论文',
+    '列出所选资料库里的论文',
+])
+def test_regular_library_lookup_does_not_require_preview(query):
+    request = ChatRequest.model_validate({
+        'message': {'query': query},
+        'retrieval': {'filters': {'kb_id': 'kb-1'}},
+    })
+    profile = resolve_task_profile(**_task_profile_inputs(request), enable_llm_fallback=False)
+    assert profile.source_strategy == 'knowledge_base'
+    assert not any(issue.issue_type == 'missing_input' for issue in profile.request_assessment.issues)

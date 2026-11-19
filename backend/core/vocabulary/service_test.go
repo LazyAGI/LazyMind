@@ -35,14 +35,23 @@ func selectLocal(t *testing.T, s *Service) {
 	}
 }
 
-func TestDisabledFeatureRejectsLocalProvider(t *testing.T) {
+func TestVocabularyPersistsInHostedModeWithoutAnki(t *testing.T) {
 	s := testService(t)
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "cloud")
 	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
-	if _, err := s.SaveSetting(context.Background(), "u", ProviderSetting{SelectedProvider: "local", AnkiEndpoint: defaultAnkiURL, AnkiDeckName: defaultAnkiDeck}); err == nil {
-		t.Fatal("expected provider rejection")
+	t.Setenv("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "false")
+	ctx := context.Background()
+	result, err := s.AddWord(ctx, "u", AddWordRequest{Provider: ProviderAnki, WordbookIDs: []string{"Legacy Anki deck"}, Term: "context", Meaning: "surroundings"})
+	if err != nil || result.Word.Provider != "local" || result.Queued {
+		t.Fatalf("local save result=%+v, err=%v", result, err)
 	}
-	if _, err := s.NextQuestion(context.Background(), "u"); err == nil {
-		t.Fatal("expected review rejection")
+	_, items, err := s.ChatWords(ctx, "u", "", "")
+	if err != nil || len(items) != 1 || items[0].ID != result.Word.ID {
+		t.Fatalf("chat items=%+v, err=%v", items, err)
+	}
+	question, err := s.NextQuestion(ctx, "u")
+	if err != nil || question == nil || question.Word.ID != result.Word.ID {
+		t.Fatalf("question=%+v, err=%v", question, err)
 	}
 }
 
@@ -165,6 +174,27 @@ func TestReviewSessionUsesSharedReviewPathAndBuildsReport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Simulate the sibling becoming due again before the session ends.
+	var sibling ReviewCard
+	if err := s.db.Where("word_id = ? AND id <> ?", result.Word.ID, batch.Questions[0].CardID).First(&sibling).Error; err != nil {
+		t.Fatal(err)
+	}
+	var card fsrs.Card
+	if err := json.Unmarshal([]byte(sibling.FSRSCardJSON), &card); err != nil {
+		t.Fatal(err)
+	}
+	card.Due = time.Now().UTC().Add(-time.Minute)
+	raw, err := json.Marshal(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Model(&sibling).Update("fsrs_card_json", string(raw)).Error; err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.StartReviewSession(ctx, "u", 5)
+	if err != nil || next.Session.ID != batch.Session.ID || len(next.Questions) != 0 {
+		t.Fatalf("continued session included an already answered word: questions=%d err=%v", len(next.Questions), err)
 	}
 	report, err := s.CompleteReviewSession(ctx, "u", batch.Session.ID)
 	if err != nil {
@@ -502,10 +532,11 @@ func TestLocalAddPersistsDefaultWordbookAndExampleTags(t *testing.T) {
 	}
 }
 
-func TestAnkiMutationIsQueuedWhenOffline(t *testing.T) {
+func TestAnkiWordUpdateQueuesMirrorWithoutRequiringConnection(t *testing.T) {
 	s := testService(t)
+	t.Setenv("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "true")
 	ctx := context.Background()
-	setting := ProviderSetting{OwnerID: "u", SelectedProvider: ProviderAnki, AnkiEndpoint: "http://127.0.0.1:1", AnkiDeckName: defaultAnkiDeck, AnkiModelVersion: ankiModelVersion}
+	setting := ProviderSetting{OwnerID: "u", LegacySelectedProvider: ProviderAnki, AnkiEndpoint: "http://127.0.0.1:1", AnkiDeckName: defaultAnkiDeck, AnkiModelVersion: ankiModelVersion}
 	if err := s.db.Create(&setting).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +549,7 @@ func TestAnkiMutationIsQueuedWhenOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	var operation providerOperation
-	if err := s.db.Where("operation_type = ? AND status = ?", "update_word", "pending").First(&operation).Error; err != nil {
+	if err := s.db.Where("operation_type = ? AND status = ?", "mirror_word", "pending").First(&operation).Error; err != nil {
 		t.Fatal(err)
 	}
 	if operation.RetryCount != 0 {
@@ -623,5 +654,168 @@ func TestObjectiveReviewQuestionsAndServerGrading(t *testing.T) {
 	rating, err = s.gradeResponse(ctx, "u", ReviewRequest{CardID: choice.CardID, Response: "错误释义"})
 	if err != nil || rating != "again" {
 		t.Fatalf("incorrect response rating=%q err=%v", rating, err)
+	}
+}
+
+func TestLegacyAnkiQueueIsVisibleWithAnkiDisabled(t *testing.T) {
+	s := testService(t)
+	t.Setenv("LAZYMIND_VOCABULARY_ANKI_SYNC_ENABLED", "false")
+	ctx := context.Background()
+	req := AddWordRequest{Provider: ProviderAnki, Term: "legacy", Language: "en", Meaning: "existing", DocumentID: "doc", WordbookIDs: []string{"Old deck"}}
+	if err := createAnkiOperation(s.db, "u", "add_word", req); err != nil {
+		t.Fatal(err)
+	}
+	words, err := s.DocumentWords(ctx, "u", "doc")
+	if err != nil || len(words) != 1 || words[0].Term != req.Term || words[0].Provider != "local" {
+		t.Fatalf("words=%+v err=%v", words, err)
+	}
+	again, err := s.DocumentWords(ctx, "u", "doc")
+	if err != nil || len(again) != 1 || again[0].ID != words[0].ID {
+		t.Fatalf("words after repeat=%+v err=%v", again, err)
+	}
+	var op providerOperation
+	if err := s.db.First(&op).Error; err != nil || op.OperationType != "mirror_word" || op.Status != "pending" {
+		t.Fatalf("operation=%+v err=%v", op, err)
+	}
+}
+
+func TestReviewSessionScopesQuestionsToWordbook(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	defaultBook, err := s.EnsureDefaultWordbook(ctx, "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherBook, err := s.CreateWordbook(ctx, "u", WordbookInput{Name: "Other book"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, book := range []Wordbook{defaultBook, otherBook} {
+		if _, err := s.AddWord(ctx, "u", AddWordRequest{
+			Term: []string{"evidence", "context"}[i], WordbookIDs: []string{book.ID},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch, err := s.StartReviewSession(ctx, "u", 5)
+	if err != nil || batch.Session.WordbookID != defaultBook.ID || len(batch.Questions) != 1 || batch.Questions[0].Word.Term != "evidence" {
+		t.Fatalf("default session=%+v err=%v", batch, err)
+	}
+	setting, err := s.Setting(ctx, "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setting.LocalDefaultWordbookID = otherBook.ID
+	if _, err := s.SaveSetting(ctx, "u", setting); err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.StartReviewSession(ctx, "u", 5)
+	if err != nil || other.Session.WordbookID != otherBook.ID || len(other.Questions) != 1 || other.Questions[0].Word.Term != "context" || other.Session.ID == batch.Session.ID {
+		t.Fatalf("other session=%+v err=%v", other, err)
+	}
+	active, err := s.activeReviewSessionForWordbook(ctx, "u", defaultBook.ID)
+	if err != nil || active == nil || active.ID != batch.Session.ID {
+		t.Fatalf("active default session=%+v err=%v", active, err)
+	}
+	// Simulate an older default-book session that had issued an out-of-book card.
+	if err := s.db.Create(&ReviewSessionItem{ID: "legacy-pending", SessionID: batch.Session.ID,
+		OwnerID: "u", WordID: other.Questions[0].Word.ID, CardID: other.Questions[0].CardID, Status: "issued"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Model(&ReviewSession{}).Where("id = ?", batch.Session.ID).Update("wordbook_id", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := s.startReviewSessionForWordbook(ctx, "u", 5, defaultBook.ID)
+	if err != nil || resumed.Session.ID != batch.Session.ID || len(resumed.Questions) != 1 || resumed.Questions[0].CardID != batch.Questions[0].CardID {
+		t.Fatalf("resumed default session=%+v err=%v", resumed, err)
+	}
+
+	if remaining, err := s.SessionRemaining(ctx, "u", resumed.Session.ID); err != nil || remaining != 1 {
+		t.Fatalf("resumed session remaining=%d err=%v", remaining, err)
+	}
+	if remaining, err := s.SessionRemaining(ctx, "u", other.Session.ID); err != nil || remaining != 1 {
+		t.Fatalf("other session remaining=%d err=%v", remaining, err)
+	}
+
+	foreign, err := s.EnsureDefaultWordbook(ctx, "another-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonVocabulary, err := s.CreateWordbook(ctx, "u", WordbookInput{Name: "Translations", CapabilityKey: "general_translation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, book := range []Wordbook{foreign, nonVocabulary} {
+		if _, err := s.startReviewSessionForWordbook(ctx, "u", 5, book.ID); err == nil {
+			t.Fatalf("accepted invalid wordbook %q", book.Name)
+		}
+	}
+}
+
+func TestReviewSessionReleasesCardAnsweredInAnotherWordbook(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	firstBook, err := s.EnsureDefaultWordbook(ctx, "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBook, err := s.CreateWordbook(ctx, "u", WordbookInput{Name: "Second book"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	word, err := s.AddWord(ctx, "u", AddWordRequest{Term: "shared", WordbookIDs: []string{firstBook.ID, secondBook.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.startReviewSessionForWordbook(ctx, "u", 5, firstBook.ID)
+	if err != nil || len(first.Questions) != 1 {
+		t.Fatalf("first questions=%d err=%v", len(first.Questions), err)
+	}
+	second, err := s.startReviewSessionForWordbook(ctx, "u", 5, secondBook.ID)
+	if err != nil || len(second.Questions) != 1 || second.Questions[0].CardID != first.Questions[0].CardID {
+		t.Fatalf("second questions=%d err=%v", len(second.Questions), err)
+	}
+	question := second.Questions[0]
+	if err := s.RecordSessionAnswer(ctx, "u", second.Session.ID, word.Word.ID, word.Word.Term, ReviewRequest{
+		CardID: question.CardID, Rating: "good", RowVersion: question.RowVersion, PreviewedAt: question.PreviewedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := s.startReviewSessionForWordbook(ctx, "u", 5, firstBook.ID)
+	if err != nil || len(resumed.Questions) != 0 || resumed.Session.ID != first.Session.ID {
+		t.Fatalf("resumed questions=%d err=%v", len(resumed.Questions), err)
+	}
+	if report, err := s.CompleteReviewSession(ctx, "u", resumed.Session.ID); err != nil || report.Total != 0 {
+		t.Fatalf("first session report total=%d err=%v", report.Total, err)
+	}
+	if report, err := s.CompleteReviewSession(ctx, "u", second.Session.ID); err != nil || report.Total != 1 {
+		t.Fatalf("second session report total=%d err=%v", report.Total, err)
+	}
+}
+
+func TestRepeatedDocumentSaveReusesExampleAndClozeCard(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	req := AddWordRequest{
+		Term: "evaluation", DocumentID: "paper", OriginType: "document",
+		Sentence: "These evaluation settings are useful.", Translation: "这些评估设置很有用。",
+	}
+	first, err := s.AddWord(ctx, "u", req)
+	if err != nil || first.Example == nil {
+		t.Fatalf("first save example=%+v err=%v", first.Example, err)
+	}
+	second, err := s.AddWord(ctx, "u", req)
+	if err != nil || second.Example == nil || second.Example.ID != first.Example.ID {
+		t.Fatalf("repeated save example=%+v err=%v", second.Example, err)
+	}
+	var cloze int64
+	err = s.db.Model(&ReviewCard{}).Where("word_id = ? AND card_type = ?", first.Word.ID, "sentence_cloze").Count(&cloze).Error
+	if err != nil || cloze != 1 {
+		t.Fatalf("cloze cards=%d err=%v", cloze, err)
+	}
+	var examples int64
+	err = s.db.Model(&Example{}).Where("word_id = ?", first.Word.ID).Count(&examples).Error
+	if err != nil || examples != 1 {
+		t.Fatalf("examples=%d err=%v", examples, err)
 	}
 }

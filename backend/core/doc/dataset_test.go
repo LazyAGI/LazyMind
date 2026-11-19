@@ -145,7 +145,7 @@ func TestListDatasetsKeywordMatchesTags(t *testing.T) {
 	}
 }
 
-func TestListDatasetsFiltersScanDeniedSourceDatasets(t *testing.T) {
+func TestListDatasetsUsesCoreACLForSourceDatasets(t *testing.T) {
 	db := newDocumentTestDB(t)
 	seedDocumentListDataset(t, db, "ds-local", "user-1")
 	seedDocumentListDataset(t, db, "ds-manual", "user-1")
@@ -191,8 +191,8 @@ func TestListDatasetsFiltersScanDeniedSourceDatasets(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.TotalSize != 1 || len(resp.Datasets) != 1 || resp.Datasets[0].DatasetID != "ds-manual" {
-		t.Fatalf("expected only manual dataset to remain, got total=%d datasets=%+v", resp.TotalSize, resp.Datasets)
+	if resp.TotalSize != 2 || len(resp.Datasets) != 2 {
+		t.Fatalf("expected both Core-authorized datasets, got total=%d datasets=%+v", resp.TotalSize, resp.Datasets)
 	}
 }
 
@@ -244,12 +244,15 @@ func TestListDatasetsPaperReadingFiltersBeforePaginationAndChecksAccess(t *testi
 	}
 }
 
-func TestGetDatasetRejectsScanDeniedSourceDataset(t *testing.T) {
+func TestGetDatasetAllowsCoreOwnerDespiteScanSourcePolicy(t *testing.T) {
 	db := newDocumentTestDB(t)
 	seedDocumentListDataset(t, db, "ds-local", "user-1")
 
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/api/scan/internal/sources/by-dataset/ds-local" {
+			return testJSONResponse(http.StatusOK, `{"source":{"source_id":"source-local"}}`), nil
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/scan/internal/source-access/by-dataset:batch" {
 			t.Errorf("unexpected scan request %s %q", r.Method, r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
@@ -267,8 +270,8 @@ func TestGetDatasetRejectsScanDeniedSourceDataset(t *testing.T) {
 
 	GetDataset(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected forbidden, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected Core-authorized detail, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

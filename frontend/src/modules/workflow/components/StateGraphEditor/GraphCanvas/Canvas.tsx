@@ -460,14 +460,14 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
       const newModel = { ...m, nodes: updatedNodes };
       skipSyncRef.current = true;
       onModelChangeRef.current(newModel);
-      // Sync the source node's data in ReactFlow so the properties panel reflects
-      // the new transition immediately (without waiting for the parent re-render).
+      // Sync only the changed transitions. Spreading the model node here would
+      // replace the canvas's material ID arrays with structured input/output refs.
       const updatedSource = updatedNodes.find((n) => n.id === connection.source)!;
       const errMsgs = nodeErrorMap.get(connection.source) ?? [];
       setNodes((nds) =>
         nds.map((n) =>
           n.id === connection.source
-            ? { ...n, data: { ...n.data, ...updatedSource, hasError: errMsgs.length > 0, errorMessages: errMsgs } }
+            ? { ...n, data: { ...n.data, transitions: updatedSource.transitions, hasError: errMsgs.length > 0, errorMessages: errMsgs } }
             : n,
         ),
       );

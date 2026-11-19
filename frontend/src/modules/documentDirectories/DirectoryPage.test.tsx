@@ -47,7 +47,7 @@ it('paginates five documents, resets on filtering, and keeps controls for empty 
   await screen.findByText('Document 11');
   expect(screen.getAllByRole('button', { name: 'directories.details' })).toHaveLength(1);
   expect(screen.getByText('Document 11')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('tab', { name: 'directories.allDocuments' }));
+  fireEvent.click(screen.getByRole('button', { name: /directories\.allDocuments/ }));
   expect(await screen.findByText('Document 1')).toBeInTheDocument();
   fireEvent.click(screen.getByTitle('2'));
   fireEvent.mouseDown(screen.getByRole('combobox', { name: 'directories.filterState' }));
@@ -165,7 +165,7 @@ it('folds failed tasks by default and keeps their times and actions after expand
   await waitFor(() => expect(screen.getAllByRole('button', { name: 'directories.retry' })).toHaveLength(3));
 });
 
-it('pins and unpins a directory from its card without opening it', async () => {
+it('moves a directory between retention sections when pinning and unpinning', async () => {
   vi.mocked(api.listBatches).mockResolvedValue([{ id: 'acknowledged', parent_id: '', directory_id: '', status: 'failed', acknowledged: true, created_at: directory.last_used_at }]);
   const pinned = { ...directory, pinned: true, version: 3 };
   vi.mocked(api.directoryAction).mockImplementation(async command => {
@@ -173,16 +173,18 @@ it('pins and unpins a directory from its card without opening it', async () => {
     return {};
   });
   render(<MemoryRouter><DirectoryPage /></MemoryRouter>);
-  const pin = await screen.findByRole('button', { name: 'directories.directoryPin' });
+  const temporarySection = within(await screen.findByRole('region', { name: 'directories.temporary' }));
+  const pinnedSection = within(screen.getByRole('region', { name: 'directories.pinned' }));
+  const pin = await temporarySection.findByRole('button', { name: 'directories.directoryPin' });
   expect(pin).toHaveAttribute('aria-pressed', 'false');
   expect(screen.queryByRole('button', { name: 'directories.retry' })).not.toBeInTheDocument();
   fireEvent.click(pin);
-  const unpin = await screen.findByRole('button', { name: 'directories.directoryUnpin' });
+  const unpin = await pinnedSection.findByRole('button', { name: 'directories.directoryUnpin' });
   expect(unpin).toHaveAttribute('aria-pressed', 'true');
   expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'update', directory_id: 'd', version: 2, pinned: true });
   await waitFor(() => expect(unpin).not.toBeDisabled());
   fireEvent.click(unpin);
-  await screen.findByRole('button', { name: 'directories.directoryPin' });
+  await temporarySection.findByRole('button', { name: 'directories.directoryPin' });
   expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'update', directory_id: 'd', version: 3, pinned: false });
 });
 
@@ -200,7 +202,7 @@ it('filters groups and searches without changing references, and explains eviden
       { ...entry, id: 'e2', title: 'Meeting notes', resource_id: '/meeting.txt' }],
   });
   view(); await screen.findByText('Contract A');
-  fireEvent.click(screen.getByRole('button', { name: /Plans/, pressed: true }));
+  fireEvent.click(screen.getByRole('button', { name: /Plans/, pressed: false }));
   expect(screen.queryByText('Meeting notes')).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole('textbox', { name: 'directories.search' }), { target: { value: 'missing' } });
   expect(screen.queryByText('Contract A')).not.toBeInTheDocument();
@@ -257,14 +259,15 @@ it('separates all documents from groups and preserves filters when switching vie
     entries: [{ ...entry, group_id: 'g' }, { ...entry, id: 'e2', title: 'Meeting notes' }],
   });
   view(); await screen.findByText('Contract A');
-  expect(screen.queryByText('Meeting notes')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('tab', { name: 'directories.allDocuments' }));
   expect(await screen.findByText('Meeting notes')).toBeInTheDocument();
-  expect(screen.queryByRole('navigation', { name: 'directories.group' })).not.toBeInTheDocument();
+  const groups = within(screen.getByRole('navigation', { name: 'directories.group' }));
+  fireEvent.click(groups.getByRole('button', { name: /Plans/, pressed: false }));
+  await screen.findByText('Contract A');
+  expect(screen.queryByText('Meeting notes')).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole('textbox', { name: 'directories.search' }), { target: { value: 'Contract' } });
-  fireEvent.click(screen.getByRole('tab', { name: 'directories.groupedView' }));
+  fireEvent.click(groups.getByRole('button', { name: /directories\.allDocuments/ }));
   expect(screen.getByRole('textbox', { name: 'directories.search' })).toHaveValue('Contract');
-  expect(screen.getByRole('button', { name: /Plans/, pressed: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(groups.getByRole('button', { name: /directories\.allDocuments/, pressed: true })).toBeVisible();
 });
 
 it('hides empty ungrouped navigation and reads mail from both title and details', async () => {
@@ -281,8 +284,9 @@ it('hides empty ungrouped navigation and reads mail from both title and details'
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
   fireEvent.click(screen.getByRole('button', { name: 'directories.details' }));
   fireEvent.click(screen.getByRole('button', { name: 'directories.viewMail' }));
-  expect(await screen.findByText('Original body')).toBeInTheDocument();
-  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'directories.details' })).not.toBeInTheDocument());
+  const mailBody = await screen.findByText('Original body');
+  fireEvent.click(within(mailBody.closest<HTMLElement>('[role="dialog"]')!).getByRole('button', { name: 'Close' }));
+  expect(screen.getByRole('button', { name: 'directories.viewMail' })).toBeVisible();
   expect(api.directoryAction).toHaveBeenCalledTimes(1);
 });
 
@@ -299,6 +303,8 @@ it('falls back to the next nonempty group after a background refresh removes the
     entries: [{ ...entry, group_id: 'g' }],
   });
   view();
+  await screen.findByText('Contract A');
+  fireEvent.click(screen.getByRole('button', { name: /Original group/, pressed: false }));
   await screen.findByText('Contract A');
   interval.mockRestore();
   mockDirectory({ directory, organizing: false,
@@ -327,6 +333,8 @@ it('keeps the server page intact and never renders unresolved groups or stale se
     return new Promise(resolve => { pending.set(page.query || '', resolve); });
   });
   view();
+  await screen.findByText('Unscoped initial page');
+  fireEvent.click(screen.getByRole('button', { name: /Plans/, pressed: false }));
   await waitFor(() => expect(pending.has('')).toBe(true));
   expect(screen.queryByText('Unscoped initial page')).not.toBeInTheDocument();
   await act(async () => pending.get('')!(result('Initial document')));
@@ -355,6 +363,8 @@ it('resets page on group and state changes, ignoring pending results from the ol
   vi.mocked(api.getDirectory).mockImplementation((id, page = {}) => page.groupId === 'g' && page.offset === 5
     ? new Promise(resolve => { oldPage = resolve; }) : paged(id, page));
   view(); await screen.findByText('Plan 1');
+  fireEvent.click(screen.getByRole('button', { name: /Plans/, pressed: false }));
+  await screen.findByText('Plan 1');
   fireEvent.click(screen.getByTitle('2'));
   await waitFor(() => expect(oldPage).toBeDefined());
   fireEvent.click(screen.getByRole('button', { name: /Notes/, pressed: false }));
@@ -389,7 +399,7 @@ it('loads the preceding server page after excluding the last item on the last pa
   expect(screen.getByTitle('Next Page')).toHaveAttribute('aria-disabled', 'true');
 });
 
-it('deletes from a directory card only after confirmation and refreshes the overview', async () => {
+it('deletes a directory from the overview only after confirmation', async () => {
   vi.mocked(api.directoryAction).mockImplementation(async () => {
     vi.mocked(api.listDirectories).mockResolvedValue([]);
     return {};

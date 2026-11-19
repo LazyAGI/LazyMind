@@ -95,6 +95,13 @@ func latestArtifact(ext documentExt, kind string) *pdfArtifactRecord {
 }
 
 func latestArtifactWithCacheKey(ext documentExt, kind, cacheKey string) *pdfArtifactRecord {
+	if kind == pdfArtifactTranslation {
+		artifact := latestArtifact(ext, kind)
+		if artifact != nil && artifact.CacheKey == cacheKey {
+			return artifact
+		}
+		return nil
+	}
 	for i := len(ext.PDFArtifacts) - 1; i >= 0; i-- {
 		if ext.PDFArtifacts[i].Kind == kind && ext.PDFArtifacts[i].CacheKey == cacheKey {
 			artifact := ext.PDFArtifacts[i]
@@ -105,11 +112,17 @@ func latestArtifactWithCacheKey(ext documentExt, kind, cacheKey string) *pdfArti
 }
 
 func findArtifact(ext documentExt, id string) *pdfArtifactRecord {
-	for i := range ext.PDFArtifacts {
-		if ext.PDFArtifacts[i].ID == id {
-			artifact := ext.PDFArtifacts[i]
-			return &artifact
+	for _, artifact := range ext.PDFArtifacts {
+		if artifact.ID != id {
+			continue
 		}
+		if artifact.Kind == pdfArtifactTranslation {
+			current := latestArtifact(ext, pdfArtifactTranslation)
+			if current == nil || current.ID != id {
+				return nil
+			}
+		}
+		return &artifact
 	}
 	return nil
 }
@@ -118,7 +131,7 @@ func replaceArtifactWithSameCacheKey(artifacts []pdfArtifactRecord, replacement 
 	kept := make([]pdfArtifactRecord, 0, len(artifacts)+1)
 	replaced := make([]pdfArtifactRecord, 0)
 	for _, artifact := range artifacts {
-		if artifact.Kind == replacement.Kind && artifact.CacheKey == replacement.CacheKey {
+		if artifact.Kind == replacement.Kind && (replacement.Kind == pdfArtifactTranslation || artifact.CacheKey == replacement.CacheKey) {
 			replaced = append(replaced, artifact)
 			continue
 		}
@@ -131,7 +144,7 @@ func removeArtifactCacheEntry(artifacts []pdfArtifactRecord, target pdfArtifactR
 	kept := make([]pdfArtifactRecord, 0, len(artifacts))
 	removed := make([]pdfArtifactRecord, 0)
 	for _, artifact := range artifacts {
-		if artifact.Kind == target.Kind && artifact.CacheKey == target.CacheKey {
+		if artifact.Kind == target.Kind && (target.Kind == pdfArtifactTranslation || artifact.CacheKey == target.CacheKey) {
 			removed = append(removed, artifact)
 			continue
 		}
@@ -140,11 +153,21 @@ func removeArtifactCacheEntry(artifacts []pdfArtifactRecord, target pdfArtifactR
 	return kept, removed
 }
 
+// Output diagnostics belong to the rendered file and share its lifetime.
+func removeArtifactOutputFile(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
+	_ = os.Remove(path + ".diagnostics.json")
+}
+
 func removeArtifactFiles(artifacts []pdfArtifactRecord) {
 	for _, artifact := range artifacts {
-		_ = os.Remove(artifact.StoredPath)
+		removeArtifactOutputFile(artifact.StoredPath)
 		if artifact.SourcePath != "" {
 			_ = os.Remove(artifact.SourcePath)
+			_ = os.RemoveAll(artifact.SourcePath + ".translation-cache")
 		}
 		if artifact.LayoutPath != "" {
 			_ = os.Remove(artifact.LayoutPath)
@@ -180,7 +203,7 @@ func GetPDFCapabilities(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, artifact := range ext.PDFArtifacts {
 		if artifact.Kind == pdfArtifactTranslation {
-			translations = append(translations, artifact)
+			translations = []pdfArtifactRecord{artifact}
 		}
 	}
 	common.ReplyOK(w, map[string]any{
@@ -204,11 +227,9 @@ func createPDFJob(w http.ResponseWriter, r *http.Request, kind string) {
 	}
 	key := pdfCacheKey(state, kind, req)
 	if !req.Force {
-		for _, artifact := range ext.PDFArtifacts {
-			if artifact.Kind == kind && artifact.CacheKey == key {
-				common.ReplyOK(w, map[string]any{"cache_status": "hit", "artifact": artifact})
-				return
-			}
+		if artifact := latestArtifactWithCacheKey(ext, kind, key); artifact != nil {
+			common.ReplyOK(w, map[string]any{"cache_status": "hit", "artifact": artifact})
+			return
 		}
 		for _, job := range ext.PDFRenderJobs {
 			if job.Kind == kind && job.CacheKey == key && job.Status != "FAILED" && job.Status != "CANCELLED" {
@@ -481,7 +502,7 @@ func ListPDFTranslations(w http.ResponseWriter, r *http.Request) {
 	items := make([]pdfArtifactRecord, 0)
 	for _, artifact := range ext.PDFArtifacts {
 		if artifact.Kind == pdfArtifactTranslation {
-			items = append(items, artifact)
+			items = []pdfArtifactRecord{artifact}
 		}
 	}
 	common.ReplyOK(w, map[string]any{"items": items})

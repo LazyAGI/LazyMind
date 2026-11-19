@@ -670,6 +670,10 @@ tests/test_cli.py
 
 Windows 浏览器必须连接 Windows 原生 Assistant Bridge。WSL 启动流程会识别宿主平台并通过 WSL 互操作运行 `lazymind.exe`；若互操作不可用则启动命令会直接失败并给出提示。网页与 Bridge 平台仍不一致时，所有助理配置和凭证同步接口都会拒绝请求，集成页会显示平台错配，而不会误报桥接器未运行。
 
+助理页的接入开关依据外部 Agent 中实际保存的 LazyMind 配置显示。开启时写入或覆盖对应条目，关闭时清除该条目。切换桌面版与 local 版后，若提示已有其他环境的接入配置，可关闭再重新开启。操作后会重新检测，读取失败时显示状态未知，连接暂不可用时保留已写入的配置状态。
+
+所有 Agent 的接入操作及检测变化写入当前 LazyMind 数据目录的 `logs/agent-setup.log`，异常旁可复制诊断信息。日志包含操作编号、当前与已配置 CLI 路径、配置差异及操作结果，用户主目录缩写为 `~`，凭证和完整配置正文排除在记录字段之外。
+
 ### 16.1 Codex Desktop 与 Codex CLI
 
 Codex 的两个方向独立检测和授权：“Codex 桌面端使用 LazyMind MCP”检测桌面应用及首次启动状态；“LazyMind 调用 Codex CLI”检测桌面应用内置的可执行命令和登录状态，不要求另行安装一套 CLI。连接前会验证 LazyMind 的 23 个工具，再调用桌面应用提供的原生命令执行 `codex mcp add`。ChatGPT 桌面应用、Codex CLI 和 IDE 扩展在同一主机上共享 `~/.codex/config.toml`，因此桌面端无需用户另行复制配置。重新连接和断开分别更新或移除同一个受管条目，不直接重写 Codex 私有配置。
@@ -694,7 +698,7 @@ LazyMind 生成 Cursor 官方 `cursor://anysphere.cursor-deeplink/mcp/install` �
 
 ### 16.4 WorkBuddy
 
-桥接器为 WorkBuddy 原子合并 `~/.workbuddy/mcp.json#mcpServers`。备份、归属判断和精确移除规则与其他文件型 Provider 相同。反向执行会自动定位 WorkBuddy 安装包内自带的运行时，并把 `WORKBUDDY_CONFIG_DIR` 与兼容变量 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 的 `~/.workbuddy` 数据目录，从而复用当前桌面端登录。用户无需另装 CLI、申请开放平台应用或填写 Client ID/Client Secret。
+桥接器为 WorkBuddy 原子合并 `~/.workbuddy/mcp.json#mcpServers`。备份及对应条目的覆盖和移除规则与其他文件型 Provider 相同。反向执行会自动定位 WorkBuddy 安装包内自带的运行时，并把 `WORKBUDDY_CONFIG_DIR` 与兼容变量 `CODEBUDDY_CONFIG_DIR` 指向 WorkBuddy 的 `~/.workbuddy` 数据目录，从而复用当前桌面端登录。用户无需另装 CLI、申请开放平台应用或填写 Client ID/Client Secret。
 
 ### 16.5 代码小浣熊 Raccoon
 

@@ -941,13 +941,21 @@ func TestBuildChatRequestBodyDropsKnowledgeFiltersWhenRAGIsInactive(t *testing.T
 
 	body := buildChatRequestBody(t.Context(), db.DB, "conv-with-kb", "", "hello", nil, map[string]any{
 		"filters":          map[string]any{"kb_id": []string{"ds-request"}},
-		"document_context": map[string]any{"document_id": "doc-old"},
+		"document_context": map[string]any{"dataset_id": "ds-request", "document_id": "doc-old", "file_name": "LISA.pdf"},
 	}, nil, "u1", 2)
 	if body["filters"] != nil {
 		t.Fatalf("filters = %#v, want nil without RAG", body["filters"])
 	}
-	if _, ok := body["document_context"]; ok {
-		t.Fatalf("document_context = %#v, want it omitted without RAG", body["document_context"])
+	documentContext, ok := body["document_context"].(map[string]any)
+	if !ok || documentContext["document_id"] != "doc-old" || documentContext["dataset_id"] != "ds-request" {
+		t.Fatalf("document_context = %#v, want current document available for non-RAG read_document", body["document_context"])
+	}
+	body["surface"] = "knowledge_document_preview"
+	req := buildLazyChatRequest(body)
+	if req.DocumentContext["document_id"] != "doc-old" || req.DocumentContext["dataset_id"] != "ds-request" ||
+		req.Conversation.Surface != "knowledge_document_preview" || req.Retrieval.Filters != nil {
+		t.Fatalf("non-RAG preview lost its exact source binding or enabled retrieval: context=%#v surface=%q filters=%#v",
+			req.DocumentContext, req.Conversation.Surface, req.Retrieval.Filters)
 	}
 }
 

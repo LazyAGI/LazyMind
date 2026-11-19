@@ -11,7 +11,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { PdfTextSelection } from "@/components/ui";
 import {
@@ -144,7 +144,7 @@ export default function AddVocabularyModal({
         const normalized = {
           ...result,
           dictionary: result.dictionary || [],
-          wordbooks: result.wordbooks || [],
+          wordbooks: (result.wordbooks || []).filter(book => !book.capability_key || book.capability_key === "english_definition"),
         };
         setResolved(normalized);
         const first = normalized.dictionary[0];
@@ -329,7 +329,7 @@ export default function AddVocabularyModal({
             <Form.Item name="term" label="目标词" rules={[{ required: true }]}>
               <Input
                 onBlur={() => void refreshDictionary()}
-                onPressEnter={(event) => {
+                onPressEnter={(event: KeyboardEvent<HTMLInputElement>) => {
                   event.preventDefault();
                   void refreshDictionary();
                 }}

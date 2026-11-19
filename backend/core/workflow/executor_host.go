@@ -2,9 +2,16 @@ package workflow
 
 import "lazymind/core/workflow/graphengine"
 
-// Steps with declared tools or post-step checks run entirely inside LazyMind.
-func executorHostForStep(controllerHost string, node graphengine.CompiledNode, runtime graphengine.RuntimePolicy) string {
+// Shared execution supports the controller's host. Steps with native-only
+// tools or checks are handled by the native executor.
+func executorHostForStep(controllerHost, provider string, node graphengine.CompiledNode, runtime graphengine.RuntimePolicy) string {
 	if controllerHost != "external-agent" {
+		return controllerHost
+	}
+	if provider != "" && runtime.Execution.UsesExternalModels() {
+		return "lazymind"
+	}
+	if node.Execution.Supported() {
 		return controllerHost
 	}
 	if len(node.LegacyTools) > 0 || len(node.TerminalTools) > 0 {

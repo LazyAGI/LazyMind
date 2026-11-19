@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ConfigProvider } from 'antd';
 import type { ChannelAccount } from '@/modules/channelGateway/api';
 import TargetPicker from './TargetPicker';
 const mocks = vi.hoisted(() => ({ targets: vi.fn(), groups: vi.fn() }));
@@ -21,14 +22,14 @@ it('keeps recipient status isolated from the last failed recipient on the same W
     capabilities: { connection_check_status: 'unavailable' } } as ChannelAccount;
   const view = render(<TargetPicker inline provider="wechat" accounts={[wechat]} current={{ enabled: true, account_id: 'a', recipient_id: 'healthy' }} onSave={() => {}} onClose={() => {}} />);
   expect(await screen.findByText('正常接收人')).toBeVisible();
-  expect(screen.queryByText('正常接收人 · notifications.wechatConnectionUnavailable')).not.toBeInTheDocument();
+  expect(screen.queryByText('正常接收人 · notifications.unavailable')).not.toBeInTheDocument();
   view.rerender(<TargetPicker inline provider="wechat" accounts={[wechat]} current={{ enabled: true, account_id: 'a', recipient_id: 'failed' }} onSave={() => {}} onClose={() => {}} />);
-  expect(await screen.findByText('失败接收人 · notifications.wechatConnectionUnavailable')).toBeVisible();
+  expect(await screen.findByText('失败接收人 · notifications.unavailable')).toBeVisible();
 });
 it.each([
   { status: 'disconnected', runtime_status: 'stopped', capabilities: {}, label: 'notConnected' },
-  { status: 'connected', runtime_status: 'running', capabilities: { connection_error_code: 'WECHAT_REAUTHORIZATION_REQUIRED' }, label: 'wechatReconnectRequired' },
-  { status: 'connected', runtime_status: 'degraded', capabilities: {}, label: 'wechatConnectionUnavailable' },
+  { status: 'connected', runtime_status: 'running', capabilities: { connection_error_code: 'WECHAT_REAUTHORIZATION_REQUIRED' }, label: 'notConnected' },
+  { status: 'connected', runtime_status: 'degraded', capabilities: {}, label: 'unavailable' },
 ])('retains account-wide $label even when the selected recipient was healthy', async ({ label, ...state }) => {
   mocks.targets.mockResolvedValue({ items: [{ recipient_id: 'healthy', label: '接收人', available: true, connection_check_status: 'connected' }], next_cursor: '' });
   const wechat = { ...account, provider: 'wechat', ...state } as ChannelAccount;
@@ -133,5 +134,19 @@ it('replaces deleted and renamed targets on refresh without changing selection',
   expect(screen.queryByText('已删除对象')).not.toBeInTheDocument();
   expect(screen.queryByText('旧名称')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'notifications.loadMore' })).not.toBeInTheDocument();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it.each([
+  { runtime_status: 'running', capabilities: { connection_error_code: 'WECHAT_REAUTHORIZATION_REQUIRED' }, label: 'notConnected', hint: 'wechatReconnectHint' },
+  { runtime_status: 'failed', capabilities: {}, label: 'unavailable', hint: 'wechatConnectionUnavailableHint' },
+])('retains $hint below the simplified $label label in the standalone picker', async ({ label, hint, ...state }) => {
+  const wechat = { ...account, provider: 'wechat', ...state } as ChannelAccount;
+  const save = vi.fn();
+  render(<ConfigProvider theme={{ token: { motion: false } }}><TargetPicker provider="wechat" accounts={[wechat]} current={{ enabled: true, account_id: 'a', recipient_id: 'oc_old' }} onSave={save} onClose={vi.fn()} /></ConfigProvider>);
+  await waitFor(() => {
+    expect(screen.getByText(`notifications.${hint}`)).toBeVisible();
+    expect(screen.getByText(`Bot · notifications.${label}`)).toBeVisible();
+  });
   expect(save).not.toHaveBeenCalled();
 });

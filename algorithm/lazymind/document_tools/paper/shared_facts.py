@@ -8,6 +8,7 @@ from lazyllm import AutoModel
 from lazyllm.tools.writer.tools.base import _WriterJsonFormatter
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from .model_response import normalize_response
 from .prompts.write_document_prompt import SECTION_CONTENT_INSTRUCTIONS, SHARED_FACTS_PROMPT
 
 
@@ -160,7 +161,8 @@ def _select_facts(spans, facts, plan, prepared):
         response = model(SHARED_FACTS_PROMPT + '\n' + json.dumps(dict(payload, correction=error), ensure_ascii=False))
         value = None
         try:
-            value = _WriterJsonFormatter()(str(response))
+            body = normalize_response(response).body
+            value = _WriterJsonFormatter()(body) if isinstance(body, str) else body
             if retained_sources and isinstance(value, dict) and isinstance(value.get('sources'), list):
                 incoming = {item.get('source_id') for item in value['sources'] if isinstance(item, dict)
                             and isinstance(item.get('source_id'), str)}
@@ -298,7 +300,8 @@ def _review_relations(body, sources, previous=None):
     from .analysis import trace as diagnostics
     phase = 'recheck' if previous else 'initial'
     diagnostics.save('shared-fact-relation-model-' + phase + '.json', dict(response=str(response)))
-    proposed = RelationResponse.model_validate(_WriterJsonFormatter()(str(response)))
+    body = normalize_response(response).body
+    proposed = RelationResponse.model_validate(_WriterJsonFormatter()(body) if isinstance(body, str) else body)
     issues, pending = [], list(proposed.pending)
     for issue in proposed.issues:
         source = sources.get(issue.fact_id)

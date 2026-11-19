@@ -62,7 +62,7 @@ func newManagementServer(service *capability.Service, config HandlerConfig) *mcp
 		})
 	}
 	if config.ImportPapers != nil {
-		addCloudTool(server, &mcp.Tool{Name: capability.PaperImportTool, Title: "Import original paper PDFs", Description: "Queue original PDF acquisition for explicitly requested papers or selected chat sources. Handles PDF lookup, validation, deduplication and ingestion in the background. Queued does not mean saved or parsed.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.PaperImportInput) (*mcp.CallToolResult, capability.PaperImportResult, error) {
+		addCloudTool(server, &mcp.Tool{Name: capability.PaperImportTool, Title: "Import papers into a collection", Description: "Save requested papers to the library immediately, then enrich metadata and acquire original PDFs in the background. Pass DOI or arXiv ID directly; do not search to verify title/authors/year first. Title-only drafts are accepted. metadata_saved confirms a saved bibliography entry, not a ready PDF; already_present is a successful duplicate receipt.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.PaperImportInput) (*mcp.CallToolResult, capability.PaperImportResult, error) {
 			v, err := config.ImportPapers(ctx, invocation(ctx, r), in)
 			return nil, v, err
 		})

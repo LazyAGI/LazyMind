@@ -1,3 +1,5 @@
+import ExternalLink from '@/components/ExternalLink';
+import { getRuntimeMode, isLocalLikeRuntimeMode } from '@/runtime/mode';
 import ZoteroWebDAVAddress from './ZoteroWebDAVAddress';
 import PaperAuthors from './PaperAuthors';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from 'react';
@@ -16,7 +18,7 @@ export interface ZoteroImportModalProps {
   onCancel: () => void;
   onImport: (preview: ZoteroPreview, config: ZoteroImportConfig, options: ZoteroImportOptions) => Promise<ZoteroImportResult>;
 }
-const initialConfig = (source: ZoteroImportConfig['source'] = 'database'): ZoteroImportConfig => ({ source, library_type: 'users', library_id: source === 'local' || source === 'database' ? '0' : '', ...(source === 'local' ? { local_url: 'http://host.docker.internal:23119/api' } : {}), ...(source === 'remote' || source === 'webdav' ? { api_key: '' } : {}), ...(source === 'webdav' ? { webdav: { url: '', username: '', password: '' } } : {}) });
+const initialConfig = (source: ZoteroImportConfig['source'] = 'database'): ZoteroImportConfig => ({ source, library_type: 'users', library_id: source === 'local' || source === 'database' ? '0' : '', ...(source === 'local' ? { local_url: isLocalLikeRuntimeMode(getRuntimeMode()) ? 'http://localhost:23119/api' : 'http://host.docker.internal:23119/api' } : {}), ...(source === 'remote' || source === 'webdav' ? { api_key: '' } : {}), ...(source === 'webdav' ? { webdav: { url: '', username: '', password: '' } } : {}) });
 const directoryInput = { webkitdirectory: '', directory: '' } as InputHTMLAttributes<HTMLInputElement>;
 const pageSize = 50;
 const noPersistedPapers: readonly { zoteroSources?: string[] }[] = [];
@@ -88,7 +90,7 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
     return papers.filter(paper => (!sourceFolder || browserIndex?.memberships.get(paper.key)?.has(sourceFolder)) && terms.every(term => paper.searchText.includes(term)));
   }, [papers, query, sourceFolder, browserIndex]);
   const selectSourceFolder = (key: string | null) => { setSourceFolder(key); setPage(1); };
-  const selectedCounts = useMemo(() => papers.reduce((counts, paper) => selected.has(paper.key) ? { pdfs: counts.pdfs + paper.pdfCount, unavailable: counts.unavailable + paper.unavailablePdfCount, notes: counts.notes + paper.noteCount + paper.annotationCount } : counts, { pdfs: 0, unavailable: 0, notes: 0 }), [papers, selected]);
+  const selectedCounts = useMemo(() => papers.reduce((counts, paper) => effectiveSelected.has(paper.key) && (!imported.has(paper.key) || completeImported) ? { pdfs: counts.pdfs + paper.pdfCount, unavailable: counts.unavailable + paper.unavailablePdfCount, notes: counts.notes + paper.noteCount + paper.annotationCount } : counts, { pdfs: 0, unavailable: 0, notes: 0 }), [papers, effectiveSelected, imported, completeImported]);
 
   const resetPreview = () => {
     setPreview(null); setPapers([]); setSelected(new Set()); setQuery(''); setPage(1); setError(null); setPartial(false); setShowSettings(false); setSourceFolder(null); setCompleteImported(false); retryKeys.current = new Set();
@@ -162,7 +164,7 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
   }, []);
 
   const footer = <div className="zotero-import-footer"><span className="zotero-private-hint"><LockOutlined />{isDatabase ? '确认选择后才会写入论文库' : '密钥和密码仅用于本次导入'}</span><Button disabled={busy === 'import'} onClick={cancel}>取消</Button>
-      {preview ? <Button type="primary" disabled={disabled || (!newSelectedCount && !(completeImported && imported.size) && !partial)} loading={busy === 'import'} onClick={commit}>{busy === 'import' ? importProgress : partial ? '重试未完成的导入' : newSelectedCount ? `确认导入 ${newSelectedCount} 篇` : completeImported && imported.size ? '补全已导入附件' : '确认导入 0 篇'}</Button> : <Button type="primary" disabled={disabled || (isFile && !jsonFile)} loading={busy === 'preview'} onClick={load}>{isDatabase ? '读取本地数据库' : isFile ? '读取并预览' : '连接并预览'}</Button>}
+      {preview ? <Button type="primary" disabled={disabled || (!newSelectedCount && !(completeImported && imported.size) && !partial)} loading={busy === 'import'} onClick={commit}>{busy === 'import' ? importProgress : partial ? '重试未完成的导入' : newSelectedCount ? `确认导入 ${newSelectedCount} 篇` : completeImported && imported.size ? (includeAttachments ? '补全附件并更新笔记与批注' : '更新已导入笔记与批注') : '确认导入 0 篇'}</Button> : <Button type="primary" disabled={disabled || (isFile && !jsonFile)} loading={busy === 'preview'} onClick={load}>{isDatabase ? '读取本地数据库' : isFile ? '读取并预览' : '连接并预览'}</Button>}
     </div>;
 
   return <Modal open={open} title={null} aria-labelledby="zotero-import-title" className={`zotero-import-modal${preview ? " is-expanded" : ""}`} width={preview ? 1440 : 760} centered destroyOnHidden footer={preview ? null : footer}
@@ -199,10 +201,10 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
       </div>}
     </>}
     </details>
-    <div className="zotero-options"><Checkbox checked={includeAttachments} disabled={disabled} onChange={event => { setIncludeAttachments(event.target.checked); if (!event.target.checked) setCompleteImported(false); }}>同时导入 PDF 附件</Checkbox>{preview && <span className="zotero-selection-materials">本次选择包含 {selectedCounts.pdfs} 个 PDF、{selectedCounts.notes} 条笔记与批注{selectedCounts.unavailable > 0 && <span className="zotero-pdf-unavailable">（其中 {selectedCounts.unavailable} 个 PDF 当前不可用）</span>}</span>}
+    <div className="zotero-options"><Checkbox checked={includeAttachments} disabled={disabled} onChange={event => { setIncludeAttachments(event.target.checked); }}>同时导入 PDF 附件</Checkbox>{preview && <span className="zotero-selection-materials">本次选择包含 {selectedCounts.pdfs} 个 PDF、{selectedCounts.notes} 条笔记与批注{selectedCounts.unavailable > 0 && <span className="zotero-pdf-unavailable">（其中 {selectedCounts.unavailable} 个 PDF 当前不可用）</span>}</span>}
       {config.source === 'local' && includeAttachments && <><div className="zotero-file-picker"><Button size="small" icon={<FolderOpenOutlined />} disabled={disabled} onClick={() => folderPicker.current?.click()}>选择本地附件文件夹</Button><span>{localFiles.length ? `已选择 ${localFiles.length} 个文件` : '选择 Zotero storage 或导出附件目录'}</span></div><input {...directoryInput} ref={folderPicker} type="file" multiple hidden aria-label="本地 Zotero 附件目录" disabled={disabled} onChange={event => { setLocalFiles(Array.from(event.target.files || [])); setError(null); }} /></>}
     </div>
-    {!!imported.size && <div className="zotero-mapping-summary"><span>{imported.size} 篇已关联到当前论文库</span><Checkbox checked={completeImported} disabled={disabled || !includeAttachments} onChange={event => setCompleteImported(event.target.checked)}>补全已导入文献的附件</Checkbox></div>}
+    {!!imported.size && <div className="zotero-mapping-summary"><span>{imported.size} 篇已关联到当前论文库</span><Checkbox checked={completeImported} disabled={disabled} onChange={event => setCompleteImported(event.target.checked)}>补充已导入文献的笔记、批注及所选附件</Checkbox></div>}
     {preview && <nav className="zotero-folder-browser" aria-label="Zotero 文件夹"><div className="zotero-folder-caption">文献库</div><Button type="text" className={!sourceFolder ? 'is-active' : ''} onClick={() => selectSourceFolder(null)}>全部文献 <span>{papers.length}</span></Button><Tree aria-label="Zotero 文件夹目录" showIcon blockNode switcherIcon={<DownOutlined />} treeData={browserIndex?.folders} selectedKeys={sourceFolder ? [sourceFolder] : []} onSelect={keys => selectSourceFolder(keys.length ? String(keys[0]) : null)} titleRender={node => <span className="zotero-folder-title"><FolderOutlined /><span>{node.title}</span><small>{node.count}</small></span>} /></nav>}
     {!!preview?.warnings.length && <details className="zotero-warning-details"><summary>导入提示（{preview.warnings.length}）</summary><Alert className="zotero-import-alert" type="warning" showIcon message={preview.warnings.join('\n')} /></details>}
     {error && <Alert className="zotero-import-alert" type="error" showIcon message={error} />}
@@ -223,13 +225,13 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
 
     <Drawer title="Zotero 接入指引" placement="right" width={420} open={open && showGuide} onClose={() => setShowGuide(false)} zIndex={1100} rootClassName="zotero-connection-guide">
       <section><h3>用户数字 ID 与 API Key</h3><ol>
-        <li>登录 <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noreferrer">Zotero API Keys 页面</a>（官网 Settings → Feeds/API → API Keys）。</li>
+        <li>登录 <ExternalLink href="https://www.zotero.org/settings/keys" target="_blank" rel="noreferrer">Zotero API Keys 页面</ExternalLink>（官网 Settings → Feeds/API → API Keys）。</li>
         <li>找到 <code>Your userID for use in API calls is …</code>，将后面的数字填入「用户 ID」。这不是用户名，也不是邮箱。</li>
         <li>点击 <strong>Create new private key</strong>，为 LazyMind 创建专用密钥，授予所需文献库的读取权限；读取 Zotero 云端附件时还需允许读取文件。复制到「API Key」。公开题录可不填密钥。</li>
       </ol><p>Security 页面中的 <strong>Register a new key</strong> 是登录用的 Passkey，不是 API Key。请使用上面的直达链接。</p><p>群组文献库请填写群组的数字 ID，并为密钥授权相应群组的读取权限。</p></section>
       <section><h3>WebDAV：与 Zotero 保持一致</h3><ol><li>打开 Zotero「设置 → 账户／同步 → 文件同步」，查看 WebDAV 设置。</li><li>分别选择协议、填写地址主体和 WebDAV 用户名／密码。右侧固定的 <code>/zotero/</code> 会自动补上；粘贴完整 URL 也会自动拆分。</li><li>例如 Zotero 中填写 <code>https</code> 和 <code>dav.example.com/dav</code>，实际目录是 <code>https://dav.example.com/dav/zotero/</code>。</li></ol><p>WebDAV 只提供附件，题录和文件夹仍从上面的 Zotero 文献库读取，因此仍需数字用户 ID 和必要的 API Key。WebDAV 账号不一定与 Zotero 账号相同；群组文献库不支持 WebDAV。</p></section>
       <section><h3>本地客户端</h3><ol><li>打开 Zotero「设置 → 高级」，勾选「允许此计算机上的其他应用程序与 Zotero 通讯」。</li><li>保持 Zotero 运行。个人文献库 ID 填 <code>0</code>，读取不需要 API Key。</li><li>LazyMind 容器部署选择「Docker 连接」，直接运行选择「本机直连」。</li></ol><p>如果需要本地 PDF，选择 Zotero 数据目录中的 <code>storage</code> 文件夹。可在「设置 → 高级 → 文件和文件夹」查看数据目录。</p></section>
-      <p className="zotero-guide-links"><a href="https://www.zotero.org/support/dev/web_api/v3/basics" target="_blank" rel="noreferrer">官方 API 说明</a> · <a href="https://www.zotero.org/support/sync" target="_blank" rel="noreferrer">官方同步说明</a></p>
+      <p className="zotero-guide-links"><ExternalLink href="https://www.zotero.org/support/dev/web_api/v3/basics" target="_blank" rel="noreferrer">官方 API 说明</ExternalLink> · <ExternalLink href="https://www.zotero.org/support/sync" target="_blank" rel="noreferrer">官方同步说明</ExternalLink></p>
     </Drawer>
   </Modal>;
 }

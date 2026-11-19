@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
@@ -23,6 +24,16 @@ import (
 
 func controlledService(t *testing.T) (*Service, *gorm.DB, Execution) {
 	t.Helper()
+	service, db := prepareControlledService(t)
+	execution, err := service.Begin(t.Context(), "owner", "session-1", "attempt-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, db, execution
+}
+
+func prepareControlledService(t *testing.T) (*Service, *gorm.DB) {
+	t.Helper()
 	service, db := hostedTestService(t)
 	service.Completion = &execution.Service{DB: db, Store: service.Store, Attempts: service.Attempts, Contexts: service.Contexts}
 	if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowTransitionCommand{}); err != nil {
@@ -35,11 +46,7 @@ func controlledService(t *testing.T) (*Service, *gorm.DB, Execution) {
 	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt-1").Update("review_required", true).Error; err != nil {
 		t.Fatal(err)
 	}
-	execution, err := service.Begin(context.Background(), "owner", "session-1", "attempt-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return service, db, execution
+	return service, db
 }
 
 func successfulSubmission(handle string) testCompletion {
@@ -169,6 +176,77 @@ func TestControlledStaleHandleCannotPublishArtifacts(t *testing.T) {
 	db.Model(&orm.WorkflowSlotRevision{}).Count(&count)
 	if count != 0 {
 		t.Fatal("a fenced worker polluted the selected artifacts")
+	}
+}
+
+func TestControlledClaimRetryReturnsTheSameLiveLease(t *testing.T) {
+	service, _ := prepareControlledService(t)
+	claim := func(id string) (int, Execution) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"claim_id":"`+id+`"}`))
+		request = mux.SetURLVars(request, map[string]string{"session_id": "session-1", "attempt_id": "attempt-1"})
+		request.Header.Set("X-User-Id", "owner")
+		response := httptest.NewRecorder()
+		(Handler{Service: service}).Begin(response, request)
+		var envelope struct {
+			Result Execution `json:"result"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		return response.Code, envelope.Result
+	}
+	status, original := claim("begin-command")
+	if status != http.StatusOK || original.ExecutionHandle == "" {
+		t.Fatalf("claim failed: HTTP %d", status)
+	}
+	status, replay := claim("begin-command")
+	if status != http.StatusOK || replay.ExecutionHandle != original.ExecutionHandle || !replay.LeaseExpires.Equal(original.LeaseExpires) {
+		t.Fatalf("claim did not replay the live lease: HTTP %d", status)
+	}
+	if status, _ := claim("another-command"); status != http.StatusConflict {
+		t.Fatalf("a second claim succeeded: HTTP %d", status)
+	}
+	if _, err := service.Resume(t.Context(), "owner", "session-1", "attempt-1"); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := claim("begin-command"); status != http.StatusConflict {
+		t.Fatalf("a revoked claim was replayed: HTTP %d", status)
+	}
+}
+
+func TestHostedHeartbeatRenewsOnlyTheCurrentLiveLease(t *testing.T) {
+	service, db, execution := controlledService(t)
+	setExpiry := func(expires time.Time) {
+		t.Helper()
+		if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", execution.ExecutionID).Update("lease_expires_at", expires).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	pendingExpiry := time.Now().UTC().Add(15 * time.Second)
+	setExpiry(pendingExpiry)
+	if _, err := service.Heartbeat(t.Context(), "owner", "session-1", execution.ExecutionID, "old-handle"); err == nil {
+		t.Fatal("heartbeat accepted a stale handle")
+	}
+	expires, err := service.Heartbeat(t.Context(), "owner", "session-1", execution.ExecutionID, execution.ExecutionHandle)
+	if err != nil || !expires.After(pendingExpiry) {
+		t.Fatalf("heartbeat did not renew the lease: %v %v", expires, err)
+	}
+	setExpiry(time.Now().UTC().Add(-time.Minute))
+	if _, err := service.Heartbeat(t.Context(), "owner", "session-1", execution.ExecutionID, execution.ExecutionHandle); err == nil {
+		t.Fatal("heartbeat revived an expired lease")
+	}
+	var session orm.WorkflowSession
+	if err := db.First(&session, "id = ?", "session-1").Error; err != nil {
+		t.Fatal(err)
+	}
+	state, err := controlstore.Read(db, session)
+	if err != nil || len(state.ActiveExecutionIDs) != 0 || !reflect.DeepEqual(state.ExpiredExecutionIDs, []string{execution.ExecutionID}) {
+		t.Fatalf("expired execution was not visible as recoverable: %+v %v", state, err)
+	}
+	resumed, err := service.Resume(t.Context(), "owner", "session-1", execution.ExecutionID)
+	if err != nil || resumed.ExecutionHandle == execution.ExecutionHandle {
+		t.Fatalf("resume did not issue a new handle: %v", err)
 	}
 }
 

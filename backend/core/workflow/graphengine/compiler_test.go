@@ -113,9 +113,11 @@ runtime:
     inspection_tools: [pptx_analyzer]
     instructions: Read every page before asking for missing dates.
   post_step_checks:
-    - step_id: b
+    - step_id: f
       tool: check_ready
-      arguments: {brief: b_result}
+      arguments: {result: final}
+      input_arguments: {brief: b_result}
+      artifacts_argument: published_artifacts
   clarification_fields:
     - id: topic
       label: Topic
@@ -155,8 +157,14 @@ runtime:
 	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" || policy.ClarificationFields[1].ChoicePolicy != "subset" {
 		t.Fatalf("runtime clarification fields were not compiled: %#v", policy.ClarificationFields)
 	}
-	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "b" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["brief"] != "b_result" {
+	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "f" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["result"] != "final" {
 		t.Fatalf("runtime post-step checks were not compiled: %#v", policy.PostStepChecks)
+	}
+	if decoded.Runtime.PostStepChecks[0].InputArguments["brief"] != "b_result" {
+		t.Fatal("bound input arguments were lost in the compiled graph")
+	}
+	if policy.PostStepChecks[0].ArtifactsArgument != "published_artifacts" {
+		t.Fatalf("post-step artifact list argument was lost: %#v", policy.PostStepChecks)
 	}
 }
 
@@ -211,6 +219,37 @@ runtime:
 		if Compile(invalid, validState, "", ProfilePublish).Valid {
 			t.Fatal("invalid checkpoint contract was accepted")
 		}
+	}
+}
+
+func TestCompileGroundedCountResolution(t *testing.T) {
+	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
+runtime:
+  clarification_fields:
+    - id: slide_count
+      question: How many slides?
+      required: true
+      reason: Determines the deck length.
+      resolution: grounded_count
+      type: text
+`, 1)
+	result := Compile(workflowYAML, validState, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("grounded count failed to compile: %#v", result.Diagnostics)
+	}
+	encoded, err := json.Marshal(result.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded CompiledStateGraph
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Runtime.ClarificationFields[0].Resolution != "grounded_count" {
+		t.Fatal("grounded resolution lost on publication")
+	}
+	if Compile(strings.Replace(workflowYAML, "grounded_count", "unknown", 1), validState, "", ProfilePublish).Valid {
+		t.Fatal("unknown resolution accepted")
 	}
 }
 
@@ -788,16 +827,22 @@ func TestBuiltinSelfTestDefaultExecutionModes(t *testing.T) {
 		t.Fatalf("test workflow must compile: %#v", result.Diagnostics)
 	}
 	want := map[string]string{
-		"prompt":          "auto",
-		"script":          "human",
-		"typed_artifacts": "auto",
-		"rewrite":         "human",
-		"list_artifacts":  "auto",
-		"verify":          "human",
+		"generate": "auto",
+		"update":   "human",
+		"verify":   "auto",
+	}
+	if len(result.Graph.Nodes) != len(want) {
+		t.Fatalf("self-test should have three steps, got %d", len(result.Graph.Nodes))
 	}
 	for stepID, mode := range want {
-		if got := result.Graph.Nodes[stepID].Mode; got != mode {
+		node := result.Graph.Nodes[stepID]
+		if got := node.Mode; got != mode {
 			t.Fatalf("step %s mode=%q, want %q", stepID, got, mode)
+		}
+		tool := "smoke_" + stepID
+		if len(node.LegacyTools) != 1 || node.LegacyTools[0] != tool || len(node.Execution.Tools) != 1 ||
+			node.Execution.Tools[0].Name != tool || node.Execution.Tools[0].Source != "package" {
+			t.Fatalf("step %s must expose the same smoke tool on both hosts: %+v", stepID, node)
 		}
 	}
 }
@@ -1160,5 +1205,29 @@ runtime:
 		if rejected.Valid {
 			t.Fatal("invalid editor contract accepted")
 		}
+	}
+}
+
+func TestUIMaterialReuseAcrossTabs(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		tabs          []map[string]any
+		wantDuplicate bool
+	}{
+		{"across tabs", []map[string]any{{"slots": []string{"base"}}, {"slots": []string{"base"}}}, false},
+		{"within tab", []map[string]any{{"slots": []string{"base", "base"}}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diagnostics := validateUI(map[string]any{"tabs": tc.tabs}, map[string]bool{"base": true}, map[string]bool{"base": true}, nil, Profile(""))
+			duplicate := false
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "E_UI_MATERIAL_DUPLICATE" {
+					duplicate = true
+				}
+			}
+			if duplicate != tc.wantDuplicate {
+				t.Fatalf("unexpected diagnostics: %+v", diagnostics)
+			}
+		})
 	}
 }

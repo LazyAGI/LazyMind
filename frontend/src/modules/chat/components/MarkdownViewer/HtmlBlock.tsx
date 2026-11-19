@@ -110,12 +110,16 @@ function hasRenderableHtml(code: string) {
   );
 }
 
-function buildPreviewDocument(code: string) {
+function buildPreviewDocument(code: string, format: "html" | "svg" = "html") {
   const trimmed = code.trim();
   if (!trimmed) {
     return "";
   }
 
+  if (format === "svg") {
+    // Image mode displays the SVG without executing scripts or loading external resources.
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0}img{display:block;width:100%;height:auto}</style></head><body><img alt="" src="data:image/svg+xml,${encodeURIComponent(trimmed)}"></body></html>`;
+  }
   let documentHtml = trimmed;
   if (!/^<!doctype html/i.test(trimmed) && !/^<html\b/i.test(trimmed)) {
     documentHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${trimmed}</body></html>`;
@@ -201,14 +205,13 @@ const HtmlSource = ({ code }: { code: string }) => {
 };
 
 const HtmlPreview = ({
-  code,
+  previewDocument,
   iframeRef,
 }: {
-  code: string;
+  previewDocument: string;
   iframeRef: RefObject<HTMLIFrameElement>;
 }) => {
   const { t } = useTranslation();
-  const previewDocument = useMemo(() => buildPreviewDocument(code), [code]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -249,10 +252,14 @@ const HtmlBlockComponent = ({
   code,
   isStreaming = false,
   allowDownload = true,
+  filename: suppliedFilename,
+  format = "html",
 }: {
   code: string;
   isStreaming?: boolean;
   allowDownload?: boolean;
+  filename?: string;
+  format?: "html" | "svg";
 }) => {
   const { t } = useTranslation();
   const [activeView, setActiveView] = useState<HtmlView>("preview");
@@ -267,10 +274,10 @@ const HtmlBlockComponent = ({
   const canShowPreview = hasRenderableHtml(code);
   const canCopySource = Boolean(code.trim());
   const canDownload = canCopySource && !isStreaming && allowDownload;
-  const previewDocument = useMemo(() => buildPreviewDocument(code), [code]);
+  const previewDocument = useMemo(() => buildPreviewDocument(code, format), [code, format]);
   const filename = useMemo(
-    () => getHtmlFilename(isStreaming ? "" : code),
-    [code, isStreaming],
+    () => suppliedFilename || getHtmlFilename(isStreaming ? "" : code),
+    [code, isStreaming, suppliedFilename],
   );
 
   useEffect(() => {
@@ -384,7 +391,7 @@ const HtmlBlockComponent = ({
       return;
     }
     downloadStream(
-      new Blob([code], { type: "text/html;charset=utf-8" }),
+      new Blob([code], { type: format === "svg" ? "image/svg+xml;charset=utf-8" : "text/html;charset=utf-8" }),
       filename,
     );
   };
@@ -418,7 +425,7 @@ const HtmlBlockComponent = ({
       );
     }
     if (canShowPreview) {
-      return <HtmlPreview code={code} iframeRef={previewIframeRef} />;
+      return <HtmlPreview previewDocument={previewDocument} iframeRef={previewIframeRef} />;
     }
     return (
       <div className="md-html-empty" role="status">
@@ -431,10 +438,11 @@ const HtmlBlockComponent = ({
   return (
     <section className="md-html-block" aria-label={t("chat.markdownHtmlDisplay")}>
       <div className="md-html-toolbar">
-        <div className="md-html-file" title={filename}>
+        <div className="md-html-file">
           <FileTextOutlined className="md-html-file-icon" aria-hidden="true" />
-          <span className="md-html-file-name">{filename}</span>
-          <span className="md-html-file-type">HTML</span>
+          <Tooltip title={filename} mouseEnterDelay={1.5}>
+            <span className="md-html-file-name">{filename}</span>
+          </Tooltip>
         </div>
 
         <div
@@ -483,9 +491,9 @@ const HtmlBlockComponent = ({
               </button>
             </Tooltip>
           )}
-          <Tooltip title={t("chat.markdownHtmlDownload")}>
+          <Tooltip title={t(format === "svg" ? "chat.fileDownload" : "chat.markdownHtmlDownload")}>
             <button
-              aria-label={t("chat.markdownHtmlDownload")}
+              aria-label={t(format === "svg" ? "chat.fileDownload" : "chat.markdownHtmlDownload")}
               disabled={!canDownload}
               type="button"
               onClick={handleDownload}
@@ -590,9 +598,9 @@ const HtmlBlockComponent = ({
                     )}
                   </button>
                 </Tooltip>
-                <Tooltip title={t("chat.markdownHtmlDownload")}>
+                <Tooltip title={t(format === "svg" ? "chat.fileDownload" : "chat.markdownHtmlDownload")}>
                   <button
-                    aria-label={t("chat.markdownHtmlDownload")}
+                    aria-label={t(format === "svg" ? "chat.fileDownload" : "chat.markdownHtmlDownload")}
                     className="md-html-workspace-icon-button"
                     disabled={!canDownload}
                     type="button"

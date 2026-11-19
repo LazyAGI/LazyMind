@@ -72,6 +72,19 @@ def test_complete_prompt_rebinds_removed_attempt_without_reading_it(runtime, dec
     assert len(calls) == 1
 
 
+def test_saved_prompt_binds_registered_basename_and_repairs_missing_image(runtime, deck):
+    bare = 'material_01.png'
+    canonical = '../images/' + bare
+    brief = f'Use the panorama {bare}. Source https://example.org/{bare}'
+    code, _, calls = generate(runtime, deck, brief, [html([]), html([bare])])
+    assert code == 0 and len(calls) == 2
+    assert calls[0] == f'Use the panorama {canonical}. Source https://example.org/{bare}'
+    assert canonical in calls[1]
+    assert f'src="{canonical}"' in (deck / 'pages/page_001.html').read_text()
+    code, result, calls = generate(runtime, deck, f'Use /unregistered/{bare}', [html([bare])])
+    assert code != 0 and not calls and 'Unregistered material image reference' in result['error']
+
+
 def test_retry_with_new_input_paths_and_three_images_preserves_every_material(runtime, deck):
     for attempt in ['old attempt', 'new attempt']:
         sources = [old_input(deck, n, attempt) for n in range(1, 4)]
@@ -131,6 +144,34 @@ def test_text_only_and_remote_text_links_are_unchanged(runtime, deck):
     code, _, calls = generate(runtime, deck, brief, [html([])])
     assert code == 0 and len(calls) == 1
     assert calls[0] == brief
+
+
+@pytest.mark.parametrize('origin', [
+    'https://example.org/download?id=1&size=large',
+    'https://example.org/%E5%9B%BE.png?token=one',
+])
+def test_registered_remote_origin_uses_downloaded_bytes_after_source_disappears(runtime, deck, tmp_path, origin):
+    from material_images import record_material_aliases
+    source = tmp_path / 'download.png'
+    source.write_bytes((deck / 'images/material_01.png').read_bytes())
+    record_material_aliases(deck, [{'path': str(source), 'origin': origin}])
+    source.unlink()
+    code, result, calls = generate(runtime, deck, f'Use `{origin}`', [html([origin])])
+    assert code == 0 and result['status'] == 'ok'
+    assert calls == ['Use `../images/material_01.png`']
+    assert origin not in (deck / 'pages/page_001.html').read_text()
+
+
+def test_remote_alias_does_not_match_different_query_or_filename(runtime, deck, tmp_path):
+    from material_images import bind_prompt_materials, normalize_material_sources, record_material_aliases
+    source = tmp_path / 'download.png'
+    source.write_bytes((deck / 'images/material_01.png').read_bytes())
+    origin = 'https://example.org/download?id=1'
+    record_material_aliases(deck, [{'path': str(source), 'origin': origin}])
+    other = origin + '2'
+    brief = f'Reference {other}'
+    assert bind_prompt_materials(deck, brief) == (brief, [])
+    assert normalize_material_sources(html([other]), deck) == html([other])
 
 
 def test_trusted_input_alias_survives_deleted_input_and_encoded_file_uri(runtime, deck, tmp_path):
@@ -239,3 +280,108 @@ def test_imported_material_origin_is_recorded_only_for_matching_bytes(runtime, d
     assert rewritten == '../images/material_02.png' and required == ['images/material_02.png']
     with pytest.raises(ValueError, match='Unregistered'):
         bind_prompt_materials(deck, '/old-session/unrelated.png')
+
+
+def set_backgrounds(deck, paths, *, enabled=True):
+    (deck / 'background_images.json').write_text(json.dumps({
+        'enabled': enabled,
+        'pages': [{'page_no': page, 'local_path': path} for page, path in enumerate(paths, 1)],
+    }))
+
+
+def background_snapshot(deck, path):
+    digest = hashlib.sha256((deck / path).read_bytes()).hexdigest()[:16]
+    return f'inputs/background_images/0001_{Path(path).stem}-{digest}.png'
+
+
+def test_four_registered_backgrounds_bind_without_foreground_images(runtime, deck):
+    (deck / 'info_pack.json').write_text('{}')
+    paths = [f'images/page_{page:03d}_background.png' for page in range(1, 5)]
+    for page, path in enumerate(paths, 1):
+        Image.new('RGB', (8, 8), (page, 0, 0)).save(deck / path)
+    set_backgrounds(deck, paths)
+    for page, path in enumerate(paths, 1):
+        snapshot = background_snapshot(deck, path)
+        calls = []
+
+        def llm(_system, query, calls=calls, **_kwargs):
+            calls.append(query)
+            return ('<!doctype html><html><head></head><body>'
+                    '<div id="bg"></div><h1>Slide content</h1></body></html>')
+
+        code, result = runtime._capture_cmd(
+            runtime.cmd_page_html_from_brief, deck, page, f'Use `{snapshot}` as the background', llm_call=llm,
+        )
+        assert code == 0 and result['background_restored']
+        assert len(calls) == 1
+        assert calls[0].startswith(f'Use `../{path}` as the background')
+        assert f'url("../{path}"). Copy the path and extension exactly.' in calls[0]
+        output = (deck / f'pages/page_{page:03d}.html').read_text()
+        assert f'background-image:url("../{path}")' in output
+        assert '<img' not in output
+
+
+@pytest.mark.parametrize('already_has_png', [False, True])
+def test_generated_background_corrects_model_suffix_without_regenerating(runtime, deck, already_has_png):
+    background = 'images/page_001_background.png'
+    Image.new('RGB', (8, 8), 'black').save(deck / background)
+    set_backgrounds(deck, [background])
+    css = '#bg{background:center/cover url(../images/page_001_background.jpg)}'
+    if already_has_png:
+        css += f'#bg{{background-image:url("../{background}")}}'
+    response = (f'<html><head><style>{css}</style></head>'
+                '<body><div id="bg"></div><h1>Slide content</h1></body></html>')
+
+    code, result, calls = generate(runtime, deck, 'Write the approved slide', [response])
+
+    assert code == 0 and result['background_restored']
+    assert len(calls) == 1 and f'url("../{background}")' in calls[0]
+    output = (deck / 'pages/page_001.html').read_text()
+    assert f'background:center/cover url("../{background}")' in output
+    assert 'page_001_background.jpg' not in output
+    assert 'data-lazymind-background' not in output
+    assert '<h1>Slide content</h1>' in output
+
+
+def test_background_snapshot_remains_distinct_from_identical_foreground(runtime, deck):
+    from material_images import bind_prompt_materials
+
+    background = 'images/page_001_background.png'
+    (deck / background).write_bytes((deck / 'images/material_01.png').read_bytes())
+    set_backgrounds(deck, [background])
+    snapshot = background_snapshot(deck, background)
+    win_uri = PureWindowsPath(f'C:/removed-attempt/{snapshot}').as_uri()
+    resolved = runtime._resolve_background_image(deck, 1)
+    brief = f'Use `{win_uri}` as background and `../images/material_01.png` as evidence'
+    rewritten, required = bind_prompt_materials(deck, brief, background_image=resolved)
+    assert rewritten == f'Use `../{background}` as background and `../images/material_01.png` as evidence'
+    assert required == ['images/material_01.png']
+    with pytest.raises(ValueError, match='Ambiguous material image reference'):
+        bind_prompt_materials(deck, '/' + snapshot.split('/')[-1], background_image=resolved)
+
+    css_only = ('<!doctype html><html><head></head><body>'
+                '<div id="bg"></div><h1>Slide content</h1></body></html>')
+    code, result, calls = generate(runtime, deck, brief, [css_only])
+    assert code != 0 and 'material_01.png' in result['error']
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize('failure', ['disabled', 'wrong_page', 'missing', 'outside'])
+def test_unavailable_background_snapshot_fails_before_model_call(runtime, deck, tmp_path, failure):
+    background = 'images/page_001_background.png'
+    Image.new('RGB', (8, 8), 'black').save(deck / background)
+    snapshot = background_snapshot(deck, background)
+    if failure == 'outside':
+        outside = tmp_path / 'outside.png'
+        outside.write_bytes((deck / background).read_bytes())
+        set_backgrounds(deck, [str(outside)])
+    elif failure == 'wrong_page':
+        set_backgrounds(deck, ['images/other.png', background])
+    else:
+        set_backgrounds(deck, [background], enabled=failure != 'disabled')
+        if failure == 'missing':
+            (deck / background).unlink()
+
+    code, result, calls = generate(runtime, deck, snapshot, [html([])])
+    assert code != 0 and 'Unregistered material image reference' in result['error']
+    assert calls == []

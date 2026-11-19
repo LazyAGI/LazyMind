@@ -62,6 +62,10 @@ it.each(['javascript:alert(1)', 'file:///etc/passwd', 'https://user:password@exa
   expect(safePreviewUrl(raw)).toBe('');
 });
 
-it.each(['png', 'pdf', 'docx', 'pptx', 'xlsx', 'html', 'md', 'txt', 'json', 'mp3', 'mp4'])('accepts existing %s preview formats', ext => {
+it.each(['png', 'pdf', 'docx', 'pptx', 'xlsx', 'html', 'svg', 'md', 'txt', 'json', 'mp3', 'mp4'])('accepts existing %s preview formats', ext => {
   expect(previewKind({ key: ext, filename: `file.${ext}` })).not.toBe('unsupported');
+});
+
+it('selects SVG image preview from MIME type when the filename has no extension', () => {
+  expect(previewKind({ key: 'diagram', filename: 'Architecture', mimeType: 'image/svg+xml' })).toBe('svg');
 });

@@ -29,9 +29,12 @@ import (
 	"lazymind/agentconnector/internal/localfile"
 )
 
-const bridgeProtocol = "v9"
+// Earlier v9 builds lack either deployment isolation or the new agent routes.
+const bridgeProtocol = "v10"
+const previousScopedBridgeProtocol = "v9"
 const bridgeProduct = "lazymind-assistant-bridge"
 const managementHeader = "X-LazyMind-Bridge-Control"
+const foregroundLauncherJobEnv = "LAZYMIND_CONNECTOR_LAUNCHER_JOB"
 
 type ClientOptions struct {
 	ID        string `json:"id"`
@@ -161,7 +164,7 @@ func bridgeEnvironment(home string, isolated bool) []string {
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
 		if key == connectorconfig.EnvironmentKey || key == "LAZYMIND_HOME" || key == "LAZYMIND_RUNTIME_PROFILE" || key == "LAZYMIND_RUNTIME_ROOT" || key == "LAZYMIND_RUNTIME_OWNER_TOKEN" ||
-			key == "LAZYMIND_BRIDGE_ISOLATED" || strings.HasPrefix(key, "LAZYMIND_AGENT_") ||
+			key == "LAZYMIND_BRIDGE_ISOLATED" || strings.EqualFold(key, foregroundLauncherJobEnv) || strings.HasPrefix(key, "LAZYMIND_AGENT_") ||
 			strings.HasPrefix(key, "LAZYMIND_WORKFLOW_") || strings.HasPrefix(key, "LAZYMIND_DESKTOP_OWNER_") {
 			continue
 		}
@@ -170,9 +173,19 @@ func bridgeEnvironment(home string, isolated bool) []string {
 	return append(env, "LAZYMIND_HOME="+home, "LAZYMIND_RUNTIME_PROFILE=bridge", "LAZYMIND_BRIDGE_ISOLATED="+strconv.FormatBool(isolated))
 }
 
-func compatibleBridge(status map[string]any, home string, isolated bool) bool {
-	return status["service"] == bridgeProduct && status["version"] == bridgeProtocol &&
+func bridgeMatchesScope(status map[string]any, home string, isolated bool) bool {
+	return status["service"] == bridgeProduct &&
 		status["home"] == home && status["isolated"] == isolated && status["platform"] == runtime.GOOS
+}
+
+func compatibleBridge(status map[string]any, home string, isolated bool) bool {
+	return status["version"] == bridgeProtocol && bridgeMatchesScope(status, home, isolated)
+}
+
+func releasableBridge(status map[string]any, home string) bool {
+	// The previous scoped broker still supports authenticated deployment release.
+	version := status["version"]
+	return (version == bridgeProtocol || version == previousScopedBridgeProtocol) && bridgeMatchesScope(status, home, false)
 }
 
 func launchBridge(ctx context.Context, executable, home, address string, isolated bool) (map[string]any, error) {
@@ -265,7 +278,9 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 			// Old bridges have no scoped sessions. A second listener sharing their
 			// legacy credential directory would not be safe isolation.
 			executable, _ := status["executable"].(string)
-			if (status["version"] == "v8" && executable != "") || (status["service"] == bridgeProduct && status["home"] == root) {
+			version := status["version"]
+			legacy := executable != "" && status["service"] == nil && (version == "v8" || version == "v9")
+			if legacy || (status["service"] == bridgeProduct && status["home"] == root) {
 				return nil, errors.New("an incompatible Assistant Bridge is using this environment; it was preserved. Stop its owning deployment before upgrading the shared bridge, then retry")
 			}
 			continue
@@ -347,7 +362,7 @@ func ReleaseClient(ctx context.Context, options ClientOptions) error {
 		}
 		return fmt.Errorf("cannot verify Assistant Bridge before release; service was preserved: %w", err)
 	}
-	if !compatibleBridge(status, root, false) {
+	if !releasableBridge(status, root) {
 		return errors.New("existing Assistant Bridge is not managed by this installation; it was preserved")
 	}
 	token, err := bridgeControlToken(root)
@@ -369,7 +384,7 @@ func ReleaseClient(ctx context.Context, options ClientOptions) error {
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	for {
-		if status, err := Health(ctx, u.Host); (err != nil || !compatibleBridge(status, root, false)) && (pid <= 0 || ownerExited(int(pid))) {
+		if status, err := Health(ctx, u.Host); (err != nil || !releasableBridge(status, root)) && (pid <= 0 || ownerExited(int(pid))) {
 			return nil
 		}
 		select {

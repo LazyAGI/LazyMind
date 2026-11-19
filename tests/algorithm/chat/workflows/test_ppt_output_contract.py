@@ -1,4 +1,4 @@
-"""Uploaded template routing survives missing or contradictory model context."""
+"""PPT route selection and delivery use the confirmed presentation format."""
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,10 +19,12 @@ def tools(monkeypatch):
     return module
 
 
-def bind(monkeypatch, tools, mode):
+def bind(monkeypatch, tools, mode, output_format=None):
     artifacts = [] if mode is None else [
         {'slot': 'template_mode', 'selected': True, 'revision': 2, 'value': {'text': mode}},
         {'slot': 'template_mode', 'selected': False, 'revision': 3, 'value': {'text': 'none'}},
+        {'slot': 'presentation_output_format', 'selected': True, 'revision': 1,
+         'value': output_format or ('native_pptx' if mode == 'upload' else 'html')},
     ]
     monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(
         list_artifacts=lambda session: SimpleNamespace(result={'artifacts': artifacts})))
@@ -65,7 +67,8 @@ def test_publish_correct_route_preserves_authored_prompt(monkeypatch, tmp_path, 
     (tmp_path / 'outline_draft.md').write_text('## 封面', encoding='utf-8')
     monkeypatch.setattr(tools, '_bound_workflow_deck', lambda: tmp_path)
     monkeypatch.setattr(tools, 'require_context', lambda: SimpleNamespace())
-    monkeypatch.setattr(tools, '_resolve_artifact_text', lambda _ctx, key: ('## 封面\n标题' if key == 'deck_outline' else None, 'text'))
+    monkeypatch.setattr(tools, '_resolve_artifact_text',
+                        lambda _ctx, key: ('## 封面\n标题' if key == 'deck_outline' else None, 'text'))
     monkeypatch.setattr(tools, '_ui_slot_order_list', lambda *a: [])
     published = []
     monkeypatch.setattr(tools, '_publish_ordered_ppt_artifact',
@@ -93,8 +96,8 @@ def test_prompt_stage_receives_durable_template_mode():
     state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
     step = state['steps']['plan_page_prompts']
     assert {'material': 'template_mode', 'required': True} in step['inputs']
-    assert 'output_format="native_pptx"' in step['prompt']
-    assert 'HTML ONLY (presentation_output_format=html' in step['prompt']
+    assert 'native PPTX' in step['prompt']
+    assert 'HTML uses 1600×900' in step['prompt']
 
 
 @pytest.mark.parametrize('output_format', ['html', 'native_pptx'])
@@ -118,7 +121,8 @@ def test_template_startup_asks_only_missing_output_choice():
     from lazymind.chat.workflow.clarification import resolve_fields, startup_card
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     values, missing = resolve_fields(policy, '主题：研究报告，8页，使用附件 company.pptx 作为 PPTX 模板',
-                                     supplied={'template_pptx': 'company.pptx'})
+                                     supplied={'topic': '研究报告', 'template_pptx': 'company.pptx'},
+                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['template_mode'] == 'upload'
     assert [field['id'] for field in missing] == ['presentation_output_format']
     card = startup_card(missing, {})
@@ -128,49 +132,186 @@ def test_template_startup_asks_only_missing_output_choice():
     assert values['presentation_output_format'] == 'html' and missing == []
 
 
-def test_plain_startup_never_asks_template_format_or_generation_mode():
-    from lazymind.chat.workflow.clarification import resolve_fields
+def test_plain_startup_asks_for_format_with_two_fixed_choices():
+    from lazymind.chat.workflow.clarification import resolve_fields, startup_card
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
-    values, missing = resolve_fields(policy, '主题：城市介绍，8页，不生成AI底图')
-    assert values['template_mode'] == 'none' and missing == []
+    values, missing = resolve_fields(policy, '主题：城市介绍，8页，不生成AI底图',
+                                     supplied={'topic': '城市介绍', 'generate_background_images': 'disabled'},
+                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
+    assert values['template_mode'] == 'none'
+    assert [field['id'] for field in missing] == ['presentation_output_format']
     assert 'presentation_output_format' not in values
+    question, = startup_card(missing, {})['questions']
+    assert question['choices'] == ['HTML｜交互预览，可导出 PPTX', '原生 PPTX｜直接生成文件']
+    assert not question['allow_other']
     assert 'generation_mode' not in {field['id'] for field in policy['clarification_fields']}
 
 
 @pytest.mark.parametrize('text,expected', [
-    ('输出 HTML', 'html'), ('输出PPTX', 'native_pptx'), ('用html输出', 'html'),
-    ('HTML 格式', 'html'), ('generate PPTX', 'native_pptx'),
+    ('输出 HTML', 'html'), ('直接输出原生 PPTX', 'native_pptx'),
+    ('先做可交互的 HTML，再导出 PPTX', 'html'), ('generate PPTX', 'native_pptx'),
 ])
-def test_explicit_template_output_does_not_ask_again(text, expected):
+@pytest.mark.parametrize('template', [{}, {'template_pptx': 'template.pptx'}])
+def test_explicit_output_does_not_ask_again(text, expected, template):
     from lazymind.chat.workflow.clarification import resolve_fields
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     values, missing = resolve_fields(policy, '主题：研究报告，8页，' + text,
-                                     supplied={'template_pptx': 'template.pptx'})
+                                     supplied={'topic': '研究报告', 'generate_background_images': 'disabled', **template,
+                                               'presentation_output_format': expected},
+                                     extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['presentation_output_format'] == expected and missing == []
 
 
-@pytest.mark.parametrize('brief,output_format', [
-    ('转正答辩，生成12 页pptx，十五分钟演讲、五分钟问答', 'native_pptx'),
-    ('请按模板制作十二页可编辑的 PowerPoint 文件', 'native_pptx'),
-    ('沿用模板风格做12页网页幻灯片', 'html'),
+@pytest.mark.parametrize('brief,output_format,count_evidence', [
+    ('转正答辩，生成12 页pptx，十五分钟演讲、五分钟问答', 'native_pptx', '12 页pptx'),
+    ('请按模板制作十二页可编辑的 PowerPoint 文件', 'native_pptx', '十二页'),
+    ('沿用模板风格做12页网页幻灯片', 'html', '12页'),
 ])
-def test_template_output_accepts_model_extraction_from_user_request(brief, output_format):
+def test_template_output_accepts_model_extraction_from_user_request(brief, output_format, count_evidence):
     from lazymind.chat.workflow.clarification import resolve_fields
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
     values, missing = resolve_fields(policy, brief, supplied={
-        'topic': '转正答辩', 'template_pptx': 'template.pptx',
+        'topic': '转正答辩', 'slide_count': '12', 'template_pptx': 'template.pptx',
         'presentation_output_format': output_format,
-    })
+    }, extractions={'slide_count': [{'value': '12', 'evidence': count_evidence}]})
     assert missing == []
     assert values['presentation_output_format'] == output_format
 
 
-@pytest.mark.parametrize('previous', [None, {'presentation_output_format': 'HTML｜参考模板样式生成'}])
-def test_user_output_choice_takes_precedence_over_model_binding(previous):
+def test_confirmed_user_output_choice_takes_precedence_over_model_binding():
     from lazymind.chat.workflow.clarification import resolve_fields
     policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
     values, missing = resolve_fields(policy, '主题：研究报告，8页，输出 HTML', supplied={
-        'template_pptx': 'template.pptx', 'presentation_output_format': 'native_pptx',
-    }, previous=previous)
+        'topic': '研究报告', 'template_pptx': 'template.pptx', 'presentation_output_format': 'native_pptx',
+    }, previous={'presentation_output_format': 'HTML｜参考模板样式生成'},
+        extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert missing == []
     assert values['presentation_output_format'] == 'html'
+
+
+def test_missing_saved_output_format_never_infers_a_legacy_route(monkeypatch, tools):
+    monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(
+        list_artifacts=lambda _: SimpleNamespace(result={'artifacts': [
+            {'slot': 'template_mode', 'value': 'upload'},
+        ]})))
+    with pytest.raises(tools.ToolExecutionError, match='missing presentation_output_format'):
+        tools._required_output_format()
+
+
+@pytest.mark.parametrize('mode,slot,kind,value,expected', [
+    ('none', None, None, None, False),
+    ('upload', None, None, None, False),
+    ('none', 'preview_notes', 'text', {'text': 'Notes only'}, False),
+    ('none', 'preview_html', 'text', {'text': ''}, False),
+    ('none', 'preview_html', 'text', {'text': '<!-- lazymind-ppt-placeholder -->Not generated'}, False),
+    ('none', 'preview_html', 'text', {'text': '<html>Slide</html>'}, True),
+    ('none', 'preview_html', 'file', {'type': 'text', 'path': '/core/slide.html'}, True),
+    ('none', 'native_pptx', 'file', {'path': '/core/deck.pptx'}, False),
+    ('upload', 'preview_html', 'text', {'text': '<html>Slide</html>'}, False),
+    ('upload', 'native_pptx', 'text', {'text': 'I generated the file'}, False),
+    ('upload', 'native_pptx', 'file', {'path': '/core/deck.pptx'}, True),
+])
+def test_delivery_requires_this_attempts_selected_output(monkeypatch, tools, mode, slot, kind, value, expected):
+    bind(monkeypatch, tools, mode)
+    artifacts = [] if slot is None else [{'slot': slot, 'content_type': kind, 'value': value}]
+    if expected:
+        assert tools.check_ppt_delivery(artifacts)['status'] == 'ok'
+    else:
+        with pytest.raises(tools.ToolExecutionError, match='PPT_DELIVERY_MISSING'):
+            tools.check_ppt_delivery(artifacts)
+
+
+def test_native_route_is_available_without_a_template(monkeypatch, tools):
+    bind(monkeypatch, tools, 'none', output_format='native_pptx')
+    assert tools.check_ppt_delivery([
+        {'slot': 'native_pptx', 'content_type': 'file', 'value': {'path': '/core/deck.pptx'}},
+    ]) == {'status': 'ok', 'output_format': 'native_pptx'}
+
+
+def test_template_html_delivery_uses_saved_choice_and_does_not_accept_old_outputs(monkeypatch, tools):
+    html = {'slot': 'preview_html', 'content_type': 'text', 'value': {'text': '<html>Saved slide</html>'}}
+    monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(
+        list_artifacts=lambda session: SimpleNamespace(result={'artifacts': [
+            {'slot': 'template_mode', 'value': {'text': 'upload'}},
+            {'slot': 'presentation_output_format', 'value': {'text': 'html'}},
+            html,
+        ]})))
+    with pytest.raises(tools.ToolExecutionError, match='PPT_DELIVERY_MISSING'):
+        tools.check_ppt_delivery([])
+    assert tools.check_ppt_delivery([html])['output_format'] == 'html'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('output_format', ['html', 'native_pptx'])
+@pytest.mark.parametrize('delivered,status', [(False, 'succeeded'), (True, 'succeeded'), (False, 'interrupted')])
+async def test_ppt_completion_gate_runs_before_runtime_success(
+        monkeypatch, tmp_path, delivered, status, output_format):
+    import base64
+    import json
+    from unittest.mock import AsyncMock, Mock
+    from lazymind.workflow_sdk import WorkflowClient
+    from lazymind.chat.engine.subagent import runner
+    from lazymind.chat.workflow.remote_executor import RemoteWorkflowExecutor
+
+    package_root = ROOT / 'workflows/ppt-workflow'
+    files = {path: base64.b64encode((package_root / path).read_bytes()).decode()
+             for path in ('workflow.yaml', 'scripts/tools.py')}
+    revision = tmp_path.name
+    package = {'revision_id': revision, 'tree_hash': 'test-tree', 'files': files}
+    # Fake Core's reads; retain the real declaration,
+    # revision validation, script materialization and callable loading chain.
+    package_read = Mock(return_value=SimpleNamespace(result=package))
+    monkeypatch.setattr(WorkflowClient, 'get_workflow', package_read)
+    inventory_read = Mock(side_effect=ConnectionError('public artifact inventory unavailable'))
+    monkeypatch.setattr(WorkflowClient, 'list_artifacts', inventory_read)
+    policy = yaml.safe_load((package_root / 'workflow.yaml').read_text(encoding='utf-8'))['runtime']
+    worker = RemoteWorkflowExecutor()
+    runtime = AsyncMock()
+    runtime.upload_artifact_file.return_value = '/static-files/deck.pptx'
+    if delivered and output_format == 'native_pptx':
+        from pptx import Presentation
+        deck = Presentation()
+        deck.slides.add_slide(deck.slide_layouts[0])
+        deck.save(tmp_path / 'deck.pptx')
+    runtime.context.return_value = {
+        'metadata': {'task_id': 'task'},
+        'inputs': {'presentation_output_format': {'revision_id': 'chosen-format'}},
+        'declared_input_types': {'presentation_output_format': 'text'},
+    }
+    runtime.input.return_value = {'content_base64': base64.b64encode(output_format.encode()).decode()}
+    runtime.execution_spec.return_value = {
+        'task': {'input_slots': [], 'output_slots': ['preview_html', 'preview_notes', 'native_pptx']},
+        'workspace_path': str(tmp_path), 'steps': [], 'llm_config': {},
+        'params': {'step_id': 'generate_ppt', 'workflow_runtime': policy,
+                   'workflow_id': 'ppt-workflow', 'revision_id': revision, 'tree_hash': 'test-tree'},
+    }
+    worker.runtime = runtime
+
+    async def stream(**_kwargs):
+        if delivered:
+            artifact = ({'slot': 'native_pptx', 'content_type': 'file', 'value': {'path': str(tmp_path / 'deck.pptx')}}
+                        if output_format == 'native_pptx' else
+                        {'slot': 'preview_html', 'content_type': 'text', 'value': {'text': '<html>Slide</html>'}})
+            yield 'data: ' + json.dumps({'type': 'artifact', 'seq': 1, **artifact}) + '\n\n'
+        yield 'data: ' + json.dumps({'type': 'done', 'status': status,
+                                    'summary': '未重新生成幻灯片' if not delivered else 'Saved'}) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    await worker._run_claim(object(), {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    inventory_read.assert_not_called()
+    if status == 'interrupted':
+        package_read.assert_not_called()
+        runtime.cancel.assert_awaited_once()
+        runtime.complete.assert_not_awaited()
+        runtime.fail.assert_not_awaited()
+    elif delivered:
+        package_read.assert_called_once_with('ppt-workflow', revision)
+        assert runtime.fail.await_args is None, runtime.fail.await_args.args[3]
+        runtime.complete.assert_awaited_once()
+        if output_format == 'native_pptx':
+            runtime.upload_artifact_file.assert_awaited_once()
+    else:
+        runtime.complete.assert_not_awaited()
+        runtime.fail.assert_awaited_once()
+        assert 'PPT_DELIVERY_MISSING' in runtime.fail.call_args.args[3]
+        assert runtime.task_event.call_args.args[-1]['status'] == 'failed'

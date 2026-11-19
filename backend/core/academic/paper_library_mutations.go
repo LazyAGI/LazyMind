@@ -182,6 +182,7 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 		Revision            int64                  `json:"revision"`
 		Metadata            *paperlibrary.Metadata `json:"metadata,omitempty"`
 		Status              *string                `json:"status,omitempty"`
+		StatusIfUnread      bool                   `json:"status_if_unread,omitempty"`
 		Tags                *[]string              `json:"tags,omitempty"`
 		PrimaryAttachmentID *string                `json:"primary_attachment_id,omitempty"`
 	}
@@ -208,7 +209,8 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if input.Status != nil && *input.Status != "unread" && *input.Status != "reading" && *input.Status != "read" {
+	if (input.Status != nil && *input.Status != "unread" && *input.Status != "reading" && *input.Status != "read") ||
+		(input.StatusIfUnread && (input.Status == nil || *input.Status != "reading")) {
 		replyError(w, 400, "INVALID_REQUEST", "阅读状态无效")
 		return
 	}
@@ -240,7 +242,14 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 		}
 		if input.Status != nil {
 			state := orm.AcademicUserPaperState{UserID: store.UserID(r), DatasetID: dataset, PaperID: row.AcademicWorkID, ReadingStatus: *input.Status, UpdatedAt: time.Now().UTC()}
-			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "dataset_id"}, {Name: "paper_id"}}, DoUpdates: clause.AssignmentColumns([]string{"reading_status", "updated_at"})}).Create(&state).Error; err != nil {
+			conflict := clause.OnConflict{
+				Columns:   []clause.Column{{Name: "user_id"}, {Name: "dataset_id"}, {Name: "paper_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"reading_status", "updated_at"}),
+			}
+			if input.StatusIfUnread {
+				conflict.Where = clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Table: state.TableName(), Name: "reading_status"}, Value: "unread"}}}
+			}
+			if err := tx.Clauses(conflict).Create(&state).Error; err != nil {
 				return err
 			}
 		}
@@ -443,6 +452,58 @@ func AddLibraryNote(w http.ResponseWriter, r *http.Request) {
 		return tx.Create(&orm.PaperLibraryNote{DatasetID: dataset, ID: input.ID, PaperID: id, Title: "新笔记", Content: input.Content, Kind: "note", SourceJSON: string(sourceJSON), CreatedAt: now, UpdatedAt: now}).Error
 	})
 	replyLibraryNoteChanges(w, r, dataset, id, err)
+}
+
+// UpdateLibraryNote changes only the note body; its original PDF anchor remains immutable.
+func UpdateLibraryNote(w http.ResponseWriter, r *http.Request) {
+	dataset, _, ok := libraryAccess(w, r, true)
+	if !ok {
+		return
+	}
+	paperID, noteID := mux.Vars(r)["library_paper_id"], mux.Vars(r)["note_id"]
+	var input struct {
+		Content string `json:"content"`
+	}
+	if !paperlibrary.ValidID(paperID) || !paperlibrary.ValidID(noteID) || !parseJSON(r, &input) || strings.TrimSpace(input.Content) == "" || len(input.Content) > 2<<20 {
+		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "笔记标识无效、内容为空或过长")
+		return
+	}
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var entry orm.PaperLibraryEntry
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND id=? AND removed_at IS NULL", dataset, paperID).Take(&entry).Error; err != nil {
+			return err
+		}
+		var note orm.PaperLibraryNote
+		if err := tx.Where("dataset_id=? AND paper_id=? AND id=?", dataset, paperID, noteID).Take(&note).Error; err != nil {
+			return err
+		}
+		return tx.Model(&note).Updates(map[string]any{"content": input.Content, "updated_at": time.Now().UTC()}).Error
+	})
+	replyLibraryNoteChanges(w, r, dataset, paperID, err)
+}
+
+func DeleteLibraryNote(w http.ResponseWriter, r *http.Request) {
+	dataset, _, ok := libraryAccess(w, r, true)
+	if !ok {
+		return
+	}
+	paperID, noteID := mux.Vars(r)["library_paper_id"], mux.Vars(r)["note_id"]
+	if !paperlibrary.ValidID(paperID) || !paperlibrary.ValidID(noteID) {
+		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "笔记标识无效")
+		return
+	}
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var entry orm.PaperLibraryEntry
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND id=? AND removed_at IS NULL", dataset, paperID).Take(&entry).Error; e != nil {
+			return e
+		}
+		var note orm.PaperLibraryNote
+		if e := tx.Where("dataset_id=? AND paper_id=? AND id=?", dataset, paperID, noteID).Take(&note).Error; e != nil {
+			return e
+		}
+		return tx.Delete(&note).Error
+	})
+	replyLibraryNoteChanges(w, r, dataset, paperID, err)
 }
 
 func validLibraryNoteSource(source *paperlibrary.NoteSource) bool {

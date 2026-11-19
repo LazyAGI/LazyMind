@@ -94,3 +94,39 @@ func TestAlgorithmOutageLeavesQueuedAndRestartCanClaim(t *testing.T) {
 		t.Fatalf("claim=%#v", claim)
 	}
 }
+
+func TestCanonicalPaperQueuePreservesLaunchAndCurrentRequirements(t *testing.T) {
+	for _, validator := range []string{"paper-agent-v1", ""} {
+		t.Run(validator, func(t *testing.T) {
+			db := dispatchDB(t, true)
+			seedDispatchStep(t, db, "paper-context")
+			params := map[string]any{"launch_user_input": "Only supplied sources; no simulation", "current_user_input": "Continue in English",
+				"workflow_runtime": map[string]any{"execution": map[string]any{"version": "1", "steps": map[string]any{"step": map[string]any{"output_validator": validator}}}}}
+			raw, err := json.Marshal(params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-paper-context").Update("params", raw).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := enqueueCanonicalAttempt(context.Background(), db, requestFor("paper-context")); err != nil {
+				t.Fatal(err)
+			}
+			var outbox orm.WorkflowOutbox
+			if err := db.First(&outbox, "attempt_id = ?", "paper-context").Error; err != nil {
+				t.Fatal(err)
+			}
+			var value executor.AttemptContext
+			if err := json.Unmarshal(outbox.PayloadJSON, &value); err != nil {
+				t.Fatal(err)
+			}
+			if validator == "paper-agent-v1" {
+				if value.LaunchRequest != params["launch_user_input"] || value.UserRequest != params["current_user_input"] {
+					t.Fatalf("requirements lost: %+v", value)
+				}
+			} else if value.LaunchRequest != "" || value.UserRequest != "" {
+				t.Fatal("non-paper context changed")
+			}
+		})
+	}
+}

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/codexhost"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/localfile"
 	"lazymind/agentconnector/internal/workflowhost"
 )
@@ -244,7 +243,7 @@ func (b *codexRecoveryBroker) complete(connector, request string, viewOnly ...bo
 
 func (s *Server) recoveryPair(w http.ResponseWriter, r *http.Request) (workflowhost.Pairing, bool) {
 	scope, err := s.store.AccountScope()
-	if err == nil && integrationstate.Allowed(s.store.Directory(), "codex") {
+	if err == nil {
 		pair, e := workflowhost.Verify(s.store.Directory(), r.Header.Get("X-LazyMind-Connector-Id"), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), scope)
 		if e == nil && pair.Provider == "codex" {
 			return pair, true

@@ -50,6 +50,7 @@ type ProducerRef struct {
 }
 
 type CompiledNode struct {
+	Execution         *StepExecution    `json:"execution,omitempty"`
 	ID                string            `json:"id"`
 	Label             string            `json:"label,omitempty"`
 	Route             string            `json:"route"`
@@ -96,6 +97,7 @@ type ClarificationField struct {
 	AskWhen       string                   `json:"ask_when,omitempty" yaml:"ask_when,omitempty"`
 	Type          string                   `json:"type,omitempty" yaml:"type,omitempty"`
 	Choices       []string                 `json:"choices,omitempty" yaml:"choices,omitempty"`
+	Recommended   string                   `json:"recommended_choice,omitempty" yaml:"recommended_choice,omitempty"`
 	ChoicePolicy  string                   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
 	Attachment    *ClarificationAttachment `json:"attachment,omitempty" yaml:"attachment,omitempty"`
 	Reason        string                   `json:"reason,omitempty" yaml:"reason,omitempty"`
@@ -131,12 +133,16 @@ type ClarificationAttachment struct {
 // PostStepCheck is a deterministic package-owned function that a Host must run
 // after the named step has produced its artifacts, but before the Attempt may
 // be committed as successful. Arguments map function parameter names to
-// artifacts produced by that step. Unlike a Workflow node, this check never
-// starts another model/SubAgent turn.
+// artifacts produced by that step. InputArguments names inputs bound to the
+// same attempt. A check runs without starting another model/SubAgent turn.
 type PostStepCheck struct {
 	StepID    string            `json:"step_id" yaml:"step_id"`
 	Tool      string            `json:"tool" yaml:"tool"`
 	Arguments map[string]string `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	// InputArguments are read from the attempt's bound inputs.
+	InputArguments map[string]string `json:"input_arguments,omitempty" yaml:"input_arguments,omitempty"`
+	// ArtifactsArgument receives only this attempt's published artifacts, including list entries.
+	ArtifactsArgument string `json:"artifacts_argument,omitempty" yaml:"artifacts_argument,omitempty"`
 }
 
 // AttachmentClarification permits one supplemental startup card after reading
@@ -175,9 +181,11 @@ type CompletedAction struct {
 // Workflow package. Hosts consume this policy instead of branching on a
 // particular workflow id.
 type RuntimePolicy struct {
+	Execution        *ExecutionPolicy  `json:"execution,omitempty" yaml:"execution,omitempty"`
 	CompletedActions []CompletedAction `json:"completed_actions,omitempty" yaml:"completed_actions,omitempty"`
 	// These contracts are pinned to the package revision, never inferred from its ID.
 	TriggerInputs             *[]string                 `json:"trigger_inputs,omitempty" yaml:"trigger_inputs,omitempty"`
+	InputContracts            map[string]InputContract  `json:"input_contracts,omitempty" yaml:"input_contracts,omitempty"`
 	ExecutionLimits           map[string]ExecutionLimit `json:"execution_limits,omitempty" yaml:"execution_limits,omitempty"`
 	TransactionalOutputs      bool                      `json:"transactional_outputs,omitempty" yaml:"transactional_outputs,omitempty"`
 	Publication               *PublicationPolicy        `json:"publication,omitempty" yaml:"publication,omitempty"`
@@ -199,7 +207,10 @@ type RuntimePolicy struct {
 }
 
 func (p RuntimePolicy) IsZero() bool {
-	return len(p.CompletedActions) == 0 && p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
+	if p.Execution != nil {
+		return false
+	}
+	return len(p.CompletedActions) == 0 && p.TriggerInputs == nil && len(p.InputContracts) == 0 && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
 		p.CompletedEditStep == "" && p.CompletedEditRouting == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0 &&
 		p.AttachmentClarification == nil && p.InputCheckpoint == nil && len(p.PostStepChecks) == 0 && len(p.RecoveryInputs) == 0
 }
@@ -306,6 +317,8 @@ type Projection struct {
 	Edges      []ProjectedEdge           `json:"edges"`
 	EndReached bool                      `json:"end_reached"`
 	Completed  bool                      `json:"completed"`
+
+	DecidedRoutes []string `json:"decided_routes"`
 }
 
 type ProjectedEdge struct {

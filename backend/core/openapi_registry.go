@@ -1261,13 +1261,14 @@ type providerRequestProtocolOpenAPIItem struct {
 }
 
 type providerRequestConfigOpenAPIResponse struct {
-	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
-	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,openai-responses,anthropic"`
-	Protocols       []providerRequestProtocolOpenAPIItem     `json:"protocols"`
+	AdvancedUnavailable bool                                     `json:"advanced_unavailable,omitempty" desc:"Legacy encrypted options could not be read. Preserve them unless the user explicitly chooses to replace or clear them."`
+	Advanced            *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Custom headers, query parameters and extra JSON body, stored locally as plaintext JSON. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
+	DefaultProtocol     string                                   `json:"default_protocol" enum:"openai,openai-responses,anthropic"`
+	Protocols           []providerRequestProtocolOpenAPIItem     `json:"protocols"`
 }
 
 type updateProviderRequestConfigOpenAPIRequest struct {
-	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
+	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Custom headers, query parameters and extra JSON body, stored locally as plaintext JSON. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
 	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,openai-responses,anthropic"`
 	Endpoints       map[string]string                        `json:"endpoints,omitempty" desc:"Optional API-root overrides keyed by openai, openai-responses or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected."`
 }
@@ -2309,6 +2310,21 @@ type remoteFSDeleteQueryParams struct {
 	TaskID    string `query:"task_id,omitempty" desc:"Required for package-internal delete; not required for confirmed permanent package purge."`
 	Permanent bool   `query:"permanent,omitempty" desc:"Required true for package root physical purge."`
 	Confirm   bool   `query:"confirm,omitempty" desc:"Required true for package root physical purge."`
+}
+
+type remoteFSSkillInstallOpenAPIRequest struct {
+	URL              string `json:"url,omitempty" desc:"Skill source page or direct HTTP(S) ZIP URL. Mutually exclusive with package_zip_base64."`
+	PackageZIPBase64 string `json:"package_zip_base64,omitempty" desc:"Complete ZIP package, base64 encoded; maximum decoded size 100 MiB."`
+	ExpectedName     string `json:"expected_name,omitempty" desc:"Optional expected package frontmatter name for byte imports."`
+}
+
+type remoteFSSkillInstallOpenAPIResponse struct {
+	Status    string                                     `json:"status" enum:"installed,already_installed"`
+	SkillID   string                                     `json:"skill_id"`
+	SkillKey  string                                     `json:"skill_key"`
+	SourceURL string                                     `json:"source_url,omitempty"`
+	Enabled   bool                                       `json:"enabled"`
+	Warnings  []skillNormalizationWarningOpenAPIResponse `json:"warnings,omitempty"`
 }
 
 type remoteFSDirOpenAPIRequest struct {
@@ -4509,6 +4525,16 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/remote-fs/skills:install",
+			Summary:     "Atomically install a linked or uploaded skill",
+			Description: "Uses the same source adapters, package limits, and metadata validation as personal imports. New skills are disabled. An already installed source is returned unchanged, including its current enabled state. Requires internal service authentication and user_id/task_id.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSTaskQueryParams{},
+			RequestBody: jsonBodyOf(remoteFSSkillInstallOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Complete skill installation", remoteFSSkillInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
 			Path:        "/remote-fs/dir",
 			Summary:     "Create remote skill filesystem directory or empty package",
 			Tags:        []string{"remote-fs"},
@@ -4658,6 +4684,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"model_providers"},
 			RequestBody: jsonBodyOf(modelprovider.EmbeddingSwitchPreviewRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Embedding switch assessment", modelprovider.EmbeddingSwitchPreviewResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/embedding/clear-chunks",
+			Summary:     "Clear text vectors and optionally activate a replacement embedding model",
+			Description: "Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.",
+			Tags:        []string{"model_providers"},
+			RequestBody: jsonBodyOf(modelprovider.EmbeddingClearRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Chunks cleared and target model activated", modelprovider.EmbeddingClearResponse{})},
 		},
 		{
 			Method:      "PUT",

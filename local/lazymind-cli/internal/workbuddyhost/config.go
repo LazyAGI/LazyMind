@@ -37,10 +37,14 @@ func Load(home, account string) (Config, workflowhost.Pairing, error) {
 	}
 	body, err = os.ReadFile(config.PairingFile)
 	if err != nil {
-		return config, pair, err
+		code := "HOST_PAIRING_UNREADABLE"
+		if errors.Is(err, os.ErrNotExist) {
+			code = "HOST_PAIRING_MISSING"
+		}
+		return config, pair, &workflowhost.PairingError{Code: code}
 	}
 	if json.Unmarshal(body, &pair) != nil || pair.Provider != "workbuddy" {
-		return config, pair, errors.New("invalid WorkBuddy pairing")
+		return config, pair, &workflowhost.PairingError{Code: "HOST_PAIRING_INVALID"}
 	}
 	pair, err = workflowhost.Verify(home, pair.ConnectorID, pair.Token, account)
 	return config, pair, err
@@ -48,17 +52,13 @@ func Load(home, account string) (Config, workflowhost.Pairing, error) {
 func Install(ctx context.Context, home, profile, account string) error {
 	node, err := findNode(ctx, profile)
 	if err != nil {
-		return err
+		return setupError("runtime_unavailable", err)
 	}
 	pair, err := workflowhost.EnsureForProvider(home, "workbuddy", profile, account)
 	if err != nil {
 		return err
 	}
-	port := 9333
-	// Preserve explicitly configured endpoint across reconnects.
-	if existing, _, err := Load(home, account); err == nil {
-		port = existing.CDPPort
-	}
+	port := configuredControlPort(home)
 	config := Config{ConnectionFile: connectorconfig.Path(home, "workbuddy", ""), PairingFile: filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json"), Node: node, CDPPort: port}
 	body, _ := json.Marshal(config)
 	if err := retireLegacyPlugins(profile); err != nil {
@@ -67,7 +67,21 @@ func Install(ctx context.Context, home, profile, account string) error {
 	if err := writeAtomic(ConfigPath(home), body); err != nil {
 		return err
 	}
-	return configureDesktopStartup(ctx, home, port, true)
+	if err := configureDesktopStartup(ctx, home, port, true); err != nil {
+		return setupError("startup_unavailable", err)
+	}
+	return nil
+}
+
+// Preserve the endpoint independently of pairing authorization. A disabled
+// pairing deliberately fails Load, but its endpoint must survive reconnect.
+// This reads installation metadata only and never activates the pairing.
+func configuredControlPort(home string) int {
+	var existing Config
+	if data, err := os.ReadFile(ConfigPath(home)); err == nil && json.Unmarshal(data, &existing) == nil && existing.CDPPort > 0 && existing.CDPPort <= 65535 {
+		return existing.CDPPort
+	}
+	return 9333
 }
 
 // The Connector now owns presentation; the old plugins also install resume
@@ -130,7 +144,8 @@ func retireLegacyPlugins(profile string) error {
 }
 func Disable(home, account string) error {
 	config, pair, err := Load(home, account)
-	if errors.Is(err, os.ErrNotExist) {
+	var pairingError *workflowhost.PairingError
+	if errors.Is(err, os.ErrNotExist) || errors.As(err, &pairingError) && pairingError.Code == "HOST_PAIRING_MISSING" {
 		return nil
 	}
 	if err != nil {

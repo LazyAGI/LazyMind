@@ -201,7 +201,34 @@ def runtime(monkeypatch, tmp_path):
     return ctx, batches
 
 
-def test_runtime_wrapper_uses_host_inputs_and_saves_all_declared_outputs(runtime, tmp_path, reflection_calls):
+@pytest.mark.parametrize('preference,allowed', [
+    (None, True), ('allow_local', True), ('允许受限运行，条件不足时使用模拟数据', True),
+    ('simulate_only', False), ('不允许，仅生成代码和模拟数据', False),
+])
+def test_experiment_runtime_decides_execution_without_a_question(runtime, tmp_path, monkeypatch, preference, allowed):
+    ctx, batches = runtime
+    path = tmp_path / 'pool.json'
+    path.write_text(json.dumps(tools.seed_pool()))
+    bound = {'seed_pool': str(path)}
+    if preference is not None:
+        choice = tmp_path / 'execution.txt'
+        choice.write_text(preference)
+        bound['experiment_execution'] = str(choice)
+    ctx.params = {'step_id': 'experiment', 'user_input': '分析已有材料', 'remote_inputs': bound}
+    calls = []
+    output = json.loads((ROOT / 'tests/fixtures/paper-writing/experiment.json').read_text())['output']
+
+    def run_algorithm(step, inputs, **kwargs):
+        calls.append((step, kwargs['allow_execution']))
+        return copy.deepcopy(output)
+
+    monkeypatch.setattr(tools, 'run_algorithm', run_algorithm)
+    tools.run_paper_step()
+    assert calls == [('experiment', allowed)]
+    assert batches
+
+
+def test_historical_runtime_wrapper_saves_legacy_outputs(runtime, tmp_path, reflection_calls):
     ctx, batches = runtime
     workflow = yaml.safe_load((PACKAGE / 'workflow.yaml').read_text())
     state = yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())
@@ -224,7 +251,10 @@ def test_runtime_wrapper_uses_host_inputs_and_saves_all_declared_outputs(runtime
         tools.run_paper_step()
         actual = {item['key'] for item in batches[-1]}
         declared = {item['material'] for item in state['steps'][step]['outputs']}
-        required = {item['material'] for item in state['steps'][step]['outputs'] if item.get('required', True)}
+        # The historical wrapper predates Agent receipts and compute-record slots.
+        required = {item['material'] for item in state['steps'][step]['outputs']
+                    if item.get('required', True) and not item['material'].endswith('_receipt')
+                    and item['material'] != 'analysis_execution'}
         assert required <= actual <= declared
         document = next(item for item in batches[-1] if item['key'].endswith('_document'))
         assert document['content_type'] == 'file'
@@ -815,7 +845,7 @@ def test_paper_attachments_reuse_text_resolver_and_content_identity(suffix, tmp_
     papers = tools._conversation_papers({'1': [path], '2': [path]})
     assert calls == [(path, 1, True)]
     assert papers == [{'id': 'upload-' + tools.text_digest('完整论文正文'), 'title': '论文', 'text': '完整论文正文',
-                       'attachment_key': tools.text_digest(path)}]
+                       'attachment_key': tools.text_digest(path), 'filename': '论文' + suffix}]
 
 
 @pytest.mark.parametrize('body,error', [
@@ -1007,7 +1037,7 @@ def test_business_manuscript_entry_publishes_visible_preparation_then_review(run
     assert {item['key'] for item in batches[-1]} == {'peer_review_pool', 'peer_review_document'}
 
 
-def test_config_logical_edges_and_no_real_external_calls():
+def test_shared_agent_contract_preserves_logical_edges():
     state = yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())
     # Core uses these capabilities to forward KB and Sciverse credentials to F2.
     assert {'kb', 'academic_search'} <= set(state['steps']['literature_review']['capabilities'])
@@ -1016,8 +1046,9 @@ def test_config_logical_edges_and_no_real_external_calls():
         # old launch request redefine a deterministic Mock tool invocation.
         assert '{{runtime_instruction}}' not in step['prompt']
         assert '{{user_input}}' not in step['prompt']
-        assert 'Do not substitute chat text for the tool call.' in step['prompt']
-        assert 'The currently viewed tab is not the execution node.' in step['prompt']
+        assert 'paper_prepare_inputs' in step['prompt']
+        assert 'paper_prepare_candidate' in step['prompt']
+        assert step['terminal_tools'] == ['paper_submit_candidate']
         assert step['prompt'].isascii()
         assert step['acceptance_criteria'].isascii()
     assert all(edge['when'].isascii() for edges in state['transitions'].values() for edge in edges)
@@ -1041,7 +1072,9 @@ def test_config_logical_edges_and_no_real_external_calls():
         else:
             assert actual == set(tools.ROUTES[node])
         assert state['steps'][step]['mode'] == 'human'
-        assert state['steps'][step]['tools'] == ['run_paper_step']
+        assert {'paper_prepare_inputs', 'paper_submit_candidate'} <= set(
+            state['steps'][step]['tools'])
+        assert 'run_paper_step' not in state['steps'][step]['tools']
 
 
 @pytest.mark.parametrize('content', [
@@ -1109,9 +1142,9 @@ def test_public_workflow_presentation_and_named_outputs():
     for slot in workflow['slots']:
         if slot['id'].endswith('_pool'):
             assert slot['exposed'] is False
-            assert slot['type'] == 'file'
+            assert slot['type'] == ('json' if slot['id'] == 'seed_pool' else 'file')
         if slot['id'].endswith('_document') and not slot.get('external'):
-            assert slot['type'] == 'file'
+            assert slot['type'] == ('json' if slot['id'] == 'seed_pool' else 'file')
     for step in tools.STEP_NODE:
         assert ui['slots'][step + '_document'] == {'widgetType': 'text-markdown', 'readOnly': False}
 
@@ -1150,3 +1183,28 @@ def test_recovery_failure_and_retry_use_core_retry_hint(runtime, tmp_path):
     tools.run_paper_step()
     assert len(batches) == 1
     assert tools._read_bound(batches[0][0]['value'])['history'][-1]['request'] == '重试 experiment [mock:retry]'
+
+
+def test_literature_entry_imports_bound_research_notes(runtime, tmp_path, monkeypatch):
+    ctx, batches = runtime
+    source = tmp_path / 'measurements.md'
+    source.write_text('# Existing measurements\nDescriptive observations; no new experiments.\n\n'
+                      '| Task | Completed | Total |\n| --- | ---: | ---: |\n| Delete | 28 | 30 |\n')
+    received = []
+
+    def review(inputs):
+        received.append(inputs)
+        assert inputs['papers'][0]['review_role'] == 'background'
+        return {'evidence': '# Literature review', 'papers': inputs['papers'], 'is_demo': False}
+
+    monkeypatch.setattr(api.ALGORITHMS['literature_review'], 'run', review)
+    ctx.params = {'step_id': 'literature_review',
+                  'current_user_input': 'Search actual literature and analyze the existing observations',
+                  'remote_inputs': {'research_materials': [str(source)]}}
+    tools.run_paper_step()
+    outputs = {item['key']: item['value'] for item in batches[-1]}
+    pool = tools._read_bound(outputs['literature_review_pool'])
+    assert received and pool['history'][0]['node'] == 'F2'
+    assert tools.material(pool, 'source_data')['content']['tables'][0]['table']['rows'] == [['Delete', 28, 30]]
+    assert tools.material(pool, 'papers')['content'][0]['filename'] == source.name
+    assert tools.material(pool, 'manuscript') is None

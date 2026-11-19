@@ -129,6 +129,10 @@ func ResolveClarifications(fields []ClarificationField, supplied map[string]any)
 			continue
 		}
 		choices := append([]string{}, field.Choices...)
+		if i := slices.Index(choices, field.Recommended); i > 0 {
+			copy(choices[1:i+1], choices[:i])
+			choices[0] = field.Recommended
+		}
 		allowOther := field.ChoicePolicy != "fixed"
 		if field.AllowOther != nil {
 			allowOther = *field.AllowOther
@@ -149,7 +153,7 @@ func ResolveClarifications(fields []ClarificationField, supplied map[string]any)
 		}
 		question := askuser.Question{ID: field.ID, Text: field.Question, Reason: field.Reason,
 			Type: field.Type, Choices: choices, ChoicePolicy: field.ChoicePolicy, AllowOther: &allowOther,
-			Required: true, BooleanLabels: field.BooleanLabels, Validation: field.Validation}
+			Required: true, Recommended: field.Recommended, BooleanLabels: field.BooleanLabels, Validation: field.Validation}
 		if field.Attachment != nil {
 			attachment := field.Attachment
 			question.Attachment = &askuser.Attachment{WhenChoice: attachment.WhenChoice, MaterialID: attachment.MaterialID,

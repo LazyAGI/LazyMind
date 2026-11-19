@@ -1,4 +1,5 @@
 import json
+import pytest
 from unittest.mock import MagicMock
 
 from lazymind.chat.service.component.history import (
@@ -84,16 +85,17 @@ def test_normal_history_preserves_workflow_transition_projection():
     assert len(normalized[1]['content']) > 40_000
 
 
-def test_rewind_history_compacts_workflow_transition_projection_before_model_call():
+@pytest.mark.parametrize('tool_name', ['advance_step', 'resume_and_rerun_step'])
+def test_rewind_history_compacts_workflow_transition_projection_before_model_call(tool_name):
     tool_call = {
         'id': 'call-1',
         'type': 'function',
-        'function': {'name': 'advance_step', 'arguments': '{}'},
+        'function': {'name': tool_name, 'arguments': '{}'},
     }
     call_frame, preview = _tool_call_frame_text(tool_call)
     result_frame = _tool_result_frame_text({
         'id': 'call-1',
-        'name': 'advance_step',
+        'name': tool_name,
         'result': _large_transition_result(),
     }, preview_value=preview)
     history = [{
@@ -156,3 +158,29 @@ def test_live_transition_receipt_drops_graph_bodies_and_preserves_control():
     assert compact['_agent_control']['stop'] is True
     assert 'projection' not in compact
     assert 'workflow_state' not in compact
+
+
+def test_confirmed_pause_returns_chat_closing_text_and_stops_tool_execution():
+    from lazyllm.tools.agent.functionCall import _tool_result_stop_text
+    from lazymind.workflow_toolkit import HostWorkflowToolkit
+
+    client = MagicMock()
+    client.get_ready_steps.return_value = {
+        'state_version': 1, 'ready_steps': ['generate'], 'rewindable_steps': [],
+    }
+    client.advance.return_value.result = {
+        'attempt_statuses': {'task': 'interrupted'},
+        'workflow_state': {'display': {'status': 'paused', 'reason': 'user_stopped'}},
+    }
+    toolkit = HostWorkflowToolkit(lambda: client)
+    advance = next(tool for tool in _safe_session_tools(toolkit, 'session') if tool.__name__ == 'advance_step')
+    result = advance(['generate'])
+    # This is the same terminal-result reader used by FunctionCall after a tool
+    # returns: it yields the final Chat text rather than another model/tool round.
+    text = _tool_result_stop_text({'ok': True, 'value': result})
+    assert text and '已暂停' in text and '已保留' in text and '继续' in text
+    assert '失败' not in text
+    assert result['_agent_control']['reason'] == 'workflow_paused'
+    assert result['next_action']['tool'] is None
+    client.advance.assert_called_once()
+    assert _tool_result_stop_text({'ok': True, 'value': _compact_transition_result(result)}) == text

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -153,6 +154,16 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := validateRequestedRuntimeOwner(cfg); err != nil {
+			return err
+		}
+		if runtime.GOOS != "windows" {
+			if _, err := fmt.Fprintln(c.out, "desktop-guard-ready"); err != nil {
+				return err
+			}
+		}
+		// The parent may close its stdout pipe before owner shutdown is complete.
+		manager.SetOutput(io.Discard, c.errOut)
 		return runRuntimeGuard(ctx, cfg, paths, ownerPID, defaultGuardPollInterval, ownerProcessAlive, manager.Down)
 	case "internal":
 		return c.runInternal(ctx, manager, args[1:])

@@ -18,7 +18,7 @@ import (
 
 func TestAgentPaperImportQueuesOnlySelectedPapers(t *testing.T) {
 	db := sourceTestDB(t)
-	if err := db.AutoMigrate(&orm.Dataset{}, &orm.ACLModel{}); err != nil {
+	if err := db.AutoMigrate(&orm.Dataset{}, &orm.ACLModel{}, &orm.PaperLibraryEntry{}, &orm.PaperLibraryFolder{}, &orm.PaperLibraryAttachment{}); err != nil {
 		t.Fatal(err)
 	}
 	previous := store.DB()
@@ -63,7 +63,7 @@ func TestAgentPaperImportQueuesOnlySelectedPapers(t *testing.T) {
 	}
 	input.AnswerID, input.SourceIDs = sources.AnswerID, []string{"1.1", "2.1"}
 	receipt, err := AgentImportPapers(t.Context(), call, input, op)
-	if err != nil || receipt.BatchID == "" || receipt.QueuedCount != 1 || len(receipt.Items) != 2 || receipt.Items[0].Status != "queued" || receipt.Items[1].Status != "unidentified" {
+	if err != nil || receipt.BatchID == "" || receipt.QueuedCount != 1 || len(receipt.Items) != 2 || receipt.Items[0].Status != "metadata_saved" || receipt.Items[1].Status != "unidentified" {
 		t.Fatalf("import receipt = %+v, %v", receipt, err)
 	}
 	replay, err := AgentImportPapers(t.Context(), call, input, op)
@@ -74,9 +74,9 @@ func TestAgentPaperImportQueuesOnlySelectedPapers(t *testing.T) {
 	if err := db.Where("batch_id = ?", receipt.BatchID).Find(&items).Error; err != nil || len(items) != 1 {
 		t.Fatalf("persisted items = %+v, %v", items, err)
 	}
-	var selected savedImportCandidate
-	if err := json.Unmarshal(items[0].SelectedCandidateJSON, &selected); err != nil || selected.SourceProvider != "arxiv" || selected.URL != "https://arxiv.org/pdf/2302.04761" {
-		t.Fatalf("persisted PDF candidate = %+v, %v", selected, err)
+	var entry orm.PaperLibraryEntry
+	if err := db.Where("dataset_id=? AND id=?", "papers", items[0].LibraryPaperID).Take(&entry).Error; err != nil || entry.AcademicWorkID != items[0].AcademicWorkID {
+		t.Fatalf("selected paper not immediately available in library: %+v, %v", entry, err)
 	}
 
 	input.AnswerID, input.SourceIDs = "", []string{"4.1"}
@@ -101,5 +101,20 @@ func TestAgentPaperImportQueuesOnlySelectedPapers(t *testing.T) {
 	explicit, err := AgentImportPapers(t.Context(), call, input, op)
 	if err != nil || explicit.QueuedCount != 1 || explicit.Items[0].PaperKey != "arxiv:2302.04761v2:exact" {
 		t.Fatalf("explicit paper = %+v, %v", explicit, err)
+	}
+	// A valid but unsupported destination must explain the required library type
+	// to the agent instead of being reduced to a generic MCP INTERNAL failure.
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "papers").Update("scene", "general").Error; err != nil {
+		t.Fatal(err)
+	}
+	op.OperationKey = "general-library"
+	_, err = AgentImportPapers(t.Context(), call, input, op)
+	var targetError *capability.Error
+	if !errors.As(err, &targetError) || targetError.Code != capability.InvalidArgument || !strings.Contains(targetError.Message, "论文集") {
+		t.Fatalf("unsupported target must return an actionable error: %v", err)
+	}
+	var unexpected int64
+	if err := db.Model(&orm.PaperImportBatch{}).Where("idempotency_key = ?", op.OperationKey).Count(&unexpected).Error; err != nil || unexpected != 0 {
+		t.Fatalf("unsupported target queued a batch: %d, %v", unexpected, err)
 	}
 }

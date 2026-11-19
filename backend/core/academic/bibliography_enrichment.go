@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"lazymind/core/asyncjob"
+	"lazymind/core/capability"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/paperlibrary"
@@ -23,7 +24,7 @@ func isMetadataEnrichmentBatch(b orm.PaperImportBatch) bool {
 	if b.EntryType == "bibliography" {
 		return true
 	}
-	if b.EntryType != "paper_link" {
+	if b.EntryType != "paper_link" && b.EntryType != "conversation_sources" {
 		return false
 	}
 	var policy struct {
@@ -46,7 +47,7 @@ func checkEnrichmentMembership(tx *gorm.DB, b orm.PaperImportBatch, item orm.Pap
 }
 
 func fillBibliographyMetadata(m paperlibrary.Metadata, in WorkInput) paperlibrary.Metadata {
-	if m.Title == "" {
+	if m.Title == "" || m.Title == m.Identifiers.DOI || m.Title == m.Identifiers.Arxiv {
 		m.Title = in.Title
 	}
 	if len(m.Authors) == 0 {
@@ -70,13 +71,22 @@ func fillBibliographyMetadata(m paperlibrary.Metadata, in WorkInput) paperlibrar
 // Metadata and PDF lookups are separate: a Crossref outage cannot prevent a
 // DOI with already imported metadata from finding an available PDF.
 func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportBatch, item *orm.PaperImportItem, caller doc.DatasetCatalogCaller) error {
-	var saved FulltextCandidate
+	var saved savedImportCandidate
 	if err := json.Unmarshal(item.SelectedCandidateJSON, &saved); err != nil {
 		return err
 	}
 	if saved.URL != "" {
 		return nil
 	} // Durable candidate receipt survives retries.
+	// Preserve source-selection keys used by conversation import history.
+	snapshot := func(fields map[string]any) json.RawMessage {
+		saved := map[string]any{}
+		_ = json.Unmarshal(item.PresenceSnapshotJSON, &saved)
+		for key, value := range fields {
+			saved[key] = value
+		}
+		return marshal(saved)
+	}
 	var entry orm.PaperLibraryEntry
 	var work orm.AcademicWork
 	db := store.DB().WithContext(ctx)
@@ -90,12 +100,18 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 	if err != nil {
 		return err
 	}
+	published := saved.Requested != nil && publicationRequested(*saved.Requested)
+	version := firstNonEmpty(saved.Version, entry.ArxivVersion)
 	identifier := m.Identifiers.DOI
-	if m.Identifiers.Arxiv != "" {
-		identifier = "arXiv:" + m.Identifiers.Arxiv + entry.ArxivVersion
+	if m.Identifiers.Arxiv != "" && !published {
+		identifier = "arXiv:" + m.Identifiers.Arxiv + version
 	}
 	if identifier == "" {
-		doi, err := findBibliographyDOI(ctx, m)
+		venue := m.Venue
+		if venue == "未标注" {
+			venue = ""
+		}
+		matchedWork, err := resolveSelectedTitle(ctx, caller.UserID, capability.PaperSelection{Title: m.Title, Authors: m.Authors, Year: m.Year, Venue: venue})
 		if err != nil {
 			return err
 		}
@@ -114,7 +130,7 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 			if err := tx.Where("dataset_id=? AND id=? AND revision=?", b.TargetDatasetID, entry.ID, entry.Revision).Take(&current).Error; err != nil {
 				return errors.New("题录已变更，请重试补全")
 			}
-			matched, _, err := findOrCreateWork(ctx, tx, WorkInput{Title: m.Title, Authors: m.Authors, Year: m.Year, Venue: m.Venue, DOI: doi, Provider: "crossref"})
+			matched, _, err := findOrCreateWork(ctx, tx, matchedWork)
 			if err != nil {
 				return err
 			}
@@ -125,7 +141,8 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 			if duplicates > 0 {
 				return errors.New("题录已保存；匹配到库中已有文献，请核对重复项后合并")
 			}
-			m.Identifiers.DOI = doi
+			m.Identifiers.DOI, m.Identifiers.Arxiv = matchedWork.DOI, matchedWork.ArxivID
+			m = fillBibliographyMetadata(m, matchedWork)
 			if err := tx.Model(&current).Updates(map[string]any{"academic_work_id": matched.ID, "metadata_json": confirmedMetadata(m), "revision": gorm.Expr("revision + 1"), "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
@@ -139,7 +156,10 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 			return err
 		}
 		entry.Revision++
-		identifier = doi
+		identifier = matchedWork.DOI
+		if matchedWork.ArxivID != "" && !published {
+			identifier = "arXiv:" + matchedWork.ArxivID + version
+		}
 	}
 	if err := sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"stage": "metadata"}); err != nil {
 		return err
@@ -169,7 +189,7 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 			if err := tx.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=? AND id=? AND revision=? AND removed_at IS NULL", b.TargetDatasetID, entry.ID, entry.Revision).Updates(map[string]any{"metadata_json": confirmedMetadata(updated), "revision": gorm.Expr("revision + 1"), "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
-			return tx.Model(&orm.PaperImportItem{}).Where("id=?", item.ID).Update("presence_snapshot_json", marshal(map[string]any{"metadata_provider": resolved.Provider, "retrieved_metadata": resolved, "original_metadata": m})).Error
+			return tx.Model(&orm.PaperImportItem{}).Where("id=?", item.ID).Update("presence_snapshot_json", snapshot(map[string]any{"metadata_provider": resolved.Provider, "retrieved_metadata": resolved, "original_metadata": m})).Error
 		}); err != nil {
 			return err
 		}
@@ -179,10 +199,15 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 	}
 	var candidate FulltextCandidate
 	var warnings []string
-	if m.Identifiers.Arxiv != "" {
-		candidate = FulltextCandidate{URL: "https://arxiv.org/pdf/" + m.Identifiers.Arxiv + entry.ArxivVersion, SourceProvider: "arxiv", SourceType: "official_pdf", ExpectedMIME: "application/pdf"}
+	if m.Identifiers.Arxiv != "" && !published {
+		candidate = FulltextCandidate{URL: "https://arxiv.org/pdf/" + m.Identifiers.Arxiv + version, SourceProvider: "arxiv", Version: version, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}
 	} else {
-		found := lookupDOIPDF(ctx, m.Identifiers.DOI)
+		var found paperPDFLookup
+		if published {
+			found = lookupSelectedDOIPDF(ctx, caller.UserID, m.Identifiers.DOI, m.Title, saved.Requested)
+		} else {
+			found = lookupDOIPDF(ctx, m.Identifiers.DOI)
+		}
 		warnings = found.Warnings
 		if found.Candidate != nil {
 			candidate = *found.Candidate
@@ -191,7 +216,7 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 	if metadataErr != nil {
 		warnings = append(warnings, "元信息补全: "+metadataErr.Error())
 	}
-	if candidate.URL == "" && m.Identifiers.DOI != "" {
+	if candidate.URL == "" && m.Identifiers.DOI != "" && !published {
 		fallback := lookupAuthorPDF(ctx, caller.UserID, m)
 		warnings = append(warnings, fallback.Warnings...)
 		if fallback.Candidate != nil {
@@ -201,8 +226,8 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 	if candidate.URL == "" {
 		return fmt.Errorf("题录已保存，但未找到可用 PDF，可手动上传或重试。%s", strings.Join(warnings, "; "))
 	}
-	item.SelectedCandidateJSON = marshal(candidate)
-	item.PresenceSnapshotJSON = marshal(map[string]any{"metadata_provider": resolved.Provider, "retrieved_metadata": resolved, "original_metadata": m, "lookup_warnings": warnings})
+	item.SelectedCandidateJSON = marshal(savedImportCandidate{FulltextCandidate: candidate, Requested: saved.Requested})
+	item.PresenceSnapshotJSON = snapshot(map[string]any{"metadata_provider": resolved.Provider, "retrieved_metadata": resolved, "original_metadata": m, "lookup_warnings": warnings})
 	return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"selected_candidate_json": item.SelectedCandidateJSON, "stage": "acquire", "presence_snapshot_json": item.PresenceSnapshotJSON})
 }
 

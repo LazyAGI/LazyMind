@@ -32,7 +32,7 @@ var OnConversationTrashHook func(convID string)
 
 const taskExecutionTimeoutReason = "任务执行超过2小时，未正常完成"
 
-var terminalTaskStatuses = []string{"succeeded", "failed", "skipped", "canceled"}
+var terminalTaskStatuses = []string{"succeeded", "failed", "interrupted", "skipped", "canceled"}
 
 const (
 	ArchivedReasonTaskRemove          = "task_remove"
@@ -544,23 +544,31 @@ func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTa
 		if session := workflowForTask(ctx, db, t); session != nil {
 			t.WorkflowSessionID = &session.ID
 			display, err := displaystate.Read(db.WithContext(ctx), *session)
-			if err != nil {
+			// A workflow revision can be removed after its historical execution is
+			// retained in Task Center. In that case the approval projection is no
+			// longer available, but the durable session lifecycle below still is.
+			// Keep propagating every other read error.
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return t, err
 			}
-			status := display.Status
-			if status == "completed" {
-				status = "succeeded"
-			}
-			if status != "" {
-				t.Status = status
-				t.FinishedAt = nil
-				if isTerminal(status) {
-					t.FinishedAt = &session.UpdatedAt
+			if err == nil {
+				status := display.Status
+				if status == "completed" {
+					status = "succeeded"
+				} else if status == "waiting_input" {
+					status = "waiting_inputs"
 				}
-				if session.UpdatedAt.After(t.UpdatedAt) {
-					t.UpdatedAt = session.UpdatedAt
+				if status != "" {
+					t.Status = status
+					t.FinishedAt = nil
+					if isTerminal(status) {
+						t.FinishedAt = &session.UpdatedAt
+					}
+					if session.UpdatedAt.After(t.UpdatedAt) {
+						t.UpdatedAt = session.UpdatedAt
+					}
+					return t, nil
 				}
-				return t, nil
 			}
 		}
 	}
@@ -619,43 +627,29 @@ func waitingDependencyReason(ctx context.Context, db *gorm.DB, t orm.TaskCenterT
 
 // ── API handlers ─────────────────────────────────────────────────────────────
 
-// ListTasks handles GET /task-center/tasks
-// Query params: status, task_type, keyword, page (1-based), page_size.
-func ListTasks(w http.ResponseWriter, r *http.Request) {
-	userID := store.UserID(r)
-	if userID == "" {
-		common.ReplyErr(w, "user not found", http.StatusUnauthorized)
-		return
+func taskMatchesStatusFilter(taskStatus, filter string) bool {
+	switch filter {
+	case "attention":
+		return taskStatus == "pending" || taskStatus == "waiting" || taskStatus == "waiting_inputs"
+	case "failed":
+		return taskStatus == "failed" || taskStatus == "interrupted"
+	case "succeeded":
+		return taskStatus == "succeeded" || taskStatus == "completed"
+	default:
+		return filter == "" || taskStatus == filter
 	}
-	db := store.DB()
-	if db == nil {
-		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
-		return
-	}
+}
 
-	q := r.URL.Query()
-	status := strings.TrimSpace(q.Get("status"))
-	taskType := strings.TrimSpace(q.Get("task_type"))
-	keyword := strings.TrimSpace(q.Get("keyword"))
-	page, _ := strconv.Atoi(q.Get("page"))
-	if page < 1 {
-		page = 1
-	}
-	pageSize, _ := strconv.Atoi(q.Get("page_size"))
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
-	offset := (page - 1) * pageSize
+type taskListRow struct {
+	orm.TaskCenterTask
+	ConvDisplayName   string  `gorm:"column:conv_display_name"`
+	ConversationState string  `gorm:"column:conversation_state"`
+	ScheduleName      *string `gorm:"column:schedule_name"`
+}
 
-	type rawRow struct {
-		orm.TaskCenterTask
-		ConvDisplayName   string  `gorm:"column:conv_display_name"`
-		ConversationState string  `gorm:"column:conversation_state"`
-		ScheduleName      *string `gorm:"column:schedule_name"`
-	}
-
-	var rows []rawRow
-	dataQ := db.WithContext(r.Context()).
+func loadTaskRows(ctx context.Context, db *gorm.DB, userID, taskType, keyword string) ([]taskListRow, error) {
+	var rows []taskListRow
+	dataQ := db.WithContext(ctx).
 		Table("task_center_tasks tct").
 		Select(`tct.*, c.display_name AS conv_display_name,
             CASE
@@ -680,13 +674,66 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	// Status must be resolved from live plugin/chat state before filtering. The
 	// stored task_center_tasks.status can lag behind and would otherwise exclude
 	// ordinary completed tasks or put waiting plugin tasks under "running".
-	if err := dataQ.Order("tct.created_at DESC").Find(&rows).Error; err != nil {
+	if err := dataQ.Order("tct.created_at DESC, tct.id DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	return rows, nil
+}
+
+func taskListResponse(ctx context.Context, db *gorm.DB, row taskListRow, task orm.TaskCenterTask) taskResponse {
+	var steps []stepInfo
+	if task.WorkflowSessionID != nil && *task.WorkflowSessionID != "" {
+		steps = loadStepsForWorkflowSession(ctx, db, *task.WorkflowSessionID)
+	} else {
+		steps = loadStepsForConversation(ctx, db, task.ConversationID)
+	}
+	item := toResponse(task, row.ConvDisplayName, row.ConversationState, row.ScheduleName, steps)
+	item.WaitingReason = waitingDependencyReason(ctx, db, row.TaskCenterTask)
+	return item
+}
+
+// ListTasks handles GET /task-center/tasks
+// Query params: status, task_type, keyword, page (1-based), page_size.
+func ListTasks(w http.ResponseWriter, r *http.Request) {
+	userID := store.UserID(r)
+	if userID == "" {
+		common.ReplyErr(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
+		return
+	}
+	if err := RecoverExternalWorkflowTasks(r.Context(), db, userID); err != nil {
+		common.ReplyErr(w, "workflow tasks unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	q := r.URL.Query()
+	status := strings.TrimSpace(q.Get("status"))
+	taskType := strings.TrimSpace(q.Get("task_type"))
+	keyword := strings.TrimSpace(q.Get("keyword"))
+	conversationID := strings.TrimSpace(q.Get("conversation_id"))
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(q.Get("page_size"))
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	rows, err := loadTaskRows(r.Context(), db, userID, taskType, keyword)
+	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	type resolvedRow struct {
-		row  rawRow
+		row  taskListRow
 		task orm.TaskCenterTask
 	}
 	resolved := make([]resolvedRow, 0, len(rows))
@@ -697,11 +744,16 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		"waiting_inputs": 0,
 		"running":        0,
 		"succeeded":      0,
+		"completed":      0,
 		"failed":         0,
+		"interrupted":    0,
 		"canceled":       0,
 		"paused":         0,
 	}
 	for _, row := range rows {
+		if conversationID != "" && row.ConversationID != conversationID {
+			continue
+		}
 		t, err := resolveTaskForResponse(r.Context(), db, row.TaskCenterTask)
 		if err != nil {
 			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
@@ -711,7 +763,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		if _, tracked := statusCounts[t.Status]; tracked {
 			statusCounts[t.Status]++
 		}
-		if status != "" && t.Status != status {
+		if !taskMatchesStatusFilter(t.Status, status) {
 			continue
 		}
 		resolved = append(resolved, resolvedRow{row: row, task: t})
@@ -727,16 +779,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]taskResponse, 0, end-offset)
 	for _, resolvedItem := range resolved[offset:end] {
-		t := resolvedItem.task
-		var steps []stepInfo
-		if t.WorkflowSessionID != nil && *t.WorkflowSessionID != "" {
-			steps = loadStepsForWorkflowSession(r.Context(), db, *t.WorkflowSessionID)
-		} else {
-			steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
-		}
-		item := toResponse(t, resolvedItem.row.ConvDisplayName, resolvedItem.row.ConversationState, resolvedItem.row.ScheduleName, steps)
-		item.WaitingReason = waitingDependencyReason(r.Context(), db, resolvedItem.row.TaskCenterTask)
-		items = append(items, item)
+		items = append(items, taskListResponse(r.Context(), db, resolvedItem.row, resolvedItem.task))
 	}
 	common.ReplyJSON(w, map[string]any{
 		"items":         items,

@@ -13,7 +13,10 @@ const (
 
 type ProviderSetting struct {
 	OwnerID                string     `json:"-" gorm:"column:owner_id;primaryKey"`
-	SelectedProvider       string     `json:"selected_provider" gorm:"column:selected_provider"`
+	SelectedProvider       string     `json:"selected_provider" gorm:"-"`
+	LegacySelectedProvider string     `json:"-" gorm:"column:selected_provider"`
+	AnkiSyncEnabled        bool       `json:"anki_sync_enabled" gorm:"-"`
+	AnkiSyncAvailable      bool       `json:"anki_sync_available" gorm:"-"`
 	AnkiEndpoint           string     `json:"anki_endpoint" gorm:"column:anki_endpoint"`
 	AnkiDeckName           string     `json:"anki_deck_name" gorm:"column:anki_deck_name"`
 	AnkiModelVersion       int        `json:"anki_model_version" gorm:"column:anki_model_version"`
@@ -130,6 +133,8 @@ type AddWordResult struct {
 }
 
 type ProviderStatus struct {
+	Available         bool       `json:"available"`
+	Enabled           bool       `json:"enabled"`
 	Provider          string     `json:"provider"`
 	Connected         bool       `json:"connected"`
 	Version           int        `json:"version,omitempty"`

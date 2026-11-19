@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"lazymind/core/doc"
+	"lazymind/core/workflow/artifactfile"
 )
 
 // SignArtifactImageValue adds a fresh signed url for file-backed artifact values.
@@ -21,8 +22,11 @@ func SignArtifactValue(contentType string, raw json.RawMessage, workspacePath st
 	if len(raw) == 0 {
 		return raw
 	}
-	raw = resolveArtifactPaths(raw, workspacePath)
 	ct := strings.TrimSpace(contentType)
+	if normalized, err := artifactfile.NormalizeImageValue(ct, raw); err == nil {
+		raw = normalized
+	}
+	raw = resolveArtifactPaths(raw, workspacePath)
 	if ct == "" || ct == "image" || strings.HasPrefix(ct, "image/") {
 		return signImageArtifactValue(raw)
 	}
@@ -142,14 +146,12 @@ func signImageArtifactValue(raw json.RawMessage) json.RawMessage {
 	}
 	if strings.HasPrefix(pathVal, "http://") || strings.HasPrefix(pathVal, "https://") ||
 		strings.HasPrefix(pathVal, "data:") {
-		if strings.Contains(pathVal, "/static-files/") {
-			if signed := doc.StaticFileURLFromAnyStoragePath(pathVal); signed != "" {
-				m["url"] = signed
-				delete(m, "path")
-				out, err := json.Marshal(m)
-				if err == nil {
-					return out
-				}
+		if signed := doc.StaticFileURLFromAnyStoragePath(pathVal); signed != "" {
+			m["url"] = signed
+			delete(m, "path")
+			out, err := json.Marshal(m)
+			if err == nil {
+				return out
 			}
 		}
 		m["url"] = pathVal

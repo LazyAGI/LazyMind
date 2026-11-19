@@ -95,8 +95,8 @@ def test_chat_completions_compatibility_activates_without_advanced_settings(monk
         sent.append(json.loads(request.body))
         response = requests.Response()
         response.status_code = 200
-        response._content = json.dumps({'choices': [{'message': {'content': 'ok'},
-                                                      'finish_reason': 'stop'}]}).encode()
+        response._content = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': 'ok'},
+                                                    'finish_reason': 'stop'}]}).encode()
         response._content_consumed = True
         response.raw = BytesIO()
         response.request = request
@@ -112,7 +112,7 @@ def test_chat_completions_compatibility_activates_without_advanced_settings(monk
         assert lazyllm.globals['lazymind_request_advanced']['llm']['private'] is False
         assert lazyllm.globals['lazymind_request_advanced']['llm']['model'] == 'gpt-5.6-sol'
         model = AutoModel(source='dynamic', name='llm', dynamic_auth=True)
-        assert model('Hi', stream_output=False)['content'] == 'ok'
+        assert model('Hi', stream_output=False) == 'ok'
         supplier = next(iter(model._suppliers.values()))
         generate = supplier._prompt.generate_prompt
 
@@ -122,7 +122,7 @@ def test_chat_completions_compatibility_activates_without_advanced_settings(monk
 
         with monkeypatch.context() as patch:
             patch.setattr(type(supplier._prompt), 'generate_prompt', with_tool)
-            assert model('Hi', stream_output=False)['content'] == 'ok'
+            assert model('Hi', stream_output=False) == 'ok'
         assert sent[0].get('reasoning_effort') is None
         assert sent[1].get('reasoning_effort') == 'none', sent[1]
         configure_request_advanced({'llm': {'source': 'openai', 'model': 'gpt-4o',
@@ -161,13 +161,15 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
     from lazyllm.common import new_session
     from lazyllm.module.llms.model_config_inject import inject_model_config
 
-    calls = []
+    calls, timeouts = [], []
 
     def send(session, request, **kwargs):
         calls.append(request)
+        timeouts.append(kwargs['timeout'])
         response = requests.Response()
         response.status_code = 200
-        response._content = json.dumps({'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}]}).encode()
+        response._content = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': 'ok'},
+                                                    'finish_reason': 'stop'}]}).encode()
         response._content_consumed = True
         response.raw = BytesIO()
         response.request = request
@@ -177,17 +179,21 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
     with new_session('test-advanced-runtime'):
         config = {'llm': {'source': 'openai', 'model': 'private-model', 'api_key': 'selected-key',
                           'base_url': 'https://example.test/proxy/v1/',
+                          'timeout': (15, 600),
                           'request_advanced': {'headers': {'X-Gateway-Token': 'first'},
                                                'query': {'tenant': 'one'}, 'extra_body': {'metadata': {'p': 1}}}}}
         inject_model_config(config)
         configure_request_advanced(config)
         model = AutoModel(source='dynamic', name='llm', dynamic_auth=True)
-        assert model('hi', stream_output=False)['content'] == 'ok'
+        assert model('hi', stream_output=False) == 'ok'
         config['llm']['request_advanced'] = {'headers': {'X-Gateway-Token': 'second'}}
         configure_request_advanced(config)
-        assert model('hi', stream_output=False)['content'] == 'ok'
+        assert model('hi', stream_output=False) == 'ok'
+        config['llm']['request_advanced'] = {}
+        configure_request_advanced(config)
+        assert model('hi', stream_output=False) == 'ok'
         configure_request_advanced({})
-        assert model('hi', stream_output=False)['content'] == 'ok'
+        assert model('hi', stream_output=False) == 'ok'
         assert 'lazymind_request_advanced' in lazyllm.globals
     assert calls[0].headers['X-Gateway-Token'] == 'first'
     assert calls[0].url.endswith('?tenant=one')
@@ -195,6 +201,7 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
     assert calls[1].headers['X-Gateway-Token'] == 'second'
     assert 'tenant=' not in calls[1].url
     assert 'X-Gateway-Token' not in calls[2].headers
+    assert timeouts == [(15, 600)] * 3 + [180]
 
 
 def test_runtime_gateway_credentials_stay_inside_supplier_origin_and_path(monkeypatch):

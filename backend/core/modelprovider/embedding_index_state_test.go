@@ -12,26 +12,29 @@ import (
 )
 
 func TestEmbeddingIndexStatusReportsLegacyIndexesAsUnknown(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	dataset := orm.Dataset{ID: "kb-old", KbID: "kb-old", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}
 	state := orm.DocumentProcessingState{DatasetID: dataset.ID, DocumentID: "doc", IndexStatus: "succeeded", UpdatedAt: now}
-	for _, row := range []any{&dataset, &state} {
+	for _, row := range []any{&dataset, &orm.Document{ID: "doc", DatasetID: dataset.ID}, &state} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	result := getEmbeddingIndexStatus(t)
-	if result.Status != "unknown" || result.IndexedKnowledgeBases != 1 || result.AffectedKnowledgeBases != 1 || result.PendingKnowledgeBases != 0 {
+	if result.Status != "unknown" || result.IndexIdentity != "legacy_unknown" || result.OperationPhase != "idle" || result.IndexedKnowledgeBases != 1 || result.AffectedKnowledgeBases != 1 || result.PendingKnowledgeBases != 0 {
 		t.Fatalf("legacy vectors must not be treated as signed: %+v", result)
 	}
 }
 
 func TestEmbeddingIndexStatusCountsLegacyIndexedDatasetWithoutDocumentState(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Dataset{ID: "kb-legacy", KbID: "kb-legacy", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.Document{ID: "doc", DatasetID: "kb-legacy"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	result := getEmbeddingIndexStatus(t)
@@ -41,12 +44,15 @@ func TestEmbeddingIndexStatusCountsLegacyIndexedDatasetWithoutDocumentState(t *t
 }
 
 func TestEmbeddingIndexStatusTreatsBlankLegacyLevelAsIndexed(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Dataset{ID: "kb-blank", KbID: "kb-blank", ProcessingLevel: "", BaseModel: orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Model(&orm.Dataset{}).Where("id = ?", "kb-blank").Update("processing_level", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.Document{ID: "doc", DatasetID: "kb-blank"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	result := getEmbeddingIndexStatus(t)
@@ -56,7 +62,7 @@ func TestEmbeddingIndexStatusTreatsBlankLegacyLevelAsIndexed(t *testing.T) {
 }
 
 func TestEmbeddingIndexStatusReportsActiveModelAndRebuildProgress(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.EmbeddingIndexState{Scope: "global", ActiveModelID: "model-new", ActiveSource: "own", ActiveModelName: "Embed New", ActiveProviderName: "Supplier", Signature: "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64), Phase: "ready", Generation: 2, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -67,20 +73,23 @@ func TestEmbeddingIndexStatusReportsActiveModelAndRebuildProgress(t *testing.T) 
 		}
 	}
 	for _, item := range []struct{ kb, status string }{{"kb-a", "succeeded"}, {"kb-b", "pending"}} {
+		if err := db.Create(&orm.Document{ID: item.kb + "-doc", DatasetID: item.kb}).Error; err != nil {
+			t.Fatal(err)
+		}
 		if err := db.Create(&orm.DocumentProcessingState{DatasetID: item.kb, DocumentID: item.kb + "-doc", IndexStatus: item.status, UpdatedAt: now}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	result := getEmbeddingIndexStatus(t)
-	if result.Status != "rebuilding" || result.ModelName != "Embed New" || result.ProviderName != "Supplier" ||
+	if result.Status != "rebuilding" || result.IndexIdentity != "verified" || result.OperationPhase != "rebuilding" || result.ModelName != "Embed New" || result.ProviderName != "Supplier" ||
 		result.IndexedKnowledgeBases != 1 || result.AffectedKnowledgeBases != 2 || result.PendingKnowledgeBases != 1 {
 		t.Fatalf("wrong embedding rebuild status: %+v", result)
 	}
 }
 
 func TestEmbeddingIndexStatusReportsCompletedOfflineClear(t *testing.T) {
-	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.DocumentProcessingState{})
+	db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.EmbeddingIndexState{Scope: "global", Phase: "cleared", Generation: 3, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -92,9 +101,124 @@ func TestEmbeddingIndexStatusReportsCompletedOfflineClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := db.Create(&orm.Document{ID: "doc", DatasetID: "kb-cleared"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	result := getEmbeddingIndexStatus(t)
-	if result.Status != "cleared" || result.IndexedKnowledgeBases != 0 || result.AffectedKnowledgeBases != 1 || result.PendingKnowledgeBases != 1 {
+	if result.Status != "cleared" || result.IndexIdentity != "empty" || result.OperationPhase != "cleared" || result.IndexedKnowledgeBases != 0 || result.AffectedKnowledgeBases != 1 || result.PendingKnowledgeBases != 1 {
 		t.Fatalf("cleared vector space must remain visible while documents await reindex: %+v", result)
+	}
+}
+
+func TestClassifyEmbeddingIndexState(t *testing.T) {
+	verifiedSignature := "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64)
+	tests := []struct {
+		name                   string
+		state                  orm.EmbeddingIndexState
+		statePresent           bool
+		affectedKnowledgeBases int64
+		pendingKnowledgeBases  int64
+		wantIdentity           string
+		wantPhase              string
+		wantReason             string
+		wantStrictlyCleared    bool
+	}{
+		{
+			name: "empty", wantIdentity: "empty", wantPhase: "idle",
+		},
+		{
+			name: "verified ready", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "own", Signature: verifiedSignature, Phase: "ready"},
+			wantIdentity: "verified", wantPhase: "idle",
+		},
+		{
+			name: "verified rebuilding", statePresent: true, pendingKnowledgeBases: 1,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "own", Signature: verifiedSignature, Phase: "ready"},
+			wantIdentity: "verified", wantPhase: "rebuilding",
+		},
+		{
+			name: "verified cloud source", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "cloud", Signature: verifiedSignature, Phase: "ready"},
+			wantIdentity: "verified", wantPhase: "idle",
+		},
+		{
+			name: "blank active source", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", Signature: verifiedSignature, Phase: "ready"},
+			wantIdentity: "legacy_unknown", wantPhase: "idle", wantReason: "index_identity_unverified",
+		},
+		{
+			name: "unknown active source", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "future_source", Signature: verifiedSignature, Phase: "ready"},
+			wantIdentity: "legacy_unknown", wantPhase: "idle", wantReason: "index_identity_unverified",
+		},
+		{
+			name: "legacy unknown", affectedKnowledgeBases: 1,
+			wantIdentity: "legacy_unknown", wantPhase: "idle", wantReason: "index_identity_unverified",
+		},
+		{
+			name: "clearing", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "own", Signature: verifiedSignature, Phase: "clearing"},
+			wantIdentity: "verified", wantPhase: "clearing", wantReason: "index_cleanup_in_progress",
+		},
+		{
+			name: "cleanup failed", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "own", Signature: verifiedSignature, Phase: "cleanup_failed"},
+			wantIdentity: "verified", wantPhase: "cleanup_failed", wantReason: "index_cleanup_incomplete",
+		},
+		{
+			name: "strictly cleared", statePresent: true,
+			state:        orm.EmbeddingIndexState{Phase: "cleared"},
+			wantIdentity: "empty", wantPhase: "cleared", wantReason: "index_cleared", wantStrictlyCleared: true,
+		},
+		{
+			name: "inconsistent cleared", statePresent: true,
+			state:        orm.EmbeddingIndexState{Phase: "cleared", ActiveModelID: "stale"},
+			wantIdentity: "legacy_unknown", wantPhase: "cleanup_failed", wantReason: "index_cleanup_incomplete",
+		},
+		{
+			name: "unknown persisted phase", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "own", Signature: verifiedSignature, Phase: "future_phase"},
+			wantIdentity: "verified", wantPhase: "cleanup_failed", wantReason: "index_cleanup_incomplete",
+		},
+		{
+			name: "blank persisted phase", statePresent: true,
+			state:        orm.EmbeddingIndexState{ActiveModelID: "model", ActiveSource: "own", Signature: verifiedSignature},
+			wantIdentity: "verified", wantPhase: "cleanup_failed", wantReason: "index_cleanup_incomplete",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyEmbeddingIndexState(tc.state, tc.statePresent, tc.affectedKnowledgeBases, tc.pendingKnowledgeBases)
+			if got.IndexIdentity != tc.wantIdentity || got.OperationPhase != tc.wantPhase || got.ReadinessReason != tc.wantReason || got.StrictlyCleared != tc.wantStrictlyCleared {
+				t.Fatalf("classification = %+v, want identity=%q phase=%q reason=%q strictlyCleared=%t", got, tc.wantIdentity, tc.wantPhase, tc.wantReason, tc.wantStrictlyCleared)
+			}
+		})
+	}
+}
+
+func TestStrictlyClearedEmbeddingIndexRejectsEveryIdentityResidue(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*orm.EmbeddingIndexState)
+	}{
+		{"active model ID", func(state *orm.EmbeddingIndexState) { state.ActiveModelID = "stale" }},
+		{"active source", func(state *orm.EmbeddingIndexState) { state.ActiveSource = "own" }},
+		{"active model name", func(state *orm.EmbeddingIndexState) { state.ActiveModelName = "stale" }},
+		{"active provider name", func(state *orm.EmbeddingIndexState) { state.ActiveProviderName = "stale" }},
+		{"active signature", func(state *orm.EmbeddingIndexState) { state.Signature = "stale" }},
+		{"target model ID", func(state *orm.EmbeddingIndexState) { state.TargetModelID = "stale" }},
+		{"target source", func(state *orm.EmbeddingIndexState) { state.TargetSource = "own" }},
+		{"target signature", func(state *orm.EmbeddingIndexState) { state.TargetSignature = "stale" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			state := orm.EmbeddingIndexState{Phase: "cleared"}
+			tc.mutate(&state)
+			got := classifyEmbeddingIndexState(state, true, 0, 0)
+			if got.StrictlyCleared || got.OperationPhase == "cleared" || got.ReadinessReason != "index_cleanup_incomplete" {
+				t.Fatalf("residual identity classified as safe-cleared: %+v", got)
+			}
+		})
 	}
 }
 
@@ -114,4 +238,34 @@ func getEmbeddingIndexStatus(t *testing.T) EmbeddingIndexStatusResponse {
 		t.Fatal(err)
 	}
 	return envelope.Data
+}
+
+func TestEmbeddingSwitchIgnoresOnlyConfirmedClearedDocumentStates(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, version, artifact, fingerprint string
+		affected                                     int64
+	}{
+		{"cleared", "pending", "reembed:manual", "", "", 0},
+		{"cleared rebuild", "pending", "rebuild:manual", "", "", 0},
+		{"running", "running", "reembed:manual", "", "", 1},
+		{"failed", "failed", "reembed:manual", "", "", 1},
+		{"indexed", "succeeded", "reembed:manual", "", "", 1},
+		{"queued", "pending", "reembed:manual", "core-task:queued", "", 1},
+		{"retained vector", "pending", "rebuild:manual", "", "old-fingerprint", 1},
+		{"unknown", "pending", "", "", "", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
+			for _, row := range []any{&orm.Dataset{ID: "kb", ProcessingLevel: "indexed"}, &orm.Document{ID: "doc", DatasetID: "kb"},
+				&orm.DocumentProcessingState{DatasetID: "kb", DocumentID: "doc", IndexStatus: tc.status, EmbeddingVersion: tc.version, IndexArtifactRef: tc.artifact, IndexFingerprint: tc.fingerprint}} {
+				if err := db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			status := getEmbeddingIndexStatus(t)
+			if status.AffectedKnowledgeBases != tc.affected {
+				t.Fatalf("affected = %d, want %d", status.AffectedKnowledgeBases, tc.affected)
+			}
+		})
+	}
 }

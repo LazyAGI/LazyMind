@@ -21,7 +21,7 @@ interface ConfirmedImport {
 export async function executeZoteroImport(input: ConfirmedImport): Promise<ZoteroImportResult> {
   const { datasetId, preview, config, options, getLibrary, saveLibrary, storeAttachment } = input;
   const plan = buildZoteroImport(preview, getLibrary(), options.targetFolderId);
-  options.onProgress?.(`正在保存 ${plan.counts.papers} 篇文献`);
+  options.onProgress?.(`正在保存 ${plan.counts.papers + plan.counts.existing} 篇文献（新增 ${plan.counts.papers} 篇，更新 ${plan.counts.existing} 篇）`);
   await saveLibrary(plan.library);
   const failures: string[] = [];
   let attachments = 0;

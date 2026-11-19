@@ -16,6 +16,7 @@ import (
 
 const cloudCredentialKeyEnvVar = "LAZYMIND_AUTH_CLOUD_SECRET_KEY"
 const legacyCloudCredentialKey = "dev-ragscan-secret-key-change-me"
+const modelCredentialKeyEnvVar = "LAZYMIND_MODEL_PROVIDER_SECRET_KEY"
 
 type credentialDeviceIdentity struct {
 	Version      int    `json:"version"`
@@ -27,6 +28,17 @@ func cloudCredentialKey() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv(cloudCredentialKeyEnvVar)); configured != "" && configured != legacyCloudCredentialKey {
 		return configured, nil
 	}
+	return deviceCredentialKey("cloud-oauth")
+}
+
+func modelCredentialKey() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv(modelCredentialKeyEnvVar)); configured != "" {
+		return configured, nil
+	}
+	return deviceCredentialKey("model-provider")
+}
+
+func deviceCredentialKey(purpose string) (string, error) {
 	identity, err := loadOrCreateCredentialDevice(credentialDeviceIdentityPath())
 	if err != nil {
 		return "", err
@@ -36,7 +48,7 @@ func cloudCredentialKey() (string, error) {
 		return "", err
 	}
 	mac := hmac.New(sha256.New, secret)
-	_, _ = fmt.Fprintf(mac, "lazymind/desktop/%s/cloud-oauth/v1", identity.DeviceID)
+	_, _ = fmt.Fprintf(mac, "lazymind/desktop/%s/%s/v1", identity.DeviceID, purpose)
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 

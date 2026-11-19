@@ -126,6 +126,57 @@ it('a failed draft save prevents publication and keeps the confirmation open', a
   expect(close).not.toHaveBeenCalled();
 });
 
+it.each([
+  { savedTemplate: undefined, chosenTemplate: 'clean' },
+  { savedTemplate: 'warm_humanist', chosenTemplate: 'editorial_contrast' },
+])('publishes WeChat with the $chosenTemplate template', async ({ savedTemplate, chosenTemplate }) => {
+  state.targets.push({ provider: 'wechat', bound: true, template: savedTemplate, connection_id: 'wechat-account' });
+  api.createPublicationGroup.mockImplementationOnce(async () => {
+    state.targets.find(target => target.provider === 'wechat')!.operation = {
+      operation_id: 'success', status: 'succeeded', provider: 'wechat', provider_synced: true,
+      updated_at: '2026-11-15T00:00:00Z', actions: [], source_slot_id: 'draft', item_index: -1,
+      warnings: ['WECHAT_IMAGES_COMPRESSED', 'WECHAT_HTML_TRUNCATED'],
+    };
+    return { data: { data: structuredClone(state) } };
+  });
+  const { rerender } = render(view({ initialProvider: 'wechat', providers: [{ id: 'wechat', capabilities: ['create', 'replace'], templates: [
+    { id: 'clean', name: 'Clean Reading' },
+    { id: 'warm_humanist', name: 'Warm Humanist' },
+    { id: 'editorial_contrast', name: 'Editorial Contrast' },
+  ] }], availability: { ...availability, states: { wechat: 'ready' }, accounts: {
+    wechat: [{ connection_id: 'wechat-account', provider: 'wechat', status: 'ACTIVE', can_use_chat: true }],
+  } } }));
+  const selector = await screen.findByRole('combobox', { name: 'WeChat article template' });
+  expect(screen.getByTitle(savedTemplate ? 'Warm Humanist' : 'Clean Reading')).toBeInTheDocument();
+  if (chosenTemplate === 'editorial_contrast') {
+    fireEvent.mouseDown(selector);
+    fireEvent.click(await screen.findByText('Editorial Contrast'));
+  }
+  expect(beforePublish).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Publish to WeChat/ }));
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledOnce());
+  const body = api.createPublicationGroup.mock.calls[0][1];
+  expect(body.targets).toEqual([expect.objectContaining({ provider: 'wechat', connection_id: 'wechat-account', template: chosenTemplate })]);
+  expect(api.preflightPublication).toHaveBeenCalledWith('latest-draft', body, expect.anything());
+  rerender(view({ open: false }));
+  for (const code of ['WECHAT_IMAGES_COMPRESSED', 'WECHAT_HTML_TRUNCATED']) {
+    await waitFor(() => expect(screen.getByText(i18n.t(`chat.publication.warnings.${code}`))).toBeVisible());
+  }
+  expect(screen.getByText(i18n.t('chat.publication.status.succeeded'))).toBeVisible();
+});
+
+it('opens the platform results as soon as publication is accepted', async () => {
+  state.preferred_providers = ['github'];
+  const { rerender } = render(view());
+  const confirm = await screen.findByRole('button', { name: 'Publish to GitHub' });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  rerender(view({ open: false }));
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Publication results by platform' })).toBeVisible());
+});
+
 it('lost acceptance is retried with the identical saved body and key despite new edits', async () => {
   api.createPublicationGroup.mockRejectedValueOnce(new Error('network disconnected'));
   const { rerender } = render(view()); await pickBoth();

@@ -36,20 +36,23 @@ func StartupHealth(ctx context.Context, home string) string {
 	}
 	running, err := startupRunning(bounded, application)
 	if err != nil {
-		return "host_unavailable"
+		return "process_inspection_failed"
 	}
 	if !running {
 		return "waiting_for_app"
 	}
 	ready, err := startupDesktopReady(bounded, c.Port)
 	if err != nil {
+		if code := SetupIssue(err); code != "" {
+			return code
+		}
 		return "cdp_unavailable"
 	}
 	if !ready {
 		return "connection_required"
 	}
 	if !startupListenerMatches(bounded, application, c.Port) {
-		return "cdp_unavailable"
+		return "control_port_conflict"
 	}
 	return ""
 }

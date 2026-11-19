@@ -6,6 +6,11 @@ import zhCN from "@/i18n/locales/zh-CN";
 describe.each([["en-US", enUS], ["zh-CN", zhCN]] as const)("%s developer settings copy", (_language, locale) => {
   it.each([
     "description",
+    "githubGuideTitle",
+    "githubGuideDescription",
+    "githubGuideConnect",
+    "githubGuideCancel",
+    "githubCheckFailed",
     "inactiveNotice",
     "optionsGroupAria",
     "enableDesc",

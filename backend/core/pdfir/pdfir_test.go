@@ -159,3 +159,10 @@ func TestOfficialCDNDownloadWithoutCredential(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSelectedMineruWithDefaultEndpointUsesVLM(t *testing.T) {
+	client, err := FromConfig(map[string]any{"ocr_type": "mineru", "ocr_auth": map[string]any{"mineru": "fixture"}})
+	if err != nil || client.Model != "vlm" || client.BaseURL != "https://mineru.net/api/v4" {
+		t.Fatalf("default MinerU route differs from ingestion: %v %v", client.Model, err)
+	}
+}

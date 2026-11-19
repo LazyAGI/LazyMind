@@ -148,10 +148,10 @@ class GitHubCLILifecycleTest(unittest.TestCase):
     def test_default_service_loads_cli_from_packaged_resources(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            binary = root / 'resources/bin/gh'
+            binary = root / 'resources/bin' / ('github-auth-helper.exe' if sys.platform == 'win32' else 'gh')
             binary.parent.mkdir(parents=True)
             binary.write_text('fixture executable')
-            binary.with_name('gh.sha256').write_text('a' * 64)
+            binary.with_suffix('.sha256').write_text('a' * 64)
             env = dict(os.environ, LAZYMIND_RUNTIME_ROOT=str(root / 'data'),
                        LAZYMIND_RUNTIME_RESOURCES_ROOT=str(root / 'resources'))
             env.pop('LAZYMIND_GITHUB_CLI_PATH', None)

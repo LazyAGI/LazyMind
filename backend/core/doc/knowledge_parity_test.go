@@ -68,8 +68,22 @@ func TestKnowledgeParityScenesAndAtomicConfiguration(t *testing.T) {
 			}
 		})
 	}
-	if _, err := s.CreateKnowledge(ctx, op, CreateKnowledgeRequest{Name: "Missing-tags", ProcessingLevel: "stored"}); err == nil {
-		t.Fatal("missing required tags accepted")
+	for _, scene := range []string{"general", "academic_papers"} {
+		level := "stored"
+		if scene == "academic_papers" {
+			level = "parsed"
+		}
+		result, err := s.CreateKnowledge(ctx, op, CreateKnowledgeRequest{Name: "No-tags-" + scene, Scene: scene, ProcessingLevel: level})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved orm.Dataset
+		if err := db.First(&saved, "id = ?", result.Items[0].ResourceRef.ID()).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(parseDatasetTags(saved.Ext)) != 0 {
+			t.Fatal("unexpected default tags")
+		}
 	}
 	invalid := []learning.CapabilityRef{{Key: "nonexistent", Version: 1, Enabled: true}}
 	if _, err := s.CreateKnowledge(ctx, op, CreateKnowledgeRequest{Name: "Invalid-caps", Tags: []string{"test"}, ProcessingLevel: "stored", Capabilities: invalid}); err == nil {
@@ -181,5 +195,26 @@ func TestPageAndResourceUpdatesPreserveUnsubmittedKnowledgeConfiguration(t *test
 	}
 	if saved.Desc != description || saved.CoverImage != "new-cover" || !reflect.DeepEqual(parseDatasetParsers(saved.Ext), parsers) || knowledgeExt(saved.Ext)["profile_id"] != "custom-preset" {
 		t.Fatalf("resource command discarded configuration: %+v %s", saved, saved.Ext)
+	}
+}
+
+func TestPageUpdateCanClearAllKnowledgeTags(t *testing.T) {
+	_, db, op := resourceFixture(t)
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "source").Update("ext", json.RawMessage(`{"tags":["old"]}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := mux.SetURLVars(httptest.NewRequest("POST", "/datasets/source", bytes.NewBufferString(`{"tags":[]}`)), map[string]string{"dataset": "source"})
+	req.Header.Set("X-User-Id", op.Caller.UserID)
+	rec := httptest.NewRecorder()
+	UpdateDataset(rec, req)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var saved orm.Dataset
+	if err := db.Where("id = ?", "source").Take(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(parseDatasetTags(saved.Ext)) != 0 {
+		t.Fatal("tags were not cleared")
 	}
 }

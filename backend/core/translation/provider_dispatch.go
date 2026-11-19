@@ -17,11 +17,31 @@ var providerRateGate = struct {
 	next map[string]time.Time
 }{next: make(map[string]time.Time)}
 
+// Keyless endpoints are limited by the server's outbound IP, not the user.
+var webProviderSlots sync.Map
+
+func acquireWebProvider(ctx context.Context, spec providerSpec) (func(), error) {
+	if !spec.Keyless {
+		return func() {}, nil
+	}
+	value, _ := webProviderSlots.LoadOrStore(spec.Name, make(chan struct{}, 1))
+	slot := value.(chan struct{})
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func waitForProvider(ctx context.Context, userID string, spec providerSpec) error {
 	if spec.MinInterval <= 0 {
 		return nil
 	}
 	key := userID + "\x00" + spec.Name
+	if spec.Keyless {
+		key = spec.Name
+	}
 	providerRateGate.Lock()
 	now := time.Now()
 	at := now
@@ -96,17 +116,32 @@ func translateWithConfigSource(ctx context.Context, client *http.Client, userID 
 	output := make([]string, 0, len(parts))
 	detectedSource := ""
 	for _, part := range parts {
+		release, err := acquireWebProvider(ctx, spec)
+		if err != nil {
+			return Response{}, err
+		}
 		if err := waitForProvider(ctx, userID, spec); err != nil {
+			release()
 			return Response{}, err
 		}
 		// A document snapshot can be revoked while another chunk is translating
 		// or waiting for its rate slot. Recheck immediately before sending text.
 		for _, check := range validate {
 			if err := check(); err != nil {
+				release()
 				return Response{}, err
 			}
 		}
 		translated, detected, err := callSelectedProvider(ctx, client, config, spec.Name, part, source, target)
+		if delay := RetryDelay(err); spec.Keyless && delay > 0 {
+			providerRateGate.Lock()
+			until := time.Now().Add(delay)
+			if until.After(providerRateGate.next[spec.Name]) {
+				providerRateGate.next[spec.Name] = until
+			}
+			providerRateGate.Unlock()
+		}
+		release()
 		if err != nil {
 			return Response{}, err
 		}

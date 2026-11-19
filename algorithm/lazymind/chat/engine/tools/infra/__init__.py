@@ -11,7 +11,6 @@ _MODULE_EXPORTS = {
     '.tool_result_citations': ('CitationResultMiddleware',),
     '.web_search_support': ('fetch_url_content',),
     '.kb_opensearch_client': ('opensearch_search', 'resolve_index', 'term_filter'),
-    '.github_skill_installer': ('GitHubSkillInstaller',),
     '.suggestion': ('Suggestion', 'dump_suggestion'),
     '.vocab_support': (
         'VocabSuggestion', 'dedupe_vocab_values_keep_order', 'dump_vocab_suggestion',

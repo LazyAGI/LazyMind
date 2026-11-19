@@ -1708,6 +1708,9 @@ components:
             type: object
         AcademicSourceImportItem:
             properties:
+                batch_created_at:
+                    format: date-time
+                    type: string
                 batch_id:
                     type: string
                 created_library:
@@ -2783,8 +2786,12 @@ components:
                     type: string
                 model_name:
                     type: string
+                provider_display_name:
+                    type: string
                 provider_id:
                     type: string
+                provider_is_custom:
+                    type: boolean
                 provider_name:
                     type: string
                 reason:
@@ -2829,8 +2836,12 @@ components:
                     type: string
                 model_name:
                     type: string
+                provider_display_name:
+                    type: string
                 provider_group_id:
                     type: string
+                provider_is_custom:
+                    type: boolean
                 provider_name:
                     type: string
                 source:
@@ -5278,8 +5289,33 @@ components:
             required:
                 - task
             type: object
+        CreateTaskOutcome:
+            properties:
+                code:
+                    type: string
+                display_name:
+                    type: string
+                input_index:
+                    type: integer
+                message:
+                    type: string
+                status:
+                    type: string
+                target_pid:
+                    type: string
+                task_ids:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - display_name
+                - input_index
+                - status
+            type: object
         CreateTaskRequest:
             properties:
+                allow_partial:
+                    type: boolean
                 items:
                     items:
                         $ref: '#/components/schemas/CreateTaskItem'
@@ -5308,6 +5344,10 @@ components:
             type: object
         CreateTasksResponse:
             properties:
+                outcomes:
+                    items:
+                        $ref: '#/components/schemas/CreateTaskOutcome'
+                    type: array
                 paper_import_batch_id:
                     type: string
                 tasks:
@@ -7559,6 +7599,10 @@ components:
                     type: array
                 id:
                     type: string
+                templates:
+                    items:
+                        $ref: '#/components/schemas/DocumentProviderTemplate'
+                    type: array
             required:
                 - capabilities
                 - id
@@ -7571,6 +7615,16 @@ components:
                     type: array
             required:
                 - providers
+            type: object
+        DocumentProviderTemplate:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
             type: object
         DocumentPublicationGroupRequest:
             properties:
@@ -7640,6 +7694,8 @@ components:
                     type: array
                 artifact_id:
                     type: string
+                current:
+                    type: integer
                 error_code:
                     type: string
                 item_index:
@@ -7655,13 +7711,21 @@ components:
                     type: string
                 source_slot_id:
                     type: string
+                stage:
+                    type: string
                 status:
                     type: string
                 target_url:
                     type: string
+                total:
+                    type: integer
                 updated_at:
                     format: date-time
                     type: string
+                warnings:
+                    items:
+                        type: string
+                    type: array
             required:
                 - actions
                 - item_index
@@ -7681,6 +7745,8 @@ components:
                 provider:
                     type: string
                 retry_operation_id:
+                    type: string
+                template:
                     type: string
                 title:
                     type: string
@@ -7707,6 +7773,8 @@ components:
                 provider:
                     type: string
                 target_url:
+                    type: string
+                template:
                     type: string
                 title:
                     type: string
@@ -7780,6 +7848,10 @@ components:
                 status:
                     type: string
                 target_document: {}
+                warnings:
+                    items:
+                        type: string
+                    type: array
             required:
                 - artifact_id
                 - artifact_saved
@@ -8120,15 +8192,59 @@ components:
                         type: string
                     type: array
             type: object
+        EmbeddingClearRequest:
+            properties:
+                confirm_clear_chunks:
+                    type: boolean
+                generation:
+                    format: int64
+                    type: integer
+                model_id:
+                    type: string
+                source:
+                    type: string
+            required:
+                - confirm_clear_chunks
+                - generation
+                - model_id
+                - source
+            type: object
+        EmbeddingClearResponse:
+            properties:
+                activated:
+                    type: boolean
+                cleared:
+                    type: boolean
+            required:
+                - activated
+                - cleared
+            type: object
         EmbeddingIndexStatusResponse:
             properties:
                 affected_knowledge_bases:
                     format: int64
                     type: integer
+                generation:
+                    format: int64
+                    type: integer
+                index_identity:
+                    enum:
+                        - empty
+                        - verified
+                        - legacy_unknown
+                    type: string
                 indexed_knowledge_bases:
                     format: int64
                     type: integer
                 model_name:
+                    type: string
+                operation_phase:
+                    enum:
+                        - idle
+                        - rebuilding
+                        - clearing
+                        - cleanup_failed
+                        - cleared
                     type: string
                 pending_knowledge_bases:
                     format: int64
@@ -8146,7 +8262,10 @@ components:
                     type: string
             required:
                 - affected_knowledge_bases
+                - generation
+                - index_identity
                 - indexed_knowledge_bases
+                - operation_phase
                 - pending_knowledge_bases
                 - status
             type: object
@@ -8940,6 +9059,46 @@ components:
                     type: array
                 kb_id:
                     type: string
+            type: object
+        GitHubStarPromptClaim:
+            additionalProperties: false
+            properties:
+                task_id:
+                    type: string
+            required:
+                - task_id
+            type: object
+        GitHubStarPromptDecision:
+            properties:
+                cooldown_days:
+                    type: integer
+                max_prompts:
+                    type: integer
+                min_successful_tasks:
+                    type: integer
+                reason:
+                    type: string
+                show:
+                    type: boolean
+                task_id:
+                    type: string
+            required:
+                - show
+                - reason
+                - task_id
+                - min_successful_tasks
+                - cooldown_days
+                - max_prompts
+            type: object
+        GitHubStarPromptSupport:
+            additionalProperties: false
+            properties:
+                supported:
+                    enum:
+                        - true
+                    type: boolean
+            required:
+                - supported
             type: object
         GrantPrincipal:
             properties:
@@ -9830,6 +9989,7 @@ components:
                     enum:
                         - finish
                         - failure
+                        - cancelled
                     type: string
                 model_call_id:
                     type: string
@@ -10540,6 +10700,8 @@ components:
             properties:
                 document:
                     $ref: '#/components/schemas/PDFIRDocument'
+                error_code:
+                    type: string
                 error_message:
                     type: string
                 source_sha256:
@@ -10569,6 +10731,26 @@ components:
                     description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
                     pattern: ^[a-fA-F0-9]{64}$
                     type: string
+            type: object
+        PDFStructureStatus:
+            properties:
+                available:
+                    type: boolean
+                error_code:
+                    type: string
+                error_message:
+                    type: string
+                model:
+                    type: string
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+                status:
+                    type: string
+            required:
+                - status
+                - available
             type: object
         PDFVisualExplanation:
             properties:
@@ -11264,6 +11446,57 @@ components:
                 - recovery
                 - stage
             type: object
+        ProcessingTaskItem:
+            properties:
+                created_at:
+                    type: string
+                dataset_id:
+                    type: string
+                dataset_name:
+                    type: string
+                document_id:
+                    type: string
+                document_name:
+                    type: string
+                error:
+                    type: string
+                id:
+                    type: string
+                level:
+                    type: string
+                stages:
+                    items:
+                        $ref: '#/components/schemas/ProcessingTaskStage'
+                    type: array
+                status:
+                    type: string
+            type: object
+        ProcessingTaskStage:
+            properties:
+                name:
+                    type: string
+                status:
+                    type: string
+            type: object
+        ProcessingTasksResponse:
+            properties:
+                counts:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                items:
+                    items:
+                        $ref: '#/components/schemas/ProcessingTaskItem'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+                unfinished_count:
+                    type: integer
+            type: object
         ProjectionError:
             properties:
                 code:
@@ -11748,6 +11981,57 @@ components:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
             type: object
+        ReadingCapabilityStatus:
+            properties:
+                completed:
+                    minimum: 0
+                    type: integer
+                error_message:
+                    type: string
+                failed:
+                    minimum: 0
+                    type: integer
+                id:
+                    enum:
+                        - formula
+                        - figure
+                        - table
+                    type: string
+                running:
+                    minimum: 0
+                    type: integer
+                status:
+                    enum:
+                        - not_requested
+                        - pending
+                        - running
+                        - partial
+                        - succeeded
+                        - failed
+                        - unavailable
+                        - empty
+                    type: string
+                total:
+                    minimum: 0
+                    type: integer
+            required:
+                - id
+                - status
+                - completed
+                - total
+            type: object
+        ReadingDailyUsage:
+            properties:
+                limit:
+                    minimum: 1
+                    type: integer
+                used:
+                    minimum: 0
+                    type: integer
+            required:
+                - used
+                - limit
+            type: object
         ReadingPreparationPolicy:
             properties:
                 automatic_eligible_after:
@@ -11758,26 +12042,36 @@ components:
                             enum:
                                 - 1
                             type: integer
-                        daily_documents:
-                            maximum: 100
+                        daily_pdf_documents:
+                            maximum: 10000
                             minimum: 1
                             type: integer
-                        study_items_per_document:
-                            maximum: 100
+                        daily_study_documents:
+                            maximum: 10000
                             minimum: 1
                             type: integer
                     required:
-                        - daily_documents
-                        - study_items_per_document
+                        - daily_pdf_documents
+                        - daily_study_documents
                         - automatic_concurrency
                     type: object
                 modes:
-                    additionalProperties:
-                        enum:
-                            - on_demand
-                            - automatic
-                            - disabled
-                        type: string
+                    properties:
+                        ai_study:
+                            enum:
+                                - on_demand
+                                - automatic
+                                - disabled
+                            type: string
+                        pdf_parse:
+                            enum:
+                                - on_demand
+                                - automatic
+                                - disabled
+                            type: string
+                    required:
+                        - pdf_parse
+                        - ai_study
                     type: object
                 parser_ref:
                     type: string
@@ -11797,6 +12091,13 @@ components:
                     type: object
                 study_model_ref:
                     type: string
+                usage:
+                    properties:
+                        ai_study:
+                            $ref: '#/components/schemas/ReadingDailyUsage'
+                        pdf_parse:
+                            $ref: '#/components/schemas/ReadingDailyUsage'
+                    type: object
             required:
                 - preset
                 - modes
@@ -11808,6 +12109,7 @@ components:
                     items:
                         enum:
                             - pdf_parse
+                            - ai_study
                             - formula
                             - figure
                             - table
@@ -11818,6 +12120,12 @@ components:
             type: object
         ReadingPreparationStatus:
             properties:
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/ReadingCapabilityStatus'
+                    type: array
+                error_code:
+                    type: string
                 error_message:
                     type: string
                 job_id:
@@ -12984,6 +13292,51 @@ components:
                 - created_at
                 - updated_at
             type: object
+        TaskCenterWorkbenchGroup:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    type: array
+                page:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+            type: object
+        TaskCenterWorkbenchResponse:
+            properties:
+                groups:
+                    properties:
+                        attention:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        canceled:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        failed:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        paused:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        recent:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                        running:
+                            $ref: '#/components/schemas/TaskCenterWorkbenchGroup'
+                    required:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: object
+                page_size:
+                    type: integer
+            required:
+                - groups
+                - page_size
+            type: object
         TaskDocumentInfo:
             properties:
                 display_name:
@@ -14033,6 +14386,8 @@ components:
                 objective:
                     type: string
                 preference_scope:
+                    type: string
+                retry_origin:
                     type: string
                 review_id:
                     type: string
@@ -17045,7 +17400,10 @@ components:
             properties:
                 advanced:
                     $ref: '#/components/schemas/ProviderRequestAdvanced'
-                    description: Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
+                    description: Custom headers, query parameters and extra JSON body, stored locally as plaintext JSON. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
+                advanced_unavailable:
+                    description: Legacy encrypted options could not be read. Preserve them unless the user explicitly chooses to replace or clear them.
+                    type: boolean
                 default_protocol:
                     enum:
                         - openai
@@ -19166,7 +19524,7 @@ components:
             properties:
                 advanced:
                     $ref: '#/components/schemas/ProviderRequestAdvanced'
-                    description: Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
+                    description: Custom headers, query parameters and extra JSON body, stored locally as plaintext JSON. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
                 default_protocol:
                     enum:
                         - openai
@@ -20624,6 +20982,9 @@ paths:
                                         - reading
                                         - read
                                     type: string
+                                status_if_unread:
+                                    description: Set reading status only if the current status is unread. Requires status=reading.
+                                    type: boolean
                                 tags:
                                     items:
                                         type: string
@@ -20717,6 +21078,41 @@ paths:
                                 $ref: '#/components/schemas/PaperLibraryChanges'
                     description: Add a note idempotently by stable note ID
             summary: Add a note idempotently by stable note ID
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/papers/{library_paper_id}/notes/{note_id}:delete:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: library_paper_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: note_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties: {}
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Delete one saved paper note
+            summary: Delete one saved paper note
             tags:
                 - AcademicWorkflows
     /api/core/academic/library/papers:delete:
@@ -26833,6 +27229,8 @@ paths:
                         application/json:
                             schema:
                                 properties:
+                                    pdf_structure:
+                                        $ref: '#/components/schemas/PDFStructureStatus'
                                     status:
                                         enum:
                                             - not_requested
@@ -26850,11 +27248,13 @@ paths:
                         application/json:
                             schema:
                                 properties:
+                                    pdf_structure:
+                                        $ref: '#/components/schemas/PDFStructureStatus'
                                     status:
                                         type: string
                                 type: object
                     description: Existing parsing in progress
-            summary: Observe chat parsing without submitting new work
+            summary: Observe shared PDF structure and retrieval readiness without submitting new work
     /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:
         delete:
             parameters:
@@ -28010,6 +28410,29 @@ paths:
             summary: Start task
             tags:
                 - tasks
+    /api/core/datasets/{dataset}/text-index:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/text-index
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/text-index
     /api/core/datasets/{dataset}/uploads:
         post:
             parameters:
@@ -30045,6 +30468,37 @@ paths:
             summary: One-click update of all installed official knowledge bases
             tags:
                 - knowledge-market
+    /api/core/knowledge-processing/tasks:
+        get:
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: level
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: q
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProcessingTasksResponse'
+                    description: Permission-scoped latest processing attempts
+            summary: Latest document processing tasks
     /api/core/knowledge/options:
         get:
             responses:
@@ -32783,6 +33237,25 @@ paths:
                                 $ref: '#/components/schemas/deleteCustomModelProviderOpenAPIResponse'
                     description: Reset supplier
             summary: Reset a built-in model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/clear-chunks:
+        post:
+            description: Requires the current generation and explicit administrator confirmation. Clears text vectors while preserving originals, parsed content, chunks and image vectors. An empty model_id performs credential-independent recovery without activating a model. Otherwise the server verifies and activates the replacement independently of browser cancellation. Replaying a completed request does not clear the new index. Documents await explicit reindexing.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/EmbeddingClearRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingClearResponse'
+                    description: Chunks cleared and target model activated
+            summary: Clear text vectors and optionally activate a replacement embedding model
             tags:
                 - model_providers
     /api/core/model_providers/embedding/index-state:
@@ -35933,6 +36406,22 @@ paths:
             summary: Idempotent system-notification receipt; delivered means submitted, not seen by the user
             tags:
                 - TaskNotifications
+    /api/core/task-center/github-star-prompt/claim:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GitHubStarPromptClaim'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GitHubStarPromptDecision'
+                    description: Invitation eligibility
+            summary: Atomically claim an optional GitHub Star invitation after a successful complete Work task
     /api/core/task-center/notification-events/{notification_id}:claim:
         post:
             description: Internal service token required; atomically grant one segment against the global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
@@ -36045,6 +36534,11 @@ paths:
     /api/core/task-center/tasks:
         get:
             parameters:
+                - in: query
+                  name: conversation_id
+                  required: false
+                  schema:
+                    type: string
                 - in: query
                   name: status
                   required: false
@@ -36216,6 +36710,52 @@ paths:
                                 $ref: '#/components/schemas/TaskRemovalResult'
                     description: Removal committed
             summary: Move task and related conversations to Trash
+    /api/core/task-center/workbench:
+        get:
+            parameters:
+                - in: query
+                  name: task_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    enum:
+                        - attention
+                        - running
+                        - paused
+                        - failed
+                        - recent
+                        - canceled
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    default: 4
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterWorkbenchResponse'
+                    description: Task-center workbench
+            summary: Summarize task categories with paginated previews
     /api/core/task-center/workflow-events:
         get:
             responses:
@@ -36717,6 +37257,32 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /user/env-vars/{id}
+    /api/core/user/github-star-prompt/support:
+        put:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GitHubStarPromptSupport'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    code:
+                                        type: integer
+                                    data:
+                                        properties:
+                                            supported:
+                                                type: boolean
+                                        type: object
+                                    message:
+                                        type: string
+                                type: object
+                    description: Invitation preference saved
+            summary: Stop future invitations for the authenticated user; does not perform or prove a GitHub write
     /api/core/user/notification-preferences:
         get:
             description: Read scheduled-task notification defaults and global gate. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.

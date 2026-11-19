@@ -321,6 +321,8 @@ export interface WorkflowSession {
 
 /** A single step execution record from workflow_session_steps. */
 export interface WorkflowSessionStep {
+  fencing_generation?: number;
+  executor_host?: string;
   id: string;
   session_id: string;
   step_id: string;
@@ -363,11 +365,24 @@ export function applyOrdinaryWorkflowSnapshot(session: WorkflowSession, snapshot
     ordinary_revision: snapshot.revision, ordinary_error: false, steps: attachOrdinarySteps(session.steps, tasks) };
 }
 
+export interface WorkflowArtifactPreview {
+  attempt_id: string;
+  step_id: string;
+  attempt: number;
+  slot: string;
+  stream_id: string;
+  seq: number;
+  content: string;
+  state: 'streaming' | 'ended' | 'aborted';
+}
+
 export interface WorkflowRuntimeProjection {
+  artifact_previews?: Record<string, WorkflowArtifactPreview>;
+  decided_routes?: string[];
   display?: WorkflowDisplayState;
   status?: string;
   current_step_id?: string;
-  attempt_history?: Record<string, Array<{ attempt: number; attempt_id?: string; task_id: string; status: string; validity: string; started_at: string; updated_at?: string; intent_context?: string }>>;
+  attempt_history?: Record<string, Array<{ attempt: number; fencing_generation?: number; executor_host?: string; attempt_id?: string; task_id: string; status: string; validity: string; started_at: string; updated_at?: string; intent_context?: string }>>;
   completed?: boolean;
   past?: string[];
   current?: string[];
@@ -391,7 +406,7 @@ export interface WorkflowRuntimeProjection {
 export function workflowSnapshotSteps(sessionId: string, history: WorkflowRuntimeProjection['attempt_history']): WorkflowSessionStep[] | undefined {
   if (!history) return undefined;
   return Object.entries(history).flatMap(([stepId, attempts]) => stepId === '__end__' ? [] : attempts.map((attempt) => ({
-    id: attempt.attempt_id ?? attempt.task_id, session_id: sessionId, step_id: stepId, task_id: attempt.task_id,
+    fencing_generation: attempt.fencing_generation, executor_host: attempt.executor_host, id: attempt.attempt_id ?? attempt.task_id, session_id: sessionId, step_id: stepId, task_id: attempt.task_id,
     attempt: attempt.attempt, status: attempt.status, validity: attempt.validity === "stale" ? "stale" as const : "effective" as const,
     created_at: attempt.started_at, updated_at: attempt.updated_at ?? attempt.started_at,
     intent_context: attempt.intent_context,
@@ -475,6 +490,8 @@ export interface TabDef {
   /** Artifact producer scope. `selected` lets a composite join adjacent workflow steps. */
   slot_scope?: 'step' | 'selected';
   status_step_ids?: string[];
+  /** Explain the route decision only when this tab is authoritatively skipped. */
+  skip_reason?: string;
   label: string;
   layout?: 'grid' | 'list' | 'vertical' | 'composite' | 'horizontal';
   slots: SlotDef[];
@@ -495,6 +512,8 @@ export interface TabDef {
   hide_when_material?: string;
   /** Hide an unexecuted dependent tab when its prerequisite branch was skipped. */
   hide_when_step_skipped?: string;
+  /** Defer this conditional tab until the named step has a persisted route decision. */
+  show_after_route?: string;
   /** Explicitly enable or disable artifact downloads for this tab. */
   allow_download?: boolean;
   /** Actions are rendered through provider modules; the composite stays domain-neutral. */
@@ -549,6 +568,7 @@ export function filterWorkflowTabs(
   const executionStarted = retained.size > 0 || Object.keys(projection?.nodes ?? {}).some(wasExecuted);
   return tabs.filter((tab) => {
     const steps = tab.status_step_ids?.length ? tab.status_step_ids : [tab.step_id || tab.id];
+    if (tab.show_after_route && !projection?.decided_routes?.includes(tab.show_after_route)) return false;
     if (hideUnstartedSteps && executionStarted && !steps.some(wasExecuted)
         && !tab.slots.some((slot) => present.has(slot.id))) return false;
     if (hideSkippedSteps) {
@@ -615,17 +635,30 @@ export interface WorkflowUI {
   tab_visibility_ready_material?: string;
   /** Opt in to hiding tabs whose runtime steps were explicitly skipped. */
   hide_skipped_steps?: boolean;
-  /** In dynamic sessions, show started steps and existing results once execution begins. */
+  /** Show started steps and existing results once execution begins. */
   hide_unstarted_steps?: boolean;
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;
 }
 
-/**
- * The catalog keeps reusable slot metadata at the workflow root while UI tabs
- * commonly reference a slot with only `{ id }`.  Hydrate those references so
- * renderers can see properties such as `type`, `cardinality`, and `ordered`.
- */
+function restoreLegacyPptMaterialImages(ui: WorkflowUI, slotDefs: Map<string, SlotDef>): WorkflowUI {
+  const images = slotDefs.get('material_images');
+  const materials = ui.tabs?.find(tab => tab.id === 'materials' && tab.step_id === 'collect_materials');
+  if (images?.user_visible !== false || images.type !== 'image' || images.cardinality !== 'list'
+    || !Array.isArray(materials?.slots) || !materials.slots.some(slot => slot.id === 'material_summary')
+    || materials.slots.some(slot => slot.id === images.id)) return ui;
+
+  // Older pinned PPT definitions hid images that the material step already saved.
+  const visibleImages = { ...images, user_visible: true };
+  slotDefs.set(images.id, visibleImages);
+  return {
+    ...ui,
+    slots: { ...ui.slots, [images.id]: { widgetType: 'image-gallery' } },
+    tabs: ui.tabs?.map(tab => tab === materials ? { ...tab, slots: [...tab.slots, visibleImages] } : tab),
+  };
+}
+
+/** Fill tab slot references with root slot metadata and widget configuration. */
 export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): WorkflowUI {
   if (!raw || typeof raw !== 'object') return {};
   const spec = raw as Record<string, unknown>;
@@ -634,7 +667,7 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
     return typeof spec.source_type === 'string' ? { source_type: spec.source_type } : {};
   }
 
-  const ui = typeof spec.source_type === 'string'
+  let ui = typeof spec.source_type === 'string'
     ? { ...(rawUI ?? {}) as WorkflowUI, source_type: spec.source_type }
     : (rawUI ?? {}) as WorkflowUI;
   const slotDefs = new Map<string, SlotDef>();
@@ -644,6 +677,10 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
       const slot = value as SlotDef;
       if (typeof slot.id === 'string' && slot.id) slotDefs.set(slot.id, slot);
     }
+  }
+
+  if (spec.id === 'ppt-workflow' && spec.source_type === 'builtin' && Array.isArray(ui.tabs)) {
+    ui = restoreLegacyPptMaterialImages(ui, slotDefs);
   }
 
   const name = typeof spec.name === 'string' ? spec.name : fallbackName;
@@ -752,6 +789,32 @@ interface WorkflowStore {
 const workflowStreams = new Map<string, { refs: number; subscription: WorkflowEventStreamSubscription }>();
 const ordinaryLoads = new Map<string, Promise<void>>();
 const ordinaryReloads = new Set<string>();
+const workflowUILoads = new Map<string, Promise<WorkflowUI>>();
+
+/** Share immutable definitions and concurrent reads; failed reads remain retryable. */
+export function loadWorkflowUI(
+  workflowId: string,
+  pinnedRevisionId?: string,
+  options: { language?: string; silentError?: boolean } = {},
+): Promise<WorkflowUI> {
+  const lang = options.language ?? i18n.language ?? '';
+  const cacheKey = workflowUICacheKey(workflowId, pinnedRevisionId, lang);
+  const cached = useWorkflowStore.getState().workflowUIByWorkflow[cacheKey];
+  if (pinnedRevisionId && cached) return Promise.resolve(cached);
+  const pending = workflowUILoads.get(cacheKey);
+  if (pending) return pending;
+  const request = WorkflowInfoApi().getWorkflow(workflowId, {
+    params: pinnedRevisionId ? { revision_id: pinnedRevisionId } : undefined,
+    headers: lang ? { 'Accept-Language': lang } : undefined,
+    ...(options.silentError ? { silentError: true } : {}),
+  }).then(res => {
+    const ui = hydrateWorkflowUI(res?.data?.data ?? res?.data ?? {}, workflowId);
+    useWorkflowStore.setState(state => ({ workflowUIByWorkflow: { ...state.workflowUIByWorkflow, [cacheKey]: ui } }));
+    return ui;
+  }).finally(() => { workflowUILoads.delete(cacheKey); });
+  workflowUILoads.set(cacheKey, request);
+  return request;
+}
 
 export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   sessionByConversation: {},
@@ -881,6 +944,10 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
           requestOptions,
         );
         const session: WorkflowSession | null = res?.data?.data?.session ?? null;
+        // The pinned UI definition does not depend on the runtime projection.
+        // Warm its shared cache while reading runtime state, rather than making
+        // the panel start another serial request after this load completes.
+        if (session?.workflow_id) void get().fetchWorkflowUI(session.workflow_id, session.pinned_revision_id);
         // Runtime controls and rollback candidates come from Go's projection.
         // Steps are attempt history only; they never define Past/Ready locally.
         if (session?.session_id) {
@@ -892,7 +959,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
             const snapshot = projectionRes?.data?.data ?? {};
             session.state_version = snapshot.state_version;
             session.projection = { ...snapshot.projection, display: snapshot.display, status: snapshot.status,
-              current_step_id: snapshot.current_step_id, attempt_history: snapshot.attempt_history };
+              current_step_id: snapshot.current_step_id, attempt_history: snapshot.attempt_history, artifact_previews: snapshot.artifact_previews };
             session.steps = workflowSnapshotSteps(session.session_id, snapshot.attempt_history) ?? [];
             session.current_step_id = snapshot.current_step_id ?? session.current_step_id;
             session.status = reconcileWorkflowSessionStatus(snapshot.status ?? session.status, session.projection);
@@ -998,22 +1065,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   },
 
   fetchWorkflowUI: async (workflowId, pinnedRevisionId) => {
-    const lang = i18n.language || "";
-    const cacheKey = workflowUICacheKey(workflowId, pinnedRevisionId, lang);
-    // Only pinned revisions are immutable. Legacy/catalog head reads must refetch.
-    const cached = get().workflowUIByWorkflow[cacheKey];
-    if (pinnedRevisionId && cached) return cached;
     try {
-      const res = await WorkflowInfoApi().getWorkflow(workflowId, {
-        params: pinnedRevisionId ? { revision_id: pinnedRevisionId } : undefined,
-        headers: lang ? { "Accept-Language": lang } : undefined,
-      });
-      const payload = res?.data?.data ?? res?.data ?? {};
-      const ui = hydrateWorkflowUI(payload, workflowId);
-      set((state) => ({
-        workflowUIByWorkflow: { ...state.workflowUIByWorkflow, [cacheKey]: ui },
-      }));
-      return ui;
+      return await loadWorkflowUI(workflowId, pinnedRevisionId);
     } catch {
       return {};
     }
@@ -1138,6 +1191,11 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       if (!session || session.session_id !== sessionId) {
         return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState } };
       }
+      if (event.type === 'artifact.preview' && !projectionState.resyncRequired) {
+        return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState },
+          sessionByConversation: { ...state.sessionByConversation, [conversationId]: { ...session,
+            projection: { ...session.projection, artifact_previews: projectionState.projection.artifact_previews as WorkflowRuntimeProjection['artifact_previews'] } } } };
+      }
       const projection = projectionState.projection as WorkflowRuntimeProjection & { status?: string };
       if (projectionState === previous || projectionState.resyncRequired
         || projectionState.stateVersion < (session.state_version ?? 0)) {
@@ -1158,6 +1216,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         },
       };
     });
+    if (event.type === 'artifact.preview') return;
     const projectionState = get().projectionBySession[sessionId];
     if (projectionState?.resyncRequired) {
       // Closing and reconnecting without Last-Event-ID asks the server for a fresh snapshot.

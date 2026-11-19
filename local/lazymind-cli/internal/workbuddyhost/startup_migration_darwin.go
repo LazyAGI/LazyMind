@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/desktopsetup"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/localfile"
 )
 
@@ -27,10 +26,6 @@ func migrateLoginEnvironment(ctx context.Context, home, account string, env star
 	}
 	defer unlock()
 	if err := ctx.Err(); err != nil {
-		return err
-	}
-	choice, err := integrationstate.Read(home, "workbuddy")
-	if err != nil || choice != nil && !*choice {
 		return err
 	}
 	dir := filepath.Join(home, "workbuddy-workflow")
@@ -54,11 +49,6 @@ func migrateLoginEnvironment(ctx context.Context, home, account string, env star
 			return nil
 		} else if !os.IsNotExist(err) {
 			return err
-		}
-		if choice != nil {
-			// New installs persist a choice before setup; a failed new install is
-			// not a legacy installation to silently finish in the background.
-			return nil
 		}
 	}
 	// Revalidate under the setup lock: account failures and disabled pairings

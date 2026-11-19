@@ -152,6 +152,47 @@
       "sizeBytes": 9188,
       "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-conventional-commits-574eb0e23e73c2d1.zip"
     },
+    "cute-baby-avatar/1.1.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-cute-baby-avatar-5371854772d35629.zip",
+      "filename": "lazymind-featured-cute-baby-avatar-5371854772d35629.zip",
+      "files": {
+        "cute-baby-avatar/1.1.0/35d8963b31c0-nine-preview.png": {
+          "sha256": "35d8963b31c09de5dfbc00e7cfd733a699068be1f2754181f16a28a9333b4cda",
+          "sizeBytes": 2433276
+        },
+        "cute-baby-avatar/1.1.0/409724a1e7c8-avatar-preview.html": {
+          "sha256": "409724a1e7c8119c3ae58c186023a9244ce2b0b790cad6ec4a0a834f6847066b",
+          "sizeBytes": 3907
+        },
+        "cute-baby-avatar/1.1.0/5941908a355f-adult-avatar.png": {
+          "sha256": "5941908a355f1726f9d1639f9375ae6b85dc2be819519fcdc8d1cf413b8963b7",
+          "sizeBytes": 2035082
+        },
+        "cute-baby-avatar/1.1.0/5f22ae6a790d-avatar.png": {
+          "sha256": "5f22ae6a790dce45560f6f0c5dbf5868287c59b730ee308cb2edf9576817d269",
+          "sizeBytes": 2125306
+        },
+        "cute-baby-avatar/1.1.0/80c7fcf493bc-adult-preview.html": {
+          "sha256": "80c7fcf493bc4678a1f7bb23def9527c868cc5f97dc4c5aeb7132ca87fb24cc3",
+          "sizeBytes": 3995
+        },
+        "cute-baby-avatar/1.1.0/9760cf82f404-input-photo.png": {
+          "sha256": "9760cf82f4042017586bb12e259df4e62e124c156fbfc6ce2bd50167190f6429",
+          "sizeBytes": 2006837
+        },
+        "cute-baby-avatar/1.1.0/abd4875851c0-nine-preview.html": {
+          "sha256": "abd4875851c015c660d67e29870766ca1285a75f086c08ecd7d00737b35c6074",
+          "sizeBytes": 4682
+        },
+        "cute-baby-avatar/1.1.0/bcf9c2f42430-adult-photo.png": {
+          "sha256": "bcf9c2f42430f449d86ffbb7e1357e582e7ff807ae4037620475e2cb75bc6162",
+          "sizeBytes": 2046380
+        }
+      },
+      "sha256": "70b085c2c507e024ed4299c649e7e6fba7cfe9da0227e870630979339f7bd94f",
+      "sizeBytes": 10105156,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-cute-baby-avatar-5371854772d35629.zip"
+    },
     "data-report/0.1.1": {
       "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-data-report-652c45fcee0e3e76.zip",
       "filename": "lazymind-featured-data-report-652c45fcee0e3e76.zip",
@@ -505,6 +546,79 @@
       "sizeBytes": 32924,
       "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-karpathy-llm-wiki-5806bd68e3a99dc5.zip"
     },
+    "landscape-art-postcard/1.1.2": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-landscape-art-postcard-1a096ffa483bc1ce.zip",
+      "filename": "lazymind-featured-landscape-art-postcard-1a096ffa483bc1ce.zip",
+      "files": {
+        "landscape-art-postcard/1.1.2/090a4fcf340d-surreal-alpine-pine-portrait.png": {
+          "sha256": "090a4fcf340d940da021840014eb8c5f59fb01ea506cfd96cbb7b16f1917c2c6",
+          "sizeBytes": 3113547
+        },
+        "landscape-art-postcard/1.1.2/0b257f57643f-torn-crimson-coast-landscape.png": {
+          "sha256": "0b257f57643f52f561990cb89ccde26b974480d45866520fb5b3df51ce3fcdc3",
+          "sizeBytes": 3209993
+        },
+        "landscape-art-postcard/1.1.2/0d008f449ff5-postcard-alpine-portrait.png": {
+          "sha256": "0d008f449ff53f662162825734ae7ef655907e0baf7c37f0277fd23175b631cf",
+          "sizeBytes": 2991588
+        },
+        "landscape-art-postcard/1.1.2/272388d13775-original-alpine.jpg": {
+          "sha256": "272388d137750ca216f0a7464ad3fb9c3842249e8c272dcc725c3a7a0647b30f",
+          "sizeBytes": 1274344
+        },
+        "landscape-art-postcard/1.1.2/350dbd47aae2-ink-cloud-dawn-landscape.png": {
+          "sha256": "350dbd47aae2d1db24d0f9b1f001e01589343eef7cd733c5d7d78b168613ea9c",
+          "sizeBytes": 2800635
+        },
+        "landscape-art-postcard/1.1.2/6a0bffcbdbeb-surreal-autumn-lake-landscape.png": {
+          "sha256": "6a0bffcbdbebb2da79c327e5c64c12fceb363da737deb97ea99f3a7382d93d83",
+          "sizeBytes": 3163159
+        },
+        "landscape-art-postcard/1.1.2/6c14db072741-ink-autumn-portrait.png": {
+          "sha256": "6c14db072741319036e4e6f5fe1d5d9ef214daf14b532917039330cce1e6832a",
+          "sizeBytes": 2995508
+        },
+        "landscape-art-postcard/1.1.2/741be76b4da6-torn-postcard.html": {
+          "sha256": "741be76b4da69eacb072812a9e5045776e23f6ac4035426a97a3e79ad5eb4a7f",
+          "sizeBytes": 5541
+        },
+        "landscape-art-postcard/1.1.2/81b5c9680283-original-autumn.jpg": {
+          "sha256": "81b5c968028345194d1958e006deab091b7609b1818fdcf85a3e7ce3033775bc",
+          "sizeBytes": 6636715
+        },
+        "landscape-art-postcard/1.1.2/82a15442e0bd-ink-artwork.html": {
+          "sha256": "82a15442e0bd388ba391d0f2573eb85d05bded2f6636a88214c077012b4daeff",
+          "sizeBytes": 6953
+        },
+        "landscape-art-postcard/1.1.2/9ababe3e51f0-photo-ink-cloud-dawn-portrait.png": {
+          "sha256": "9ababe3e51f0d4df1a64c8d89b4538b2141968b85a85edd642aa91ea6d02bafe",
+          "sizeBytes": 2630172
+        },
+        "landscape-art-postcard/1.1.2/a9367dd506d5-ink-postcard.html": {
+          "sha256": "a9367dd506d5b7cae189b4f060bebf088760aecde0f6d9fe08c4618e8201bf49",
+          "sizeBytes": 8587
+        },
+        "landscape-art-postcard/1.1.2/ae31d4fd4440-surreal-ink-artwork.html": {
+          "sha256": "ae31d4fd44408fbceed4ce84ba2c577ff9941a406a3a7333e51d850e7f270080",
+          "sizeBytes": 7156
+        },
+        "landscape-art-postcard/1.1.2/d2b568abc16e-postcard-crimson-coast-landscape.png": {
+          "sha256": "d2b568abc16ec7a714de5e1e1155171725d60f6f4fea0a059a983eb1a5d7f1c1",
+          "sizeBytes": 3060416
+        },
+        "landscape-art-postcard/1.1.2/ef3527526d60-original-cloud.jpg": {
+          "sha256": "ef3527526d60a3ba6bba53341d4e4fb1b311e09c5a7bce68a2fc8831e71ed5fd",
+          "sizeBytes": 1299787
+        },
+        "landscape-art-postcard/1.1.2/fbdf8b2c68f5-original-coast.jpg": {
+          "sha256": "fbdf8b2c68f567109c1e5a8137cb0839735780f2830dbf9ccac845a69657708d",
+          "sizeBytes": 5641809
+        }
+      },
+      "sha256": "b57956d665926dd2b8f39f2be02c3869fc316a5f3744dd2011b5377ff03d3e80",
+      "sizeBytes": 38157995,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-landscape-art-postcard-1a096ffa483bc1ce.zip"
+    },
     "live-commerce-script-studio/1.0.0": {
       "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-live-commerce-script-studio-9d5d52df3eb983d4.zip",
       "filename": "lazymind-featured-live-commerce-script-studio-9d5d52df3eb983d4.zip",
@@ -630,6 +744,63 @@
       "sha256": "e926ea3e6c7f496ca834eb313faa78fbc04d03c2ad16ce38390b05e0af3ae75a",
       "sizeBytes": 1953800,
       "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-oral-seeding-video-maker-39c9ab9fcc3ca6ce.zip"
+    },
+    "photo-to-gongbi/1.0.0": {
+      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-photo-to-gongbi-cdb9c6334e172be3.zip",
+      "filename": "lazymind-featured-photo-to-gongbi-cdb9c6334e172be3.zip",
+      "files": {
+        "photo-to-gongbi/1.0.0/0105cb5dde01-cat-source.jpg": {
+          "sha256": "0105cb5dde01965202bd869761d12201b600e72cf0c97729d5b5fa1eab326061",
+          "sizeBytes": 454194
+        },
+        "photo-to-gongbi/1.0.0/01c6fffd8d28-cat-gongbi.jpg": {
+          "sha256": "01c6fffd8d28d3d92b5cd2d0d7e2bf027022c06ab637b6e3eaf7434c136db345",
+          "sizeBytes": 678594
+        },
+        "photo-to-gongbi/1.0.0/2568a423f078-landscape-preview.en.html": {
+          "sha256": "2568a423f078b60a22b73ad69f9ca5c5a74fb23ea35393343b0a065babfeed7d",
+          "sizeBytes": 2088
+        },
+        "photo-to-gongbi/1.0.0/541a644a30f5-garden-source.jpg": {
+          "sha256": "541a644a30f5cbe4ebced773d27dc9968acbfc75919d91a2ab2ce8817ea08de6",
+          "sizeBytes": 483041
+        },
+        "photo-to-gongbi/1.0.0/5f7d37e11c52-garden-preview.html": {
+          "sha256": "5f7d37e11c529f2efbca138e2fbe71c28b16e31a8d6fbc26dfd7998e9ff6439f",
+          "sizeBytes": 1954
+        },
+        "photo-to-gongbi/1.0.0/803b0d2a1a3c-landscape-source.jpg": {
+          "sha256": "803b0d2a1a3cbaba2445e9e74c3f12208b0bab40db8cbc98676d261ab19b0912",
+          "sizeBytes": 704612
+        },
+        "photo-to-gongbi/1.0.0/85b2a4753c83-garden-preview.en.html": {
+          "sha256": "85b2a4753c83cf0be064c59ba84cacf114bb15945778765c458181b56888494f",
+          "sizeBytes": 2059
+        },
+        "photo-to-gongbi/1.0.0/8e0a0bad6f9e-landscape-gongbi.jpg": {
+          "sha256": "8e0a0bad6f9e9e03822ab3a295bb0f2859e9ddc4ccd60147713083c943d07f4a",
+          "sizeBytes": 831003
+        },
+        "photo-to-gongbi/1.0.0/9c038218d803-cover.jpg": {
+          "sha256": "9c038218d803de0b8544d714e3c2263a9513ccd7ca49191037abde769f1c3f3c",
+          "sizeBytes": 715969
+        },
+        "photo-to-gongbi/1.0.0/cc15814c250d-cat-preview.en.html": {
+          "sha256": "cc15814c250de577f79a42b4c5e1e8d5259b5173042388fb5bf169b9c1712876",
+          "sizeBytes": 2034
+        },
+        "photo-to-gongbi/1.0.0/d61cd8ad6417-cat-preview.html": {
+          "sha256": "d61cd8ad641784d40ff8b6a95c2e482c8df61454d91c22c08261fd6f925f7ce0",
+          "sizeBytes": 1941
+        },
+        "photo-to-gongbi/1.0.0/fc2579335b0c-landscape-preview.html": {
+          "sha256": "fc2579335b0c697310669c6adbfec97c54870ed952dfe398144ec190a74f8065",
+          "sizeBytes": 1959
+        }
+      },
+      "sha256": "aa4196761177ea0f5257e07dd4b9e8f67f7cf3c6b8203009a9cb686939159610",
+      "sizeBytes": 3875570,
+      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-photo-to-gongbi-cdb9c6334e172be3.zip"
     },
     "poster-design/1.0.1": {
       "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-poster-design-3f144d8524cd7bd4.zip",

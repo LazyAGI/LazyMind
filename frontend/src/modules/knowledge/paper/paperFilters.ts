@@ -6,14 +6,17 @@ export interface PaperFilters {
     star: "all" | "starred" | "unstarred";
     pdf: "all" | "has-pdf" | "needs-pdf";
     status: "all" | ReadingStatus;
+    tags: string[];
+    tagMatch: "any" | "all";
     yearRange: [
         number,
         number
     ] | null;
 }
 export const DEFAULT_PAPER_FILTERS: PaperFilters = {
-    star: "all", pdf: "all", status: "all", yearRange: null,
+    star: "all", pdf: "all", status: "all", yearRange: null, tags: [], tagMatch: "any",
 };
+export const PAPER_TAG_MATCH_LABELS = { any: "任一（OR）", all: "全部（AND）" };
 /** Metadata-only migration placeholders do not mean a PDF is available. */
 export function isReadablePdfAttachment(attachment: Attachment): boolean {
     if (attachment.available === false)
@@ -52,7 +55,11 @@ export function filterPaperRecords<T extends PaperRecord>(papers: T[], attachmen
         if (filters.yearRange && (!Number.isFinite(paper.metadata.year) || paper.metadata.year < filters.yearRange[0] || paper.metadata.year > filters.yearRange[1]))
             return false;
         if ((filters.minCitations || 0) > 0 && (!Number.isSafeInteger(paper.metadata.citationCount) || (paper.metadata.citationCount ?? -1) < filters.minCitations!)) return false;
-        return true;
+        if (!filters.tags.length)
+            return true;
+        return filters.tagMatch === "all"
+            ? filters.tags.every(tag => paper.tags.includes(tag))
+            : filters.tags.some(tag => paper.tags.includes(tag));
     });
 }
 export function getFilterBounds(papers: PaperRecord[]): {
@@ -70,5 +77,6 @@ export function getFilterBounds(papers: PaperRecord[]): {
 }
 export function hasPaperFilters(filters: PaperFilters): boolean {
     return filters.star !== "all" || filters.pdf !== "all"
-        || filters.status !== "all" || filters.yearRange !== null || (filters.minCitations || 0) > 0 || (filters.folder !== undefined && filters.folder !== "all");
+        || filters.status !== "all" || filters.yearRange !== null || (filters.minCitations || 0) > 0
+        || (filters.folder !== undefined && filters.folder !== "all") || filters.tags.length > 0;
 }

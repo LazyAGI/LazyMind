@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { RcFile } from "antd/es/upload";
 import ImageUpload, { allowedImageTypes, type ImageUploadImperativeProps } from "../ImageUpload";
 import "./index.scss";
+import { askDraftStore } from "@/modules/chat/store/askAnswerDraft";
 
 export interface AskQuestion {
   id?: string;
@@ -84,6 +85,8 @@ interface AskCardProps {
   answered?: boolean;
   /** Cached answers to pre-populate (index → serialized answer) */
   savedAnswers?: Record<number, AnswerState>;
+  /** Chat card scope for retaining the current question across navigation/reloads. */
+  navigationKey?: string;
   /** Called whenever an answer changes, for external caching */
   onAnswerChange?: (index: number, ans: AnswerState) => void;
 }
@@ -261,7 +264,7 @@ function normalizedAskQuestions(
 
 export default function AskCard(props: AskCardProps) {
   // A new card is a new decision scope, even when it reuses the same component.
-  return <AskCardContent key={props.askPending.ask_id} {...props} />;
+  return <AskCardContent key={props.navigationKey ?? props.askPending.ask_id} {...props} />;
 }
 
 function AskCardContent({
@@ -271,6 +274,7 @@ function AskCardContent({
   disabled = false,
   answered = false,
   savedAnswers,
+  navigationKey,
   onAnswerChange,
 }: AskCardProps) {
   const { t } = useTranslation();
@@ -296,7 +300,13 @@ function AskCardContent({
   const [answers, setAnswers] = useState<AnswerState[]>(() =>
     questions.map((q, i) => restoreAnswer(q, savedAnswers?.[i])),
   );
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    const saved = navigationKey ? (askDraftStore.getQuestionIndex(navigationKey) ?? 0) : 0;
+    return Number.isInteger(saved) && saved >= 0 && saved < total ? saved : 0;
+  });
+  useEffect(() => {
+    if (navigationKey) askDraftStore.setQuestionIndex(navigationKey, currentIndex);
+  }, [navigationKey, currentIndex]);
   const [submitted, setSubmitted] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -356,11 +366,8 @@ function AskCardContent({
     next: AnswerState,
     autoAdvance = false,
   ) => {
-    setAnswers((prev) => {
-      const updated = prev.map((a, i) => (i === idx ? next : a));
-      onAnswerChange?.(idx, next);
-      return updated;
-    });
+    setAnswers((prev) => prev.map((a, i) => (i === idx ? next : a)));
+    onAnswerChange?.(idx, next);
     if (autoAdvance && idx < total - 1) {
       setTimeout(() => setCurrentIndex(idx + 1), 180);
     }

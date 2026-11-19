@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import NewChatPage from "../newChat";
+import ConversationContent from './ConversationContent';
 import "./index.scss";
 
 function Home() {
@@ -10,7 +10,7 @@ function Home() {
   return (
     <div className="chat-wrapper">
       <div className="chat-content">
-        <NewChatPage />
+        <ConversationContent />
       </div>
     </div>
   );

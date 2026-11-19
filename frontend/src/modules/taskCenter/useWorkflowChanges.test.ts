@@ -34,3 +34,16 @@ it('refreshes on state changes, reconnects once after disconnect, and releases t
   expect(fixtures.streams[1].close).toHaveBeenCalledOnce();
   window.removeEventListener(WORKFLOW_TASKS_CHANGED, changed);
 });
+
+it('does not connect while signed out and replaces the stream when the owner changes', () => {
+  const { rerender, unmount } = renderHook(({ owner }) => useWorkflowChanges(owner), { initialProps: { owner: '' } });
+  expect(fixtures.streams).toHaveLength(0);
+  rerender({ owner: 'alice' });
+  expect(fixtures.streams).toHaveLength(1);
+  rerender({ owner: 'bob' });
+  expect(fixtures.streams[0].close).toHaveBeenCalledOnce();
+  expect(fixtures.streams).toHaveLength(2);
+  rerender({ owner: '' });
+  expect(fixtures.streams[1].close).toHaveBeenCalledOnce();
+  unmount();
+});

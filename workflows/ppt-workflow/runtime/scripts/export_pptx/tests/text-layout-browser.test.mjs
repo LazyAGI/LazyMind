@@ -53,6 +53,41 @@ test('horizontal flex formulas do not become paragraphs and retain real box inse
   }
 });
 
+test('keeps browser single-line headings and scores from rewrapping in PowerPoint', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'ppt-line-wrap-'));
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const html = path.join(dir, 'page.html');
+    await writeFile(html, `
+      <meta charset="utf-8">
+      <style>
+        .wrapper { width: 1280px; height: 720px; }
+        #heading, #score { width: max-content; }
+        #paragraph { width: 150px; }
+      </style>
+      <div class="wrapper"><div id="ct">
+        <h1 id="heading">GEN与BLG会师决赛</h1>
+        <div id="score" style="font-size: 30px">3:<span style="font-size: 24px">0</span></div>
+        <p id="paragraph">A longer body paragraph that wraps onto several lines.</p>
+        <p id="manual">First line<br>Second line</p>
+      </div></div>`);
+    const ir = await extractPage(await browser.newPage(), html);
+    const nodes = Object.fromEntries(ir.ct.children.map(node => [node.id, node]));
+    for (const id of ['heading', 'score']) {
+      assert.equal(nodes[id].styles.whiteSpace, 'normal');
+      assert.equal(nodes[id].singleLine, true);
+      assert.equal(buildTextElement(nodes[id]).options.wrap, false);
+    }
+    assert.equal(nodes.paragraph.singleLine, false);
+    assert.equal(buildTextElement(nodes.paragraph).options.wrap, true);
+    assert.equal(buildTextElement(nodes.manual).options.wrap, true);
+    assert.ok(buildTextElement(nodes.manual).text.some(run => run.options.breakLine));
+  } finally {
+    await browser.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 
 test('chart fallback serializes quoted font families as valid standalone XML', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'ppt-chart-svg-'));

@@ -17,7 +17,7 @@
 .conversation-group-member-time { flex: 0 0 auto; margin-left: 6px; color: #9ca3af; font-size: 11px; line-height: 16px; white-space: nowrap; }
 .conversation-group-batch-checkbox { display: flex; align-items: center; width: 100%; min-width: 0; font-size: 12px; }
 .conversation-group-batch-checkbox .ant-checkbox-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-group-member:hover > .ant-btn, .conversation-group-member:focus-within > .ant-btn { opacity: 1; }
+.conversation-group-member:hover > .ant-btn, .conversation-group-member:has(:focus-visible) > .ant-btn { opacity: 1; }
 .conversation-group-member { position: relative; }
 .conversation-group-member.member-drop-before::before, .conversation-group-member.member-drop-after::after { content: ''; position: absolute; left: 15px; right: 0; height: 2px; background: var(--color-primary, #1677ff); pointer-events: none; }
 .conversation-group-member.member-drop-before::before { top: 0; }

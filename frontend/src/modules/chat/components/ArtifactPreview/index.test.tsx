@@ -54,6 +54,31 @@ it('offers a read-only retry after fetch failure', async () => {
   expect(mocks.download).not.toHaveBeenCalled();
 });
 
+it.each([
+  { url: '/static-files/a-new.txt' },
+  { content: 'updated inline content' },
+])('reloads when the file source changes: %j', async change => {
+  mocks.read.mockResolvedValueOnce(bytes('original')).mockResolvedValueOnce(bytes('updated'));
+  const view = render(<ArtifactPreview target={a} onClose={vi.fn()} />);
+  await screen.findByText('a.txt: original');
+  view.rerender(<ArtifactPreview target={{ ...a, ...change }} onClose={vi.fn()} />);
+  await screen.findByText('a.txt: updated');
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+});
+
+it('uses the latest URL refresh callback when retrying an unchanged artifact', async () => {
+  mocks.read.mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(bytes('recovered'));
+  const firstRefresh = vi.fn();
+  const latestRefresh = vi.fn();
+  const view = render(<ArtifactPreview target={{ ...a, refreshUrl: firstRefresh }} onClose={vi.fn()} />);
+  await screen.findByRole('button', { name: '重新加载' });
+  view.rerender(<ArtifactPreview target={{ ...a, refreshUrl: latestRefresh }} onClose={vi.fn()} />);
+  expect(mocks.read).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
+  await screen.findByText('a.txt: recovered');
+  expect(mocks.read.mock.calls[1][0].refreshUrl).toBe(latestRefresh);
+});
+
 it('preserves citation interactions for inline text without a filename extension', async () => {
   mocks.read.mockResolvedValue(bytes('ReAct [1](#source-1.1)'));
   const { container } = render(<ArtifactPreview target={{ key: 'report', filename: '报告', content: 'ReAct [1](#source-1.1)',

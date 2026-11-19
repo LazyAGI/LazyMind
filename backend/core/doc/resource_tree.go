@@ -175,9 +175,6 @@ func (s *ResourceService) Snapshot(ctx context.Context, op ResourceOperationCont
 		if tree.root.Kind == "knowledge_base" && tree.dataset.CreateUserID != op.Caller.UserID {
 			return ResourceSnapshot{}, resourceErr("FORBIDDEN", "whole knowledge base deletion requires owner")
 		}
-		if err := s.sourceAccess(ctx, op.Caller, tree.dataset.ID, "DELETE"); err != nil {
-			return ResourceSnapshot{}, err
-		}
 	}
 	snapshot := treeSnapshot(trees)
 	snapshot.PreviewResources, err = s.snapshotPreviews(ctx, trees)
@@ -228,7 +225,7 @@ func (s *ResourceService) deleteWithRelatedMutation(ctx context.Context, op Reso
 			if ds.CreateUserID != op.Caller.UserID && tree.root.Kind == "knowledge_base" {
 				return out, resourceErr("FORBIDDEN", "whole knowledge base deletion requires owner")
 			}
-			if err = s.checkSource(ctx, tx, op.Caller, ds.ID, "DELETE"); err != nil {
+			if err = resourcePreparedPolicy(tx, op.Caller, ds.ID, "DELETE"); err != nil {
 				return out, err
 			}
 			if !locked[ds.ID] {

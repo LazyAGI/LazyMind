@@ -43,9 +43,9 @@ it.each(cases)('exposes source for $label, including read-only data', async ({ t
     revision: 1, created_at: '2026-09-16', content_type: type, artifact_value: value };
   render(<SlotRenderer slot={slot} readOnly expectedType={expectedType} widget={widget} />);
   fireEvent.click(await screen.findByRole('button', { name: '展示源码' }));
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue(
     typeof expected === 'string' ? expected : JSON.stringify(expected, null, 2));
-  expect(screen.getByRole('textbox', { name: '源码' })).toHaveAttribute('readonly');
+  expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveAttribute('readonly');
 });
 
 it('keeps the source accessible without revealing a disabled Markdown download action', async () => {
@@ -69,10 +69,10 @@ it('displays PPT prompt text literally even with a legacy Markdown descriptor', 
   expect(container.querySelector('.writer-markdown-editor')).toBeNull();
   expect(container.querySelector('i, sub, sup')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(prompt);
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue(prompt);
 });
 
-it.each(['academic_brief', 'deck_outline'])('renders %s as Markdown and preserves comments in editable source', async (slotName) => {
+it.each(['academic_brief', 'deck_outline'])('opens %s in the Markdown editor with comments, formulas and tables', async (slotName) => {
   const text = '<!-- 汇报共 8 页 -->\n\n## 方法与证据\n\n**复杂度**：$O(n)$\n\n| 指标 | 数值 |\n| --- | --- |\n| 准确率 | 95% |';
   const slot = { slot_id: slotName, slot: slotName, selected: true,
     revision: 1, created_at: '', content_type: 'text', artifact_value: { text },
@@ -82,9 +82,9 @@ it.each(['academic_brief', 'deck_outline'])('renders %s as Markdown and preserve
   expect(await screen.findByRole('heading', { name: '方法与证据' })).toBeVisible();
   expect(screen.getByRole('table')).toHaveTextContent('95%');
   expect(screen.queryByText(/文档格式暂时无法解析/)).not.toBeInTheDocument();
-  expect(container.querySelector('.writer-markdown-editor')).toBeNull();
-  fireEvent.click(container.querySelector('.workflow-slot__text--markdown')!);
-  expect(await screen.findByRole('textbox', { name: '编辑文本' })).toHaveValue(text);
+  expect(container.querySelector('.writer-markdown-editor')).toBeInTheDocument();
+  expect(await screen.findByRole('textbox', { name: 'editable markdown' })).toHaveAttribute('contenteditable', 'true');
+  expect(container.querySelector('.workflow-slot__text-editor')).toBeNull();
 });
 
 it('loads historical offloaded research analysis as Markdown without requiring a widget', async () => {
@@ -99,10 +99,25 @@ it('loads historical offloaded research analysis as Markdown without requiring a
   fireEvent.doubleClick(screen.getByRole('heading', { name: '科研内容分析' }));
   expect(screen.queryByRole('textbox', { name: '编辑文本' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
-  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(text);
+  expect(await screen.findByRole('textbox', { name: '查看源码' })).toHaveValue(text);
 });
 
-it('opens the complete PPT design source for editing without treating section toggles as edits', async () => {
+it.each(['academic_brief', 'deck_outline'].flatMap(slotName =>
+  ['panel', 'widget', 'unselected', 'descriptor', 'save-capability'].map(reason => ({ slotName, reason }))))(
+  'does not enable $slotName editing when blocked by $reason', async ({ slotName, reason }) => {
+    const slot = { slot_id: slotName, slot: slotName, selected: reason !== 'unselected',
+      revision: 1, created_at: '', content_type: 'text', artifact_value: { text: '## 只读大纲\n\n正文' },
+      artifact_id: 'legacy-markdown', document: { representation: 'markdown', editable: reason !== 'descriptor',
+        capabilities: reason === 'save-capability' ? [] : ['save'] },
+    } as SlotRevision;
+    const { container } = render(<SlotRenderer slot={slot} sessionId='permission-test' readOnly={reason === 'panel'}
+      widget={{ widgetType: 'text-markdown', readOnly: reason === 'widget' }} />);
+    fireEvent.click(await screen.findByRole('heading', { name: '只读大纲' }));
+    expect(container.querySelector('[contenteditable="true"], .workflow-slot__text-editor')).toBeNull();
+  },
+);
+
+it('opens the PPT Markdown editor without treating section toggles as edits', async () => {
   const text = '**设计风格：** 蓝白\n\n布局：左右双栏\n\n设计要求：保留全部文字 <div>原始示例</div>';
   const slot: SlotRevision = { slot_id: 'slide_outline', slot: 'slide_outline', selected: true,
     revision: 1, created_at: '', content_type: 'text', artifact_value: { text }, list_index: 6 };
@@ -110,5 +125,24 @@ it('opens the complete PPT design source for editing without treating section to
   fireEvent.click(container.querySelector('summary')!);
   expect(screen.queryByRole('textbox', { name: '编辑文本' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '编辑文本' }));
-  expect(await screen.findByRole('textbox', { name: '编辑文本' })).toHaveValue(text);
+  expect(await screen.findByRole('textbox', { name: 'editable markdown' })).toHaveAttribute('contenteditable', 'true');
+  expect(container.querySelector('.writer-markdown-editor')).toBeInTheDocument();
+  expect(container.querySelector('.workflow-slot__text-editor')).toBeNull();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+it.each([false, true])('shows reserved PPT notes as status without document actions (descriptor: %s)', (withDocument) => {
+  const text = '<!-- lazymind-ppt-placeholder -->\n第 1 页尚未生成或发布成功，请重试该页。';
+  const slot = { slot_id: 'notes', slot: 'notes', selected: true,
+    revision: 1, created_at: '', content_type: 'text', artifact_value: { text },
+    ...(withDocument ? { artifact_id: 'reserved-notes', document: {
+      representation: 'markdown', editable: true, capabilities: ['save', 'download', 'publish'],
+    } } : {}),
+  } as SlotRevision;
+  const { container } = render(<SlotRenderer slot={slot} sessionId='ppt-session' widget={{ widgetType: 'text-markdown' }} />);
+  expect(screen.getByRole('alert')).toHaveTextContent('第 1 页尚未生成或发布成功，请重试该页。');
+  expect(container.querySelector('.writer-markdown-editor')).toBeNull();
+  expect(screen.queryByText(/文档格式暂时无法解析/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/lazymind-ppt-placeholder/)).not.toBeInTheDocument();
+  expect(screen.queryAllByRole('button')).toHaveLength(0);
 });

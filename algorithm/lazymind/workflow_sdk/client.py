@@ -16,6 +16,8 @@ import httpx
 from .input_bindings import normalize_input_bindings
 
 CONTRACT_VERSION = 'workflow.v1'
+MAX_SKILL_ZIP_BYTES = 100 << 20
+SKILL_ZIP_SUBMISSION_TIMEOUT = 300.0
 
 
 class WorkflowClientError(RuntimeError):
@@ -58,6 +60,7 @@ class AdvanceRequest:
     handoff: bool = False
     retry_origin: str = 'automatic'
     command_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    resume_for_rerun: bool = False
 
 
 @dataclass(frozen=True)
@@ -457,6 +460,9 @@ class WorkflowClient:
                    'workflow_mode': request.workflow_mode,
                    'retry_origin': request.retry_origin,
                    'steps': [asdict(step) for step in request.steps]}
+        if request.resume_for_rerun:
+            payload['resume_for_rerun'] = True
+            payload['trigger_history_id'] = self.trigger_history_id
         if self.enable_tool_retrieval is not None:
             payload['parent_agentic_config'] = {'enable_tool_retrieval': self.enable_tool_retrieval}
         if self.trace_context is not None:
@@ -602,9 +608,16 @@ class WorkflowClient:
             'idempotency_key': command_id,
         }
         try:
+            request_timeout = self.timeout
+            if skill.get('zip_base64'):
+                # A 100 MiB ZIP expands to roughly 134 MiB of JSON before the
+                # server can acknowledge the task. Keep the normal short
+                # timeout for URL sources, but do not turn a large local upload
+                # into a false TASK_SUBMISSION_UNCERTAIN result.
+                request_timeout = max(request_timeout, SKILL_ZIP_SUBMISSION_TIMEOUT)
             response = self._decode(self.transport.post(
                 self.base_url + '/external-agent/workflow-tasks',
-                json=payload, headers=self._headers(command_id), timeout=self.timeout,
+                json=payload, headers=self._headers(command_id), timeout=request_timeout,
             ))
         except httpx.RequestError as exc:
             raise WorkflowClientError(
@@ -624,11 +637,11 @@ class WorkflowClient:
         path = Path(source.pop('zip_path')).expanduser()
         try:
             with path.open('rb') as archive:
-                content = archive.read((20 << 20) + 1)
+                content = archive.read(MAX_SKILL_ZIP_BYTES + 1)
         except OSError as exc:
             raise WorkflowClientError('SKILL_ZIP_UNREADABLE', f'Cannot read Skill ZIP: {exc}') from exc
-        if not content or len(content) > 20 << 20:
-            raise WorkflowClientError('SKILL_ZIP_INVALID', 'Skill ZIP must be non-empty and no larger than 20 MiB.')
+        if not content or len(content) > MAX_SKILL_ZIP_BYTES:
+            raise WorkflowClientError('SKILL_ZIP_INVALID', 'Skill ZIP must be non-empty and no larger than 100 MiB.')
         source['zip_base64'] = base64.b64encode(content).decode('ascii')
         return source
 

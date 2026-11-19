@@ -24,6 +24,84 @@ when_to_use: >
   delivery mode: static or dynamic.
 
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      classify_request:
+        tools: []
+      ordinary_prepare:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      ordinary_generate:
+        tools:
+        - name: image_generator
+          source: global
+      edit_prepare:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      edit_candidate:
+        tools:
+        - name: image_editor
+          source: global
+      meme_brief:
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      meme_preflight:
+        tools: []
+      canonical_character:
+        tools:
+        - name: image_generator
+          source: global
+      build_identity_anchors:
+        tools:
+        - name: image_generator
+          source: global
+      understand_states:
+        tools: []
+      design_best_performances:
+        tools: []
+      plan_static:
+        tools: []
+      render_static:
+        tools:
+        - name: image_generator
+          source: global
+      caption_static:
+        tools: []
+      plan_dynamic:
+        tools: []
+      render_keyframes:
+        tools:
+        - name: image_generator
+          source: global
+      video_canary:
+        tools:
+        - name: video_generator
+          source: global
+      render_dynamic:
+        tools:
+        - name: video_generator
+          source: global
+      caption_dynamic:
+        tools: []
+      review_pack:
+        tools: []
   clarification_fields:
     - id: image_goal
       label: 图片主体或修改要求

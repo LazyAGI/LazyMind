@@ -69,6 +69,79 @@ function publishedSource(markdown: string) {
   return markdown.replace(/^<a id="block-user-[^"]+"><\/a>\r?\n/gm, '');
 }
 
+it('edits Markdown containing comments, literal tags, JSON and formulas without changing their source', async () => {
+  const markdown = [
+    '<!-- 汇报共 8 页 -->', '', '# 方法与证据', '',
+    '<!-- 多行注释', '保留内部说明 {"pages":8}', '-->', '',
+    '原始段落<!-- 行内备注 -->。', '',
+    '标签示例 <sup>/<sub>，JSON {"color":"#FFFFFF"}。', '',
+    '上标 x<sup>2</sup> 与下标 H<sub>2</sub>O。', '',
+    '行内公式 $\\frac{1}{n}$，复杂度 $O(n)$。', '',
+    '$$', '\\sum_{i=1}^{n} i', '$$', '',
+    '行内代码 `<!-- 示例 -->` 与 `{value}`。', '',
+    '```html', '<!-- 代码注释 -->', '<sup>', '{"code": true}', '```', '',
+    '| 指标 | 数值 |', '| --- | --- |', '| 准确率 | 95% |', '',
+    '<a id="paper-ref-1" />', '', '[来源](#paper-ref-1)',
+  ].join('\n');
+  let flush: (() => Promise<boolean>) | undefined;
+  const onSave = vi.fn(async (value: string) => ({ markdown: value, revision: 2 }));
+  const { container } = render(<SlotEditingContext.Provider value={{ setEditing: vi.fn(), registerFooterAction: () => () => {},
+    registerFlush: (_key, callback) => { flush = callback; return () => {}; },
+  }}><MarkdownArtifactEditor editingKey='compatibility' markdown={markdown} sourceRevision={1} onSave={onSave} /></SlotEditingContext.Provider>);
+  await waitFor(() => expect(capture.editor).not.toBeNull());
+  expect(capture.importError).toBe('');
+  const content = container.querySelector('.mdxeditor-root-contenteditable')!;
+  expect(content).not.toHaveTextContent('汇报共 8 页');
+  expect(content).not.toHaveTextContent('保留内部说明');
+  expect(content).not.toHaveTextContent('行内备注');
+  expect(content).toHaveTextContent('标签示例 <sup>/<sub>，JSON {"color":"#FFFFFF"}。');
+  expect(content.querySelector('sup')).toHaveTextContent('2');
+  expect(content.querySelector('sub')).toHaveTextContent('2');
+  expect(Array.from(content.querySelectorAll('annotation[encoding="application/x-tex"]'), node => node.textContent))
+    .toEqual(['\\frac{1}{n}', 'O(n)', '\\sum_{i=1}^{n} i']);
+  expect(content).toHaveTextContent('<!-- 示例 -->');
+  expect(content).toHaveTextContent('<!-- 代码注释 -->');
+  expect(content.querySelector('a[href="#paper-ref-1"]')).toBeInTheDocument();
+  expect(onSave).not.toHaveBeenCalled();
+  for (const [before, after] of [['原始段落。', '修改段落。'], ['修改段落。', '再次修改。']]) {
+    await replaceText(before, after);
+    await act(async () => expect(await flush!()).toBe(true));
+    expect(publishedSource(onSave.mock.calls[onSave.mock.calls.length - 1][0])).toBe(markdown.replace('原始段落', after.slice(0, -1)));
+  }
+});
+
+it.each([
+  ['multiline code span', '代码 ``first\n<!-- 示例 -->\n<sup> {value}``。', '\n'],
+  ['indented code', '    <!-- 示例 -->\n    <sup> {value}', '\n'],
+  ['quoted code block', '> ```html\n> <!-- 示例 -->\n> <sup> {value}\n> ```', '\n'],
+  ['quoted formula', '> $$\n> \\frac{1}{n}\n> $$', '\n'],
+  ['CRLF and Unicode', '<!-- 注释 😀 -->\n\n中文 $x_{i}$ 与 `{"中文":1}`。', '\r\n'],
+])('preserves %s source through save, reload and another save', async (_kind, fragment, newline) => {
+  const markdown = ['先前段落。', '', fragment, '', '最后段落。', ''].join('\n').replace(/\n/g, newline);
+  let revision = 1;
+  const onSave = vi.fn(async (value: string) => ({ markdown: value, revision: ++revision }));
+  let flush: (() => Promise<boolean>) | undefined;
+  const context = { setEditing: vi.fn(), registerFooterAction: () => () => {},
+    registerFlush: (_key: string, callback: () => Promise<boolean>) => { flush = callback; return () => {}; } };
+  const view = (value: string, version: number) => <SlotEditingContext.Provider value={context}>
+    <MarkdownArtifactEditor editingKey='roundtrip' markdown={value} sourceRevision={version} onSave={onSave} />
+  </SlotEditingContext.Provider>;
+  const { rerender } = render(view(markdown, 1));
+  await waitFor(() => expect(capture.editor).not.toBeNull());
+  expect(capture.importError).toBe('');
+  expect(onSave).not.toHaveBeenCalled();
+  await replaceText('先前段落。', '编辑段落。');
+  await act(async () => expect(await flush!()).toBe(true));
+  const firstSave = markdown.replace('先前段落。', '编辑段落。');
+  expect(onSave.mock.calls[0][0]).toBe(firstSave);
+  rerender(view(firstSave, 2));
+  await replaceText('最后段落。', '再次修改。');
+  await act(async () => expect(await flush!()).toBe(true));
+  expect(onSave).toHaveBeenCalledTimes(2);
+  expect(onSave.mock.calls[1][0]).toBe(firstSave.replace('最后段落。', '再次修改。'));
+  expect(capture.importError).toBe('');
+});
+
 it('saves only a new section and a later text edit, retaining untouched README source', async () => {
   let revision = 1;
   const onSave = vi.fn(async (markdown: string) => ({ markdown, revision: ++revision }));
@@ -109,9 +182,9 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   // reformatted replacement when its mapping is unavailable.
   const menu = document.querySelector<HTMLDetailsElement>('.writer-document-options')!;
   act(() => { menu.open = true; fireEvent(menu, new Event('toggle')); });
-  fireEvent.click(screen.getByRole('button', { name: '源码' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看源码' }));
   expect(onSave).not.toHaveBeenCalled();
-  expect(screen.queryByRole('textbox', { name: '源码' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: '查看源码' })).not.toBeInTheDocument();
   capture.abortDiff = false;
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -119,10 +192,10 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   const unsavedMarkdown = source.replace('Original paragraph.', 'Unsaved paragraph.');
   expect(publishedSource(savedMarkdown)).toBe(unsavedMarkdown);
   // Calling onSave starts persistence; its receipt updates the source preview.
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(unsavedMarkdown));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue(unsavedMarkdown));
   await act(async () => { finishSave!(); });
-  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(savedMarkdown));
-  expect(screen.getByRole('textbox', { name: '源码' })).toHaveAttribute('readonly');
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveValue(savedMarkdown));
+  expect(screen.getByRole('textbox', { name: '查看源码' })).toHaveAttribute('readonly');
 }, 15000);
 
 it('round-trips the repository README editor input with only the added content in the diff', async () => {
@@ -160,13 +233,25 @@ it.each(['ref-001', 'SRC-001', 'KB-001', 'source.v2_甲'])('preserves and naviga
   await replaceText('Original paragraph.', 'Edited paragraph.');
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1), { timeout: 3000 });
   expect(publishedSource(onSave.mock.calls[0][0])).toBe(source.replace('Original paragraph.', 'Edited paragraph.'));
-  expect(document.getElementById(`paper-ref-${id}`)).toHaveClass('writer-markdown-editor__system-anchor');
+  const target = document.getElementById(`paper-ref-${id}`)!;
+  expect(target).toHaveClass('writer-markdown-editor__system-anchor');
   const surface = document.querySelector<HTMLElement>('.writer-markdown-editor__surface')!;
+  // JSDOM does not lay out the document; model an overflowing editor viewport.
+  surface.style.overflowY = 'auto';
+  Object.defineProperties(surface, {
+    clientHeight: { value: 300 },
+    scrollHeight: { value: 1800 },
+    clientTop: { value: 1 },
+  });
+  surface.scrollTop = 100;
+  vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 200, 600, 300));
+  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 900, 600, 20));
   surface.scrollTo = vi.fn();
   const link = document.querySelector<HTMLAnchorElement>(`a[href="#paper-ref-${id}"]`)!;
   expect(link.textContent).toBe('[1]');
   fireEvent.click(link);
-  expect(surface.scrollTo).toHaveBeenCalled();
+  expect(surface.scrollTo).toHaveBeenCalledTimes(1);
+  expect(surface.scrollTo).toHaveBeenCalledWith({ top: 791, behavior: 'smooth' });
 }, 15000);
 
 it('selects a bibliography entry and saves a canonical citation through the real editor', async () => {

@@ -1,7 +1,10 @@
 .knowledge-create-modal {
   .ant-modal-body {
     max-height: calc(100vh - 180px);
+    margin-inline-end: -16px;
+    padding-inline-end: 16px;
     overflow-y: auto;
+    scrollbar-gutter: stable;
   }
 }
 
@@ -127,4 +130,29 @@
   display: block;
   width: 100%;
   height: 32px;
+}
+
+.knowledge-scene-grid.ant-radio-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.knowledge-scene-card.ant-radio-wrapper {
+  position: relative;
+  margin: 0;
+  padding: 12px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  transition: border-color .15s, background .15s;
+  > .ant-radio { position: absolute; right: 8px; top: 8px; }
+  > span:last-child { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0; font-size: 13px; }
+  &:hover { border-color: #91b7f4; }
+  &.ant-radio-wrapper-checked { border-color: #3271d9; background: #f5f8ff; }
+  &:focus-within { outline: 2px solid #91b7f4; outline-offset: 2px; }
+  &.ant-radio-wrapper-disabled { opacity: .5; background: #fafafa; }
+}
+@media (max-width: 480px) {
+  .knowledge-scene-grid.ant-radio-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -65,6 +65,8 @@ def _worker_with_processor(monkeypatch, processor):
     from lazymind.config import config
 
     monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
+    from lazymind.parsing.service import embedding_reset
+    monkeypatch.setattr(embedding_reset, 'index_state', lambda: {'generation': 0, 'phase': 'ready'})
     worker = importlib.import_module('lazymind.processor.service.worker')
     base_impl = worker.DocumentProcessorWorker._Impl.__mro__[1]
     monkeypatch.setattr(base_impl, '_get_processor', lambda _self: processor)
@@ -215,3 +217,236 @@ def test_worker_image_only_reembed_succeeds_without_rewriting_image(monkeypatch,
         assert ordinary_calls == [True]
     finally:
         processor._thread_pool.shutdown(wait=False)
+
+
+def test_full_rebuild_expanded_source_selection_rereads_original(monkeypatch):
+    store = _Store()
+    processor = _Processor(store)
+    worker = _worker_with_processor(monkeypatch, processor)
+    calls = []
+    initialized = []
+    store._seg_init = lambda: initialized.append('segments')
+    store._vec_init = lambda: initialized.append('vectors')
+    base_impl = type(worker).__mro__[1]
+    monkeypatch.setattr(base_impl, '_exec_reparse_task',
+                        lambda _self, _processor, _task, payload, *_args: calls.append(payload))
+    try:
+        payload = {'strategy': 'rebuild', 'processing_level': 'chunked',
+                   'ng_names': [LAZY_ROOT_NAME, 'block', 'line']}
+        worker._exec_reparse_task(processor, 'task', payload, _node_groups(), {}, None)
+        assert calls[-1]['ng_names'] is None
+        assert initialized == ['segments', 'vectors']
+        assert payload['ng_names'] == [LAZY_ROOT_NAME, 'block', 'line']
+        for selection, strategy in [(['block'], 'rebuild'), ([LAZY_ROOT_NAME, 'block'], 'reembed')]:
+            payload = {'strategy': strategy, 'ng_names': selection}
+            worker._exec_reparse_task(processor, 'task', payload, _node_groups(), {}, None)
+            assert calls[-1]['ng_names'] == selection
+    finally:
+        processor._thread_pool.shutdown(wait=False)
+
+
+def test_full_source_rebuild_defers_optional_llm_groups_but_explicit_selection_runs(monkeypatch):
+    from types import SimpleNamespace
+    processor = SimpleNamespace()
+    called = []
+
+    def rebuild(group_name, groups):
+        called.append(group_name)
+        if group_name is None:
+            processor._reparse_docs('doc-summary', groups)
+            processor._reparse_docs('block', groups)
+
+    processor._reparse_docs = rebuild
+    _worker_with_processor(monkeypatch, processor)
+    module = importlib.import_module('lazymind.processor.service.worker')
+    module._install_deferred_group_guard(processor)
+    processor._reparse_docs(None, _node_groups())
+    assert called == [None, 'block']
+    processor._reparse_docs('doc-summary', _node_groups())
+    assert called == [None, 'block', 'doc-summary']
+
+
+def test_index_task_connects_before_read_but_parse_only_does_not(monkeypatch):
+    store = _Store()
+    processor = _Processor(store)
+    worker = _worker_with_processor(monkeypatch, processor)
+    connected = []
+    store._seg_init = lambda: connected.append('segments')
+    store._vec_init = lambda: connected.append('vectors')
+    try:
+        worker._lazymind_task_indexes = False
+        worker._get_processor()
+        assert connected == []
+        worker._lazymind_task_indexes = True
+        worker._get_processor()
+        assert connected == ['segments', 'vectors']
+    finally:
+        processor._thread_pool.shutdown(wait=False)
+
+
+def test_worker_loop_recovers_from_queue_exception_and_respects_shutdown(monkeypatch):
+    from types import SimpleNamespace
+    worker = _worker_with_processor(monkeypatch, SimpleNamespace())
+    worker._shutdown = False
+    module = importlib.import_module('lazymind.processor.service.worker')
+    attempts = []
+    waits = []
+
+    def consume(_self):
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise ConnectionError('database restarting')
+        return 'finished'
+
+    monkeypatch.setattr(type(worker).__mro__[1], '_worker_impl', consume)
+    monkeypatch.setattr(module.time, 'sleep', waits.append)
+    assert worker._worker_impl() == 'finished'
+    assert len(attempts) == 2
+    assert waits == [5]
+    worker._shutdown = True
+    worker._worker_impl()
+    assert len(attempts) == 2
+
+
+def test_explicit_summary_survives_full_rebuild_fallback(monkeypatch):
+    from types import SimpleNamespace
+    processor = SimpleNamespace()
+    _worker_with_processor(monkeypatch, processor)
+    module = importlib.import_module('lazymind.processor.service.worker')
+    calls = []
+    roots_present = False
+
+    def rebuild(group_name, groups):
+        nonlocal roots_present
+        calls.append(group_name)
+        if group_name == 'doc-summary' and not roots_present:
+            return processor._reparse_docs(None, groups)
+        if group_name is None:
+            roots_present = True
+            processor._reparse_docs('doc-summary', groups)
+
+    processor._reparse_docs = rebuild
+    module._install_deferred_group_guard(processor)
+    processor._reparse_docs('doc-summary', _node_groups())
+    assert calls == ['doc-summary', None, 'doc-summary']
+
+
+@pytest.mark.parametrize('other,expected', [
+    (None, 'FAILED'), ('same-doc-live', 'WORKING'), ('expired', 'FAILED'),
+    ('other-library', 'FAILED'), ('unowned', 'WORKING'), ('malformed', 'WORKING'),
+    ('newer-marker', 'WORKING'),
+])
+def test_reclaimed_add_recovers_only_orphaned_node_groups(monkeypatch, other, expected):
+    import json
+    from contextlib import contextmanager
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+    from sqlalchemy import Column, DateTime, String, create_engine
+    from sqlalchemy.orm import declarative_base, sessionmaker
+
+    worker = _worker_with_processor(monkeypatch, SimpleNamespace())
+    module = importlib.import_module('lazymind.processor.service.worker')
+    base = declarative_base()
+
+    class Task(base):
+        __tablename__ = 'tasks'
+        task_id = Column(String, primary_key=True)
+        worker_id = Column(String)
+        status = Column(String)
+        lease_expires_at = Column(DateTime)
+        updated_at = Column(DateTime)
+        message = Column(String)
+
+    class Group(base):
+        __tablename__ = 'groups'
+        node_group_id = Column(String, primary_key=True)
+        doc_id = Column(String)
+        kb_id = Column(String)
+        status = Column(String)
+        error_msg = Column(String)
+        updated_at = Column(DateTime)
+
+    engine = create_engine('sqlite://')
+    base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+
+    @contextmanager
+    def session():
+        with sessions.begin() as s:
+            yield s
+
+    manager = SimpleNamespace(get_session=session, get_table_orm_class=lambda name:
+                              Task if name == 'tasks' else Group)
+    worker._worker_id = 'current-worker'
+    worker._waiting_task_queue = SimpleNamespace(_sql_manager=manager, _table_name='tasks')
+    worker._db_manager = manager
+    now = datetime.now()
+    with session() as s:
+        s.add(Task(task_id='current', worker_id='someone-else' if other == 'unowned' else 'current-worker',
+                   status='WORKING', lease_expires_at=now + timedelta(minutes=5), updated_at=now))
+        s.add(Group(node_group_id='block', doc_id='doc', kb_id='kb', status='WORKING',
+                    updated_at=now + timedelta(minutes=1) if other == 'newer-marker' else now - timedelta(minutes=10)))
+        s.add(Group(node_group_id='line', doc_id='doc', kb_id='kb', status='SUCCESS', updated_at=now))
+        if other not in (None, 'unowned', 'newer-marker'):
+            message = json.dumps({'kb_id': 'other' if other == 'other-library' else 'kb',
+                                  'file_infos': [{'doc_id': 'doc'}]})
+            s.add(Task(task_id='other', worker_id='another-worker', status='WORKING',
+                       lease_expires_at=now + timedelta(minutes=-1 if other == 'expired' else 5),
+                       message='invalid-json' if other == 'malformed' else message))
+    module._recover_owned_node_groups(worker, 'current', {'kb_id': 'kb', 'file_infos': [{'doc_id': 'doc'}]})
+    with session() as s:
+        assert s.get(Group, 'block').status == expected
+        assert s.get(Group, 'line').status == 'SUCCESS'
+    engine.dispose()
+
+
+@pytest.mark.parametrize('reader_fails', [False, True])
+def test_parse_only_rebuild_replaces_roots_without_touching_chunks_or_vectors(monkeypatch, tmp_path, reader_fails):
+    from types import SimpleNamespace
+    from lazyllm.tools.rag.store.document_store import _DocumentStore
+    module = importlib.import_module('lazymind.processor.service.worker')
+    store = _DocumentStore({'type': 'SQLiteStore', 'kwargs': {'db_path': str(tmp_path / 'segments.db')}},
+                           group_embed_keys={}, embed={})
+    store.activate_group([LAZY_ROOT_NAME, LAZY_IMAGE_GROUP, 'block'])
+    metadata = {'docid': 'doc', 'kb_id': 'kb'}
+    old = DocNode(text='old source', group=LAZY_ROOT_NAME, global_metadata=metadata)
+    chunk = DocNode(text='retained chunk', group='block', global_metadata=metadata)
+    store.update_nodes([old, chunk], skip_embed_groups={LAZY_ROOT_NAME, 'block'})
+    fresh = DocNode(text='new source', group=LAZY_ROOT_NAME, global_metadata=metadata)
+
+    def load(*args, **kwargs):
+        if reader_fails:
+            raise RuntimeError('reader unavailable')
+        return {LAZY_ROOT_NAME: [fresh], LAZY_IMAGE_GROUP: []}
+
+    def forbid_vectors():
+        raise AssertionError('parse-only operation initialized vectors')
+
+    monkeypatch.setattr(store, '_vec_init', forbid_vectors)
+    processor = _Processor(store)
+    payload = {'kb_id': 'kb', 'file_infos': [{'doc_id': 'doc', 'file_path': '/paper.pdf'}]}
+    try:
+        if reader_fails:
+            with pytest.raises(RuntimeError, match='reader unavailable'):
+                module._replace_parsed_roots(processor, payload, _node_groups(), SimpleNamespace(load_data=load))
+        else:
+            module._replace_parsed_roots(processor, payload, _node_groups(), SimpleNamespace(load_data=load))
+        roots = store.seg_impl.get(store._gen_collection_name(LAZY_ROOT_NAME), {'docid': ['doc'], 'kb_id': 'kb'})
+        assert {row['uid'] for row in roots} == {old.uid if reader_fails else fresh.uid}
+        chunks = store.seg_impl.get(store._gen_collection_name('block'), {'docid': ['doc'], 'kb_id': 'kb'})
+        assert {row['uid'] for row in chunks} == {chunk.uid}
+    finally:
+        processor._thread_pool.shutdown(wait=False)
+
+
+def test_parse_only_partial_batch_keeps_every_previous_source():
+    from types import SimpleNamespace
+    module = importlib.import_module('lazymind.processor.service.worker')
+    # The reader can silently skip one failed file; no storage access is allowed.
+    processor = SimpleNamespace(_prepare_doc_inputs=lambda *a: (['a', 'b'], [{}, {}], 'kb'))
+    reader = SimpleNamespace(load_data=lambda *a, **k: {
+        LAZY_ROOT_NAME: [DocNode(text='a', global_metadata={'docid': 'a'})]})
+    payload = {'kb_id': 'kb', 'file_infos': [
+        {'doc_id': doc, 'file_path': f'/{doc}.pdf'} for doc in ('a', 'b')]}
+    with pytest.raises(RuntimeError, match='incomplete documents'):
+        module._replace_parsed_roots(processor, payload, _node_groups(), reader)

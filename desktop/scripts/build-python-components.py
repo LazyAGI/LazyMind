@@ -23,6 +23,7 @@ from packaging.utils import canonicalize_name
 SEEDS = {
     'rag': {'milvus-lite', 'pymilvus', 'spacy', 'sentencepiece', 'nltk'},
 }
+CLUSTER_SEEDS = {'umap-learn', 'numba', 'llvmlite', 'pynndescent'}
 
 
 def digest(data):
@@ -33,7 +34,8 @@ def encoded(value):
     return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
 
 
-def dependency_groups(distributions, protected):
+def dependency_groups(distributions, protected, defer_cluster=False):
+    component_seeds = {**SEEDS, 'cluster': CLUSTER_SEEDS} if defer_cluster else SEEDS
     edges = {}
     for name, dist in distributions.items():
         edges[name] = set()
@@ -42,7 +44,7 @@ def dependency_groups(distributions, protected):
             if req.marker is None or req.marker.evaluate({'extra': ''}):
                 edges[name].add(canonicalize_name(req.name))
     groups = {}
-    for component, seeds in SEEDS.items():
+    for component, seeds in component_seeds.items():
         missing = seeds - distributions.keys()
         if missing:
             raise RuntimeError(f'{component} seed dependencies missing: {sorted(missing)}')
@@ -71,7 +73,7 @@ def dependency_groups(distributions, protected):
                 changed = True
         if not changed:
             break
-    for component, seeds in SEEDS.items():
+    for component, seeds in component_seeds.items():
         if not seeds <= groups[component]:
             raise RuntimeError(f'{component} is required by core: {sorted(seeds - groups[component])}')
     return groups
@@ -105,7 +107,7 @@ def distribution_files(dist, site):
 DEFAULT_BASE_URL = 'https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/RAG/'
 
 
-def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False):
+def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False, defer_cluster=False):
     # Windows TEMP may use an 8.3 alias (e.g. CUISHA~1); compare canonical paths
     # against the resolved runtime root rather than rejecting the same directory.
     site = Path(sysconfig.get_path('purelib')).resolve()
@@ -130,7 +132,9 @@ def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False):
     protected = {canonicalize_name(Requirement(line.strip()).name)
                  for line in requirements.read_text().splitlines() if line.strip() and not line.lstrip().startswith('#')}
     protected -= set.union(*SEEDS.values())
-    groups = dependency_groups(distributions, protected)
+    if defer_cluster:
+        protected -= CLUSTER_SEEDS
+    groups = dependency_groups(distributions, protected, defer_cluster)
     if slim_providers and 'grpcio' not in groups['rag']:
         raise RuntimeError('gRPC is still required by the desktop base; review the dependency boundary')
     full_versions = {name: dist.version for name, dist in sorted(distributions.items())}
@@ -219,6 +223,9 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--slim-providers', action='store_true',
                         help='Remove unused desktop providers and include gRPC in the newly generated RAG bundle')
+    parser.add_argument('--defer-cluster', action='store_true',
+                        help='Generate a separate UMAP/Numba clustering bundle')
     args = parser.parse_args()
     split(args.runtime.resolve(), args.output.resolve(),
-          os.environ.get('LAZYMIND_PYTHON_COMPONENT_BASE_URL') or DEFAULT_BASE_URL, args.slim_providers)
+          os.environ.get('LAZYMIND_PYTHON_COMPONENT_BASE_URL') or DEFAULT_BASE_URL,
+          args.slim_providers, args.defer_cluster)

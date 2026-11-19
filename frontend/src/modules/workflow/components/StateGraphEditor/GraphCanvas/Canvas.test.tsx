@@ -1,12 +1,13 @@
 import { createRef, type ReactNode } from 'react';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import type { Node } from '@xyflow/react';
+import type { Connection, Node, ReactFlowProps } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Canvas, { type CanvasHandle } from './Canvas';
-import { createEmptyModel, type StepNode } from '../core/model';
+import { createEmptyModel, type GraphModel, type StepNode } from '../core/model';
 
 const flow = vi.hoisted(() => ({
   nodes: [] as Node[], setViewport: vi.fn(), screenToFlowPosition: vi.fn(),
+  onConnect: undefined as ReactFlowProps['onConnect'],
   zoom: 1.5, pendingFrames: new Map<number, FrameRequestCallback>(), nextFrame: 0,
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -17,7 +18,17 @@ vi.mock('@xyflow/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@xyflow/react')>();
   return {
     ...actual,
-    ReactFlow: ({ nodes }: { nodes: Node[] }) => { flow.nodes = nodes; return <div className="react-flow" />; },
+    ReactFlow: ({ nodes = [], nodeTypes, onConnect }: ReactFlowProps) => {
+      flow.nodes = nodes;
+      flow.onConnect = onConnect;
+      const Step = nodeTypes!.step;
+      return <div className="react-flow">{nodes.filter(node => node.type === 'step').map(node => (
+        <Step key={node.id} id={node.id} type="step" data={node.data} selected={node.selected ?? false}
+          dragging={false} isConnectable draggable selectable deletable
+          positionAbsoluteX={node.position.x} positionAbsoluteY={node.position.y} zIndex={0} />
+      ))}</div>;
+    },
+    Handle: () => null,
     ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
     useStore: (selector: (state: { nodes: Node[]; transform: number[] }) => unknown) => selector({ nodes: flow.nodes, transform: [0, 0, flow.zoom] }),
     useReactFlow: () => ({
@@ -37,9 +48,11 @@ const model = { ...createEmptyModel(), nodes: [step], layout: { review: { x: 100
 
 beforeEach(() => {
   flow.nodes = [];
+  flow.onConnect = undefined;
   flow.pendingFrames.clear();
   flow.setViewport.mockReset().mockResolvedValue(true);
   flow.screenToFlowPosition.mockReset().mockImplementation((point) => point);
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     const id = ++flow.nextFrame; flow.pendingFrames.set(id, callback); return id;
   });
@@ -60,6 +73,41 @@ function finishFrame() {
 }
 
 describe('canvas authoring geometry', () => {
+  it.each([true, false])('keeps material chips renderable after connecting a step (labels: %s)', (withLabels) => {
+    const source: StepNode = {
+      ...step,
+      inputs: [{ material: 'notes', required: true, alternatives: ['backup'] }],
+      outputs: [{ material: 'summary', required: true }, { material: 'report', required: false }],
+    };
+    const graph: GraphModel = {
+      ...model,
+      nodes: [source, { ...step, id: 'write', label: 'Write' }],
+      slots: withLabels ? {
+        summary: { id: 'summary', type: 'text', label: 'Summary' },
+        report: { id: 'report', type: 'text', label: 'Report' },
+      } : {},
+    };
+    const onModelChange = vi.fn();
+    const view = render(<Canvas model={graph} errors={[]} onModelChange={onModelChange} />);
+    const connection: Connection = { source: 'review', target: 'write', sourceHandle: null, targetHandle: null };
+
+    act(() => flow.onConnect?.(connection));
+
+    expect(screen.getByText(withLabels ? 'Summary' : 'summary')).toBeVisible();
+    expect(screen.getByText(withLabels ? 'Report' : 'report')).toBeVisible();
+    const card = flow.nodes.find(node => node.id === 'review')!;
+    expect(card.data.inputs).toEqual(['notes', 'backup']);
+    expect(card.data.outputs).toEqual(['summary', 'report']);
+    expect(card.data.transitions).toEqual([{ to: 'write' }]);
+    const updated = onModelChange.mock.calls[0][0];
+    expect(updated.nodes[0]).toEqual({ ...source, transitions: [{ to: 'write' }] });
+
+    view.rerender(<Canvas model={updated} errors={[]} onModelChange={onModelChange} />);
+    expect(screen.getByText(withLabels ? 'Summary' : 'summary')).toBeVisible();
+    act(() => flow.onConnect?.(connection));
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+  });
+
   it('blocks the imperative add entry point while readonly and enables it when conversion finishes', () => {
     const ref = createRef<CanvasHandle>();
     const onModelChange = vi.fn();

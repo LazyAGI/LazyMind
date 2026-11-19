@@ -23,6 +23,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/workflow/artifactfile"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/document"
 )
@@ -118,6 +119,7 @@ func (h RemoteHandler) Context(w http.ResponseWriter, r *http.Request) {
 		remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", err.Error())
 		return
 	}
+
 	remoteReply(w, 200, value, "", "")
 }
 
@@ -358,21 +360,29 @@ func (h RemoteHandler) UploadArtifactFile(w http.ResponseWriter, r *http.Request
 		remoteReply(w, http.StatusUnprocessableEntity, nil, "INVALID_ARTIFACT_FILE", "content_base64 must contain file data")
 		return
 	}
-	filename := unsafeArtifactFilename.ReplaceAllString(filepath.Base(strings.TrimSpace(body.Filename)), "_")
-	if filename == "" || filename == "." {
-		filename = "artifact.bin"
+	name := filepath.Base(strings.ReplaceAll(strings.TrimSpace(body.Filename), "\\", "/"))
+	base := safeArtifactPathPart(strings.TrimSuffix(name, filepath.Ext(name)))
+	// Interior dots can put a Windows device name before the first extension.
+	base = strings.ReplaceAll(base, ".", "_")
+	if len(base) > 16 {
+		base = base[:16]
 	}
-	ext := filepath.Ext(filename)
-	base := strings.TrimSuffix(filename, ext)
-	digest := fmt.Sprintf("%x", sha256.Sum256(content))
-	filename = base + "-" + digest[:16] + ext
-	dir := filepath.Join(doc.UploadRoot(), "workflow-artifacts",
-		safeArtifactPathPart(ctx.SessionID), safeArtifactPathPart(ctx.AttemptID))
+	contentDigest := sha256.Sum256(content)
+	nameDigest := sha256.New()
+	nameDigest.Write(contentDigest[:])
+	nameDigest.Write([]byte(name))
+	filename := fmt.Sprintf("%s-%x%s", base, nameDigest.Sum(nil)[:12], artifactfile.StorageExtension(name))
+	path, err := artifactfile.StoragePath(filepath.Join(doc.UploadRoot(), "workflow-artifacts"),
+		filename, safeArtifactPathPart(ctx.SessionID), safeArtifactPathPart(ctx.AttemptID))
+	if err != nil {
+		remoteReply(w, http.StatusServiceUnavailable, nil, "ARTIFACT_FILE_WRITE_FAILED", err.Error())
+		return
+	}
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		remoteReply(w, http.StatusServiceUnavailable, nil, "ARTIFACT_FILE_WRITE_FAILED", err.Error())
 		return
 	}
-	path := filepath.Join(dir, filename)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		temp, createErr := os.CreateTemp(dir, ".artifact-*")
 		if createErr != nil {

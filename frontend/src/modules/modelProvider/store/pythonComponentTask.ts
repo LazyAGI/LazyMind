@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { message } from "antd";
+import i18n from "@/i18n";
 import { setTransientRequestErrorsSuppressed } from "@/components/request";
 import { restartRuntime } from "@/runtime/desktopBridge";
 import { getPythonComponents, installPythonComponent, type PythonComponentStatus } from "../api/systemDependencies";
@@ -29,18 +30,19 @@ export function runPythonComponentTask(id: PythonComponentStatus["id"], restartO
   const controller = new AbortController();
   download = restartOnly ? undefined : controller;
   usePythonComponentTask.setState({ id, error: "", phase: restartOnly ? "restarting" : "installing" });
+  const name = i18n.t(id === "cluster" ? "clusterComponent.name" : "ragComponent.name");
   currentTask = (async () => {
     let restarting = false;
     let installed: PythonComponentStatus | undefined;
     try {
       if (!restartOnly) {
-        progress("installing", "正在后台下载并安装本地知识库组件，可以继续浏览其他页面。");
+        progress("installing", i18n.t("ragComponent.installingMessage", { name }));
         installed = await installPythonComponent(id, controller.signal);
       }
       download = undefined;
       setTransientRequestErrorsSuppressed(true);
       restarting = true;
-      progress("restarting", "组件已安装，正在自动重启本地服务…");
+      progress("restarting", i18n.t("ragComponent.restartingMessage"));
       const result = await restartRuntime({ reload: false });
       if (!result.ok && result.reason === "unavailable" && installed?.installMethod === "source") {
         usePythonComponentTask.setState({ phase: "idle", error: "" });
@@ -48,19 +50,19 @@ export function runPythonComponentTask(id: PythonComponentStatus["id"], restartO
         message.info({ key: notificationKey, content: "RAG 依赖已安装。请执行 make local-down，再执行 make local-up LAZYMIND_RAG_ENABLED=false 完成启用。", duration: 12 });
         return;
       }
-      if (!result.ok) throw result.error || new Error("无法自动重启本地服务，请重试启用组件。");
-      progress("verifying", "本地服务已重启，正在确认知识库组件已启用…");
+      if (!result.ok) throw result.error || new Error(i18n.t("ragComponent.restartFailedMessage"));
+      progress("verifying", i18n.t("ragComponent.verifyingMessage", { name }));
       const items = await getPythonComponents();
       if (!items.some(item => item.id === id && item.active)) {
-        throw new Error("组件已安装，但本地知识库服务尚未启用，请重试启用组件。");
+        throw new Error(i18n.t("ragComponent.verifyFailedMessage", { name }));
       }
       usePythonComponentTask.setState({ phase: "success", error: "" });
       window.dispatchEvent(new Event(PYTHON_COMPONENTS_CHANGED_EVENT));
-      message.success({ key: notificationKey, content: "本地知识库组件安装成功，服务已重启并启用。", duration: 5 });
+      message.success({ key: notificationKey, content: i18n.t("ragComponent.successMessage", { name }), duration: 5 });
     } catch (error) {
       if (controller.signal.aborted) {
         usePythonComponentTask.setState({ phase: "idle", error: "" });
-        message.info({ key: notificationKey, content: "已取消组件下载。", duration: 3 });
+        message.info({ key: notificationKey, content: i18n.t("ragComponent.canceledMessage"), duration: 3 });
       } else {
         const detail = pythonComponentErrorText(error);
         usePythonComponentTask.setState({ phase: "error", error: detail });

@@ -1,0 +1,20 @@
+{
+  "adapted_skill_sha256": "2a71473065f04379ffe37f56bbe72ef6479d3480b1e9e765283b8d3b56130efb",
+  "commit": "2574e29377c7173d0cecffef29a6ecbd7f8ccb5d",
+  "connector_configuration": "No connectors installed. .mcp.json is optional host configuration mentioned in prose; offline inputs only.",
+  "connector_path": "marketing/CONNECTORS.md",
+  "endorsement": "No upstream endorsement or collaboration implied.",
+  "files_sha256": {
+    "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "SKILL.md": "2a71473065f04379ffe37f56bbe72ef6479d3480b1e9e765283b8d3b56130efb",
+    "references/CONNECTORS.md": "e85d04dde99b220ba438cf1345212e7414da536fb7d781d83a4ad57270586630"
+  },
+  "license": "Apache-2.0",
+  "license_path": "marketing/LICENSE",
+  "modification": "2026-11-02: change only ../../CONNECTORS.md to references/CONNECTORS.md; namespace frontmatter name to performance-report-offline-20261102 to coexist with the previously imported original",
+  "original_skill_sha256": "997397e23ba5124cdcbbf17e4be9f5cb36f2a2145b5648e02b2852c91c3cc140",
+  "path": "marketing/skills/performance-report/SKILL.md",
+  "repository": "https://github.com/anthropics/knowledge-work-plugins",
+  "upstream": "Anthropic knowledge-work-plugins contributors",
+  "variant": "adapted Skill; not the original unchanged package"
+}

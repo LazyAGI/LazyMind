@@ -179,7 +179,7 @@ func lockSQLiteArxivImport(ctx context.Context, db *gorm.DB, key string) (*arxiv
 	// usage. Never unlink a live shard: a new inode could admit another holder.
 	hash := sha256.Sum256([]byte(key))
 	lockPath := filepath.Join(lockDir, fmt.Sprintf("arxiv-%02x.sqlite", hash[0]%128))
-	lockURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(lockPath)}).String()
+	lockURL := sqliteFileURL(lockPath).String()
 	pool, err := sql.Open("sqlite", lockURL)
 	if err != nil {
 		return nil, err

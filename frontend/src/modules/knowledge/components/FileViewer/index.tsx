@@ -1,3 +1,4 @@
+import type { PdfScrollSyncEndpoint } from "@/components/ui/pdfScrollSync";
 import {
   forwardRef,
   useCallback,
@@ -42,6 +43,7 @@ import { normalizePdfSelectionText } from "@/components/ui/pdfSelectionText";
 
 import "./index.scss";
 import "@/components/ui/PdfPaperReader.css";
+import ParsedDocumentPreview, { type ParsedPreviewTarget } from "./ParsedDocumentPreview";
 import type { ExcelSelection } from "./renderers/render-excel";
 
 export interface FileViewerRef {
@@ -50,9 +52,14 @@ export interface FileViewerRef {
 }
 
 interface FileViewerProps {
+  parsedFallbackTarget?: ParsedPreviewTarget;
   paperMode?: boolean;
+  pdfScrollSync?: PdfScrollSyncEndpoint;
+  pdfToolbarMode?: "full" | "navigation" | "none";
+  pdfSelectableText?: boolean;
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
+  onPdfNoteHighlightClick?: (id:string) => void;
   pdfHeaderStart?: ReactNode;
   pdfHeaderEnd?: ReactNode | ((tools: ReactNode) => ReactNode);
   onPdfStudyOpenChange?: (open: boolean) => void;
@@ -227,6 +234,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     return "unknown";
   }, [fileSuffix]);
 
+  const useParsedFallback = fileType === "unknown" && !!props.parsedFallbackTarget;
+
   const handlePreviewSelection = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (event.target instanceof Node && textSelectionActionRef.current?.contains(event.target)) return;
     if (props.paragraphSelectionMode) {
@@ -308,6 +317,10 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   );
 
   useEffect(() => {
+    if (useParsedFallback) {
+      setFileData(null); setLoading(false); setPreviewError(null);
+      return;
+    }
     if (props.data !== undefined) {
       setFileData(props.data); setLoading(false); setPreviewError(null);
       return;
@@ -337,7 +350,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
         setFileData(null);
       });
     return () => { cancelled = true; };
-  }, [resolvedFileUrl, getFileData, props.data, onPreviewError]);
+  }, [resolvedFileUrl, getFileData, props.data, onPreviewError, useParsedFallback]);
 
   useEffect(() => {
     if (!fileData || (fileType !== "image" && fileType !== "video" && fileType !== "audio")) {
@@ -410,11 +423,13 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "pdf":
         return pdfPreviewData ? (
           <RenderPdf
+            pdfScrollSync={props.pdfScrollSync}
             paperMode={props.paperMode}
+            pdfToolbarMode={props.pdfToolbarMode}
+            pdfSelectableText={props.pdfSelectableText}
             pdfHeaderStart={props.pdfHeaderStart}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
-            paperTitle={props.fileName.replace(/\.pdf$/i, "")}
             onStudyOpenChange={props.onPdfStudyOpenChange}
             pdfIRTarget={props.pdfIRTarget}
             onPdfIRDocumentChange={props.onPdfIRDocumentChange}
@@ -423,6 +438,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             pdfNavigateToPage={props.pdfNavigateToPage}
             pdfNavigateToPosition={props.pdfNavigateToPosition}
             savedNoteHighlights={props.pdfNoteHighlights}
+            onNoteHighlightClick={props.onPdfNoteHighlightClick}
             pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
             className="scroll-container"
             style={{
@@ -443,8 +459,6 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             translateSelectionLabel={t("knowledge.translateSelection")}
             translateSelectionDisabled={!props.translationConfigured}
             translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
-            translateSelectionConfigureLabel={t("knowledge.translationConfigureAction")}
-            translateSelectionConfigureUrl="/settings?section=model_defaults&service=translation"
             learningSelectionActions={props.learningSelectionActions}
             onLearningSelection={props.onLearningSelection}
             onPdfKindDetected={props.onPdfKindDetected}
@@ -539,6 +553,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     pdfFingerprint,
     props.pdfIRTarget,
+    props.pdfScrollSync,
+    props.pdfToolbarMode,
+    props.pdfSelectableText,
     props.paperMode,
     props.onPdfIRDocumentChange,
     props.onPdfOutlineChange,
@@ -546,6 +563,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     props.pdfNavigateToPage,
     props.pdfNavigateToPosition,
     props.pdfNoteHighlights,
+    props.onPdfNoteHighlightClick,
     props.pdfHeaderStart,
     props.pdfHeaderEnd,
     props.file,
@@ -676,9 +694,14 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             >{action.label}</button>)}
           </span>
         ) : null}
-        {loading && renderLoading}
-        {!loading && !fileData && renderEmpty}
-        {!loading && fileData && renderFile}
+        {useParsedFallback && props.parsedFallbackTarget ? <ParsedDocumentPreview
+          key={`${props.parsedFallbackTarget.dataset}/${props.parsedFallbackTarget.document}`}
+          {...props.parsedFallbackTarget}
+        /> : <>
+          {loading && renderLoading}
+          {!loading && !fileData && renderEmpty}
+          {!loading && fileData && renderFile}
+        </>}
       </div>
     </div>
   );

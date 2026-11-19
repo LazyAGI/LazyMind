@@ -369,7 +369,7 @@ func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var session orm.WorkflowSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "id = ?", sessionID).Error; err != nil {
 			return err
@@ -1260,6 +1260,10 @@ func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm
 		if err := db.WithContext(ctx).Where("session_id = ? AND selected = ? AND validity = ?", sessionID, true, "effective").Order("slot_id ASC, list_index ASC").Find(&rows).Error; err != nil {
 			return nil, err
 		}
+		rows, err := controlstore.PresentationSlots(db.WithContext(ctx), rows)
+		if err != nil {
+			return nil, err
+		}
 		return orderSlotRevisions(ctx, db, sessionID, rows), nil
 	}
 
@@ -1301,6 +1305,10 @@ func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm
 		seenIDs[row.ID] = true
 	}
 
+	result, err = controlstore.PresentationSlots(db.WithContext(ctx), result)
+	if err != nil {
+		return nil, err
+	}
 	return orderSlotRevisions(ctx, db, sessionID, result), nil
 }
 

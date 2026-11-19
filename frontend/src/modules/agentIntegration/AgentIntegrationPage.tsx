@@ -1,4 +1,4 @@
-import { workbuddyErrorMessage } from "./workbuddyErrors";
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import { useSettingsDraft } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Alert, Button, Card, Input, Modal, Popover, Space, Spin, Switch, Tag, Tooltip, Typography, message } from "antd";
@@ -41,6 +41,13 @@ import {
 import "./index.scss";
 import ExternalCapabilityAccess from "./ExternalCapabilityAccess";
 import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
+import DSHInstallationGuide from "./DSHInstallationGuide";
+import RepairRequestCopy from "./RepairRequestCopy";
+import { isDisconnectPending, requiresAgentQuit } from "./agentActions";
+import { dshErrorMessage } from "./dshConnection";
+import { agentConnectionReady, agentConnectionStatusKey } from "./agentConnection";
+import { codexErrorMessage } from "./codexErrors";
+import { workbuddyErrorMessage } from "./workbuddyErrors";
 
 interface AgentDefinition {
   id: DesktopAgent;
@@ -72,7 +79,7 @@ const AGENTS: AgentDefinition[] = [
   {
     id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.svg",
     installURL: "https://www.workbuddy.cn",
-    executorName: "WorkBuddy CLI", executorLoginURL: "workbuddy://home",
+    executorName: "WorkBuddy CLI", executorLoginMode: "automatic",
     mcpBindingTarget: "workbuddy-desktop",
   },
   {
@@ -100,6 +107,12 @@ const BRIDGE_RETRY_DELAYS_MS = [250, 750];
 type StatusMap = Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
 type ExecutorPolicyMap = Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
 type BindingMap = Partial<Record<DesktopAgentBindingTarget, string>>;
+
+function unavailableInspections(current: StatusMap): StatusMap {
+  return Object.fromEntries(Object.entries(current).map(([agent, status]) => [agent, {
+    ...status, inspection_unavailable: true, connection: undefined,
+  }]));
+}
 
 async function retryBridgeResult<T extends { ok: boolean; reason?: string }>(call: () => Promise<T>): Promise<T> {
   let result = await call();
@@ -146,6 +159,12 @@ export default function AgentIntegrationPage() {
   const [manualBindingPath, setManualBindingPath] = useState("");
   const [workBuddyGuideOpen, setWorkBuddyGuideOpen] = useState(false);
   const [codexGuideOpen, setCodexGuideOpen] = useState(false);
+  const [dshGuideOpen, setDSHGuideOpen] = useState(false);
+  const openInstallationGuide = (agent: DesktopAgent) => {
+    if (agent === "deepseek-harness") setDSHGuideOpen(true);
+    else if (agent === "codex") setCodexGuideOpen(true);
+    else if (agent === "workbuddy") setWorkBuddyGuideOpen(true);
+  };
   const confirmBindingClose = useSettingsDraft({
     dirty: manualBindingTarget !== null && manualBindingPath !== "",
     saving: Boolean(manualBindingTarget && action === `binding:${manualBindingTarget}`),
@@ -172,10 +191,14 @@ export default function AgentIntegrationPage() {
         else localBridgeUnavailable = true;
       };
       try {
-        const result = await retryBridgeResult(() => agentIntegrationStatuses(refreshInstallations));
+        const result = await retryBridgeResult(() => agentIntegrationStatuses(refreshInstallations))
+          .catch(() => ({ ok: false as const, reason: "operation_failed" }));
         if (!isCurrent()) return;
         if (result.ok) setStatuses(result.data);
-        else recordBridgeFailure(result.reason);
+        else {
+          setStatuses(unavailableInspections);
+          recordBridgeFailure(result.reason);
+        }
 
         const [policyResult, bindingResult] = await Promise.all([
           retryBridgeResult(executorIntegrationPolicies),
@@ -244,17 +267,7 @@ export default function AgentIntegrationPage() {
   useEffect(() => {
     let stopped = false;
     let inFlight = false;
-    const markUnavailable = () => setStatuses(current => {
-      const next = { ...current };
-      for (const agent of ["codex", "workbuddy"] as const) {
-        const status = next[agent];
-        if (!status || !(status.enabled ?? status.state === "enabled")) continue;
-        next[agent] = { ...status, issue: { code: "host_unavailable" }, message: "Connection status is unavailable.",
-          connection: { ...status.connection, mcp_configured: status.connection?.mcp_configured ?? false,
-            control_ready: false, presentation_status: "host-offline", runtime_state: "unavailable" } };
-      }
-      return next;
-    });
+    const markUnavailable = () => setStatuses(unavailableInspections);
     const check = async () => {
       if (stopped || inFlight || document.visibilityState !== "visible" || pendingAgentActions.current.size || refreshInFlight.current) return;
       inFlight = true;
@@ -339,26 +352,32 @@ export default function AgentIntegrationPage() {
   };
 
   const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction, restartConfirmed = false) => {
-    if (["workbuddy", "codex"].includes(agent) && nextAction === "connect" && !restartConfirmed) {
-      if (agent === "codex") setCodexGuideOpen(true); else setWorkBuddyGuideOpen(true);
+    if (["workbuddy", "codex", "deepseek-harness"].includes(agent) && nextAction === "connect" && !restartConfirmed) {
+      openInstallationGuide(agent);
       return;
     }
     if (pendingAgentActions.current.has(agent)) return;
     pendingAgentActions.current.add(agent);
     const key = `${agent}:${nextAction}`;
+    const failureMessage = nextAction === "login"
+      ? t("agentIntegration.loginStates.failed")
+      : t(`agentIntegration.setupFeedback.${nextAction === "disconnect" ? "disableFailed" : "enableFailed"}`);
     try {
+      invalidateRefresh();
       setAction(key);
       const result = await agentIntegrationAction(agent, nextAction);
       if (!result.ok) {
-        const detail = agent === "deepseek-harness" ? t("agentIntegration.dshErrors.operation_failed") : result.error instanceof Error ? result.error.message : result.error ? String(result.error) : result.reason;
-        if (agent === "codex" && restartConfirmed) throw new Error(detail);
+        const detail = failureMessage;
+        const checked = await agentIntegrationStatuses();
+        if (checked.ok) setStatuses(checked.data);
+        if (["codex", "workbuddy", "deepseek-harness"].includes(agent) && restartConfirmed) throw new Error(detail);
         setError(detail);
         return;
       }
       invalidateRefresh();
       setStatuses((current) => ({ ...current, [agent]: result.data }));
       setError("");
-      if (nextAction === "disconnect" && !result.data.can_disconnect && !["enabled", "error", "conflict"].includes(result.data.state)) {
+      if (!requiresAgentQuit(result.data) && nextAction === "disconnect" && !result.data.can_disconnect && !["enabled", "error", "conflict"].includes(result.data.state)) {
         message.success(t("agentIntegration.disconnectSuccess", { agent: result.data.display_name }));
       } else if (nextAction === "login") {
         const definition = AGENTS.find((item) => item.id === agent);
@@ -369,13 +388,15 @@ export default function AgentIntegrationPage() {
             : "agentIntegration.loginStarted", { agent: executorName }));
           setPendingLoginAgent(agent);
         }
-      } else if (result.data.state === "enabled" && !["workbuddy", "codex"].includes(agent)) {
+      } else if (result.data.state === "enabled" && !["workbuddy", "codex", "deepseek-harness"].includes(agent)) {
         message.success(t("agentIntegration.enableSuccess", { agent: result.data.display_name }));
       }
       return result.data;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      if (agent === "codex" && restartConfirmed) throw cause;
+      setError(failureMessage);
+      const checked = await agentIntegrationStatuses();
+      if (checked.ok) setStatuses(checked.data);
+      if (["codex", "workbuddy", "deepseek-harness"].includes(agent) && restartConfirmed) throw cause;
     } finally {
       pendingAgentActions.current.delete(agent);
       setAction((current) => current === key ? "" : current);
@@ -388,7 +409,9 @@ export default function AgentIntegrationPage() {
     const result = await executorIntegrationAction(provider, nextAction);
     setAction("");
     if (!result.ok) {
-      setError(result.error instanceof Error ? result.error.message : result.error ? String(result.error) : result.reason);
+      setError(t(`agentIntegration.setupFeedback.${nextAction === "disable" ? "disableFailed" : "enableFailed"}`));
+      const checked = await executorIntegrationPolicies();
+      if (checked.ok) setExecutorPolicies(checked.data);
       return;
     }
     invalidateRefresh();
@@ -498,7 +521,7 @@ export default function AgentIntegrationPage() {
                       return next;
                     })}
                     onMCPAction={async (agent, operation) => { await runAction(agent, operation); }}
-                    onOpenInstallationGuide={() => agent.id === "codex" ? setCodexGuideOpen(true) : setWorkBuddyGuideOpen(true)}
+                    onOpenInstallationGuide={() => openInstallationGuide(agent.id)}
                     onExecutorAction={runExecutorAction}
                     onBindingAction={runBindingAction}
                     onExternalConfigurationStarted={(target) => {
@@ -515,6 +538,12 @@ export default function AgentIntegrationPage() {
         </section>
       </Spin>
       <ExternalCapabilityAccess />
+      {dshGuideOpen && <DSHInstallationGuide
+        status={statuses["deepseek-harness"]}
+        onConnect={() => runAction("deepseek-harness", "connect", true)}
+        onStatus={(status) => setStatuses(current => ({ ...current, "deepseek-harness": status }))}
+        onClose={() => setDSHGuideOpen(false)}
+      />}
       {codexGuideOpen && <WorkBuddyInstallationGuide
         agent="codex"
         status={statuses.codex}
@@ -525,6 +554,7 @@ export default function AgentIntegrationPage() {
       {workBuddyGuideOpen && <WorkBuddyInstallationGuide
         status={statuses.workbuddy}
         onConnect={() => runAction("workbuddy", "connect", true)}
+        onLogin={() => runAction("workbuddy", "login")}
         onStatus={(status) => setStatuses(current => ({ ...current, workbuddy: status }))}
         onClose={() => setWorkBuddyGuideOpen(false)}
       />}
@@ -578,24 +608,18 @@ function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null):
 }
 
 function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegrationStatus, t: TFunction): string {
-  if (["codex", "workbuddy"].includes(agent) && status.issue && ["startup_unavailable", "installation_unavailable", "cdp_unavailable", ...(agent === "codex" ? ["capability_unavailable"] : [])].includes(status.issue.code)) {
-    return t(`agentIntegration.connectionErrors.${status.issue.code}`);
-  }
-  if (agent === "codex" && status.issue && !status.connection?.control_ready) return t("agentIntegration.codexInstallGuide.controlUnavailableDescription");
-  if (agent === "workbuddy" && status.state !== "conflict") return workbuddyErrorMessage(status, t);
-  if (agent !== "deepseek-harness") return status.message || "";
-  const code = status.issue?.code;
-  const key = code === "unsupported_version" || code === "dependency_environment" ? code : "operation_failed";
-  let text = t(`agentIntegration.dshErrors.${key}`);
-  if (key === "dependency_environment" && status.issue?.path) {
-    text += ` ${t("agentIntegration.dshErrors.location")}${status.issue.path}`;
-  }
-  const completed = status.profiles?.filter(profile => profile.state === "enabled")
-    .map(profile => profile.name === "desktop" ? "Desktop" : profile.name === "web" ? "Web" : "").filter(Boolean);
-  if (completed?.length && completed.length < (status.profiles?.length || 0)) {
-    text += ` ${t("agentIntegration.dshErrors.partial", { targets: completed.join(", ") })}`;
-  }
-  return text;
+  if (requiresAgentQuit(status)) return t("agentIntegration.quitRequired.description", { agent: status.display_name });
+  if (isDisconnectPending(status)) return t("agentIntegration.quitRequired.exitedDescription", { agent: status.display_name });
+  if (status.inspection_unavailable && !status.issue) return t("agentIntegration.repairRequest.inspectionUnavailable");
+  if (status.issue?.code === "configuration_unreadable") return t("agentIntegration.setupFeedback.readFailed");
+  if (status.state === "conflict" || status.issue?.code === "environment_mismatch") return t("agentIntegration.setupFeedback.environmentMismatch");
+  if (status.retry_action === "disconnect") return t("agentIntegration.setupFeedback.disableFailed");
+  if (status.state === "error" && !status.issue) return t("agentIntegration.setupFeedback.enableFailed");
+  if (agent === "deepseek-harness") return dshErrorMessage(status, t);
+  if (agent === "codex") return codexErrorMessage(status, t);
+  if (agent === "workbuddy") return workbuddyErrorMessage(status, t);
+  const key = status.state === "error" ? "enableFailed" : "connectionUnavailable";
+  return t(`agentIntegration.setupFeedback.${key}`);
 }
 
 function AgentCard({
@@ -648,8 +672,8 @@ function AgentCard({
   const detectionComplete = mcpPrepared && (!executorSupported || executorPrepared);
   const mcpEnabled = mcpState === "enabled";
   const detected = mcpInstalled || mcpEnabled;
-  const mcpChecked = mcpStatus?.enabled ?? (mcpEnabled || Boolean(mcpStatus?.can_disconnect));
-  const mcpCanToggle = mcpState === "ready" || mcpChecked || Boolean(mcpStatus?.can_connect);
+  const mcpChecked = mcpStatus?.enabled ?? (mcpEnabled || mcpState === "conflict" || Boolean(mcpStatus?.can_disconnect));
+  const mcpCanToggle = mcpStatus?.issue?.code !== "configuration_unreadable" && (mcpState === "ready" || mcpChecked || Boolean(mcpStatus?.can_connect));
 
   return (
     <Card
@@ -679,6 +703,9 @@ function AgentCard({
               agent={agent}
               mcpClientName={mcpClientName}
               mcpChecked={mcpChecked}
+              mcpUnknown={mcpStatus?.issue?.code === "configuration_unreadable"}
+              mcpConnectionStatus={t(agentConnectionStatusKey(mcpStatus, mcpChecked), { agent: mcpStatus?.display_name || agent.name })}
+              mcpConnected={agentConnectionReady(mcpStatus)}
               mcpCanToggle={mcpCanToggle}
               executorEnabled={executorEnabled}
               executorPrepared={executorPrepared}
@@ -810,8 +837,8 @@ function CollapsedDetectionSummary({
       });
     }
   }
-  if (mcpStatus?.message && (["error", "conflict"].includes(mcpStatus.state) || ["workbuddy", "codex"].includes(agent.id) && mcpStatus.issue)) {
-    items.push({ id: "mcp-error", label: integrationErrorMessage(agent.id, mcpStatus, t), ready: false });
+  if (mcpStatus && (mcpStatus.inspection_unavailable || ["error", "conflict"].includes(mcpStatus.state) || mcpStatus.issue)) {
+    items.push({ id: "mcp-error", label: t(agentConnectionStatusKey(mcpStatus, Boolean(mcpStatus.enabled)), { agent: mcpStatus.display_name || agent.name }), ready: false });
   }
   if (!items.length) {
     items.push({ id: "pending", label: t("agentIntegration.waitingForDetection"), ready: false });
@@ -832,6 +859,9 @@ function CompactIntegrationControls({
   agent,
   mcpClientName,
   mcpChecked,
+  mcpUnknown,
+  mcpConnectionStatus,
+  mcpConnected,
   mcpCanToggle,
   executorEnabled,
   executorPrepared,
@@ -843,6 +873,9 @@ function CompactIntegrationControls({
   agent: AgentDefinition;
   mcpClientName: string;
   mcpChecked: boolean;
+  mcpUnknown: boolean;
+  mcpConnectionStatus: string;
+  mcpConnected: boolean;
   mcpCanToggle: boolean;
   executorEnabled: boolean;
   executorPrepared: boolean;
@@ -855,7 +888,9 @@ function CompactIntegrationControls({
     id: "mcp",
     title: t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeTitle" : agent.id === "codex" ? "agentIntegration.codexModeTitle" : "agentIntegration.mcpModeTitle", { agent: mcpClientName }),
     description: t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeDescription" : agent.id === "codex" ? "agentIntegration.codexModeDescription" : "agentIntegration.mcpModeDescription", { agent: mcpClientName }),
-    checked: mcpChecked,
+    status: mcpConnectionStatus,
+    ready: mcpConnected,
+    checked: mcpUnknown ? undefined : mcpChecked,
     disabled: !mcpChecked && !mcpCanToggle,
     loading: busyAction === `${agent.id}:connect` || busyAction === `${agent.id}:disconnect`,
     onChange: (checked: boolean) => void onMCPAction(agent.id, checked ? "connect" : "disconnect"),
@@ -865,6 +900,8 @@ function CompactIntegrationControls({
       id: "executor",
       title: t("agentIntegration.executorModeTitle", { agent: agent.executorName }),
       description: t("agentIntegration.executorModeDescription", { agent: agent.executorName }),
+      status: t(executorEnabled ? "agentIntegration.enabled" : "agentIntegration.notEnabled"),
+      ready: executorEnabled,
       checked: executorEnabled,
       disabled: !executorEnabled && !executorPrepared,
       loading: busyAction === `executor:${agent.id}:${executorEnabled ? "disable" : "enable"}`,
@@ -879,19 +916,19 @@ function CompactIntegrationControls({
       {methods.map((method) => (
         <Tooltip
           key={method.id}
-          title={<><strong>{method.title}</strong><br />{method.description}</>}
+          title={<><strong>{method.title}</strong><br /><span>{method.description}</span><br /><span>{method.status}</span></>}
           placement="bottom"
         >
-          <div className={`agent-integration-compact-control${method.checked ? " is-enabled" : ""}`}>
+          <div className={`agent-integration-compact-control${method.ready ? " is-ready" : ""}`}>
             <span>{method.title}</span>
-            <Switch
+            {method.checked === undefined ? <span>{t("agentIntegration.setupFeedback.unknown")}</span> : <Switch
               size="small"
               aria-label={method.title}
               checked={method.checked}
               disabled={method.disabled || method.loading}
               loading={method.loading}
               onChange={method.onChange}
-            />
+            />}
           </div>
         </Tooltip>
       ))}
@@ -930,9 +967,12 @@ function AgentConfigurationFlow({
   const mcpRequirements = mcpStatus?.requirements || [];
   const mcpPrepared = mcpRequirements.length > 0 && mcpRequirements.every((item) => item.satisfied);
   const mcpEnabled = mcpState === "enabled";
-  const mcpChecked = mcpStatus?.enabled ?? (mcpEnabled || Boolean(mcpStatus?.can_disconnect));
-  const mcpCanToggle = mcpState === "ready" || mcpChecked || Boolean(mcpStatus?.can_connect);
-  const retryDisconnect = mcpStatus?.retry_action === "disconnect" && Boolean(mcpStatus?.can_disconnect);
+  const mcpChecked = mcpStatus?.enabled ?? (mcpEnabled || mcpState === "conflict" || Boolean(mcpStatus?.can_disconnect));
+  const mcpCanToggle = mcpStatus?.issue?.code !== "configuration_unreadable" && (mcpState === "ready" || mcpChecked || Boolean(mcpStatus?.can_connect));
+  const retryDisconnect = mcpStatus?.retry_action === "disconnect";
+  const quitRequired = requiresAgentQuit(mcpStatus);
+  const disconnectPending = isDisconnectPending(mcpStatus);
+  const waitingForAction = quitRequired || disconnectPending;
   const mcpBindingConfigured = Boolean(agent.mcpBindingTarget && bindings[agent.mcpBindingTarget]);
   const mcpInstallationMissing = mcpRequirements.length > 0 && !mcpRequirements[0].satisfied;
 
@@ -997,8 +1037,14 @@ function AgentConfigurationFlow({
 
   const mcpActions = (
     <Space wrap size={8}>
+      {["workbuddy", "codex", "deepseek-harness"].includes(agent.id) && !retryDisconnect && !waitingForAction
+        && (mcpStatus?.issue || mcpStatus?.connection?.runtime_state === "connection_required") && mcpStatus?.can_connect && (
+        <Button size="small" disabled={busyAction !== ""} onClick={onOpenInstallationGuide}>
+          {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.reconnect`)}
+        </Button>
+      )}
       {!mcpPrepared && !mcpEnabled && (
-        <Button size="small" icon={<LinkOutlined />} href={agent.installURL} target="_blank">
+        <Button size="small" icon={<LinkOutlined />} {...externalLinkProps(agent.installURL)} target="_blank">
           {t("agentIntegration.viewInstallGuide")}
         </Button>
       )}
@@ -1033,7 +1079,7 @@ function AgentConfigurationFlow({
   const executorActions = executorSupported ? (
     <Space wrap size={8}>
       {!executorInstalled && (
-        <Button size="small" icon={<LinkOutlined />} href={agent.executorInstallURL || agent.installURL} target="_blank">
+        <Button size="small" icon={<LinkOutlined />} {...externalLinkProps(agent.executorInstallURL || agent.installURL)} target="_blank">
           {t("agentIntegration.viewExecutorGuide")}
         </Button>
       )}
@@ -1057,7 +1103,7 @@ function AgentConfigurationFlow({
             disabled={busyAction !== "" || mcpStatus?.login?.state === "running"}
             onClick={() => void onMCPAction(agent.id, "login")}
           >
-            {t(agent.executorLoginMode === "interactive"
+            {t(agent.id === "workbuddy" ? "agentIntegration.openWorkBuddy" : agent.executorLoginMode === "interactive"
               ? "agentIntegration.openLoginTerminal"
               : "agentIntegration.login")}
           </Button>
@@ -1180,14 +1226,14 @@ function AgentConfigurationFlow({
       <ConfigurationStage
         step={executorSupported ? 3 : 2}
         title={t("agentIntegration.integrationStageTitle")}
-        ready={mcpEnabled || executorEnabled}
+        ready={agentConnectionReady(mcpStatus) || executorEnabled}
         status={t("agentIntegration.chooseIntegrationMode")}
       >
         <div className="agent-integration-methods">
           <IntegrationMethod
             title={t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeTitle" : agent.id === "codex" ? "agentIntegration.codexModeTitle" : "agentIntegration.mcpModeTitle", { agent: mcpClientName })}
             description={t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeDescription" : agent.id === "codex" ? "agentIntegration.codexModeDescription" : "agentIntegration.mcpModeDescription", { agent: mcpClientName })}
-            help={["workbuddy", "codex"].includes(agent.id) ? (
+            help={["workbuddy", "codex", "deepseek-harness"].includes(agent.id) ? (
               <Button
                 type="text"
                 size="small"
@@ -1195,17 +1241,14 @@ function AgentConfigurationFlow({
                 icon={<QuestionCircleOutlined />}
                 onClick={onOpenInstallationGuide}
               >
-                {t(`agentIntegration.${agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.entry`)}
+                {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.entry`)}
               </Button>
             ) : undefined}
-            status={mcpStatus?.connection?.runtime_state === "waiting" ? t("agentIntegration.waitingForApplication")
-              : mcpStatus?.connection?.runtime_state === "connection_required" ? t("agentIntegration.connectionRequired")
-              : mcpChecked && mcpStatus?.issue ? t("agentIntegration.configurationIssue")
-                : mcpStatus?.enabled ? t("agentIntegration.enabled") : mcpCapabilityStatus(mcpState, t)}
-            ready={mcpEnabled && !mcpStatus?.issue && !["waiting", "connection_required"].includes(mcpStatus?.connection?.runtime_state || "")}
+            status={t(agentConnectionStatusKey(mcpStatus, mcpChecked), { agent: mcpStatus?.display_name || agent.name })}
+            ready={agentConnectionReady(mcpStatus)}
             disabled={!mcpCanToggle}
             loading={busyAction === `${agent.id}:connect` || busyAction === `${agent.id}:disconnect`}
-            checked={mcpChecked}
+            checked={mcpStatus?.issue?.code === "configuration_unreadable" ? undefined : mcpChecked}
             onChange={(checked) => void onMCPAction(agent.id, checked ? "connect" : "disconnect")}
           />
           {executorSupported && (
@@ -1228,23 +1271,29 @@ function AgentConfigurationFlow({
             />
           )}
         </div>
-        {mcpChecked && mcpStatus?.connection?.runtime_state === "waiting" && (
+        {mcpChecked && !mcpStatus?.issue && mcpStatus?.connection?.runtime_state === "waiting" && (
           <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.waitingForApplicationDescription", { agent: agent.name })}</div>
         )}
-        {mcpChecked && mcpStatus?.connection?.runtime_state === "connection_required" && (
-          <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.codexInstallGuide.controlUnavailableDescription")}</div>
+        {mcpChecked && !mcpStatus?.issue && mcpStatus?.connection?.runtime_state === "connection_required" && (
+          <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.connectionErrors.connection_required", { agent: mcpClientName })}</div>
         )}
-        {mcpStatus?.message && (["error", "conflict"].includes(mcpState) || ["workbuddy", "codex"].includes(agent.id) && mcpStatus.issue) && (
-          <div className="agent-integration-stage-hint is-error" role="alert">
+        {mcpStatus && (mcpStatus.inspection_unavailable || (mcpStatus.message || mcpStatus.issue) && (["error", "conflict"].includes(mcpState) || Boolean(mcpStatus.issue))) && (
+          <div className={`agent-integration-stage-hint ${waitingForAction ? "is-warning" : "is-error"}`} role={waitingForAction ? "status" : "alert"}>
             <WarningOutlined />
             {integrationErrorMessage(agent.id, mcpStatus, t)}
+            {mcpStatus.inspection_unavailable && (waitingForAction || mcpStatus.issue) &&
+              <Typography.Text type="secondary">{t("agentIntegration.repairRequest.inspectionUnavailable")}</Typography.Text>}
           </div>
         )}
-        {agent.id === "deepseek-harness" && mcpState !== "enabled" && (
+        <RepairRequestCopy agent={agent.id} status={mcpStatus}
+          error={mcpStatus && (mcpStatus.issue || ["error", "conflict"].includes(mcpState))
+            ? integrationErrorMessage(agent.id, mcpStatus, t) : undefined} />
+        {mcpState !== "enabled" && (
           <Space>
-            {mcpState === "error" && (retryDisconnect || mcpStatus?.can_connect) && (
+            {(mcpState === "error" || waitingForAction) && (retryDisconnect || mcpStatus?.can_connect) && (
               <Button disabled={Boolean(busyAction)} onClick={() => void onMCPAction(agent.id, retryDisconnect ? "disconnect" : "connect")}>
-                {t(retryDisconnect ? "agentIntegration.retryDisconnection" : "agentIntegration.retryConnection")}
+                {t(waitingForAction ? retryDisconnect ? "agentIntegration.quitRequired.retryDisconnect" : "agentIntegration.quitRequired.retryInstall"
+                  : retryDisconnect ? "agentIntegration.retryDisconnection" : "agentIntegration.retryConnection")}
               </Button>
             )}
           </Space>
@@ -1334,7 +1383,7 @@ function IntegrationMethod({
   ready: boolean;
   disabled: boolean;
   loading: boolean;
-  checked: boolean;
+  checked: boolean | undefined;
   onChange: (checked: boolean) => void;
 }) {
   return (
@@ -1346,13 +1395,13 @@ function IntegrationMethod({
       <div className="agent-integration-method-controls">
         <span className="agent-integration-method-status">{status}</span>
         {help && <div className="agent-integration-method-help">{help}</div>}
-        <Switch
+        {checked !== undefined && <Switch
           aria-label={title}
           checked={checked}
           disabled={disabled || loading}
           loading={loading}
           onChange={onChange}
-        />
+        />}
       </div>
     </div>
   );
@@ -1398,15 +1447,8 @@ function GuideText({ text }: { text: string }) {
     : part);
 }
 
-function mcpCapabilityStatus(state: DesktopAgentIntegrationStatus["state"], t: TFunction) {
-  if (state === "enabled") return t("agentIntegration.enabled");
-  if (state === "action_required") return t("agentIntegration.awaitingConfirmation");
-  if (state === "conflict" || state === "error") return t("agentIntegration.configurationIssue");
-  return t("agentIntegration.notEnabled");
-}
-
 function executorAuthenticationRequired(reason = "") {
   const normalized = reason.toLowerCase();
   return normalized.includes("not signed in") || normalized.includes("not logged in") ||
-    normalized.includes("login required") || normalized.includes("authentication required");
+    normalized.includes("login required") || normalized.includes("authentication required") || normalized.includes("sign-in has expired");
 }

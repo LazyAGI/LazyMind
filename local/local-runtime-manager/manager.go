@@ -431,6 +431,10 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.killStaleRuntimeProcesses(ctx, stateCfg, paths); err != nil {
 		return err
 	}
+	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
+	if err := prepareDesktopPythonComponents(ctx, cfg, paths); err != nil {
+		return err
+	}
 	state.Runtime = cfg.Profile
 	state.Profile = cfg.Profile
 	state.OwnerToken = cfg.OwnerToken
@@ -507,6 +511,10 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	m.progressf("desktop Python environment check completed in %s", m.now().Sub(relocationStartedAt).Round(time.Millisecond))
 	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
 	if err := ensureLazyLLMSource(ctx, m.runner, paths.RepoRoot, freshCfg.Profile); err != nil {
+		return err
+	}
+	m.prepareDesktopCluster(ctx, freshCfg, paths)
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	for attempt := 1; attempt <= maxAutomaticPortStartupAttempts; attempt++ {
@@ -1080,16 +1088,23 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		failureContext = context
 	}
 	apiAlive := m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond)
-	fallbackCleanup := !apiAlive
-	if apiAlive {
+	bundledSupervisorMissing := false
+	if cfg.Profile == "desktop" && paths.buildRootIsBundledResources() {
+		_, err := os.Stat(processComposeCommand(paths))
+		bundledSupervisorMissing = os.IsNotExist(err)
+	}
+	fallbackCleanup := !apiAlive || bundledSupervisorMissing
+	if apiAlive && !bundledSupervisorMissing {
 		processComposeTimeout := m.effectiveProcessComposeDownTimeout()
 		m.progressf("stopping process-compose on 127.0.0.1:%d (timeout %s)", cfg.ProcessComposePort, processComposeTimeout)
 		downCtx, cancel := context.WithTimeout(ctx, processComposeTimeout)
 		defer cancel()
 		recordFailure(m.processComposeDownWithProgress(downCtx, cfg, paths), runtimeDownFailureContext(paths, processComposeServiceName))
 		fallbackCleanup = downErr != nil
-	} else {
+	} else if !apiAlive {
 		m.progressf("process-compose API not reachable on 127.0.0.1:%d; skipping process-compose down", cfg.ProcessComposePort)
+	} else {
+		m.progressf("bundled process-compose executable was removed; using recorded-process cleanup")
 	}
 	if !fallbackCleanup {
 		recordFailure(m.killStaleRuntimeProcesses(context.Background(), cfg, paths), runtimeDownFailureContext(paths, ""))

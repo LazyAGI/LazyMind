@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Alert, Button, Checkbox, Input, Modal, Popover, Select, Spin, Tag } from 'antd';
 import { CheckCircleOutlined, CloudOutlined, CloudUploadOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -10,6 +11,7 @@ import type { useWriterProviderAvailability } from './useWriterProviderAvailabil
 import { documentPublicationTargetUrl } from './documentPublicationUrl';
 import { documentPublicationErrorMessage } from './documentPublicationError';
 import { WriterProviderIcon } from './DocumentProviderChoice';
+import { WeChatTemplateSelect } from './WeChatTemplateSelect';
 import './DocumentPublicationDialog.scss';
 
 const running = new Set(['preparing', 'write_started', 'provider_confirmed', 'local_persist_failed', 'local_conflict']);
@@ -36,6 +38,7 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
   const [state, setState] = useState<DocumentPublicationGroupState>();
   const [selected, setSelected] = useState<string[]>([]);
   const [connectionChoices, setConnectionChoices] = useState<Record<string, string>>({});
+  const [wechatTemplate, setWechatTemplate] = useState<string>();
   const [retryOperations, setRetryOperations] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [authorizationProvider, setAuthorizationProvider] = useState<string>();
@@ -55,6 +58,8 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
   const [targetProblems, setTargetProblems] = useState<Record<string, string>>({});
   const vaults = availability.obsidian?.vaults ?? [];
   const savedParent = state?.targets.find(item => item.provider === 'obsidian')?.parent_uri;
+  const wechatTemplates = providers.find(item => item.id === 'wechat')?.templates ?? [];
+  const chosenTemplate = wechatTemplate ?? (state?.targets.find(item => item.provider === 'wechat')?.template || 'clean');
   const savedDestination = useMemo(() => {
     if (!savedParent) return undefined;
     try {
@@ -130,6 +135,7 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
     if (providers.some(item => preferred.includes(item.id) && (!availability.states[item.id] || availability.states[item.id] === 'checking'))) return;
     initialized.current = true;
     setConnectionChoices({});
+    setWechatTemplate(undefined);
     setSelected(preferred.filter(canSelect));
     setRetryOperations({});
     setError('');
@@ -188,7 +194,8 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
             parent = `obsidian://${chosenVault.id}/${path.split('/').map(encodeURIComponent).join('/')}`;
           }
           if (!existing?.bound && provider === 'github' && !parent) throw new Error(t('chat.publication.githubTargetRequired'));
-          return { provider, connection_id: account?.connection_id, parent_uri: existing?.bound ? undefined : parent, retry_operation_id: retryOperations[provider] };
+          return { provider, connection_id: account?.connection_id, parent_uri: existing?.bound ? undefined : parent,
+            template: provider === 'wechat' ? chosenTemplate : undefined, retry_operation_id: retryOperations[provider] };
         });
         if (targets.some(input => input.retry_operation_id && current.targets.find(item => item.provider === input.provider)?.operation_hash !== current.current_hash)) {
           setRetryOperations({});
@@ -205,6 +212,8 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
       const attempt = pending.current;
       const response = await WorkflowSessionApi().createPublicationGroup(attempt.id, attempt.body, { silentError: true });
       setState(response.data.data); pending.current = undefined; setUncertain(false);
+      focusResults.current = true;
+      setResultsOpen(true);
       onClose();
     } catch (failure) {
       const code = (failure as { response?: { data?: { data?: { code?: string } } } })?.response?.data?.data?.code;
@@ -265,11 +274,15 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
             <Tag className='document-publication-result-status' bordered={false} color={statusColor} icon={status === 'succeeded' ? <CheckCircleOutlined aria-hidden='true' /> : undefined}>
               {status === 'succeeded' && item.provider === 'github' && (item.operation?.target_url || item.target_url)?.includes('/pull/') ? t('chat.publication.pullRequestCreated') : status ? statusLabel(status) : t('chat.publication.bound')}
             </Tag>
+            {item.operation?.stage && <span>
+              {t(`chat.publication.progress.${item.operation.stage}`)}
+              {!!item.operation.current && t('chat.publication.progress.imageIndex', { current: item.operation.current, total: item.operation.total })}
+            </span>}
             {item.last_success_hash && (dirty || item.last_success_hash !== state?.current_hash) && <Tag bordered={false} color='warning'>{t('chat.publication.newEdits')}</Tag>}
           </div>
         </div>
         <div className='document-publication-result-actions'>
-        {targetUrl && <a className='document-publication-open' href={targetUrl} target='_blank' rel='noopener noreferrer' aria-label={`${label(item.provider)} · ${t('chat.writerIR.openCloudDocument')}`} title={`${label(item.provider)} · ${t('chat.writerIR.openCloudDocument')}`}><ExportOutlined aria-hidden='true' /></a>}
+        {targetUrl && <ExternalLink className='document-publication-open' href={targetUrl} target='_blank' rel='noopener noreferrer' aria-label={`${label(item.provider)} · ${t('chat.writerIR.openCloudDocument')}`} title={`${label(item.provider)} · ${t('chat.writerIR.openCloudDocument')}`}><ExportOutlined aria-hidden='true' /></ExternalLink>}
         {item.operation?.actions.includes('cancel') && !readOnly && <Button size='small' onClick={async () => {
           if (lock.current) return; lock.current = true;
           try { await WorkflowSessionApi().cancelPublication(item.operation!.operation_id, { silentError: true }); await load(); }
@@ -283,6 +296,9 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
         </div>
         {item.provider === 'wechat' && status === 'succeeded' && !item.operation?.target_url && <p className='document-publication-result-note'>{t('chat.writerIR.wechatDraftLinkUnavailable')}</p>}
         {item.operation?.error_code && <p className='document-publication-error'>{documentPublicationErrorMessage(item.operation.error_code, item.provider)}</p>}
+        {item.operation?.warnings?.map(warning => <p className='document-publication-warning' key={warning}>
+          {t(`chat.publication.warnings.${warning}`, { defaultValue: warning })}
+        </p>)}
         {status === 'outcome_unknown' && <p className='document-publication-error'>{t('chat.publication.unknownHelp')}</p>}
       </li>;
       })}
@@ -318,7 +334,7 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
       okText={uncertain ? t('chat.publication.confirmAgain') : selected.length ? t('chat.publication.confirm', { platforms: selected.map(label).join('、') }) : t('chat.publication.selectPlatforms')}>
       <p className='document-publication-description'>{t('chat.publication.latestOnly')}</p>
       <div className='document-publication-scroll'>
-        {error && <Alert type='error' message={error} showIcon action={authorizationProvider && <a href={getCloudDocumentsUrl(authorizationProvider === 'feishu' || authorizationProvider === 'googledrive' || authorizationProvider === 'wechat' ? authorizationProvider : undefined)} target='_blank' rel='noopener noreferrer'>{t('chat.publication.configure')}</a>} />}
+        {error && <Alert type='error' message={error} showIcon action={authorizationProvider && <ExternalLink href={getCloudDocumentsUrl(authorizationProvider === 'feishu' || authorizationProvider === 'googledrive' || authorizationProvider === 'wechat' ? authorizationProvider : undefined)} target='_blank' rel='noopener noreferrer'>{t('chat.publication.configure')}</ExternalLink>} />}
         <div className='document-publication-section-heading'>
           <div><strong>{t('chat.publication.platforms')}</strong><span>{t('chat.publication.multipleAllowed')}</span></div>
           <Button type='text' size='small' icon={<ReloadOutlined aria-hidden='true' />} onClick={() => void refresh()} loading={loading} disabled={submitting || uncertain}>{t('common.refresh')}</Button>
@@ -349,13 +365,18 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
                   </span>
                 </span>
               </Checkbox>
-              {isObsidian && <a className='document-publication-authorize' aria-label={t('modelProvider.cloudDocuments.obsidianSetupGuideAction')}
-                href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target='_blank' rel='noopener noreferrer'>{t('modelProvider.cloudDocuments.obsidianSetupGuideShort')}</a>}
-              {authorizationNeeded && !submitting && !uncertain && <a className='document-publication-authorize' aria-label={t('chat.publication.authorizePlatform', { platform: label(provider.id) })}
-                href={getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)} target='_blank' rel='noopener noreferrer'>{t('chat.publication.authorize')}</a>}
+              {isObsidian && <ExternalLink className='document-publication-authorize' aria-label={t('modelProvider.cloudDocuments.obsidianSetupGuideAction')}
+                href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target='_blank' rel='noopener noreferrer'>{t('modelProvider.cloudDocuments.obsidianSetupGuideShort')}</ExternalLink>}
+              {authorizationNeeded && !submitting && !uncertain && <ExternalLink className='document-publication-authorize' aria-label={t('chat.publication.authorizePlatform', { platform: label(provider.id) })}
+                href={getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)} target='_blank' rel='noopener noreferrer'>{t('chat.publication.authorize')}</ExternalLink>}
               </div>;
             })}
           </div>
+          {selected.includes('wechat') && wechatTemplates.length > 0 && <div className='document-publication-accounts'>
+            <label htmlFor={`${resultsId}-wechat-template`}>{t('chat.publication.wechatTemplate')}</label>
+            <WeChatTemplateSelect id={`${resultsId}-wechat-template`} templates={wechatTemplates}
+              value={chosenTemplate} disabled={!open || submitting || uncertain || loading} onChange={setWechatTemplate} />
+          </div>}
           {selected.includes('obsidian') && !state.targets.find(item => item.provider === 'obsidian')?.bound && (vaults.length > 1 || vaultUnavailable || targetProblems.obsidian) && <div className='document-publication-accounts'>
             <label htmlFor={`${resultsId}-vault`}>{t('chat.publication.chooseVault')}</label>
             <Select id={`${resultsId}-vault`} value={chosenVault?.id} placeholder={t('chat.publication.chooseVault')} disabled={submitting || uncertain}

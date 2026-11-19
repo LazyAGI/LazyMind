@@ -17,7 +17,9 @@ from lazyllm.module.servermodule import LLMBase
 from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError
 
 from .budget import build_context_budget, parse_token_limit
-from .model_calls import ContextCapacityError, UnsupportedModelInput, request_tokens, configured_output_limit
+from .model_calls import (
+    ContextCapacityError, UnsupportedModelInput, request_tokens, configured_output_limit, enable_tool_call_stream,
+)
 from .message_fields import model_facing_history
 from lazyllm.module.llms.onlinemodule.base import ModelCallControl
 from .cancellation import UserCancelledError
@@ -261,6 +263,7 @@ class FallbackLLM(ModuleBase, LLMBase):
             selected_stream = {**(stream if isinstance(stream, dict) else {}), '_stream_sink': sink} if stream else False
             view = raw.share(prompt=_copy_prompt(self._prompt), format=lambda message: message,
                              stream=selected_stream, copy_static_params=True)
+            enable_tool_call_stream(view)
             usage_module_id = self._used_by_moduleid or self._module_id
             view.used_by(usage_module_id)
             budget = build_context_budget(current.max_input_tokens)

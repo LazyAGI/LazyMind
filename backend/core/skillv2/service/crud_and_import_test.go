@@ -53,9 +53,8 @@ func TestCreateSkillFromURL_CreatesInitialRevision(t *testing.T) {
 		t.Fatalf("URL imported metadata = %#v", imported)
 	}
 	assertInitialRevision(t, db, resp.SkillID, resp.HeadRevisionID)
-	assertRevisionEntries(t, db, resp.HeadRevisionID)
+	assertURLSourceEntries(t, db, resp.HeadRevisionID)
 	assertDraftInitialized(t, db, resp.SkillID, resp.HeadRevisionID)
-	assertBlobRouting(t, db, resp.HeadRevisionID)
 }
 
 func TestCreateSkillFromURL_FallsBackToURLFilename(t *testing.T) {
@@ -97,7 +96,7 @@ func TestCreateSkillFromURL_PreservesRequestedNameAsRuntimeAlias(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	zipPath := filepath.Join(t.TempDir(), "download.zip")
 	writeSkillZip(t, zipPath, map[string][]byte{
-		"SKILL.md": []byte("# SkillHub Skill\n\nPackage without frontmatter.\n"),
+		"SKILL.md": externalSkillMD("download", "Package without frontmatter."),
 	})
 	const downloadURL = "https://api.skillhub.cn/api/v1/download?slug=publisher%2Frequested-skill"
 	svc := NewSkillService(SkillServiceDeps{
@@ -245,12 +244,25 @@ func TestCreateSkillFromURL_ImportsGitHubTreeSubdirectory(t *testing.T) {
 		t.Fatalf("GitHub imported metadata = %#v", imported)
 	}
 	assertInitialRevision(t, db, resp.SkillID, resp.HeadRevisionID)
-	assertRevisionEntries(t, db, resp.HeadRevisionID)
+	assertURLSourceEntries(t, db, resp.HeadRevisionID)
 	if got := countRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", resp.HeadRevisionID, "ignored/%"); got != 0 {
 		t.Fatalf("ignored subtree entry count = %d, want 0", got)
 	}
 	if got := countRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", resp.HeadRevisionID, "%DS_Store%"); got != 0 {
 		t.Fatalf("system metadata entry count = %d, want 0", got)
+	}
+}
+
+func assertURLSourceEntries(t *testing.T, db *gorm.DB, revisionID string) {
+	t.Helper()
+	entries := listRevisionEntries(t, db, revisionID)
+	for _, name := range []string{"SKILL.md", "references", "references/a.md", "assets", "assets/logo.png"} {
+		if entries[name].Path != name {
+			t.Fatalf("URL import lost source path %q", name)
+		}
+	}
+	if len(entries) != 5 {
+		t.Fatalf("URL import added files absent from the source: %#v", entries)
 	}
 }
 

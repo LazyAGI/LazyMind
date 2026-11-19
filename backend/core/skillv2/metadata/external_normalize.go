@@ -169,7 +169,9 @@ func NormalizeExternalMetadata(content []byte, canonicalName string) ([]byte, []
 	next = append(next, marker...)
 	next = append(next, frontmatter...)
 	next = append(next, content[frontEnd:]...)
-	if _, err := ParseRequired(next); err != nil {
+	// Missing fields are resolved later from verified source metadata or the
+	// document body, exactly as for an otherwise unmodified external document.
+	if _, err := Parse(next); err != nil {
 		return content, nil, err
 	}
 	return next, warnings, nil

@@ -38,7 +38,7 @@ def test_pptx_analyzer_reads_native_pages(monkeypatch, tmp_path):
     monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(source), None))
     result = tools.pptx_analyzer('template.pptx')
     assert result['slide_count'] == 2 and result['next_page'] == 2
-    assert any(slot['text'] == 'Internship contribution' for slot in result['slots'])
+    assert result['text'] == 'Internship contribution'
     assert tools.pptx_analyzer('template.pptx', page=2)['next_page'] is None
     assert source.read_bytes() == original
 
@@ -276,7 +276,7 @@ def test_pptx_reader_is_available_without_rag_runtime(monkeypatch, tmp_path):
     monkeypatch.setenv('LAZYMIND_RAG_ENABLED', 'false')
     monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(path), None))
     result = tools.pptx_analyzer(path.name)
-    assert any(slot['text'] == 'presentation content' for slot in result['slots'])
+    assert result['text'] == 'presentation content'
     assert result['slide_count'] == 1
     assert result['next_page'] is None
 
@@ -344,7 +344,7 @@ def test_office_attachment_reader_routes_without_pdf_conversion(monkeypatch, tmp
             from lazymind.chat.engine.subagent import tools
             monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(path), None))
             result = tools.pptx_analyzer(path.name)
-            assert any(slot['text'] == 'native office text' for slot in result['slots'])
+            assert result['text'] == 'native office text'
             assert result['slide_count'] == 1
             assert result['next_page'] is None
         else:
@@ -438,7 +438,7 @@ def test_pptx_analyzer_reads_whole_template_in_one_call(monkeypatch, tmp_path, c
     loads = []
     load = fill._load
     monkeypatch.setattr(fill, '_load', lambda path: (loads.append(path), load(path))[1])
-    result = tools.pptx_analyzer(source.name, all_pages=True)
+    result = tools.pptx_analyzer(source.name, all_pages=True, mode='template')
     assert result['all_pages'] is True
     assert result['slide_count'] == 3 and result['next_page'] is None
     assert [p['page'] for p in result['pages']] == [1, 2, 3]
@@ -447,9 +447,101 @@ def test_pptx_analyzer_reads_whole_template_in_one_call(monkeypatch, tmp_path, c
     assert result['quality_contract'] and 'quality_contract' not in result['pages'][0]
     assert len(loads) == 1
     if cached:
-        again = tools.pptx_analyzer(source.name, all_pages=True)
+        again = tools.pptx_analyzer(source.name, all_pages=True, mode='template')
         assert again['cache_hit'] is True and again['pages'] == result['pages']
         assert len(loads) == 1
     with pytest.raises(tools.ToolExecutionError, match='all_pages requires page=1'):
         tools.pptx_analyzer(source.name, page=2, all_pages=True)
     assert source.read_bytes() == original
+    import json
+    content = tools.pptx_analyzer(source.name, all_pages=True)
+    assert [p['text'] for p in content['pages']] == ['封面', '主管：待填写', '实习时间：待填写']
+    assert len(json.dumps(content).encode()) < len(json.dumps(result).encode()) / 2
+
+
+def test_pptx_content_preserves_text_tables_groups_notes_without_template_analysis(monkeypatch, tmp_path):
+    from pptx import Presentation
+    from pptx.util import Inches
+    from lazymind.chat.engine.subagent import tools
+    from lazymind.chat.engine.tools.file_resources import pptx_template_fill as fill
+
+    source = tmp_path / 'content.pptx'
+    deck = Presentation()
+    slide = deck.slides.add_slide(deck.slide_layouts[6])
+    group = slide.shapes.add_group_shape()
+    box = group.shapes.add_textbox(0, 0, Inches(3), Inches(1))
+    para = box.text_frame.paragraphs[0]
+    para.add_run().text = '中文'
+    para.add_run().text = '😀正文'
+    para.add_line_break()
+    para.add_run().text = '下一行'
+    table = slide.shapes.add_table(2, 2, 0, Inches(2), Inches(3), Inches(1)).table
+    table.cell(0, 0).text = '项目'
+    table.cell(0, 1).text = '金额'
+    table.cell(1, 0).text = 'A'
+    table.cell(1, 1).text = '100'
+    slide.notes_slide.notes_text_frame.text = '演讲备注'
+    deck.slides.add_slide(deck.slide_layouts[6])
+    deck.save(source)
+    original = source.read_bytes()
+    monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(source), None))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail('Content reading must not run template analysis')
+    monkeypatch.setattr(fill, 'inspect_template', forbidden)
+    monkeypatch.setattr(fill, 'inspect_layout', forbidden)
+    monkeypatch.setattr(fill, 'materialize_paragraph', forbidden)
+    result = tools.pptx_analyzer(source.name, all_pages=True)
+    assert result['mode'] == 'content' and result['slide_count'] == 2
+    assert result['next_page'] is None
+    assert result['pages'][0] == {
+        'page': 1,
+        'text': '中文😀正文\n下一行\n\n[Table: tab-separated cells; \\n = cell line break]\n'
+                '项目\t金额\nA\t100\n\n[Speaker notes]\n演讲备注',
+    }
+    assert result['pages'][1] == {'page': 2, 'text': ''}
+    assert not {'quality_contract', 'composition', 'sha256'} & result.keys()
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize('kwargs', [
+    {'mode': 'unknown'}, {'page': 0}, {'page': True}, {'page': 1.5},
+    {'page': 3}, {'all_pages': 'true'}, {'page': 2, 'all_pages': True},
+])
+def test_pptx_content_rejects_invalid_options(monkeypatch, tmp_path, kwargs):
+    from pptx import Presentation
+    from lazymind.chat.engine.subagent import tools
+    source = tmp_path / 'content.pptx'
+    deck = Presentation()
+    deck.slides.add_slide(deck.slide_layouts[6])
+    deck.save(source)
+    monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(source), None))
+    with pytest.raises(tools.ToolExecutionError):
+        tools.pptx_analyzer(source.name, **kwargs)
+
+
+def test_pptx_reading_multiple_decks_does_not_bind_template(monkeypatch, tmp_path):
+    import lazyllm
+    from pptx import Presentation
+    from lazymind.chat.engine.subagent import tools
+    from lazymind.chat.engine.tools.file_resources import pptx_template_fill as fill
+
+    for name in ['first', 'second']:
+        deck = Presentation()
+        deck.slides.add_slide(deck.slide_layouts[0]).shapes.title.text = name
+        deck.save(tmp_path / f'{name}.pptx')
+    monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(tmp_path / filename), None))
+    monkeypatch.setattr('lazymind.chat.engine.tools.conversation_workspace.chat_agent_workspace',
+                        lambda *args: tmp_path / 'cache')
+    previous = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {'user_id': 'reader', 'conversation_id': 'multiple-decks'}
+    try:
+        for name in ['first', 'second']:
+            result = tools.pptx_analyzer(f'{name}.pptx', all_pages=True)
+            assert result['pages'][0]['text'] == name
+        assert not (tmp_path / 'cache').exists()
+        # Reading two decks must not bind either one to the template cache.
+        report = fill.inspect_template(tmp_path / 'second.pptx', cache_workspace=tmp_path / 'cache')
+        assert report['slots'][0]['text'] == 'second'
+    finally:
+        lazyllm.globals['agentic_config'] = previous

@@ -18,6 +18,7 @@ import { Popover, Spin, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { CHAT_MODEL_SELECTION_CHANGED_EVENT, CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
 import { LAZYMIND_CLOUD_SESSION_CHANGED_EVENT } from "@/runtime/cloud/session";
+import { getProviderDisplayName, getProviderSearchText } from "@/modules/modelProvider/providerDisplayNames";
 import { getProviderLogoUrl } from "@/modules/modelProvider/providerBranding";
 import {
   THINKING_DEPTH_VALUES,
@@ -161,7 +162,7 @@ const ChatModelSelector = ({
   onSavingChange,
   onSelectionChange,
 }: ChatModelSelectorProps) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const depthLabels: Record<ThinkingDepth, string> = {
     low: t("chat.thinkingDepthLabels.low"),
     medium: t("chat.thinkingDepthLabels.medium"),
@@ -329,13 +330,13 @@ const ChatModelSelector = ({
     : loadStatus === "loading"
       ? t("chat.modelSelectorLoading")
       : (disabled ? disabledReason : undefined) || catalogBlockedReason;
+  const interactionDisabled = disabled || saving || loadStatus === "loading";
   const controlDisabled =
-    disabled ||
-    saving ||
-    loadStatus === "loading" ||
+    interactionDisabled ||
     (loadStatus === "ready" && catalog?.switch_allowed === false);
   const depthDisabled = thinkingDepthDisabled || saving || !onThinkingDepthChange;
-  const triggerDisabled = controlDisabled && (!combined || depthDisabled);
+  // A cached server block must not prevent opening the menu to revalidate it.
+  const triggerDisabled = interactionDisabled && (!combined || depthDisabled);
 
   useEffect(() => {
     setPreviewDepth(thinkingDepth ?? "medium");
@@ -382,10 +383,11 @@ const ChatModelSelector = ({
       ).detail;
       const requestedId = detail?.conversationId?.trim();
       if (requestedId && requestedId !== normalizedConversationId) return;
-      if (controlDisabled) {
+      if (disabled || savingRef.current) {
         message.warning(switchBlockedReason);
         return;
       }
+      void loadCatalog();
       setModelsExpanded(true);
       setOpen(true);
     };
@@ -395,7 +397,7 @@ const ChatModelSelector = ({
         CHAT_OPEN_MODEL_SELECTOR_EVENT,
         handleOpenRequest,
       );
-  }, [controlDisabled, normalizedConversationId, switchBlockedReason]);
+  }, [disabled, loadCatalog, normalizedConversationId, switchBlockedReason]);
 
   const currentSelection = catalog?.selection;
   const currentProvider = useMemo(
@@ -422,7 +424,7 @@ const ChatModelSelector = ({
     return providers
       .map((provider) => ({
         ...provider,
-        models: includesQuery(provider.name)
+        models: includesQuery(getProviderSearchText(provider, i18n.language))
           ? provider.models
           : provider.models.filter(
               (model) =>
@@ -433,7 +435,7 @@ const ChatModelSelector = ({
             ),
       }))
       .filter((provider) => provider.models.length > 0);
-  }, [catalog?.providers, searchQuery]);
+  }, [catalog?.providers, searchQuery, i18n.language]);
   const hasProviderModels =
     catalog?.providers.some((provider) => provider.models.length > 0) ?? false;
 
@@ -613,9 +615,10 @@ const ChatModelSelector = ({
               aria-label={t("chat.modelSelectorChoose")}
               aria-expanded={modelsExpanded}
               aria-controls={showModelList ? modelListId : undefined}
-              disabled={controlDisabled}
-              title={controlDisabled ? switchBlockedReason : triggerLabel}
+              disabled={interactionDisabled}
+              title={interactionDisabled ? switchBlockedReason : triggerLabel}
               onClick={() => {
+                if (!modelsExpanded && catalog?.switch_allowed === false) void loadCatalog();
                 setModelsExpanded((current) => !current);
                 setSearchQuery("");
               }}
@@ -711,6 +714,15 @@ const ChatModelSelector = ({
 
       {loadStatus === "ready" && catalog ? (
         <>
+          {catalog.switch_allowed === false ? (
+            <div className="chat-model-selector-state" role="status">
+              <span>{catalogBlockedReason}</span>
+              <button type="button" onClick={() => void loadCatalog()}>
+                <ReloadOutlined aria-hidden="true" />
+                {t("chat.modelSelectorReload")}
+              </button>
+            </div>
+          ) : null}
           {hasProviderModels ? (
             <label className="chat-model-selector-search">
               <SearchOutlined aria-hidden="true" />
@@ -759,11 +771,11 @@ const ChatModelSelector = ({
                 visibleProviders.map((provider) => (
                   <section
                     className="chat-model-provider-group"
-                    aria-label={provider.name}
+                    aria-label={getProviderDisplayName(provider, i18n.language)}
                     key={providerKey(provider)}
                   >
                     <div className="chat-model-provider-heading">
-                      <span>{provider.name}</span>
+                      <span>{getProviderDisplayName(provider, i18n.language)}</span>
                       {provider.source === "shared" ? (
                         <small>{t("chat.modelSelectorShared")}</small>
                       ) : provider.source === "cloud" ? (
@@ -780,41 +792,6 @@ const ChatModelSelector = ({
                               currentSelection.source ===
                                 (model.source ?? provider.source))
                           : model.current === true);
-                      const rawBadges = new Set(model.badges ?? []);
-                      const badges = [
-                        model.default ||
-                        model.is_default ||
-                        rawBadges.has("default")
-                          ? t("chat.modelSelectorDefault")
-                          : "",
-                        model.is_recommended || rawBadges.has("recommended")
-                          ? t("chat.modelSelectorRecommended")
-                          : "",
-                        model.is_low_cost ||
-                        rawBadges.has("low_cost") ||
-                        rawBadges.has("low-cost")
-                          ? t("chat.modelSelectorLowCost")
-                          : "",
-                        model.shared ||
-                        model.is_shared ||
-                        model.source === "shared" ||
-                        rawBadges.has("shared")
-                          ? t("chat.modelSelectorShared")
-                          : "",
-                        model.source === "cloud" || rawBadges.has("cloud")
-                          ? t("chat.modelSelectorCloud")
-                          : "",
-                        model.availability === "degraded" ||
-                        rawBadges.has("degraded")
-                          ? t("chat.modelSelectorDegraded")
-                          : "",
-                        model.lifecycle === "deprecated"
-                          ? t("chat.modelSelectorDeprecated")
-                          : "",
-                        model.lifecycle === "retired"
-                          ? t("chat.modelSelectorRetired")
-                          : "",
-                      ].filter(Boolean);
                       return (
                         <button
                           type="button"
@@ -836,28 +813,6 @@ const ChatModelSelector = ({
                           </span>
                           <span className="chat-model-option-copy">
                             <strong>{model.name}</strong>
-                            {model.group_name &&
-                            model.group_name !== provider.name ? (
-                              <small>{model.group_name}</small>
-                            ) : null}
-                            {model.capabilities?.length ? (
-                              <small>
-                                {model.capabilities
-                                  .map((capability) =>
-                                    capability === "chat"
-                                      ? t("chat.modelSelectorCapabilityChat")
-                                      : capability,
-                                  )
-                                  .join(" / ")}
-                              </small>
-                            ) : null}
-                            {badges.length ? (
-                              <span className="chat-model-option-badges">
-                                {badges.map((badge) => (
-                                  <em key={badge}>{badge}</em>
-                                ))}
-                              </span>
-                            ) : null}
                             {!isModelAvailable(model) ? (
                               <small className="chat-model-option-unavailable">
                                 {model.lifecycle === "deprecated"
@@ -976,6 +931,7 @@ const ChatModelSelector = ({
         trigger="click"
         onOpenChange={(nextOpen: boolean) => {
           if (nextOpen && triggerDisabled) return;
+          if (nextOpen && catalog?.switch_allowed === false) void loadCatalog();
           if (!nextOpen) {
             setSearchQuery("");
             setModelsExpanded(false);

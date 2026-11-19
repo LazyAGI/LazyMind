@@ -10,7 +10,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from lazymind.document_tools.paper import research_topic, workflow
+from lazymind.document_tools.paper import publication, research_topic, workflow
 
 
 @pytest.fixture
@@ -44,7 +44,11 @@ def test_recorded_refinement_saves_question_without_fixed_feedback_heading(
 
     result = workflow.execute_step('refine_topic', topic_pool, '根据综述调整选题')
 
-    expected = re.sub(r'\[M(\d+)\]', lambda match: f'[source-{match[1]}]', response)
+    expected = re.sub(r'\[M(\d+)\]',
+                      lambda match: rf'[\[{match[1]}\]](#paper-ref-source-{match[1]})', response)
+    papers = workflow.material(topic_pool, 'papers')['content']
+    references = [dict(id=paper['id'], citation=paper['title']) for paper in papers]
+    expected += '\n\n' + publication.render_references(references, paper_language='zh')
     assert result['status'] == 'completed'
     assert result['document'] == expected
     assert workflow.material(result['pool'], 'question')['content'] == expected

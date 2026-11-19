@@ -5,14 +5,29 @@ import (
 	"lazymind/core/modelconfig"
 	"lazymind/core/readingpolicy"
 	"lazymind/core/store"
+	"log"
 )
 
 func loadReadingParser(ctx context.Context, user string) (map[string]any, error) {
+	return resolveDocumentOCR(ctx, user, false)
+}
+
+func loadIngestionParser(ctx context.Context, user string) (map[string]any, error) {
+	return resolveDocumentOCR(ctx, user, true)
+}
+
+func resolveDocumentOCR(ctx context.Context, user string, allowBuiltinFallback bool) (map[string]any, error) {
 	p, err := readingpolicy.Load(ctx, store.DB(), user)
 	if err != nil {
 		return nil, err
 	}
-	return modelconfig.ResolveReadingParser(ctx, store.DB(), user, p.ParserRef)
+	config, err := modelconfig.ResolveReadingParser(ctx, store.DB(), user, p.ParserRef)
+	if err != nil && allowBuiltinFallback && p.ParserRef == "" {
+		// The built-in reader remains available when default OCR is unavailable.
+		log.Printf("default document OCR configuration unavailable for user=%s: %v", user, err)
+		return nil, nil
+	}
+	return config, err
 }
 func loadReadingStudyModel(ctx context.Context, user string) (*modelconfig.AvailableChatModel, error) {
 	p, err := readingpolicy.Load(ctx, store.DB(), user)

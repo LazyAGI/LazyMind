@@ -3,9 +3,10 @@ import { ConfigProvider } from "antd";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cloudResource, deferred, installDesktopTestDOM, localSkill } from "@/test/desktopResourceFixtures";
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
 
 const mocks = vi.hoisted(() => ({
-  mode: "desktop", session: vi.fn(), list: vi.fn(), local: vi.fn(), patch: vi.fn(), upload: vi.fn(), download: vi.fn(),
+  mode: "desktop", session: vi.fn(), list: vi.fn(), local: vi.fn(), patch: vi.fn(), upload: vi.fn(), download: vi.fn(), create: vi.fn(),
 }));
 const memoryContext = vi.hoisted(() => ({current: null as any}));
 vi.mock("../../context", async (load) => {
@@ -24,7 +25,7 @@ vi.mock("@/runtime/features", async (load) => {
 vi.mock("@/runtime/cloud/session", async (load) => ({ ...await load<object>(), getCloudSession: mocks.session, beginCloudLogin: vi.fn() }));
 vi.mock("../../cloudResourceApi", async (load) => ({ ...await load<object>(), listCloudResources: mocks.list, uploadCloudSkill: mocks.upload, downloadCloudResource: mocks.download }));
 vi.mock("../../skillApi", async (load) => ({
-  ...await load<object>(), listSkillAssetsPage: mocks.local, patchSkillAsset: mocks.patch,
+  ...await load<object>(), listSkillAssetsPage: mocks.local, patchSkillAsset: mocks.patch, createSkillAsset: mocks.create,
   listSkillCategories: vi.fn().mockResolvedValue(["internal"]), listSkillTags: vi.fn().mockResolvedValue([]),
   listIncomingSkillShares: vi.fn().mockResolvedValue([]), listOutgoingSkillShares: vi.fn().mockResolvedValue([]),
   getSkillReviewSummary: vi.fn().mockResolvedValue({ runningTask: null, pendingCount: 0 }),
@@ -52,11 +53,72 @@ function mount(entry = "/memory-management/skills") {
 beforeAll(installDesktopTestDOM);
 beforeEach(() => {
   vi.clearAllMocks(); mocks.mode = "desktop"; mocks.patch.mockResolvedValue({});
+  useChatInputStore.getState().setModeDraft();
   mocks.session.mockResolvedValue({ configured: true, reachability: "reachable", state: "signed_in", account_id: "account-a" });
   mocks.list.mockResolvedValue([cloudResource("cloud-only")]);
   mocks.local.mockImplementation(async ({ page = 1, pageSize = 6 }) => ({ records: [localSkill("local-only")], total: 1, page, pageSize }));
 });
 afterEach(cleanup);
+
+async function openUrlImport(url: string) {
+  await screen.findByText("local-only", { exact: true });
+  fireEvent.click(screen.getByRole("button", { name: /新建技能/ }));
+  fireEvent.click(await screen.findByText("从网络上导入"));
+  const dialog = await screen.findByRole("dialog");
+  await waitFor(() => expect(dialog).toBeVisible());
+  fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: url } });
+  fireEvent.click(within(dialog).getByRole("button", { name: /导\s*入/ }));
+  return dialog;
+}
+
+describe("skill URL import recovery", () => {
+  it("keeps the entered URL visible while importing and closes after success", async () => {
+    const request = deferred<string>();
+    mocks.create.mockReturnValueOnce(request.promise);
+    mount();
+    const dialog = await openUrlImport("https://github.com/example/skills/tree/main/writer");
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByRole("textbox")).toHaveValue("https://github.com/example/skills/tree/main/writer");
+    expect(within(dialog).getByRole("textbox")).toBeDisabled();
+    await act(async () => { request.resolve("imported"); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("explains oversized imports and carries the original URL into an editable chat draft", async () => {
+    mocks.create.mockRejectedValueOnce({ response: { status: 413, data: { data: { code: "payload_too_large" } } } });
+    mount();
+    const url = "https://github.com/example/large/tree/release/writer?plain=1#readme";
+    await openUrlImport(` ${url} `);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("技能包过大");
+    expect(alert).toHaveTextContent("对话");
+    expect(within(screen.getByRole("dialog")).getByRole("textbox")).toHaveValue(` ${url} `);
+    fireEvent.click(within(alert).getByRole("button", { name: "去对话中安装" }));
+    expect(screen.getByLabelText("当前位置")).toHaveTextContent("/agent/chat/home");
+    expect(useChatInputStore.getState().modeDraft).toEqual({
+      text: `请帮我从以下链接安装技能：\n${url}`,
+      mentions: [], files: [],
+    });
+  });
+
+  it.each(["github_multiple_skills", "skill_md_ambiguous"])("shows a directory-link correction for %s", async (code) => {
+    mocks.create.mockRejectedValueOnce({ response: { status: 400, data: { data: { code } } } });
+    mount();
+    await openUrlImport("https://github.com/example/skills");
+    expect(await screen.findByRole("alert")).toHaveTextContent("具体技能目录");
+    expect(within(screen.getByRole("dialog")).getByRole("textbox")).toHaveValue("https://github.com/example/skills");
+    expect(screen.queryByRole("button", { name: "去对话中安装" })).not.toBeInTheDocument();
+  });
+
+  it("retains an ordinary failed import for correction without showing an oversized recovery action", async () => {
+    mocks.create.mockRejectedValueOnce({ response: { status: 500, data: { message: "database unavailable" } } });
+    mount();
+    await openUrlImport("https://github.com/example/skills");
+    expect(await screen.findByRole("alert")).toHaveTextContent(translation("admin.memorySkillUploadFailed"));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "去对话中安装" })).not.toBeInTheDocument();
+  });
+});
 
 describe("Desktop 我的技能 local and Cloud integration", () => {
   it.each(["resolve", "reject"] as const)("keeps background cleanup refresh nonblocking and ignores aborted %s", async (outcome) => {

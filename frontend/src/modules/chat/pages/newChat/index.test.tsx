@@ -9,6 +9,7 @@ import {
 } from "@/modules/chat/store/chatInput";
 import NewChatPage from "./index";
 import type { ShowcaseCase } from "@/modules/showcase/api";
+import { useFeaturedSelectionStore } from "@/modules/chat/store/featuredSelection";
 
 const mocks = vi.hoisted(() => ({
   setThinkingDepth: vi.fn(),
@@ -110,7 +111,12 @@ vi.mock("@/modules/chat/components/ChatInput", () => ({
   default: forwardRef(function MockChatInput(props: any, ref) {
     mocks.latestChatInputProps = props;
     useImperativeHandle(ref, () => ({
-      clearFiles: mocks.clearFiles,
+      clearFiles: () => {
+        mocks.clearFiles();
+        // Match the composer's public API: clearing files also discards its
+        // persisted attachments, even while the welcome composer is hidden.
+        useChatInputStore.getState().saveInputFiles(props.draftKey, []);
+      },
       focus: vi.fn(),
       element: null,
     }));
@@ -216,6 +222,7 @@ vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
 describe("NewChatPage featured templates", () => {
   beforeEach(() => {
     useChatInputStore.getState().clearAllInputContents();
+    useFeaturedSelectionStore.setState({ selections: {} });
     window.sessionStorage.clear();
     mocks.setThinkingDepth.mockClear();
     mocks.listShowcaseCases.mockReset();
@@ -324,6 +331,58 @@ describe("NewChatPage featured templates", () => {
     expect(mocks.clearFiles).toHaveBeenCalledTimes(cleared);
   });
 
+  it.each([
+    [false, 'Keep my draft'], [true, 'Keep my draft'], [false, ''], [true, ''],
+  ])('clears the composer when manually switching task mode %s with draft %j', async (runInBackground, text) => {
+    window.sessionStorage.setItem('chat_new_run_in_background', runInBackground ? '1' : '0');
+    await act(async () => render(<MemoryRouter initialEntries={['/agent/chat/home']}><NewChatPage /></MemoryRouter>));
+    useFeaturedSelectionStore.getState().setSelection('new', { caseId: 'previous', taskId: 'task' });
+    useChatInputStore.getState().saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, text);
+    useChatInputStore.getState().setModeDraft({ text, mentions: [], files: [{ id: 'upload:file', name: 'file.txt' }], featuredSelection: { caseId: 'previous', taskId: 'task' } });
+    const clearedFiles = mocks.clearFiles.mock.calls.length;
+    act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+      detail: { conversationId: '', runInBackground: !runInBackground, source: 'sidebar' },
+    })));
+    await waitFor(() => expect(mocks.latestChatInputProps.runInBackground).toBe(!runInBackground));
+    expect(useFeaturedSelectionStore.getState().selections.new).toBeUndefined();
+    expect(useChatInputStore.getState().modeDraft).toBeUndefined();
+    expect(useChatInputStore.getState().getInputContent(NEW_CHAT_INPUT_DRAFT_KEY)).toBe('');
+    expect(mocks.latestChatInputProps.transferredDraft).toBeUndefined();
+    expect(mocks.latestChatInputProps.value).toBe('');
+    expect(mocks.clearFiles.mock.calls.length).toBeGreaterThan(clearedFiles);
+    expect(mocks.latestChatInputProps.showcaseSelection?.skill.value).toBeFalsy();
+  });
+
+  it('clears the showcase URL and selection when manually leaving a loaded template', async () => {
+    mocks.listShowcaseCases.mockResolvedValue({ cases: [{ ...featuredCase, type: 'workflow', workflow_ref: 'builtin:template' }], categories: [], total: 1 });
+    await act(async () => render(<MemoryRouter initialEntries={['/agent/chat/home?showcase_case=aiProduct&showcase_entry=work']}><NewChatPage /></MemoryRouter>));
+    await waitFor(() => expect(mocks.latestChatInputProps.showcaseSelection?.skill.value).toBe('aiProduct'));
+    expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+    act(() => mocks.latestChatInputProps.onChange(''));
+    useChatInputStore.getState().setModeDraft({ text: '', mentions: [], files: [] });
+    act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+      detail: { conversationId: '', runInBackground: false, source: 'sidebar' },
+    })));
+    await waitFor(() => expect(mocks.latestChatInputProps.runInBackground).toBe(false));
+    expect(mocks.latestChatInputProps.showcaseSelection?.skill.value).toBeFalsy();
+    expect(useFeaturedSelectionStore.getState().selections.new).toBeUndefined();
+  });
+
+  it.each([false, true])('retains an explicitly confirmed capability switch from task mode %s', async runInBackground => {
+    window.sessionStorage.setItem('chat_new_run_in_background', runInBackground ? '1' : '0');
+    await act(async () => render(<MemoryRouter initialEntries={['/agent/chat/home']}><NewChatPage /></MemoryRouter>));
+    const selection = { caseId: 'chosen' };
+    const mention = { mention_id: 'chosen', type: 'workflow' as const, resource_id: 'builtin:chosen', display_name: 'Chosen', start: 0, end: 6 };
+    useChatInputStore.getState().setModeDraft({ text: 'Chosen', mentions: [mention], files: [], featuredSelection: selection });
+    act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+      detail: { conversationId: '', runInBackground: !runInBackground, source: 'mention' },
+    })));
+    await waitFor(() => expect(mocks.latestChatInputProps.runInBackground).toBe(!runInBackground));
+    expect(useFeaturedSelectionStore.getState().selections.new).toEqual(selection);
+    expect(mocks.latestChatInputProps.transferredDraft).toMatchObject({ featuredSelection: selection, mentions: [mention] });
+    expect(mocks.latestChatInputProps.value).toBe('Chosen');
+  });
+
   it('restores an unsent welcome draft after leaving and reopening Quick Q&A', async () => {
     const firstView = render(
       <MemoryRouter initialEntries={['/agent/chat/home']}>
@@ -378,6 +437,32 @@ describe("NewChatPage featured templates", () => {
       expect(mocks.latestChatInputProps.runInBackground).toBe(true);
       expect(mocks.latestChatInputProps.value).toBe('继续完成这项后台任务');
     });
+  });
+
+  it.each(['welcome text', ''])('preserves independent attachment drafts when returning home with text %j', async text => {
+    const store = useChatInputStore.getState();
+    const homeFiles = [{ id: 'upload:home', name: 'home.png', input: { input_type: 'image' as const, uri: '/static-files/home.png', filename: 'home.png' } }];
+    const otherFiles = [{ id: 'upload:other', name: 'other.png', input: { input_type: 'image' as const, uri: '/static-files/other.png', filename: 'other.png' } }];
+    store.saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, text);
+    store.saveInputFiles(NEW_CHAT_INPUT_DRAFT_KEY, homeFiles);
+    await act(async () => render(<MemoryRouter><NewChatPage /></MemoryRouter>));
+    expect(useChatInputStore.getState().inputFiles[NEW_CHAT_INPUT_DRAFT_KEY]).toEqual(homeFiles);
+    const cleared = mocks.clearFiles.mock.calls.length;
+    for (let i = 0; i < 2; i++) {
+      act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+        detail: { conversationId: 'other', source: 'sidebar' },
+      })));
+      store.saveInputContent('other', 'other text');
+      store.saveInputFiles('other', otherFiles);
+      act(() => window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+        detail: { conversationId: '', runInBackground: false, source: 'sidebar' },
+      })));
+      expect(mocks.latestChatInputProps.value).toBe(text);
+      expect(useChatInputStore.getState().inputFiles[NEW_CHAT_INPUT_DRAFT_KEY]).toEqual(homeFiles);
+      expect(useChatInputStore.getState().inputFiles.other).toEqual(otherFiles);
+      expect(store.getInputContent('other')).toBe('other text');
+    }
+    expect(mocks.clearFiles).toHaveBeenCalledTimes(cleared);
   });
 
   it('restores the draft transferred from a historical conversation on mode change', async () => {

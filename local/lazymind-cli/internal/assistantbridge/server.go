@@ -599,12 +599,16 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 	case "disconnect":
 		return adapter.Disconnect(ctx), nil
 	case "login":
-		if agent != string(mcpclient.Cursor) {
+		var login func(context.Context) error
+		switch mcpclient.Kind(agent) {
+		case mcpclient.Cursor:
+			login = func(loginCtx context.Context) error { return cursoradapter.Login(loginCtx, "") }
+		case mcpclient.WorkBuddy:
+			login = workbuddyadapter.Login
+		default:
 			return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 		}
-		s.startAgentLogin(agent, func(loginCtx context.Context) error {
-			return cursoradapter.Login(loginCtx, "")
-		})
+		s.startAgentLogin(agent, login)
 		return s.withLoginStatus(adapter.Status(ctx)), nil
 	default:
 		return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)

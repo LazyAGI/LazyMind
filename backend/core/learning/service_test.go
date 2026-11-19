@@ -467,3 +467,15 @@ func TestResolveContentRejectsIncompatibleBook(t *testing.T) {
 		t.Fatal("expected capability mismatch")
 	}
 }
+
+func TestCollectionsAvailableWithoutLegacyDesktopFlag(t *testing.T) {
+	s := testService(t)
+	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
+	if !LocalAvailable() {
+		t.Fatal("learning collections must be available in every deployment")
+	}
+	book, err := s.CreateBook(context.Background(), "cloud-user", Book{Name: "Cloud words", CapabilityKey: "english_definition"}, []string{"text_input"})
+	if err != nil || book.ID == "" {
+		t.Fatalf("create collection: %+v %v", book, err)
+	}
+}

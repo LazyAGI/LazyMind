@@ -1,3 +1,11 @@
+## 页面文案保真（生成前后均检查）
+
+已批准的逐页提示词中的正文、机制步骤、公式变量、条件、图表数值和结论限定是待排版内容，
+不能再次概括成标题、关键词或大数字。先把这些内容映射到可见文字、图解标签、公式或图表，
+再安排构图；讲稿和隐藏节点不算页面已覆盖。不得为了沿用固定大字号或稀疏模板删减核心机制。
+空间不足时先去重复和装饰、重排分栏；保持可读性，并遵从用户明确的低文字要求。
+输出前逐项对照原提示词检查遗漏，不用仅有“加载了 Skill”或“文件合法”代替内容检查。
+
 ## 来源与防重叠约束（也适用于旧提示词和定向重生成）
 
 - 知识来源、文件名、资料页码、链接、PR/issue 编号只放在讲稿末尾的「知识来源｜不朗读」区，不得放进可见幻灯片、页脚或图注。讲稿由工具注入；渲染器不要重复生成来源脚注。旧页面或旧 prompt 要求可见来源时，以此规则为准。保留图表本身必要的单位、统计口径、图例、限制条件；不能把业务结论移出画面。
@@ -24,6 +32,9 @@
   按原标题、正文、表格、页脚区域及层级布局；模板坐标优先于本文通用安全区和推荐 Flex 骨架。
 - 保留逐段对齐、行距、段前段后、缩进、项目符号、逐文字字体/颜色/粗细，表格列宽、行高和合并关系。
   主题字体只作缺省；元素的显式字体/字号/颜色优先。缺少字体时说明替代风险，不能偷偷拉宽字形。
+- 新增文字、表格和图表标签也从模板对应区域的实际配色出发，显式写出文字颜色，避免继承通用黑字。
+  结合文字所在的局部背景判断对比度：深色页面上的浅色卡片可能仍需深色文字，不能整页一律设白。
+  上传模板优先于科研风格等通用白底黑字默认；用户明确改色或画面需要修复时，模型仍可调整任何可见样式。
 - 原背景 `background.image.local_path` 是从 PPTX 背景层提取的图片，不是整页截图，也不是 AI 背景。
   按给定 `content_box_px` 放到 `#bg`，不加滤镜、遮罩、渐变或额外 Logo；`#ct` 透明。
   背景已包含的 Logo/装饰不得再画一次。其他模板原图只使用列出的本地路径并保留比例和裁切。
@@ -67,8 +78,10 @@ AI 底图属于单独的背景层，不计入这一张内容素材图。没有�
 ## 命名素材与展示稿质感
 
 - user message 的 `NAMED PRESENTATION ASSETS` 是可用离线素材清单。精确使用其中的名称：
-  `<img data-ppt-asset="fluent-3d:clipboard" alt="需求分析" style="width:100px;height:100px;object-fit:contain">`。
-  工具会补全真实 src；禁止猜测名称、远程 CDN、字体图标、emoji 字符或手写复杂 SVG 冒充素材库图标。
+  `<img data-ppt-asset="fluent-3d:clipboard" alt="需求分析" style="width:64px;height:64px;object-fit:contain">`。
+  工具会补全真实 src。图标仅用于标签旁或局部装饰，宽、高各不超过 96 CSS px，不得用作大幅主图或背景。
+  主体视觉用登记素材、内容结构或有依据的图表。清单内没有合适的精确名称时省略图标。
+  禁止猜测名称、远程 CDN、字体图标、emoji 字符或手写复杂 SVG 冒充素材库图标。
 - 一张流程图选同一素材家族。`fluent-color` 为彩色 SVG，`fluent-3d` 为透明 3D PNG，
   `ph` 为双色，`lucide`/`tabler` 为线性。图标名称代表语义，邻近标签使用普通 HTML 文字。
 - 用户认可彩色立体参考稿时，落实其层级、柔和阴影、浅渐变台座、统一光照和图标比例。
@@ -320,4 +333,4 @@ PDF 提取或裁剪的图作为前景图片，使用 `object-fit: contain` 并�
 本阶段仅生成可见幻灯片内容，不生成 speaker-notes，也不需要读取讲稿 artifact。
 规划阶段已经保存独立讲稿，发布工具会在渲染完成后按页自动插入隐藏备注，供演讲与导出使用。
 
-Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. Font resources must be embedded in the delivered HTML and editable PPTX; do not claim portability from a font name alone.
+Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. HTML must load verified font resources by URL; the exporter embeds the same fonts in editable PPTX. Do not inline font bytes in HTML or claim portability from a font name alone.

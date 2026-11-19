@@ -19,6 +19,24 @@ def test_business_failed_status_is_not_a_tool_execution_failure():
     assert _tool_result_status({'status': 'failed', 'message': 'Task did not finish.'}) == 'ok'
 
 
+def test_hidden_reasoning_keeps_streamed_and_final_answer_text():
+    streamed = AgentEventFrameTranslator(query='q')
+    streamed.include_reasoning = False
+    frames = streamed.feed({'tag': 'think', 'delta': 'separate reasoning'})
+    frames += streamed.feed({'tag': 'subagent_think', 'think': 'tool agent reasoning'})
+    frames += streamed.feed({'tag': 'text', 'delta': '<thi'})
+    frames += streamed.feed({'tag': 'text', 'delta': 'nk>inline reasoning</think>answer'})
+    frames += streamed.finish('answer')
+    assert ''.join(frame.get('text') or '' for frame in frames) == 'answer'
+    assert not any(frame.get('think') for frame in frames)
+
+    final = AgentEventFrameTranslator(query='q')
+    final.include_reasoning = False
+    frames = final.finish({'think': 'separate reasoning', 'text': '<think>draft</think>answer'})
+    assert ''.join(frame.get('text') or '' for frame in frames) == 'answer'
+    assert not any(frame.get('think') for frame in frames)
+
+
 def test_translator_rewrites_citations_registered_by_tools():
     translator = AgentEventFrameTranslator(query='q')
     item = {
@@ -531,8 +549,9 @@ def test_workflow_rendering_normalizes_canonical_success_and_failure():
         },
     })
 
-    assert 'Result: **queued**. Reason: **accepted**.' in success_text
-    assert 'Result: **failed**. Reason: **Workflow service is unavailable**.' in failure_text
+    assert 'The workflow is queued and waiting to run.' in success_text
+    assert 'The workflow could not start. Please review the error details.' in failure_text
+    assert 'Workflow service is unavailable' in failure_text
     assert '{result.' not in success_text
     assert '{result.' not in failure_text
 
@@ -703,7 +722,9 @@ def test_translator_composite_ask_preserves_ordinary_question_and_latest_mail_ca
 
 def test_translator_recognizes_explicit_composite_ask_and_plain_asks():
     translator = AgentEventFrameTranslator(query='question')
-    plain = translator.feed({'tag': 'ask_pending', 'ask_id': 'plain', 'questions': [{'text': 'Question'}]})[0]['ask_pending']
+    plain = translator.feed({
+        'tag': 'ask_pending', 'ask_id': 'plain', 'questions': [{'text': 'Question'}],
+    })[0]['ask_pending']
     assert plain['mail_draft_only'] is False
     assert plain['mail_drafts'] == []
     composite = {

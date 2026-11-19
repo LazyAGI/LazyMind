@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -132,5 +133,48 @@ func TestNewProviderRequiresExplicitTrustedIdentity(t *testing.T) {
 	}
 	if _, err := EnsureForProvider(home, "fake-agent", profile, "account"); err == nil {
 		t.Fatal("reconnect silently repaired missing provider")
+	}
+}
+
+func TestPairingFailuresIdentifyRepairWithoutDisclosingCredentials(t *testing.T) {
+	for _, scenario := range []struct{ name, code string }{
+		{"missing", "HOST_PAIRING_MISSING"}, {"disabled", "HOST_PAIRING_DISABLED"},
+		{"account", "HOST_ACCOUNT_MISMATCH"}, {"credential", "HOST_CREDENTIAL_MISMATCH"},
+		{"corrupt", "HOST_PAIRING_INVALID"}, {"directory", "HOST_PAIRING_UNREADABLE"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			home := t.TempDir()
+			pair, err := EnsureForProvider(home, "workbuddy", t.TempDir(), "private-account")
+			if err != nil {
+				t.Fatal(err)
+			}
+			path, _ := pairingPath(home, pair.ConnectorID)
+			account, token := "private-account", pair.Token
+			switch scenario.name {
+			case "missing":
+				os.Remove(path)
+			case "disabled":
+				Disable(home, pair.ConnectorID)
+			case "account":
+				account = "other-private-account"
+			case "credential":
+				token = "private-wrong-credential"
+			case "corrupt":
+				os.WriteFile(path, []byte("invalid-private-value"), 0600)
+			case "directory":
+				os.Remove(path)
+				os.Mkdir(path, 0700)
+			}
+			_, err = Verify(home, pair.ConnectorID, token, account)
+			coded, ok := err.(interface{ PairingCode() string })
+			if !ok || coded.PairingCode() != scenario.code {
+				t.Fatalf("want %s, got %v", scenario.code, err)
+			}
+			for _, secret := range []string{pair.Token, "private-account", "private-wrong-credential", "invalid-private-value"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatal("error disclosed private data")
+				}
+			}
+		})
 	}
 }

@@ -48,6 +48,8 @@ const skillDiffApi = SkillDiffApiFactory(coreConfig, BASE_URL, axiosInstance);
 const coreBasePath = `${BASE_URL}/api/core`;
 
 const SKILL_MD_PATH = "SKILL.md";
+// Allow the five-minute backend download plus package verification and installation.
+const SKILL_PACKAGE_PREPARE_TIMEOUT_MS = 6 * 60_000;
 
 const createSkillOrganizeRequestId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -461,7 +463,7 @@ export interface SkillTreeNodeRecord {
 }
 
 export interface CreateSkillPayload {
-  name: string;
+  name?: string;
   description?: string;
   category: string;
   tags?: string[];
@@ -1301,7 +1303,7 @@ export async function getSkillAssetDetail(
 
 export async function createSkillAsset(
   payload: CreateSkillPayload,
-  options?: { silentError?: boolean },
+  options?: { silentError?: boolean; signal?: AbortSignal },
 ): Promise<string> {
   const request: SkillCreateManagedOpenAPIRequest = {
     name: payload.name,
@@ -1318,7 +1320,7 @@ export async function createSkillAsset(
 
   const response = await skillsApi.apiCoreSkillsPost(
     { skillCreateManagedOpenAPIRequest: request },
-    options?.silentError ? ({ silentError: true } as never) : undefined,
+    { timeout: 300_000, silentError: options?.silentError, ...(options?.signal ? { signal: options.signal } : {}) } as never,
   );
   const body = unwrapEnvelope<{ skill_id?: string }>(response.data);
   return body.skill_id || "";
@@ -1330,7 +1332,7 @@ export async function enableBuiltinSkill(
 ): Promise<SkillAssetRecord | null> {
   const response = await skillsApi.apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(
     { builtinSkillUid },
-    { timeout: 120_000, silentError: options?.silentError } as never,
+    { timeout: SKILL_PACKAGE_PREPARE_TIMEOUT_MS, silentError: options?.silentError } as never,
   );
   const payload = unwrapEnvelope<SkillDetailOpenAPIResponse>(response.data);
   if (!payload?.id && !payload?.skill_id) {
@@ -1615,7 +1617,7 @@ export async function prepareSkillDistributionUpgrade(
 ): Promise<SkillDistributionUpgradePrepareRecord> {
   const response = await skillsApi.apiCoreSkillsSkillIdDistributionUpgradePreparePost(
     { skillId },
-    { timeout: 120_000 },
+    { timeout: SKILL_PACKAGE_PREPARE_TIMEOUT_MS },
   );
   const raw = toRawObject(
     unwrapEnvelope<SkillDistributionUpgradePrepareOpenAPIResponse>(response.data),
@@ -2149,6 +2151,7 @@ export async function getSkillMarketItem(
 
 export async function publishSkillToMarket(
   payload: PublishSkillToMarketPayload,
+  options?: { silentError?: boolean; signal?: AbortSignal },
 ): Promise<{ marketItemId: string; sourceSkillId: string }> {
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
@@ -2158,7 +2161,11 @@ export async function publishSkillToMarket(
           ? { type: "uploaded_zip", upload_id: payload.source.uploadId }
           : { type: "url", url: payload.source.url },
     },
-  });
+  }, {
+    timeout: 300_000,
+    ...(options?.signal ? { signal: options.signal } : {}),
+    ...(options?.silentError ? { silentError: true } : {}),
+  } as never);
   const body = unwrapEnvelope<{ market_item_id?: string; source_skill_id?: string }>(
     response.data,
   );

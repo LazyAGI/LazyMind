@@ -6,6 +6,12 @@
   border-radius: 10px;
   overflow: hidden;
 
+  &--embedded {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
   &__toolbar {
     display: flex;
     align-items: center;
@@ -28,7 +34,11 @@
     &:hover { color: #365cff; background: #edf2ff; }
     &:focus-visible { outline: 2px solid #365cff; outline-offset: 2px; }
   }
-  &__body { padding: 0 24px; }
+  &__body {
+    padding: 0 24px;
+    max-height: var(--workflow-ppt-prompt-max-height, none);
+    overflow-y: auto;
+  }
   &__section {
     padding: 18px 0;
     border-bottom: 1px solid #e8ecf2;

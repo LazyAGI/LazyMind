@@ -81,8 +81,15 @@ func DualWriteMainChat(
 			Msg("[ArtifactV2] dual-write skipped unsupported content type")
 		return skipStaleMainChatProjection(ctx, svc, row.ID, err)
 	}
+	var value struct {
+		PreviewGroup string `json:"preview_group"`
+	}
+	if row.ContentType == "file" && json.Unmarshal(row.Value, &value) == nil && value.PreviewGroup != "" {
+		req.Metadata, _ = json.Marshal(map[string]string{"preview_group": value.PreviewGroup})
+	}
 	if req.IdempotencyKey == "" {
-		sum := sha256.Sum256(append(append(append([]byte(row.ID), req.Content...), req.InlineJSON...), []byte(req.BlobID)...))
+		payload := append(append(append([]byte(row.ID), req.Content...), req.InlineJSON...), []byte(req.BlobID)...)
+		sum := sha256.Sum256(append(payload, req.Metadata...))
 		req.IdempotencyKey = "legacy/" + row.ID + "/" + historyID + "/" + hex.EncodeToString(sum[:8])
 	}
 	if _, err := svc.CommitRevision(ctx, req); err != nil {
@@ -182,14 +189,20 @@ func BindForkRevision(ctx context.Context, svc *Service, ownerUserID, revisionID
 		contentType = "file"
 	}
 	var metadata struct {
-		Filename string `json:"filename"`
+		Filename     string `json:"filename"`
+		PreviewGroup string `json:"preview_group"`
 	}
 	_ = json.Unmarshal(rev.Metadata, &metadata)
+	var previewMetadata json.RawMessage
+	if metadata.PreviewGroup != "" {
+		previewMetadata, _ = json.Marshal(map[string]string{"preview_group": metadata.PreviewGroup})
+	}
 	_, err = svc.CommitRevision(ctx, CommitRequest{
 		TenantID: art.TenantID, OwnerUserID: ownerUserID,
 		LogicalKey: ConversationScopedLogicalKey(childConversationID, DisplayLogicalKey(art.LogicalKey)),
 		Title:      firstNonEmpty(metadata.Filename, art.Title), Kind: art.Kind, Caption: rev.Caption,
 		IdempotencyKey: "fork/" + childConversationID + "/" + childLegacyID + "/" + revisionID,
+		Metadata:       previewMetadata,
 		InlineJSON:     rev.InlineJSON, BlobID: rev.BlobID, ContentType: contentType,
 		ProducerType: ProducerMainChat, Channel: ChannelPublished, Bindings: bindings,
 	})

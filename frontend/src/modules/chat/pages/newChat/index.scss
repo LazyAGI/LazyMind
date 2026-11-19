@@ -1,37 +1,3 @@
-@keyframes gradientShift {
-  0% {
-    background-position: 0% 10%;
-  }
-  25% {
-    background-position: 50% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  75% {
-    background-position: 50% 100%;
-  }
-  100% {
-    background-position: 0% 10%;
-  }
-}
-
-@keyframes blobMove {
-  0%,
-  100% {
-    transform: translate(-50%, -50%) scale(1);
-  }
-  25% {
-    transform: translate(-10%, -60%) scale(1.05);
-  }
-  50% {
-    transform: translate(-90%, -40%) scale(0.95);
-  }
-  75% {
-    transform: translate(-50%, -50%) scale(1.1);
-  }
-}
-
 .new-chat-page {
   width: 100%;
   height: 100%;
@@ -180,9 +146,6 @@
         z-index: 1;
         background: linear-gradient(357.24deg, #e6ecff 28.84%, #ffffff 131.15%);
         filter: blur(65px);
-        animation:
-          gradientShift 8s ease-in-out infinite,
-          blobMove 12s ease-in-out infinite;
       }
     }
 

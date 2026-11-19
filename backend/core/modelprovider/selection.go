@@ -414,6 +414,25 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if hasEmbeddingSelection && embeddingSignature != "" && db.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+		state, err := loadGlobalEmbeddingState(r.Context(), db)
+		if err != nil {
+			common.ReplyErr(w, "embedding state unavailable", 503)
+			return
+		}
+		status, err := loadEmbeddingIndexStatus(r.Context(), db)
+		if err != nil {
+			common.ReplyErr(w, "embedding state unavailable", 503)
+			return
+		}
+		if status.AffectedKnowledgeBases == 0 && state.ActiveModelID != "" && state.Signature != embeddingSignature {
+			if err := clearEmbeddingChunks(r.Context(), db, state, embeddingModelID, embeddingSource, embeddingSignature, true); err != nil {
+				common.ReplyErr(w, err.Error(), 409)
+				return
+			}
+		}
+	}
+
 	// When embed_image is configured for the first time, clear lazy_mode so
 	// image embedding runs immediately. When it is cleared, reset lazy_mode to embed.
 	multimodalModelID, hasMultimodalSelection := selectionByType["embed_image"]
@@ -534,13 +553,14 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			if stateMissing ||
 				(state.ActiveModelID != embeddingModelID || state.ActiveSource != embeddingSource || state.Signature != embeddingSignature ||
 					state.ActiveModelName != embeddingModelName || state.ActiveProviderName != providerName) {
+				changedSpace := state.Signature != embeddingSignature
 				state.ActiveModelID, state.ActiveSource = embeddingModelID, embeddingSource
 				state.ActiveModelName, state.ActiveProviderName = embeddingModelName, providerName
 				state.Signature, state.Phase = embeddingSignature, "ready"
 				state.TargetModelID, state.TargetSource, state.TargetSignature = "", "", ""
 				if state.Generation < 1 {
 					state.Generation = 1
-				} else {
+				} else if changedSpace {
 					state.Generation++
 				}
 				state.UpdatedAt = now
@@ -775,13 +795,6 @@ func loadSelectedModelsInternal(ctx context.Context, db *gorm.DB, userID string,
 		return nil, err
 	}
 	catalog, _ := ResolveCloudModelCatalog(ctx)
-	if !catalog.Known {
-		sort.Slice(out, func(i, j int) bool { return out[i].ModelKey < out[j].ModelKey })
-		if projectGlobalEmbedding {
-			return projectGlobalSelectedEmbedding(ctx, db, userID, out)
-		}
-		return out, nil
-	}
 	byType := make(map[string]int, len(out))
 	for index := range out {
 		byType[out[index].ModelKey] = index
@@ -820,19 +833,35 @@ func loadSelectedModelsInternal(ctx context.Context, db *gorm.DB, userID string,
 
 func projectGlobalSelectedEmbedding(ctx context.Context, db *gorm.DB, userID string, selected []selectedModelItem) ([]selectedModelItem, error) {
 	choice, present, err := ResolveGlobalEmbeddingChoice(ctx, db)
-	if !present {
-		return selected, nil
-	}
 	if err != nil {
 		return nil, err
 	}
+	if !present {
+		return selected, nil
+	}
 	filtered := make([]selectedModelItem, 0, len(selected))
+	persistedEmbedding := make([]selectedModelItem, 0, 1)
 	for _, item := range selected {
-		if item.ModelKey != "embed_main" {
-			filtered = append(filtered, item)
+		if item.ModelKey == "embed_main" {
+			persistedEmbedding = append(persistedEmbedding, item)
+			continue
 		}
+		filtered = append(filtered, item)
 	}
 	if choice.ModelID == "" {
+		if choice.Phase == "detached" || choice.indexState.StrictlyCleared {
+			return filtered, nil
+		}
+		reason := choice.indexState.ReadinessReason
+		if reason == "" {
+			reason = "model_unavailable"
+		}
+		for _, item := range persistedEmbedding {
+			item.Availability = "unavailable"
+			item.UnavailableReason = reason
+			filtered = append(filtered, item)
+		}
+		sort.Slice(filtered, func(i, j int) bool { return filtered[i].ModelKey < filtered[j].ModelKey })
 		return filtered, nil
 	}
 	if choice.Source == "cloud" {
@@ -874,15 +903,11 @@ func projectGlobalSelectedEmbedding(ctx context.Context, db *gorm.DB, userID str
 		}
 		filtered = append(filtered, active)
 	}
-	if choice.Phase == "unverified" || choice.Phase == "clearing" || choice.Phase == "cleanup_failed" {
+	if choice.indexState.ReadinessReason != "" {
 		for i := range filtered {
 			if filtered[i].ModelKey == "embed_main" {
 				filtered[i].Availability = "unavailable"
-				if choice.Phase == "unverified" {
-					filtered[i].UnavailableReason = "index_identity_unverified"
-				} else {
-					filtered[i].UnavailableReason = "index_cleanup_incomplete"
-				}
+				filtered[i].UnavailableReason = choice.indexState.ReadinessReason
 			}
 		}
 	}

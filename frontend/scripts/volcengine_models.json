@@ -1,0 +1,680 @@
+{
+  "source": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+  "reviewed_at": "2026-11-13",
+  "scope": "All listed Ark models for tasks supported by LazyMind. Models marked for retirement remain listed until removed by the official catalog. Plan-specific services are excluded.",
+  "unsupported_models": [
+    "doubao-seed3d-2-0-260328",
+    "hyper3d-gen2-260112",
+    "hitem3d-2-0-251223"
+  ],
+  "models": [
+    {
+      "name": "doubao-seed-evolving",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 262144,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-1-pro-260915",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 262144,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-1-lite-260915",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 262144,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-1-turbo-260628",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 262144,
+      "max_input": 262144,
+      "max_output": 262144,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-1-pro-260628",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 262144,
+      "max_input": 262144,
+      "max_output": 262144,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-0-lite-260428",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 262144,
+      "max_input": 229376,
+      "max_output": 131072,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-0-mini-260428",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 262144,
+      "max_input": 229376,
+      "max_output": 131072,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-0-pro-260215",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 262144,
+      "max_input": 229376,
+      "max_output": 131072,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-0-lite-260215",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 262144,
+      "max_input": 229376,
+      "max_output": 131072,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-0-mini-260215",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 262144,
+      "max_input": 229376,
+      "max_output": 131072,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-2-0-code-preview-260215",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 262144,
+      "max_input": 229376,
+      "max_output": 131072,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-character-260628",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 131072,
+      "max_input": 98304,
+      "max_output": 32768,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seed-character-251128",
+      "model_type": "llm",
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 131072,
+      "max_input": 98304,
+      "max_output": 32768,
+      "feature_support": {
+        "vision": false,
+        "tool_calling": true,
+        "reasoning": false
+      }
+    },
+    {
+      "name": "doubao-seed-translation-250915",
+      "model_type": "llm",
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 4096,
+      "max_input": 1024,
+      "max_output": 3072,
+      "feature_support": {
+        "vision": false,
+        "tool_calling": false,
+        "reasoning": false
+      }
+    },
+    {
+      "name": "glm-5-3-flash-260828",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 131072,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "glm-5-2-260617",
+      "model_type": "llm",
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 131072,
+      "feature_support": {
+        "vision": false,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "kimi-k3-1-pro-261024",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 1048576,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "deepseek-v4-1-flash-261017",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 393216,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "deepseek-v4-1-flash-260910",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 393216,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "deepseek-v4-1-flash-economy-261017",
+      "model_type": "llm",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 393216,
+      "feature_support": {
+        "vision": true,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "deepseek-v4-pro-ga-260813",
+      "model_type": "llm",
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 393216,
+      "feature_support": {
+        "vision": false,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "deepseek-v4-flash-ga-260731",
+      "model_type": "llm",
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 393216,
+      "feature_support": {
+        "vision": false,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "deepseek-v4-pro-260425",
+      "model_type": "llm",
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ],
+      "context": 1048576,
+      "max_input": 1048576,
+      "max_output": 393216,
+      "feature_support": {
+        "vision": false,
+        "tool_calling": true,
+        "reasoning": true
+      }
+    },
+    {
+      "name": "doubao-seedance-2-5-260628",
+      "model_type": "text2video",
+      "input": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "output": [
+        "video"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedance-2-0-260128",
+      "model_type": "text2video",
+      "input": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "output": [
+        "video"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedance-2-0-fast-260128",
+      "model_type": "text2video",
+      "input": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "output": [
+        "video"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedance-2-0-mini-260615",
+      "model_type": "text2video",
+      "input": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "output": [
+        "video"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedance-1-0-pro-250528",
+      "model_type": "text2video",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "video"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedance-1-0-pro-fast-251015",
+      "model_type": "text2video",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "video"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedream-5-5-261028",
+      "model_type": "text2image",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "image"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedream-5-0-pro-260628",
+      "model_type": "text2image",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "image"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedream-5-0-flash-260915",
+      "model_type": "text2image",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "image"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedream-5-0-260128",
+      "model_type": "text2image",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "image"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedream-5-0-lite-260128",
+      "model_type": "text2image",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "image"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedream-4-5-251128",
+      "model_type": "text2image",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "image"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-seedream-4-0-250828",
+      "model_type": "text2image",
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "image"
+      ],
+      "context": 0,
+      "max_input": 0,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-embedding-vision-251215",
+      "model_type": "multimodal_embedding",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "embedding"
+      ],
+      "context": 131072,
+      "max_input": 131072,
+      "max_output": 0
+    },
+    {
+      "name": "doubao-embedding-vision-250615",
+      "model_type": "multimodal_embedding",
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "embedding"
+      ],
+      "context": 131072,
+      "max_input": 131072,
+      "max_output": 0
+    }
+  ]
+}

@@ -659,6 +659,66 @@ describe("compact provider workspace", () => {
   });
 
   it.each([
+    ["阿斯顿", "baseUrlInvalid"],
+    ["/v1", "baseUrlInvalid"],
+    ["ftp://api.example.test/v1", "baseUrlInvalid"],
+    ["https://user:password@api.example.test/v1", "baseUrlInvalid"],
+    ["https://api.example.test/v1?query=test", "baseUrlInvalid"],
+    ["https://api.example.test/v1#fragment", "baseUrlInvalid"],
+    ["", "baseUrlRequired"],
+    [`https://api.example.test/${"a".repeat(512)}`, "baseUrlMax"],
+  ])("shows one endpoint validation error and allows correction: %s", async (value, error) => {
+    const callbacks = setup();
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    fireEvent.change(endpoint, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+
+    expect(await screen.findAllByText(`modelProvider.validation.${error}`)).toHaveLength(1);
+    expect(endpoint).toHaveAttribute("aria-invalid", "true");
+    expect(mocks.updateEndpoint).not.toHaveBeenCalled();
+
+    fireEvent.change(endpoint, { target: { value: "https://valid.example.test/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledOnce());
+    expect(mocks.updateEndpoint).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.queryByText(`modelProvider.validation.${error}`)).not.toBeInTheDocument());
+    expect(endpoint).not.toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("shows one save error and preserves the endpoint draft for retry", async () => {
+    const errorText = "Clear the old text vectors before editing the active embedding model";
+    mocks.updateEndpoint.mockRejectedValueOnce(new Error(errorText));
+    const errorMessage = vi.spyOn(message, "error").mockImplementation(() => null as never);
+    const successMessage = vi.spyOn(message, "success").mockImplementation(() => null as never);
+    try {
+      const callbacks = setup();
+      const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+      const draft = "https://new.example.test/v1";
+      fireEvent.change(endpoint, { target: { value: draft } });
+      fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+
+      await waitFor(() => expect(errorMessage).toHaveBeenCalledOnce());
+      expect(errorMessage).toHaveBeenCalledWith(errorText);
+      expect(mocks.updateEndpoint).toHaveBeenCalledOnce();
+      expect(mocks.updateEndpoint).toHaveBeenCalledWith(provider.id, draft);
+      expect(endpoint).toHaveValue(draft);
+      expect(callbacks.onReload).not.toHaveBeenCalled();
+      expect(successMessage).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" })).toBeEnabled());
+
+      mocks.updateEndpoint.mockResolvedValueOnce({ id: provider.id, base_url: draft });
+      fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+      await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledOnce());
+      await waitFor(() => expect(successMessage).toHaveBeenCalledOnce());
+      expect(successMessage).toHaveBeenCalledWith("modelProvider.workspace.endpointSaved");
+      expect(errorMessage).toHaveBeenCalledOnce();
+    } finally {
+      errorMessage.mockRestore();
+      successMessage.mockRestore();
+    }
+  });
+
+  it.each([
     ["https://api.example.test/", provider.baseUrl],
     ["https://new.example.test", "https://new.example.test/v1/"],
   ])("accepts the server's normalized endpoint after saving %s even before a provider refresh", async (entered, canonical) => {
@@ -1316,6 +1376,18 @@ describe("compact provider workspace", () => {
     expect(mocks.addKey).not.toHaveBeenCalled();
     expect(mocks.createGroup).not.toHaveBeenCalled();
   });
+  it.each([
+    ["OpenAI", false, "deleteKeyModelsHint"],
+    ["vLLM", false, "deleteKeyHint"],
+    ["LMDeploy", false, "deleteKeyHint"],
+    ["Custom", true, "deleteKeyHint"],
+  ])("explains key deletion for %s", async (name, isCustom, hint) => {
+    const callbacks = setup();
+    await act(async () => callbacks.setProvider({ ...provider, name, isCustom }));
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.deleteKeyNumber" }));
+    await waitFor(() => expect(screen.getByText(`modelProvider.workspace.${hint}`)).toBeVisible());
+    expect(mocks.deleteKey).not.toHaveBeenCalled();
+  });
   it("deletes a saved key by opaque ID without submitting masked text", async () => {
     setup();
     fireEvent.click(
@@ -1534,6 +1606,35 @@ describe("compact provider workspace", () => {
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
     expect(await screen.findByText("modelProvider.embeddingInUse")).toBeInTheDocument();
     expect(callbacks.onReload).not.toHaveBeenCalled();
+  });
+  describe.each(["deleteSupplier", "resetSupplier"] as const)("%s embedding recovery", (action) => {
+    afterEach(() => message.destroy());
+
+    it.each([
+      ["active_index_owner", "modelProvider.embeddingInUse"],
+      ["legacy_selected_owner", "modelProvider.embeddingDeletionLegacyOwner"],
+      ["index_identity_unverified", "modelProvider.embeddingDeletionUnverified"],
+    ])("explains %s without removing the supplier", async (reason, label) => {
+      const target = action === "deleteSupplier"
+        ? { ...provider, id: "custom", name: "Private proxy", isCustom: true }
+        : provider;
+      const callbacks = setup({ providers: [target], configuredProviders: [target] });
+      const request = action === "deleteSupplier" ? mocks.deleteProvider : mocks.resetProvider;
+      request.mockRejectedValueOnce({ response: { status: 409, data: {
+        code: 2005089, message: "raw diagnostic canary",
+        data: { reason, recovery: "offline_vector_cleanup", credential: "secret-canary" },
+      } } });
+      const actionLabel = `modelProvider.workspace.${action}`;
+      fireEvent.click(screen.getByRole("button", { name: actionLabel }));
+      fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: actionLabel }));
+
+      const warning = await screen.findByText((text) => text.startsWith(label) && text.includes("modelProvider.embeddingOfflineMaintenance"));
+      expect(warning).not.toHaveTextContent(/raw diagnostic canary|secret-canary/);
+      expect(request).toHaveBeenCalledOnce();
+      expect(request).toHaveBeenCalledWith(target.id);
+      expect(callbacks.onReload).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: actionLabel })).toBeEnabled();
+    });
   });
   it("resets a built-in supplier while keeping its entry", async () => {
     const callbacks = setup();

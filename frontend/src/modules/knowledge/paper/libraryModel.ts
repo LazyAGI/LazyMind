@@ -1,9 +1,13 @@
-import type { ImportSource, PaperImportMethod } from './model';
+import type { ImportSource, PaperImportMethod, ParseState } from './model';
+import type { PdfStructureStatus } from '../api/pdfArtifacts';
 import type { DocumentAcademic } from '../api/paperWorkflows';
 export type { PaperRecord, PaperLibraryData, PaperMetadata } from './model';
 export type AttachmentKind = 'pdf' | 'supplement' | 'snapshot' | 'other';
 export type NoteKind = 'note' | 'ai_summary' | 'method' | 'conclusion';
 export interface Attachment {
+    parse?: ParseState;
+    pdf_structure?: PdfStructureStatus;
+    processingError?: string;
     academicState?: DocumentAcademic['state'];
     id: string;
     paperId: string;
@@ -47,7 +51,7 @@ export function emptyLibrary(): import('./model').PaperLibraryData { return { fo
 export function readingSummary(data: import('./model').PaperLibraryData, paperId: string) { const paper = data.papers.find(item => item.id === paperId); return { attachments: paper?.attachmentIds.length || 0, notes: paper?.noteIds.length || 0 }; }
 
 export interface Collection { id: string; name: string; parentId?: string | null; description?: string; zoteroSources?: string[] }
-export interface Annotation { id: string; paperId: string; attachmentId?: string; page?: number; quote?: string; comment: string; color: 'yellow' | 'blue' | 'red' | 'green'; createdAt: string }
+export interface Annotation { id: string; paperId: string; attachmentId?: string; page?: number; pdfRects?: Array<[number, number, number, number]>; quote?: string; comment: string; color: 'yellow' | 'blue' | 'red' | 'green'; createdAt: string }
 export interface PaperRelation { id: string; fromPaperId: string; toPaperId: string; kind: 'related' | 'cites' | 'cited_by' | 'version_of' }
 export type CompletePaperLibrary = import('./model').PaperLibraryData & { collections: Collection[]; annotations: Annotation[]; relations: PaperRelation[]; mergeSnapshots: unknown[] };
 /** Supply optional graph arrays while preserving every server-owned extension. */

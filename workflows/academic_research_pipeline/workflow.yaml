@@ -17,6 +17,58 @@ when_to_use: >
   单独审稿或格式转换时不应触发完整流程。
 
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      formulate_research:
+        tools: []
+      retrieve_literature:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      synthesize_evidence:
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+      build_paper_outline:
+        tools: []
+      write_paper_draft:
+        tools: []
+      pre_review_integrity:
+        tools: []
+      peer_review:
+        tools: []
+      revise_paper:
+        tools: []
+      re_review:
+        tools: []
+      second_revision:
+        tools: []
+      final_integrity:
+        tools: []
+      finalize_paper:
+        tools: []
+      process_summary:
+        tools: []
   exclusive_tool_capabilities: [writer.create, writer.revise]
   collects_knowledge: true
   clarification_fields:

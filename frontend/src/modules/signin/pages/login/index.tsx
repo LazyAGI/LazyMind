@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import { runtimeFeatures } from "@/runtime/features";
 import { cloudDocumentLoginReturnPath } from "@/modules/modelProvider/utils/cloudDocumentUrls";
+import { workflowRunLoginReturnPath } from "@/modules/chat/pages/workflowRun/loginReturnPath";
 
 interface LoginForm {
   username: string;
@@ -21,7 +22,8 @@ const Login = () => {
   const [form] = Form.useForm<LoginForm>();
   const navigate = useNavigate();
   const location = useLocation();
-  const afterLogin = cloudDocumentLoginReturnPath(location.state?.cloudDocumentReturnTo) || "/agent/chat";
+  const afterLogin = workflowRunLoginReturnPath(location.state?.workflowRunReturnTo)
+    || cloudDocumentLoginReturnPath(location.state?.cloudDocumentReturnTo) || "/agent/chat";
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
 

@@ -210,6 +210,17 @@ export interface WorkflowToolScript {
 }
 
 export interface WorkflowRuntimePolicy {
+  /** Shared step capabilities; business instructions belong to state.yml. */
+  execution?: {
+    version: '1';
+    skills?: string[];
+    constraints?: string[];
+    steps: Record<string, {
+      skills?: string[];
+      constraints?: string[];
+      tools?: Array<{ name: string; source: 'package' | 'global' }>;
+    }>;
+  };
   publisher_owned_slots?: string[];
   collects_knowledge?: boolean;
   completed_edit_step?: string;

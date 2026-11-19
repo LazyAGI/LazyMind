@@ -41,6 +41,14 @@ def _normalize_caption(caption: Optional[str]) -> Optional[str]:
     return normalized
 
 
+def _preview_group(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 255:
+        raise ToolExecutionError('preview_group must be a non-empty string of at most 255 characters')
+    return value.strip()
+
+
 def _published_file_directory(user_id: str, conversation_id: str, artifact_id: str) -> str:
     workspace_root = os.path.realpath(
         os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE')
@@ -115,6 +123,7 @@ def save_chat_artifact(
     caption: Optional[str] = None,
     change_summary: Optional[str] = None,
     logical_key: Optional[str] = None,
+    preview_group: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Save a downloadable artifact produced in the current main-chat turn.
 
@@ -136,22 +145,30 @@ def save_chat_artifact(
             other binary attachments use ``file`` with a local path inside the
             current main-Agent workspace. ``image`` is not a valid value here.
         caption: Optional short human-readable description.
+        preview_group: Explicit identity of one visual work within this reply. When publishing
+            the same diagram in HTML, SVG or image formats, pass the same unique group to each
+            save call; the UI auto-displays one format, preferring HTML, and keeps all file links.
+            Use different groups for independent diagrams, even when their filenames match.
+            Omit for standalone outputs. This does not merge files or their revision histories.
     """
     normalized_type = str(content_type or 'text').strip().lower()
     if normalized_type not in {'text', 'json', 'file'}:
         raise ToolExecutionError("content_type must be 'text', 'json', or 'file'")
     safe_name = _safe_filename(filename, normalized_type)
     normalized_caption = _normalize_caption(caption)
+    group = _preview_group(preview_group)
     if normalized_type == 'file':
         return save_chat_file(
             safe_name, str(content or ''), normalized_caption,
-            change_summary=change_summary, logical_key=logical_key,
+            change_summary=change_summary, logical_key=logical_key, preview_group=group,
         )
     if normalized_type == 'json':
         value = {'data': content}
     else:
         text = str(content if content is not None else '')
         value = {'text': text}
+    if group:
+        value['preview_group'] = group
     # Measure the actual event value rather than only the raw content: JSON escaping
     # can make the persisted payload larger than its source string.
     encoded_value = json.dumps(
@@ -212,8 +229,10 @@ def save_chat_file(
     replace_existing: bool = False,
     change_summary: Optional[str] = None,
     logical_key: Optional[str] = None,
+    preview_group: Optional[str] = None,
 ) -> Dict[str, Any]:
     filename = _safe_filename(filename, 'file')
+    group = _preview_group(preview_group)
     user_id, conversation_id = _current_artifact_scope()
     source = _resolve_source_file(path, user_id, conversation_id)
     artifact_id = artifact_id or str(uuid.uuid4())
@@ -233,6 +252,8 @@ def save_chat_file(
         os.replace(temporary, destination)
         size = os.path.getsize(destination)
         value = {'filename': filename, 'path': destination, 'size': size}
+        if group:
+            value['preview_group'] = group
         metadata = _artifact_metadata(
             json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'),
             change_summary, logical_key,

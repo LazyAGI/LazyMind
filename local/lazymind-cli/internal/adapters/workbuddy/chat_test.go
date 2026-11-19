@@ -137,7 +137,7 @@ func TestAvailabilityRequiresWorkBuddyDesktopAuthentication(t *testing.T) {
 	if ready, reason := availability(auth); ready || !strings.Contains(reason, "open WorkBuddy") {
 		t.Fatalf("signed-out availability=(%v, %q)", ready, reason)
 	}
-	if err := os.WriteFile(auth, []byte("authenticated"), 0o600); err != nil {
+	if err := os.WriteFile(auth, []byte(`{"account":{"uid":"fixture-user"},"auth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if ready, reason := availability(auth); !ready || reason != "" {

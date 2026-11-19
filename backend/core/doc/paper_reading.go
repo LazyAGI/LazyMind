@@ -65,7 +65,7 @@ type paperReadingRequest struct {
 	SourceSHA256 json.RawMessage `json:"source_sha256"`
 }
 
-func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) (any, string, error) {
+func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) (response any, cache string, resultErr error) {
 	row, ext, _, ok := loadPDFDocument(r, false)
 	if !ok {
 		return nil, "", formulaExplanationFailure{404, "Document not found or access denied."}
@@ -91,7 +91,7 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 	if err != nil {
 		return nil, "", formulaExplanationFailure{500, "Cannot read the PDF structure. Retry later."}
 	}
-	if state.Status != "ready" || state.Document == nil || state.Document.Version != 1 || state.Document.CoordinateSpace != "normalized_top_left" {
+	if state.Document == nil || state.Document.Version != 1 || state.Document.CoordinateSpace != "normalized_top_left" {
 		return nil, "", formulaExplanationFailure{409, "Parse the original PDF before using the paper reader."}
 	}
 	d := *state.Document
@@ -112,11 +112,7 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 	defer cancel()
 	var config map[string]any
 	var modelName string
-	cacheKey := func(model string) string {
-		keyData, _ := json.Marshal([]any{paperReadingPromptVersion, "visual", blockID, d.SourceSHA256, d.Parser, pdfir.Revision, d.ProjectionVersion, model, request.Language, evidence, []pdfir.Block(nil)})
-		return pdfir.Digest(string(keyData))
-	}
-	key := cacheKey("")
+	key := paperVisualCacheKey(d, blockID, request.Language, evidence)
 	dir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", "paper-reading", pdfIRResource(row.DatasetID, row.ID), pdfir.Digest(store.UserID(r)))
 	path := filepath.Join(dir, key+".json")
 	validate := func(raw string) (any, error) {
@@ -168,6 +164,8 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 		return nil, "", formulaExplanationFailure{422, "Select an available study model in AI reading preferences before using the paper reader."}
 	}
 
+	finish := startReadingWork(path)
+	defer func() { finish(resultErr) }()
 	content, _ := json.Marshal(input)
 	raw := ""
 	if len(evidence) == 0 {
@@ -177,7 +175,7 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 		raw, err = h.model.generate(ctx, string(content), instruction, config)
 	}
 	if err != nil {
-		return nil, "", formulaExplanationFailure{502, "The selected model could not complete this reading request. Check the model connection and retry."}
+		return nil, "", err
 	}
 	result, err := validate(raw)
 	if err != nil {
@@ -224,7 +222,16 @@ func savePaperReading(dir, path string, result any) error {
 	return os.Rename(f.Name(), path)
 }
 
+func isReadingModelTimeout(err error) bool {
+	var taskError *algo.StructuredTaskError
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &taskError) && taskError.Code == "request_timeout")
+}
+
 func replyReadingServiceError(w http.ResponseWriter, err error) {
+	if isReadingModelTimeout(err) {
+		formulaExplanationError(w, 504, "The reading model did not finish within 2 minutes. Retry or choose another study model.")
+		return
+	}
 	var failure formulaExplanationFailure
 	if errors.As(err, &failure) {
 		formulaExplanationError(w, failure.status, failure.message)

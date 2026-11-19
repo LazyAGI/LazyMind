@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 )
 
@@ -15,13 +14,13 @@ function Start-WorkBuddyDesktop {
     $exe = $env:LAZYMIND_WB_DESKTOP
     $running = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $exe })
     foreach ($instance in $running) {
-        if (-not $instance.CommandLine) { throw 'Cannot inspect WorkBuddy; quit it from its tray menu and retry' }
+        if (-not $instance.CommandLine) { throw 'LAZYMIND_WB_process_inspection_failed: Cannot inspect WorkBuddy; quit it from its tray menu and retry' }
         if ($instance.CommandLine -match '(?:^|\s)--type(?:=|\s)') { continue }
         $process = Get-Process -Id $instance.ProcessId -ErrorAction SilentlyContinue
         if (-not $process) { continue }
-        if ($process.MainWindowHandle -eq 0) { throw 'WorkBuddy is still running in the tray; quit WorkBuddy from its tray menu and retry' }
-        if (-not $process.CloseMainWindow()) { throw 'Close WorkBuddy and retry' }
-        if (-not $process.WaitForExit(10000)) { throw 'WorkBuddy did not exit; quit it from its tray menu or finish its pending dialog and retry' }
+        if ($process.MainWindowHandle -eq 0) { throw 'LAZYMIND_WB_quit_required: WorkBuddy is still running in the tray; quit WorkBuddy from its tray menu and retry' }
+        if (-not $process.CloseMainWindow()) { throw 'LAZYMIND_WB_quit_required: Close WorkBuddy and retry' }
+        if (-not $process.WaitForExit(10000)) { throw 'LAZYMIND_WB_quit_required: WorkBuddy did not exit; quit it from its tray menu or finish its pending dialog and retry' }
     }
     # LazyMind itself may predate the persistent environment update. Override
     # the inherited value as WorkBuddy reads it before Electron startup.
@@ -34,10 +33,10 @@ func launchDesktop(ctx context.Context, application string, port int) error {
 	// Pass the installed executable via environment, never interpolate a path
 	// into PowerShell source. CloseMainWindow allows ordinary application shutdown.
 	script := "$ErrorActionPreference='Stop';" + windowsDesktopFunctions + "\nStart-WorkBuddyDesktop"
-	command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	command := backgroundCommand(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	command.Env = append(os.Environ(), "LAZYMIND_WB_DESKTOP="+application, "LAZYMIND_WB_CDP_PORT="+strconv.Itoa(port))
 	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("start WorkBuddy: %s: %w", output, err)
+		return desktopLaunchError(string(output), fmt.Errorf("start WorkBuddy: %w", err))
 	}
 	return nil
 }

@@ -42,8 +42,9 @@ describe('Workflow Panel live update surface', () => {
     expect(taskStore).toContain(
       'void get().refreshConversationExecution(conversationId)',
     );
-    expect(chatLayout).toContain('subscribeConvEvents(sessionId)');
-    expect(chatLayout).toContain('unsubscribeConvEvents(sessionId)');
+    expect(chatLayout).toContain('const executionConversationId = routeConversationId || sessionId');
+    expect(chatLayout).toContain('subscribeConvEvents(executionConversationId)');
+    expect(chatLayout).toContain('unsubscribeConvEvents(executionConversationId)');
   });
 
   it('retains workflow tasks for live artifact streams and both task center modes', () => {

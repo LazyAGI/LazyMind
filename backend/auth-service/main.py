@@ -59,15 +59,19 @@ _logger.propagate = True
 
 @app.middleware('http')
 async def _log_request(request: Request, call_next):
-    """Log one request entry plus access-log for each request"""
+    """Log request timing and failures beyond Uvicorn's access log."""
     if request.url.path in _SWAGGER_PATHS:
         return await call_next(request)
-    client_ip = None
-    if request.client:
-        client_ip = request.client.host
-    _logger.info('Request started: %s %s from %s', request.method, request.url.path, client_ip)
-    print(f'Request started: {request.method} {request.url.path} from {client_ip}', flush=True)
-    start = time.time()
+    local_authorize = (
+        os.environ.get('LAZYMIND_RUNTIME_MODE') == 'local'
+        and request.method == 'POST'
+        and request.url.path == f'{_API_PREFIX}/auth/authorize'
+    )
+    if not local_authorize:
+        client_ip = request.client.host if request.client else None
+        _logger.info('Request started: %s %s from %s', request.method, request.url.path, client_ip)
+        print(f'Request started: {request.method} {request.url.path} from {client_ip}', flush=True)
+    start = time.monotonic()
     try:
         response = await call_next(request)
     except AppException:
@@ -79,7 +83,7 @@ async def _log_request(request: Request, call_next):
     except StarletteHTTPException:
         raise
     except Exception as e:
-        cost_ms = int((time.time() - start) * 1000)
+        cost_ms = int((time.monotonic() - start) * 1000)
         _logger.exception(
             'unhandled_exception method=%s path=%s cost_ms=%d',
             request.method,
@@ -102,7 +106,11 @@ async def _log_request(request: Request, call_next):
         )
         app_exc = app_exception_from_exception(e)
         return JSONResponse(status_code=app_exc.http_code, content=error_payload_from_exception(app_exc))
-    cost_ms = int((time.time() - start) * 1000)
+    cost_ms = int((time.monotonic() - start) * 1000)
+    # Uvicorn already logs each response. Avoid extra log writes for routine
+    # gateway authorization while keeping slow requests and errors visible.
+    if local_authorize and response.status_code == 200 and cost_ms < 500:
+        return response
     if response.status_code >= 500:
         _logger.error(
             'access-log method=%s path=%s status=%s cost_ms=%d',

@@ -3,6 +3,46 @@ name: 论文自动拓展
 description: 承接已确认的研究范围，检索并交付论文清单，深入研究进一步生成研究报告与论文关系。
 when_to_use: 仅在拓展记录已经确定方向后执行（按启动时所选策略全选方向或等待人工确认）；继续同一范围或调整结果表达沿用原记录。
 runtime:
+  execution:
+    version: '1'
+    skills:
+    - scenario/execution.md
+    constraints:
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
+    steps:
+      expand_and_screen:
+        tools:
+        - name: academic_expansion
+          source: package
+        - name: academic_search_papers
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: academic_resolve_papers
+          source: package
+      screen_and_supplement:
+        tools:
+        - name: academic_expansion
+          source: package
+        - name: academic_search_papers
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: academic_resolve_papers
+          source: package
+      analyze_relations:
+        tools:
+        - name: academic_expansion
+          source: package
+        - name: academic_search_papers
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: academic_resolve_papers
+          source: package
   transactional_outputs: true
   publisher_owned_slots:
   - candidate_set

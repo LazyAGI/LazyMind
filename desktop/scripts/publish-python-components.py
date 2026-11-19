@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a verified ZIP and its online tag catalog to MS or HF (catalog last)."""
+"""Publish verified Python components and their tag catalogs to MS or HF."""
 import argparse
 import importlib.util
 import json
@@ -17,36 +17,43 @@ def publish(directory, repo, python=None, api=None, host='ms', signing_mode='dev
     verify.require(host in ('ms', 'hf'), 'Invalid publication host')
     catalog_path = directory / 'python-components.json'
     catalog = json.loads(catalog_path.read_text(encoding='utf-8'))
-    entry = catalog['components']['rag']
-    tag = entry.get('tag', '')
-    verify.require(re.fullmatch(r'[a-f0-9]{64}', tag), 'Invalid component tag')
-    verify.require(Path(entry['filename']).name == entry['filename'], 'Invalid ZIP filename')
-    prefix = f'RAG/tags/{tag}'
-    base = (f'https://modelscope.cn/datasets/{repo}/resolve/master/{prefix}/' if host == 'ms'
-            else f'https://huggingface.co/datasets/{repo}/resolve/main/{prefix}/')
-    verify.require(host == 'hf' or (entry['url'] == base + entry['filename'] and
-                   entry['catalogUrl'] == base + 'python-components.json'),
-                   'Catalog URLs do not match the ModelScope upload destination')
-    archive = directory / entry['filename']
-    verify.check_archive(archive, entry)
-    with tempfile.TemporaryDirectory(prefix='rag-publish-') as temporary:
+    entries = catalog['components']
+    verify.require('rag' in entries and entries.keys() <= {'rag', 'cluster'}, 'Invalid component list')
+    with tempfile.TemporaryDirectory(prefix='python-component-publish-') as temporary:
         temp = Path(temporary)
-        overlay = verify.extract_bundle(archive, temp / 'payload', entry)
-        if entry['platform'] == 'darwin':
-            verify.require(python is not None, 'Mac publication requires the signed bundled Python')
-            if signing_mode == 'adhoc':
-                verify.require(entry.get('signingMode') == 'adhoc' and '-adhoc-' in entry['filename'],
-                               'Ad-hoc publication requires a labelled ad-hoc bundle')
-                verify.verify_macos_team_id(overlay, python, adhoc=True)
-            else:
-                verify.verify_macos_team_id(overlay, python)
+        archives = {}
+        for component_id in sorted(entries, key=lambda name: name != 'rag'):
+            entry = entries[component_id]
+            tag = entry.get('tag', '')
+            verify.require(entry.get('id') == component_id and re.fullmatch(r'[a-f0-9]{64}', tag),
+                           'Invalid component ID or tag')
+            verify.require(Path(entry['filename']).name == entry['filename'], 'Invalid ZIP filename')
+            prefix = f'RAG/tags/{tag}'
+            base = (f'https://modelscope.cn/datasets/{repo}/resolve/master/{prefix}/' if host == 'ms'
+                    else f'https://huggingface.co/datasets/{repo}/resolve/main/{prefix}/')
+            verify.require(host == 'hf' or (entry['url'] == base + entry['filename'] and
+                           entry['catalogUrl'] == base + 'python-components.json'),
+                           'Catalog URLs do not match the ModelScope upload destination')
+            archive = directory / entry['filename']
+            verify.check_archive(archive, entry)
+            overlay = verify.extract_bundle(archive, temp / component_id, entry)
+            if entry['platform'] == 'darwin':
+                verify.require(python is not None, 'Mac publication requires the signed bundled Python')
+                signature_options = ({'required_binary': verify.MACOS_CLUSTER_LIBRARY}
+                                     if component_id == 'cluster' else {})
+                if signing_mode == 'adhoc':
+                    verify.require(entry.get('signingMode') == 'adhoc' and '-adhoc-' in entry['filename'],
+                                   'Ad-hoc publication requires a labelled ad-hoc bundle')
+                    verify.verify_macos_team_id(overlay, python, adhoc=True, **signature_options)
+                else:
+                    verify.verify_macos_team_id(overlay, python, **signature_options)
+            if host == 'hf':
+                entry.update(url=base + entry['filename'], catalogUrl=base + 'python-components.json')
+                entry.pop('fallbackUrl', None)
+            archives[component_id] = (prefix, archive)
         if host == 'hf':
-            entry.update(url=base + entry['filename'], catalogUrl=base + 'python-components.json')
-            entry.pop('fallbackUrl', None)
             catalog_path = temp / 'python-components.json'
             catalog_path.write_text(json.dumps(catalog), encoding='utf-8')
-        sums = temp / 'SHA256SUMS'
-        sums.write_text(f'{entry["sha256"]}  {entry["filename"]}\n', encoding='utf-8')
         if api is None:
             token_name = 'MODELSCOPE_API_TOKEN' if host == 'ms' else 'HF_TOKEN'
             token = os.environ.get(token_name)
@@ -57,16 +64,20 @@ def publish(directory, repo, python=None, api=None, host='ms', signing_mode='dev
             else:
                 from huggingface_hub import HfApi
                 api = HfApi(token=token)
-        # Make the payload available before changing the channel pointer.
-        for source in (archive, sums, catalog_path):
-            api.upload_file(repo_id=repo, repo_type='dataset', path_or_fileobj=str(source),
-                            path_in_repo=f'{prefix}/{source.name}', revision='master' if host == 'ms' else 'main',
-                            commit_message=f'Publish RAG {tag}: {source.name}')
-        published = verify.resolve_catalog_entry(entry)
-        verify.require(published['sha256'] == entry['sha256'] and published['revision'] == entry['revision'],
-                       'Published catalog does not match this build')
-        verify.acquire_bundle(published, temp, None)
-    print(f'Published and downloaded/verified {entry["catalogUrl"]}', flush=True)
+        for component_id, (prefix, archive) in archives.items():
+            entry = entries[component_id]
+            sums = temp / component_id / 'SHA256SUMS'
+            sums.write_text(f'{entry["sha256"]}  {entry["filename"]}\n', encoding='utf-8')
+            # Make the payload available before changing its channel pointer.
+            for source in (archive, sums, catalog_path):
+                api.upload_file(repo_id=repo, repo_type='dataset', path_or_fileobj=str(source),
+                                path_in_repo=f'{prefix}/{source.name}', revision='master' if host == 'ms' else 'main',
+                                commit_message=f'Publish {component_id} {entry["tag"]}: {source.name}')
+            published = verify.resolve_catalog_entry(entry)
+            verify.require(published['sha256'] == entry['sha256'] and published['revision'] == entry['revision'],
+                           'Published catalog does not match this build')
+            verify.acquire_bundle(published, temp, None)
+            print(f'Published and downloaded/verified {entry["catalogUrl"]}', flush=True)
 
 
 if __name__ == '__main__':

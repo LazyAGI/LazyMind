@@ -51,9 +51,24 @@ func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(contex
 		return
 	}
 	db := store.DB().WithContext(ctx)
+	if _, err := parsingEmbeddingGeneration(ctx, db); err != nil {
+		return
+	}
+	// Explicit work must reconcile even after the user lowers the default.
+	// Reconciliation observes completion; it never schedules a manual rebuild.
+	var activeDatasets []string
+	if db.Model(&orm.DocumentProcessingState{}).
+		Where("embedding_version IN ? AND index_artifact_ref LIKE ?", []string{embeddingVersionReembedManual, embeddingVersionRebuildRequired}, "core-task:%").
+		Distinct().Pluck("dataset_id", &activeDatasets).Error == nil {
+		for _, id := range activeDatasets {
+			r, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/internal/index-status", nil)
+			syncProcessingTaskStates(r, id)
+		}
+	}
 	var states []orm.DocumentProcessingState
 	if db.Where("(parse_artifact_ref <> '' OR embedding_version = ?) AND embedding_version <> ? AND index_status <> ?",
 		embeddingVersionReembedPending, embeddingVersionReembedManual, "succeeded").
+		Where("embedding_version <> ?", embeddingVersionRebuildRequired).
 		Order("updated_at ASC").Find(&states).Error != nil {
 		return
 	}
@@ -76,7 +91,7 @@ func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(contex
 		r.Header.Set("X-User-Id", dataset.CreateUserID)
 		syncProcessingTaskStates(r, dataset.ID)
 		db.Where("dataset_id = ? AND document_id = ?", dataset.ID, document.ID).Take(&state)
-		if state.IndexStatus == "succeeded" || state.IndexStatus == "running" {
+		if state.EmbeddingVersion == embeddingVersionReembedManual || state.IndexStatus == "succeeded" || state.IndexStatus == "running" {
 			continue
 		}
 		// Failed/abandoned submissions back off; successful remote submissions are

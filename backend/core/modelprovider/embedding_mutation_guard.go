@@ -2,8 +2,10 @@ package modelprovider
 
 import (
 	"errors"
+	"net/http"
 
 	"gorm.io/gorm"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
 
@@ -34,38 +36,25 @@ func guardEmbeddingRuntimeMutation(tx *gorm.DB, userID, providerID, groupID, mod
 	if len(ids) == 0 {
 		return nil
 	}
-	if tx.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
-		var state orm.EmbeddingIndexState
-		err := tx.Where("scope = ?", globalEmbeddingScope).Take(&state).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		if err == nil {
-			for _, id := range ids {
-				if id == state.ActiveModelID {
-					return errEmbeddingIdentityInUse
-				}
-			}
-			// A recorded global choice supersedes old personal selections.
-			return nil
-		}
+	_ = userID // Kept for call-site compatibility; vector ownership is global.
+	return guardEmbeddingDestructiveOperation(tx, errEmbeddingIdentityInUse, ids...)
+}
+
+func replyEmbeddingMutationConflict(w http.ResponseWriter, err error) bool {
+	var conflict *embeddingDestructiveOperationError
+	if errors.As(err, &conflict) {
+		common.ReplyErrWithData(w, conflict.Error(), map[string]string{
+			"reason": conflict.Reason, "recovery": "offline_vector_cleanup",
+		}, http.StatusConflict)
+		return true
 	}
-	if tx.Migrator().HasTable(&orm.UserSelectedModel{}) {
-		var selected int64
-		if err := tx.Model(&orm.UserSelectedModel{}).
-			Where("model_type = ? AND user_model_provider_group_model_id IN ?", "embed_main", ids).
-			Count(&selected).Error; err != nil {
-			return err
-		}
-		if selected > 0 {
-			return errEmbeddingIdentityInUse
-		}
+	// Preserve structured recovery for legacy direct sentinel paths while they
+	// are phased into the evidence classifier. Never infer an active owner.
+	if errors.Is(err, errEmbeddingInUse) || errors.Is(err, errEmbeddingIdentityInUse) {
+		common.ReplyErrWithData(w, err.Error(), map[string]string{
+			"reason": embeddingConflictIndexIdentityUnverified, "recovery": "offline_vector_cleanup",
+		}, http.StatusConflict)
+		return true
 	}
-	if err := guardEmbeddingRemoval(tx, userID, ids...); err != nil {
-		if errors.Is(err, errEmbeddingInUse) {
-			return errEmbeddingIdentityInUse
-		}
-		return err
-	}
-	return nil
+	return false
 }

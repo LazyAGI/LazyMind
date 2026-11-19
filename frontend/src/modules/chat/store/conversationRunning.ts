@@ -16,6 +16,7 @@ type StatusEntry = {
 };
 interface RunningState {
   entries: Record<string, StatusEntry>;
+  checkingIds: string[];
   watchers: Record<string, string[]>;
   watch: (key: string, ids: string[]) => void;
   unwatch: (key: string) => void;
@@ -23,6 +24,7 @@ interface RunningState {
 
 export const useConversationRunningStore = create<RunningState>((set) => ({
   entries: {},
+  checkingIds: [],
   watchers: {},
   watch: (key, ids) => set((state) => {
     const next = new Set(ids.filter(Boolean));
@@ -95,13 +97,14 @@ export function startConversationRunningSync(userScope = "") {
 
   function markUnavailable(ids: string[]) {
     const entries = { ...store.getState().entries };
+    const checkingIds = store.getState().checkingIds;
     const now = Date.now();
     for (const id of ids) {
-      if (!entries[id] || now - entries[id].confirmedAt >= STALE_MS) {
+      if (!entries[id] || checkingIds.includes(id) || now - entries[id].confirmedAt >= STALE_MS) {
         entries[id] = { status: "unknown", confirmedAt: entries[id]?.confirmedAt ?? 0 };
       }
     }
-    store.setState({ entries });
+    store.setState({ entries, checkingIds: checkingIds.filter((id) => !ids.includes(id)) });
     clearTimeout(staleTimer);
     const deadlines = Object.values(entries).filter((entry) => entry.status !== "unknown")
       .map((entry) => entry.confirmedAt + STALE_MS - now).filter((delay) => delay > 0);
@@ -117,6 +120,14 @@ export function startConversationRunningSync(userScope = "") {
 
   function invalidate(ids: string[] = []) {
     ids.forEach((id) => pending.add(id));
+    // A refresh hint is not proof of a running task. Keep confirmed statuses
+    // separate from the first snapshot / lifecycle confirmation in progress.
+    if (ids.length) {
+      const { entries, checkingIds } = store.getState();
+      const added = ids.filter((id) => !entries[id] || entries[id].status === "idle");
+      if (added.length) store.setState({ checkingIds: [...new Set([...checkingIds, ...added])] });
+      if (!canReachGateway()) markUnavailable(ids);
+    }
     revision++;
     if (!inFlight) schedule(100);
   }
@@ -163,7 +174,7 @@ export function startConversationRunningSync(userScope = "") {
               confirmedAt: Date.now(),
             };
           }
-          store.setState({ entries: current });
+          store.setState({ entries: current, checkingIds: store.getState().checkingIds.filter((id) => !batch.includes(id)) });
           acknowledgeViewed();
         } catch {
           if (disposed || controller.signal.aborted) return;
@@ -189,7 +200,12 @@ export function startConversationRunningSync(userScope = "") {
   }
 
   const unsubscribe = store.subscribe((next, previous) => {
-    if (next.watchers !== previous.watchers) { acknowledgeViewed(); invalidate(); }
+    if (next.watchers !== previous.watchers) {
+      const previousIDs = new Set(Object.values(previous.watchers).flat());
+      const added = [...watchedIDs()].filter((id) => !previousIDs.has(id) && !next.entries[id]);
+      acknowledgeViewed();
+      invalidate(added);
+    }
   });
   const onActivity = (event: Event) => {
     const id = (event as CustomEvent<{ conversationId?: string }>).detail?.conversationId;
@@ -202,7 +218,7 @@ export function startConversationRunningSync(userScope = "") {
       clearTimeout(timer);
       if (!canReachGateway()) {
         controller?.abort();
-        markUnavailable(Object.keys(store.getState().entries));
+        markUnavailable([...new Set([...Object.keys(store.getState().entries), ...store.getState().checkingIds])]);
       }
     }
   };
@@ -211,6 +227,7 @@ export function startConversationRunningSync(userScope = "") {
   window.addEventListener("online", onVisibility);
   window.addEventListener("offline", onVisibility);
   document.addEventListener("visibilitychange", onVisibility);
+  invalidate([...watchedIDs()].filter((id) => !store.getState().entries[id]));
   schedule(0);
   return () => {
     disposed = true;
@@ -224,7 +241,7 @@ export function startConversationRunningSync(userScope = "") {
     window.removeEventListener("online", onVisibility);
     window.removeEventListener("offline", onVisibility);
     document.removeEventListener("visibilitychange", onVisibility);
-    store.setState({ entries: {} });
+    store.setState({ entries: {}, checkingIds: [] });
   };
 }
 

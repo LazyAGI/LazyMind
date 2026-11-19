@@ -12,7 +12,6 @@ import (
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/credentials"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/workbuddyhost"
 	"lazymind/agentconnector/internal/workflowhost"
 )
@@ -104,9 +103,7 @@ func TestWorkBuddySignedOutDisconnectRevokesLocalPairingAndKeepsOtherServers(t *
 	config := workbuddyhost.Config{Node: filepath.Join(root, "node"), PairingFile: filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json"), CDPPort: 1}
 	body, _ := json.Marshal(config)
 	writeTestFile(t, workbuddyhost.ConfigPath(home), string(body))
-	if err = integrationstate.Set(home, "workbuddy", true); err != nil {
-		t.Fatal(err)
-	}
+
 	adapter := testAdapter(WorkBuddy)
 	adapter.self, _ = os.Executable()
 	adapter.home = home

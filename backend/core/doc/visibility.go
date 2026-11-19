@@ -265,7 +265,8 @@ func FilterDocumentVisibilityHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Items []DocumentVisibilityRef `json:"items"`
+		Items               []DocumentVisibilityRef `json:"items"`
+		RequireCurrentIndex bool                    `json:"require_current_index"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&input); err != nil {
 		common.ReplyErr(w, "invalid document references", http.StatusBadRequest)
@@ -281,5 +282,50 @@ func FilterDocumentVisibilityHTTP(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+	if input.RequireCurrentIndex {
+		refs, err = svc.filterCurrentIndexes(r.Context(), refs)
+		if err != nil {
+			common.ReplyErr(w, "index freshness could not be checked", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	common.ReplyJSON(w, map[string]any{"items": refs})
+}
+
+// Apply only to retrieval results. Original documents remain readable while an
+// explicitly rebuilt source waits for a fresh vector index.
+func (s *DocumentVisibilityService) filterCurrentIndexes(ctx context.Context, refs []DocumentVisibilityRef) ([]DocumentVisibilityRef, error) {
+	if len(refs) == 0 {
+		return refs, nil
+	}
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ids = append(ids, ref.DocumentID)
+	}
+	var rows []struct{ DatasetID, KbID, ID, LazyllmDocID string }
+	err := s.db.WithContext(ctx).Table("document_processing_states p").
+		Select("d.dataset_id,k.kb_id,d.id,d.lazyllm_doc_id").
+		Joins("JOIN documents d ON d.id=p.document_id AND d.dataset_id=p.dataset_id").
+		Joins("JOIN datasets k ON k.id=d.dataset_id").
+		Where("(d.id IN ? OR d.lazyllm_doc_id IN ?) AND p.embedding_version=?", ids, ids, embeddingVersionRebuildRequired).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	stale := map[DocumentVisibilityRef]bool{}
+	for _, row := range rows {
+		for _, kb := range []string{row.DatasetID, row.KbID} {
+			for _, doc := range []string{row.ID, row.LazyllmDocID} {
+				if kb != "" && doc != "" {
+					stale[DocumentVisibilityRef{KnowledgeID: kb, DocumentID: doc}] = true
+				}
+			}
+		}
+	}
+	out := make([]DocumentVisibilityRef, 0, len(refs))
+	for _, ref := range refs {
+		if !stale[ref] {
+			out = append(out, ref)
+		}
+	}
+	return out, nil
 }

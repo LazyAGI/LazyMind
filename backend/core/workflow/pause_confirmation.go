@@ -44,7 +44,8 @@ func PauseNativeWorkflowHTTP(w http.ResponseWriter, r *http.Request) {
 // The old lease token identifies that exact execution even after it was fenced.
 func ConfirmNativeStop(ctx context.Context, db *gorm.DB, attemptID, token string) error {
 	var stoppedSessionID string
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		stoppedSessionID = ""
 		var step orm.WorkflowSessionStep
 		if err := tx.Where("id = ?", attemptID).First(&step).Error; err != nil {
 			return err

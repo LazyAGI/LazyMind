@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useSettingsDraft, useSettingsEditor } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -29,6 +30,7 @@ import {
   withModelProviderJsonOptions,
   type StoredProviderKey,
 } from "../api";
+import ParsingServiceSelection from "../components/ParsingServiceSelection";
 import ToolManagementSection from "../components/ToolManagementSection";
 import DependencyInstallSection from "../components/DependencyInstallSection";
 import { sortTranslationProviders, translationProviderDisplayName } from "../translationProviderNames";
@@ -404,14 +406,14 @@ export function renderExternalServiceDescription(description: string) {
   return parts.map((part, index) => {
     if (/^https?:\/\//.test(part)) {
       return (
-        <a
+        <ExternalLink
           href={part}
           key={`${part}-${index}`}
           rel="noreferrer"
           target="_blank"
         >
           {part}
-        </a>
+        </ExternalLink>
       );
     }
 
@@ -747,6 +749,7 @@ export default function ExternalServicesPage({
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
   const configLocation = useSettingsEditor("service");
   const [activeService, setActiveService] = useState<ExternalServiceConfig | null>(null);
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const [services, setServices] = useState<ExternalServiceConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -793,6 +796,7 @@ export default function ExternalServicesPage({
           return;
         }
         setServices(providers.map((provider) => mapApiProviderToService(provider, t)));
+        setSelectionRevision(value => value + 1);
       })
       .catch((error) => {
         if (controller.signal.aborted || requestIdRef.current !== requestId) {
@@ -905,7 +909,7 @@ export default function ExternalServicesPage({
         }
         setGroupForActiveService(savedGroup);
 
-        if (!isTranslation) await selectServiceProvider(activeService, savedGroup.id);
+        if (!isTranslation && activeService.category !== "parsing") await selectServiceProvider(activeService, savedGroup.id);
       } else if (isTranslation) {
         const savedGroup = await replaceProviderCredential(activeService, groupForActiveService, apiKey);
         setGroupForActiveService(savedGroup);
@@ -993,7 +997,7 @@ export default function ExternalServicesPage({
       }
 
       const hasSavedKeys = savedGroup?.has_api_key || Boolean(savedGroup?.keys?.length) || keyList.length > 0;
-      if (activeService.category !== "translation" && savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+      if (activeService.category !== "translation" && activeService.category !== "parsing" && savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
         await selectServiceProvider(activeService, savedGroup.id);
       }
 
@@ -1185,6 +1189,7 @@ export default function ExternalServicesPage({
             {category.key === "parsing" && parsingControl ? (
               <div className="model-provider-default-parsing-control">{parsingControl}</div>
             ) : null}
+            {category.key === "parsing" && <ParsingServiceSelection revision={selectionRevision} onChanged={onConfigurationChanged} />}
             {category.key === "translation" ? (
               <div className="model-provider-translation-tiers">
                 {[
@@ -1230,6 +1235,7 @@ export default function ExternalServicesPage({
           </div>
         </div>
 
+        {category.key === "parsing" && <ParsingServiceSelection revision={selectionRevision} onChanged={onConfigurationChanged} />}
         {renderServiceCards(visibleServices)}
       </section>
     );
@@ -1326,10 +1332,10 @@ export default function ExternalServicesPage({
                 <div className="model-provider-translation-setup-head">
                   <strong>{t("modelProvider.external.translationGuideTitle", { name: serviceDisplayName(activeService) })}</strong>
                   {getTranslationSetupUrl(activeService) ? (
-                    <a href={getTranslationSetupUrl(activeService)} rel="noreferrer" target="_blank">
+                    <ExternalLink href={getTranslationSetupUrl(activeService)} rel="noreferrer" target="_blank">
                       {t("modelProvider.external.translationGuideOpenOfficial")}
                       <RightOutlined aria-hidden="true" />
-                    </a>
+                    </ExternalLink>
                   ) : null}
                 </div>
                 <ol>

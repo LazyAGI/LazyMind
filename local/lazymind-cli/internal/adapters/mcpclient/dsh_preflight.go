@@ -91,6 +91,8 @@ func sanitizeDSHStatus(s *agentintegration.Status) {
 		s.Message = "This DSH version is not supported. Update to 0.2.0-rc.2 or later and retry."
 	case "dependency_environment":
 		s.Message = "The DSH dependency environment is invalid. Unable to connect."
+	case "plugin_update_required":
+		s.Message = "The installed LazyMind plugin needs an update. Reconnect to update its components."
 	default:
 		s.Message = "DSH connection failed. Retry, and report the issue if it persists."
 	}

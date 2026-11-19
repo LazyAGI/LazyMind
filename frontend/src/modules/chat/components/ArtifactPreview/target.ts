@@ -23,6 +23,7 @@ export interface ArtifactPreviewTarget {
   downloadUrl?: string;
   content?: string;
   mimeType?: string;
+  previewGroup?: string;
   canDownload?: boolean;
   refreshUrl?: () => Promise<string>;
   workflow?: WorkflowPreviewOrigin;
@@ -55,6 +56,7 @@ export function filePreviewTarget(file: ArtifactFile): ArtifactPreviewTarget {
     workflow: artifact.source_type === 'workflow' || stepId
       ? { sessionId: session?.session_id || '', stepId: stepId || '' } : undefined,
     filename: file.filename,
+    previewGroup: typeof artifact.value?.preview_group === 'string' ? artifact.value.preview_group.trim() || undefined : undefined,
     url: file.url,
     content: inline ? extractTextContent(artifact) : undefined,
     mimeType: artifact.value?.mime_type || (artifact.content_type === 'json' ? 'application/json' : undefined),
@@ -87,6 +89,7 @@ export function urlPreviewTarget(url: string, filename: string, conversationId?:
 export function previewKind(target: ArtifactPreviewTarget): string {
   const ext = previewFilename(target).split('.').pop()?.toLowerCase() || '';
   if (['html', 'htm'].includes(ext)) return 'html';
+  if (ext === 'svg') return 'svg';
   if (ext === 'json' || target.mimeType === 'application/json') return 'json';
   if (['md', 'markdown', 'txt', 'log', 'csv', 'pdf', 'doc', 'docx', 'ppt', 'pptx', 'pptm', 'xls', 'xlsx',
     'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tif', 'tiff', 'svg', 'xml',
@@ -97,7 +100,7 @@ export function previewKind(target: ArtifactPreviewTarget): string {
 export function previewFilename(target: ArtifactPreviewTarget): string {
   const mimeExtensions: Record<string, string> = {
     'application/pdf': 'pdf', 'text/markdown': 'md', 'text/plain': 'txt', 'text/html': 'html',
-    'application/json': 'json', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
+    'application/json': 'json', 'image/svg+xml': 'svg', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
     'audio/mpeg': 'mp3', 'video/mp4': 'mp4',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',

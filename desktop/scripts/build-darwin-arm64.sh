@@ -248,12 +248,18 @@ prune_runtime_app() {
     remove_generated_path "${app_root}/algorithm/lazyllm"
   else
     remove_generated_path "${app_root}/algorithm/lazyllm/docs"
+    remove_generated_path "${app_root}/algorithm/lazyllm/Tutorial"
   fi
+  remove_generated_path "${app_root}/output"
+  remove_generated_path "${app_root}/outputs"
   remove_generated_path "${app_root}/skills/.runtime"
   remove_generated_path "${app_root}/skills/research"
   remove_generated_path "${app_root}/skills/review"
   remove_generated_path "${app_root}/skills/search"
   remove_generated_path "${app_root}/backend/core/core"
+  # The packaged Core binary embeds these dictionaries. Keep their notices.
+  remove_generated_path "${app_root}/backend/core/vocabulary/dictionary_data/ecdict-common.json.gz"
+  remove_generated_path "${app_root}/backend/core/vocabulary/dictionary_data/freedict-eng-zho.json.gz"
 }
 
 mkdir -p \
@@ -362,6 +368,9 @@ rsync -a --delete \
   --exclude "/tests" \
   --exclude "/data" \
   --exclude "/volumes" \
+  --exclude "/output" \
+  --exclude "/outputs" \
+  --exclude "/algorithm/lazyllm/Tutorial" \
   --exclude "/local/config.env" \
   --exclude "/history-injection" \
   --exclude "/integrations/workbuddy-workflow/cdp-demo" \
@@ -400,6 +409,8 @@ rsync -a --delete \
   --exclude "/frontend/public" \
   --exclude "/frontend/scripts" \
   --exclude "/backend/core/core" \
+  --exclude "/backend/core/vocabulary/dictionary_data/ecdict-common.json.gz" \
+  --exclude "/backend/core/vocabulary/dictionary_data/freedict-eng-zho.json.gz" \
   --exclude "/README.md" \
   --exclude "/README.CN.md" \
   "${ROOT}/" "${RUNTIME_ROOT}/app/"

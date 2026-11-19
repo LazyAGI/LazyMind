@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import i18n from "@/i18n";
 
 interface RenderTxtProps {
@@ -27,14 +27,12 @@ const RenderTxt = (props: RenderTxtProps) => {
     if (txtList.length <= 1) {
       return originalText;
     }
-    const newText = txtList.map((txt, index) => {
-      if (index === 0) {
-        return txt;
-      }
-      return `<span style="background-color: yellow; font-weight: bold;" class="txt-keyword">${contentText}</span>${txt}`;
-    });
-
-    return newText.join("");
+    return txtList.map((txt, index) => (
+      <Fragment key={index}>
+        {index > 0 && <span style={{ backgroundColor: "yellow", fontWeight: "bold" }} className="txt-keyword">{contentText}</span>}
+        {txt}
+      </Fragment>
+    ));
   }, [contentText, originalText]);
 
   // Scroll the first highlighted keyword into view. Runs only when the
@@ -54,7 +52,7 @@ const RenderTxt = (props: RenderTxtProps) => {
   try {
     return (
       <div className="file-viewer-text-container">
-        <pre dangerouslySetInnerHTML={{ __html: highlightedText || "" }}></pre>
+        <pre>{highlightedText}</pre>
       </div>
     );
   } catch {

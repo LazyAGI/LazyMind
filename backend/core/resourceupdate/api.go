@@ -367,6 +367,14 @@ func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string,
 	resp.Status = stats.Status
 	resp.ResultCount = skillReviewStatsToResponse(stats).SkillCount
 	resp.WhenToUseConflicts = parseWhenToUseConflicts(stats.Summary)
+	if task.TaskType == orm.ResourceUpdateTaskTypeGenerateReview && task.ResourceType == orm.ResourceUpdateResourceTypeSkill && stats.Status == orm.SkillReviewStatsStatusFailed {
+		var failure struct {
+			Code string `json:"error_code"`
+		}
+		if json.Unmarshal([]byte(stats.Summary), &failure) == nil && failure.Code == "skill_review_cluster_required" {
+			resp.ErrorCode = failure.Code
+		}
+	}
 	applySkillOrganizeDetails(&resp, task, stats.Summary)
 	settleFinishedSkillOrganizeReservation(ctx, db, task, stats.Status)
 	return resp, nil

@@ -37,9 +37,10 @@ type providerRequestProtocol struct {
 }
 
 type providerRequestConfigResponse struct {
-	DefaultProtocol string                                  `json:"default_protocol"`
-	Protocols       []providerRequestProtocol               `json:"protocols"`
-	Advanced        credentialvault.ProviderRequestAdvanced `json:"advanced"`
+	AdvancedUnavailable bool                                    `json:"advanced_unavailable,omitempty"`
+	DefaultProtocol     string                                  `json:"default_protocol"`
+	Protocols           []providerRequestProtocol               `json:"protocols"`
+	Advanced            credentialvault.ProviderRequestAdvanced `json:"advanced"`
 }
 
 type updateProviderRequestConfigRequest struct {
@@ -221,13 +222,19 @@ func GetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	response := requestConfigResponse(db.WithContext(r.Context()), parent)
 	advanced, err := ResolveProviderRequestAdvanced(parent)
 	if err != nil {
-		common.ReplyErr(w, "read advanced request configuration failed", 500)
-		return
+		if savedRequestConfig(nil, parent).AdvancedCiphertext == "" {
+			common.ReplyErr(w, "read advanced request configuration failed", 500)
+			return
+		}
+		// Expose endpoint settings for explicit recovery without deleting or
+		// pretending to have read the unavailable legacy options.
+		response.AdvancedUnavailable = true
+	} else {
+		response.Advanced = advanced
 	}
-	response := requestConfigResponse(db.WithContext(r.Context()), parent)
-	response.Advanced = advanced
 	common.ReplyOK(w, response)
 }
 
@@ -287,23 +294,16 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		current := savedRequestConfig(tx, parent)
-		previousAdvanced, err := ResolveProviderRequestAdvanced(parent)
-		if err != nil {
-			return err
-		}
 		advancedChanged := false
 		if req.Advanced != nil {
-			previousJSON, _ := json.Marshal(previousAdvanced)
-			nextJSON, _ := json.Marshal(*req.Advanced)
-			advancedChanged = string(previousJSON) != string(nextJSON)
-			if advancedChanged {
-				current.AdvancedCiphertext, err = encryptRequestAdvanced(parent, *req.Advanced)
-				if err != nil {
-					return err
-				}
-				current.Advanced = nil
-			}
+			// An explicit replacement must not need the legacy root key. In
+			// particular, never turn a failed legacy decrypt into empty data.
+			previousJSON, _ := json.Marshal(current.Advanced)
+			nextJSON, _ := json.Marshal(req.Advanced)
+			advancedChanged = current.AdvancedCiphertext != "" || string(previousJSON) != string(nextJSON)
+			current.Advanced, current.AdvancedCiphertext = req.Advanced, ""
 		}
+
 		before := requestConfigResponse(tx, parent)
 		for _, entry := range before.Protocols {
 			// Preserve the currently active address while switching protocols, but
@@ -357,6 +357,7 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		// Saving an unchanged drawer must not change native provider adapters or
 		// invalidate credentials. Persist metadata only when an endpoint changed.
+		endpointsChanged := false
 		unchanged := !protocolChanged && !advancedChanged
 		for _, entry := range before.Protocols {
 			if entry.Supported {
@@ -366,16 +367,45 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 				}
 				if normalizeBaseURLForCompare(next) != normalizeBaseURLForCompare(entry.BaseURL) {
 					unchanged = false
+					endpointsChanged = true
 				}
 			}
 		}
 		if unchanged {
 			return nil
 		}
-		if protocolChanged || advancedChanged {
+		// Advanced options are user-managed request defaults. Validate their shape
+		// above, but do not gate saving them on embedding usage. Protocol and
+		// endpoint changes retain their existing index protections.
+		if protocolChanged {
 			if err := guardEmbeddingRuntimeMutation(tx, parent.CreateUserID, parent.ID, "", ""); err != nil {
 				return err
 			}
+		}
+		if !protocolChanged && !endpointsChanged && advancedChanged {
+			parent.RequestConfig = string(encoded)
+			if _, err := portableProviderRequestConfig(parent); err != nil {
+				return err
+			}
+			parent.ActiveKeyRevision++
+			if err := tx.Model(&parent).Updates(map[string]any{"request_config": parent.RequestConfig, "active_key_revision": parent.ActiveKeyRevision, "updated_at": now}).Error; err != nil {
+				return err
+			}
+			// Options affect connection checks, but do not change the API key
+			// or its encryption AAD/revision. Queue metadata backup separately.
+			if err := setSupplierVerification(tx, parent, false, now); err != nil {
+				return err
+			}
+			var groups []orm.UserModelProviderGroup
+			if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).Find(&groups).Error; err != nil {
+				return err
+			}
+			for _, group := range groups {
+				if err := enqueueCredentialBackup(tx, group.ID, max(group.CredentialRevision, 1), credentialvault.BackupUpsert, now); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 		if err := initializeProviderActiveKey(tx, &parent); err != nil {
 			return err
@@ -401,12 +431,12 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		return updateProviderEndpointLocked(tx, &parent, effective, now, true, protocolChanged || advancedChanged)
 	})
 	if err != nil {
-		if errors.Is(err, credentialvault.ErrInvalidContract) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		} else if errors.Is(err, credentialvault.ErrInvalidContract) {
 			common.ReplyErr(w, "request configuration exceeds credential limits", 400)
 		} else if errors.Is(err, errUnsupportedRequestModels) {
 			common.ReplyErr(w, err.Error(), 400)
-		} else if errors.Is(err, errEmbeddingIdentityInUse) {
-			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
 			common.ReplyErr(w, "save request configuration failed", 500)
 		}

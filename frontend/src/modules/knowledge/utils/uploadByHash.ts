@@ -22,6 +22,8 @@ export type BuildUploadTaskItemsOptions = {
   documentPid?: string;
   /** Include relative_path in each create-task item (folder import). */
   folderMode?: boolean;
+  /** Ordinary batch imports can retain failures and continue independent files. */
+  onFileError?: (item: ImportFileItem, error: Error) => void;
 };
 
 type HashedFileItem = ImportFileItem & {
@@ -42,13 +44,18 @@ export async function buildUploadTaskItems(
   }
 
   const hashedItems: HashedFileItem[] = [];
+  const reportFailure = (item: ImportFileItem, error: unknown) => {
+    if (!options.onFileError) throw error;
+    options.onFileError(item, error instanceof Error ? error : Object.assign(new Error("上传失败"), error));
+  };
   for (const item of fileItems) {
-    const contentHash = await computeFileSha256(item.originFile);
-    hashedItems.push({
-      ...item,
-      contentHash,
-      displayName: item.originFile.name,
-    });
+    try {
+      if (item.originFile.size === 0) throw new Error("空文件（0 字节），请添加内容后再上传");
+      const contentHash = await computeFileSha256(item.originFile);
+      hashedItems.push({...item, contentHash, displayName: item.originFile.name});
+    } catch (error) {
+      reportFailure(item, error);
+    }
   }
 
   const uniqueHashes = [...new Set(hashedItems.map((item) => item.contentHash))];
@@ -57,19 +64,22 @@ export async function buildUploadTaskItems(
 
   // Upload each missing unique hash once (first file that carries it).
   const uploadFileIdByHash = new Map<string, string>();
+  const failedHashes = new Set<string>();
   for (const hash of missingHashes) {
     const source = hashedItems.find((item) => item.contentHash === hash);
     if (!source) continue;
 
-    const uploaded = await uploadSingleFile(datasetId, source, {
-      documentPid,
-      folderMode,
-    });
-    uploadFileIdByHash.set(hash, uploaded.uploadFileId);
+    try {
+      const uploaded = await uploadSingleFile(datasetId, source, {documentPid, folderMode});
+      uploadFileIdByHash.set(hash, uploaded.uploadFileId);
+    } catch (error) {
+      failedHashes.add(hash);
+      for (const item of hashedItems.filter(item => item.contentHash === hash)) reportFailure(item, error);
+    }
   }
 
   const firstUploadUsed = new Set<string>();
-  return hashedItems.map((item) => {
+  return hashedItems.filter(item => !failedHashes.has(item.contentHash)).map((item) => {
     const task = buildTaskPayload(item, { tags, documentPid, folderMode });
 
     if (missingSet.has(item.contentHash)) {

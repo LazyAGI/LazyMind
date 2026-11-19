@@ -24,6 +24,7 @@ func init() {
 	}
 	for _, source := range []string{
 		"import attempt superseded", "document already bound by a newer attempt",
+		"所选论文已在此论文集，请更新选择",
 		"confirmation superseded by guidance", "confirmation does not belong to this chat run",
 	} {
 		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)

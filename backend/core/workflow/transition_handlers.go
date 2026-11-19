@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/exporter"
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -31,6 +32,7 @@ type transitionCommandRequest struct {
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
 	RetryOrigin          string              `json:"retry_origin"`
+	ResumeForRerun       bool                `json:"resume_for_rerun,omitempty"`
 	TargetStepID         string              `json:"target_step_id"`
 	ExpectedStateVersion int64               `json:"expected_state_version"`
 	GraphHash            string              `json:"graph_hash"`
@@ -450,6 +452,9 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		writeTransitionResponse(w, response, http.StatusServiceUnavailable)
 		return
 	}
+	if pkg, err := workflowstore.New(store.DB()).GetWorkflowPackage(r.Context(), req.UserID, firstNonEmpty(req.WorkflowRef, req.WorkflowID), req.WorkflowRevisionID); err == nil {
+		exporter.PrewarmWorkflow(pkg.Files["workflow.yaml"])
+	}
 	emitTaskCreatedConvEvent(r.Context(), taskID, sessionID, req.ConversationID)
 	writeTransitionResponse(w, response, http.StatusOK)
 }
@@ -663,7 +668,20 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return snapshotErr
 		}
 		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
-		if err := guardRunAdvance(tx, session); err != nil {
+		if req.ResumeForRerun {
+			if err := resumeForRerun(ctx, tx, &session, req); err != nil {
+				var rejected *controlstore.Error
+				if errors.As(err, &rejected) {
+					return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
+				}
+				return err
+			}
+		}
+		recovery := runAdvanceRecovery{replacesInput: replacesInputCheckpoint(graph, req)}
+		if !req.ResumeForRerun && req.Operation == "rewind" && req.RetryOrigin == "user" && len(targets) == 1 {
+			recovery.replacesReviewStep = req.TargetStepID
+		}
+		if err := guardRunAdvance(tx, session, recovery); err != nil {
 			var rejected *controlstore.Error
 			if errors.As(err, &rejected) {
 				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
@@ -688,15 +706,17 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			}
 		}
 		var postStepCheckpoint *executor.PostStepCheckpoint
+		retryExistingOutputs := false
 		if req.Operation == "retry" || req.Operation == "rewind" {
 			var latest orm.WorkflowSessionStep
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
 				targets[0].TargetStepID, "effective").Order("attempt DESC").First(&latest).Error; err != nil {
 				return err
 			}
-			// A bare retry repeats this failed attempt's confirmed request, not
-			// the workflow launch intent or a successful older attempt's request.
-			if req.Operation == "retry" && session.ControllerHost != "external-agent" && isBareRetryInput(currentInputs[targets[0].TaskID]) {
+			// Bare retries and automatic retries with inherited input repeat this
+			// failed attempt's request, not the launch or an older successful input.
+			if req.Operation == "retry" && session.ControllerHost != "external-agent" &&
+				(req.RetryOrigin == "automatic" || isBareRetryInput(currentInputs[targets[0].TaskID])) {
 				var previous orm.SubAgentTask
 				err := tx.Select("params").Where("id = ?", latest.TaskID).First(&previous).Error
 				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -705,9 +725,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				var input struct {
 					CurrentUserInput string `json:"current_user_input"`
 				}
-				if err == nil && json.Unmarshal(previous.Params, &input) == nil && !isBareRetryInput(input.CurrentUserInput) {
+				if err == nil && json.Unmarshal(previous.Params, &input) == nil && !isBareRetryInput(input.CurrentUserInput) &&
+					(isBareRetryInput(currentInputs[targets[0].TaskID]) || currentInputs[targets[0].TaskID] == input.CurrentUserInput) {
 					targets[0].UserInput = input.CurrentUserInput
 					currentInputs[targets[0].TaskID] = input.CurrentUserInput
+					retryExistingOutputs = latest.Status == StepStatusFailed
 				}
 			}
 			var failedResult struct {
@@ -754,6 +776,13 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			}
 			if invalidErr := invalidateForOperation(ctx, tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
 				return invalidErr
+			}
+			if controlstore.Controlled(session) {
+				if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND status = ? AND attempt_id IN (?)", session.ID, "pending",
+					tx.Model(&orm.WorkflowSessionStep{}).Select("id").Where("session_id = ? AND validity <> ?", session.ID, "effective")).
+					Updates(map[string]any{"status": "superseded", "decision_command_id": req.CommandID, "updated_at": time.Now().UTC()}).Error; err != nil {
+					return err
+				}
 			}
 			var reloadErr error
 			snapshot, reloadErr = loadRuntimeSnapshot(ctx, tx, session.ID, graph)
@@ -834,7 +863,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			// Tool-dependent steps run inside LazyMind; the session controller stays unchanged.
 			executorHost := session.ControllerHost
 			if controlstore.Controlled(session) {
-				executorHost = executorHostForStep(session.ControllerHost, nodeDef, graph.Runtime)
+				binding, err := controlstore.DecodeBinding(session)
+				if err != nil {
+					return err
+				}
+				executorHost = executorHostForStep(session.ControllerHost, binding.Provider, nodeDef, graph.Runtime)
 			}
 			if executorHost == "external-agent" {
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
@@ -859,11 +892,21 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				}
 				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, LaunchUserInput: sessionIntentText(session.IntentContext), CurrentUserInput: currentInputs[target.TaskID], HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				params.HostedTaskID = req.HostedTaskID
+				params.RetryExistingOutputs = retryExistingOutputs
+				params.RetryHint = workflowStepRuntimeInstruction(target.Objective, target.RuntimeInstruction)
 				var launchErr error
 				stepObjective := workflowStepObjectiveWithRuntimeBoundaries(nodeDef.Prompt, target.Objective, target.UserInput, nodeDef.Capabilities, nodeDef.LegacyTools, nodeDef.TerminalTools)
 				toolConfig, toolErr := workflowNodeToolConfig(ctx, tx, session.CreateUserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
 				if toolErr != nil {
 					return toolErr
+				}
+				// Admit the controlled continuation before the native launcher reconciles
+				// status: a retry has invalidated the failed attempt, but its replacement
+				// does not exist yet. Activation and launch share this transaction.
+				if controlstore.Controlled(session) {
+					if err := acceptRunControl(ctx, tx, &session, "continue", nil, nil); err != nil {
+						return err
+					}
 				}
 				_, taskID, _, launchErr = launchWorkflowAttempt(ctx, tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, toolConfig, false, false)
 				if launchErr != nil {
@@ -1017,7 +1060,11 @@ func isBareRetryInput(input string) bool {
 
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, now time.Time) error {
+	node = node.ForExecutor("external-agent")
 	objective := workflowStepObjectiveWithRuntimeBoundaries(node.Prompt, target.Objective, target.UserInput, node.Capabilities, node.LegacyTools, node.TerminalTools)
+	if node.Execution.Supported() {
+		objective = workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
+	}
 	refOrID := session.WorkflowRef
 	if refOrID == "" {
 		refOrID = session.WorkflowID
@@ -1029,11 +1076,15 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 	}
 	value := executor.AttemptContext{ContractVersion: attempt.ContractVersion, SessionID: session.ID,
 		AttemptID: target.TaskID, StepID: target.TargetStepID, AttemptNo: int(count) + 1, Operation: "execute",
+		LaunchRequest: sessionIntentText(session.IntentContext), UserRequest: target.UserInput,
 		Objective: objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
-		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
+		Instruction: workflowStepRuntimeInstruction(target.Objective, target.RuntimeInstruction), PartialSelector: target.PartialIndices,
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools, TerminalTools: node.TerminalTools,
 		ToolsOnly: node.ToolsOnly, TerminalToolsOnly: node.TerminalToolsOnly}
+	if node.Execution != nil {
+		value.Execution = &executor.ExecutionContract{StepExecution: *node.Execution}
+	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -1075,6 +1126,20 @@ func workflowConfigCapabilityNames(capabilities, legacyTools []string) []string 
 	return uniqueSortedStrings(append(append([]string{}, capabilities...), legacyTools...))
 }
 
+// Keep caller-supplied refinements separate from the expanded step objective.
+// Step execution consumes this existing instruction channel within the pinned
+// step contract; a launch with no refinement must not reinsert the global goal.
+func workflowStepRuntimeInstruction(objective, instruction string) string {
+	if strings.TrimSpace(objective) == "" {
+		return instruction
+	}
+	refinement := "Current step objective refinement (within the pinned step/output/tool boundaries):\n" + strings.TrimSpace(objective)
+	if strings.TrimSpace(instruction) != "" {
+		refinement += "\n\n" + instruction
+	}
+	return refinement
+}
+
 // workflowStepObjective makes the immutable workflow step prompt authoritative.
 // A caller-supplied objective may refine it, but cannot accidentally erase it.
 func workflowStepObjective(prompt, objective, userInput string) string {
@@ -1114,11 +1179,12 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 	}
 	var revision orm.WorkflowSlotRevision
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id", "human_artifact_id", "content_snapshot").
+		Select("id", "revision", "human_artifact_id", "content_snapshot").
 		Where("id = ? AND session_id = ?", witness.RevisionID, sessionID).
 		First(&revision).Error; err != nil {
 		return value
 	}
+	value.SourceRevision = fmt.Sprintf("%d", revision.Revision)
 	if revision.HumanArtifactID == nil || *revision.HumanArtifactID == "" {
 		if len(revision.ContentSnapshot) > 0 {
 			value.ContentHash = fmt.Sprintf("sha256:%x", sha256.Sum256(revision.ContentSnapshot))
@@ -1190,8 +1256,8 @@ func invalidateNativeForOperation(ctx context.Context, tx *gorm.DB, session *orm
 		}
 		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, code, "target has no effective attempt to invalidate", false, nil)
 	}
-	if operation == "retry" && attempt.Status != "failed" && attempt.Status != "interrupted" {
-		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_RETRY", "only failed or interrupted attempts can be retried", false, nil)
+	if operation == "retry" && attempt.Status != "failed" && attempt.Status != "interrupted" && attempt.Status != "cancelled" && attempt.Status != "canceled" {
+		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_RETRY", "only failed, interrupted, or cancelled attempts can be retried", false, nil)
 	}
 	if operation == "rewind" && attempt.Status != "succeeded" {
 		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_REWIND", "only succeeded attempts can be rewound", false, nil)

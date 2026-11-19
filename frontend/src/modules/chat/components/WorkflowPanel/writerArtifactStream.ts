@@ -26,6 +26,7 @@ export function findWriterArtifactStream(
   stepId: string | undefined,
   slotId: string,
   tasks: SubAgentTask[],
+  allowExternalPreviews = true,
 ): TaskArtifactStream | undefined {
   if (!stepId) return undefined;
   const paper = session.workflow_id === 'paper-writing';
@@ -48,6 +49,18 @@ export function findWriterArtifactStream(
   if (paper) steps.sort((a, b) => b.attempt - a.attempt || Date.parse(b.created_at) - Date.parse(a.created_at));
   for (const step of steps) {
     if (paper && ['failed', 'interrupted', 'canceled', 'cancelled'].includes(step.status)) return undefined;
+    if (paper && (step.executor_host ?? session.controller_host) === 'external-agent') {
+      const preview = session.projection?.artifact_previews?.[step.id];
+      if (!allowExternalPreviews || ['stopped', 'failed', 'completed'].includes(session.status)
+        || !['claimed', 'running'].includes(step.status) || !preview || preview.state === 'aborted'
+        || preview.attempt_id !== step.id || preview.step_id !== stepId || preview.attempt !== step.attempt
+        || (step.fencing_generation !== undefined && preview.stream_id !== `${step.id}:${step.fencing_generation}`)
+        || preview.slot !== slotId || !Number.isSafeInteger(preview.seq) || preview.seq < 1
+        || typeof preview.content !== 'string' || !['streaming', 'ended'].includes(preview.state)) return undefined;
+      return { attempt_id: step.id, step_id: stepId, attempt: step.attempt, task_id: step.task_id,
+        slot: slotId, content_type: 'text/markdown', stream_id: preview.stream_id,
+        chunk_index: preview.seq, content: preview.content, state: preview.state };
+    }
     const stream = findStream(tasks.find((task) => task.task_id === step.task_id), step.status);
     if (stream) {
       if ((paper || PAPER_STREAM_SLOT_IDS.has(slotId)) && stream.state === 'aborted') return undefined;

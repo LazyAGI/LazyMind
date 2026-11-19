@@ -19,6 +19,7 @@ import {
   CloseOutlined,
   CommentOutlined,
   EditOutlined,
+  LoadingOutlined,
   PaperClipOutlined,
   PlusOutlined,
   SettingOutlined,
@@ -38,7 +39,7 @@ import ImageUpload, {
 } from "../ImageUpload";
 import { fileToBase64 } from "@/modules/chat/utils/upload";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
-import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { NEW_CHAT_INPUT_DRAFT_KEY, useChatInputStore } from "@/modules/chat/store/chatInput";
 import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
 import { getRuntimeMode, isLocalLikeRuntimeMode } from "@/runtime/mode";
 
@@ -53,6 +54,7 @@ import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector"
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
+import { useWorkflowSelection } from "./useWorkflowSelection";
 import type { ConversationRuntimeSettings } from "../../utils/request";
 import { WorkflowSessionApi } from "../../utils/request";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
@@ -140,7 +142,8 @@ import {
   useChatThinkStore,
   type ThinkingDepth,
 } from "@/modules/chat/store/chatThink";
-import { CHAT_SUBMIT_INPUT_EVENT, CHAT_CAPTURE_MODE_DRAFT_EVENT } from "@/modules/chat/constants/chat";
+import { CHAT_SUBMIT_INPUT_EVENT, CHAT_CAPTURE_MODE_DRAFT_EVENT, CHAT_SELECT_CONVERSATION_EVENT, selectChatConversationFilter } from "@/modules/chat/constants/chat";
+import type { ShowcaseEntryType } from "@/modules/showcase/classification";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
@@ -474,6 +477,7 @@ interface ChatInputProps {
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
+  disabledLoading?: boolean;
   disabledReason?: string;
   disabledDescription?: ReactNode;
   disabledAction?: ReactNode;
@@ -617,6 +621,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       rerankReady,
       disabled = false,
       disabledReason,
+      disabledLoading = false,
       disabledDescription,
       disabledAction,
       citeMessage,
@@ -651,6 +656,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
+    const inputDraftKey = sessionId ?? draftKey;
     const showWorkspaceEnvironment = composerVariant !== "paper" && runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
     const [workspaceId, setWorkspaceId] = useState<string>();
     const [projectName, setProjectName] = useState<string>();
@@ -725,6 +731,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return [...merged.values()];
     }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions, ragReady]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
+    const handleRuntimeSettingsChange = useCallback((settings: ConversationRuntimeSettings) => {
+      setContextRuntimeSettings(settings);
+      onConversationSettingsChange?.(settings);
+    }, [onConversationSettingsChange]);
+    const { beforeWorkflowSelect, validateWorkflowSelection, busy: selectingWorkflow } = useWorkflowSelection({
+      conversationId: sessionId,
+      runInBackground,
+      settings: contextRuntimeSettings,
+      onChange: handleRuntimeSettingsChange,
+    });
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [menuHeight, setMenuHeight] = useState(420);
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -746,7 +762,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       kb: boolean | null;
     }>({ kb: null });
     const disabledNoticeId = useId();
-    const inputDraftKey = sessionId ?? draftKey;
     const draftRef = useRef<{ sessionId?: string; content: string; mentions: ChatMention[] }>({ content: value, mentions: [] });
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
@@ -796,27 +811,60 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [initialConversationSettings]);
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
+    // Each uploader owns only its local files; late callbacks must preserve
+    // restored attachments and uploads from other mounted conversations.
+    const uploaderDraft = useMemo(() => ({ files: new Map<string, string | undefined>() }), [inputDraftKey]);
+    const activeUploaderDraft = useRef<typeof uploaderDraft | null>(uploaderDraft);
+    useLayoutEffect(() => {
+      activeUploaderDraft.current = uploaderDraft;
+      return () => { activeUploaderDraft.current = null; };
+    }, [uploaderDraft]);
+    const savedUploads = useChatInputStore(state => inputDraftKey !== undefined
+      ? state.inputFiles[inputDraftKey] ?? EMPTY_COMPOSER_FILES : EMPTY_COMPOSER_FILES);
     const [removedTransferredFiles, setRemovedTransferredFiles] = useState<string[]>([]);
     useEffect(() => { setRemovedTransferredFiles([]); }, [props.transferredDraft]);
     const localUploadIds = new Set(fileList.map(file => `upload:${file.uid}`));
-    const transferredUploads = [...new Map((props.transferredDraft?.files || EMPTY_COMPOSER_FILES).map(file => [file.id, file])).values()]
+    const transferredUploads = [...new Map([...savedUploads, ...(props.transferredDraft?.files || EMPTY_COMPOSER_FILES)].map(file => [file.id, file])).values()]
       .filter(file => file.id.startsWith('upload:') && file.input?.uri && !removedTransferredFiles.includes(file.id) && !localUploadIds.has(file.id));
-    const displayedFiles = [...fileList, ...transferredUploads.map(file => ({ uid: file.id, name: file.name, base64: file.input?.input_type === 'image' ? file.input.uri : '', suffix: file.name.slice(file.name.lastIndexOf('.')), size: '' }))];
+    const displayedFiles = [...fileList, ...transferredUploads.map(file => ({ uid: file.id, name: file.name, base64: '', previewUrl: file.input?.uri, suffix: file.name.slice(file.name.lastIndexOf('.')), size: '' }))];
     const conversationFiles = props.conversationFiles ?? EMPTY_COMPOSER_FILES;
     const composerFiles = useMemo(() => {
       const uploaded = fileListRef.current?.getFiles() ?? [];
-      const files = [...conversationFiles.filter(file => !removedTransferredFiles.includes(file.id)), ...fileList.map(file => {
+      const files = [...conversationFiles.filter(file => !removedTransferredFiles.includes(file.id)), ...transferredUploads, ...fileList.map(file => {
         const stored = uploaded.find(item => item.uid === file.uid);
         return { id: `upload:${file.uid}`, name: file.name, disabled: !stored?.uri,
           input: stored?.uri ? { input_type: allowedImageTypes.includes(file.suffix.toLowerCase()) ? 'image' as const : 'file' as const, uri: stored.uri, filename: file.name } : undefined };
       })];
       return [...new Map(files.map(file => [file.id, file])).values()];
-    }, [conversationFiles, fileList, removedTransferredFiles]);
+    }, [conversationFiles, fileList, removedTransferredFiles, savedUploads, props.transferredDraft]);
     const prepareReferences = () => buildComposerReferences(effectiveMentions, composerFiles, [...transferredUploads.map(file => file.input!), ...(fileListRef.current?.getFiles() ?? []).filter(file => file.uri).map(file => ({
       input_type: allowedImageTypes.includes(file.name.substring(file.name.lastIndexOf('.')).toLowerCase()) ? 'image' as const : 'file' as const,
       uri: file.uri, filename: file.name,
     }))], value);
     useEffect(() => { setActiveMenu(null); }, [runInBackground, sessionId]);
+
+    useEffect(() => {
+      if (props.transferredDraft) textAreaRef.current?.focusAtEnd();
+    }, [props.transferredDraft]);
+
+    const handleCapabilityModeChange = useCallback((entryType: ShowcaseEntryType, draft: {
+      text: string;
+      mentions: ChatMention[];
+      featuredSelection: { caseId: string };
+    }) => {
+      const modeDraft = { ...draft, files: composerFiles.filter(file =>
+        file.id.startsWith('upload:') && Boolean(file.input?.uri)
+        || draft.mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id),
+      ) };
+      useChatInputStore.getState().setModeDraft(modeDraft);
+      useChatInputStore.getState().saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, draft.text, draft.mentions);
+      useChatInputStore.getState().saveInputFiles(NEW_CHAT_INPUT_DRAFT_KEY, modeDraft.files.filter(file => file.id.startsWith('upload:')));
+      sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
+      selectChatConversationFilter(entryType === 'work' ? 'task' : 'normal');
+      window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+        detail: { conversationId: '', runInBackground: entryType === 'work', source: 'mention' },
+      }));
+    }, [composerFiles]);
     // Keep synchronous mode-switch capture aligned with the committed composer.
     // Async uploads can commit before passive effects update the old listener.
     useLayoutEffect(() => {
@@ -824,12 +872,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         const detail = (event as CustomEvent).detail;
         if (!allowMentions || !allowLocalWorkspace || detail?.runInBackground === undefined || detail.runInBackground === runInBackground
           || !innerRef.current?.getClientRects().length) return;
-        detail.draft = { text: value, mentions: [...mentions], featuredSelection: useFeaturedSelectionStore.getState().selections[sessionId || "new"], files: composerFiles.filter(file => file.id.startsWith('upload:') && Boolean(file.input?.uri) || mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id)) };
+        const capabilityBindings = [...boundMentions, ...featuredMentions].filter(mention => mention.type === 'skill' || mention.type === 'workflow');
+        const draft = textAreaRef.current?.getDraftWithoutMentions(capabilityBindings) ?? { text: value, mentions: [...mentions] };
+        detail.draft = { ...draft, files: composerFiles.filter(file => file.id.startsWith('upload:') && Boolean(file.input?.uri) || draft.mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id)) };
         useChatInputStore.getState().setModeDraft(detail.draft);
+        useChatInputStore.getState().saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, draft.text, draft.mentions);
+        useChatInputStore.getState().saveInputFiles(NEW_CHAT_INPUT_DRAFT_KEY, detail.draft.files.filter((file: ComposerFileCandidate) => file.id.startsWith('upload:')));
       };
       window.addEventListener(CHAT_CAPTURE_MODE_DRAFT_EVENT, transferDraft, true);
       return () => window.removeEventListener(CHAT_CAPTURE_MODE_DRAFT_EVENT, transferDraft, true);
-    }, [runInBackground, value, mentions, composerFiles, sessionId, allowMentions, allowLocalWorkspace]);
+    }, [runInBackground, value, mentions, composerFiles, boundMentions, featuredMentions, allowMentions, allowLocalWorkspace]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
     const { saveInputContent, getInputContent, getInputMentions, clearInputContent } =
       useChatInputStore();
@@ -887,13 +939,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const debouncedSaveInput = useMemo(
       () =>
         debounce((conversationId: string, content: string, draftMentions: ChatMention[]) => {
-          if (!content || content.trim() === "") {
-            clearInputContent(conversationId);
-          } else {
-            saveInputContent(conversationId, content, draftMentions);
-          }
+          saveInputContent(conversationId, content, draftMentions);
         }, 500),
-      [saveInputContent, clearInputContent],
+      [saveInputContent],
     );
 
     const clearMultiData = useCallback(() => {
@@ -906,8 +954,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         return [];
       });
       fileListRef.current?.clear();
+      setRemovedTransferredFiles((props.transferredDraft?.files ?? []).map(file => file.id));
+      if (inputDraftKey !== undefined) useChatInputStore.getState().saveInputFiles(inputDraftKey, []);
       setTimeout(() => onHeightChange?.(), 0);
-    }, [onHeightChange]);
+    }, [onHeightChange, inputDraftKey, props.transferredDraft]);
 
     useImperativeHandle(
       ref,
@@ -940,7 +990,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       ],
     );
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       if (draftRef.current.sessionId === inputDraftKey && draftRef.current.content !== value) {
         draftRef.current = { sessionId: inputDraftKey, content: value, mentions: [] };
       }
@@ -951,16 +1001,24 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       debouncedSaveInput.cancel();
       const previous = draftRef.current;
       if (previous.sessionId !== undefined) {
-        if (previous.content.trim()) saveInputContent(previous.sessionId, previous.content, previous.mentions);
-        else clearInputContent(previous.sessionId);
-        if (previous.content.trim() && previous.sessionId.startsWith("temp_") && inputDraftKey && !inputDraftKey.startsWith("temp_")) {
+        saveInputContent(previous.sessionId, previous.content, previous.mentions);
+        const previousFiles = useChatInputStore.getState().inputFiles[previous.sessionId] ?? [];
+        if ((previous.content.trim() || previousFiles.length) && previous.sessionId.startsWith("temp_") && inputDraftKey && !inputDraftKey.startsWith("temp_")) {
           saveInputContent(inputDraftKey, previous.content, previous.mentions);
+          useChatInputStore.getState().saveInputFiles(inputDraftKey, previousFiles);
           clearInputContent(previous.sessionId);
         }
       }
       const content = inputDraftKey !== undefined ? getInputContent(inputDraftKey) : value;
       const savedMentions = inputDraftKey !== undefined ? getInputMentions(inputDraftKey) : [];
       draftRef.current = { sessionId: inputDraftKey, content, mentions: savedMentions };
+      setFileList(previousFiles => {
+        previousFiles.forEach(file => {
+          if (file.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(file.previewUrl);
+        });
+        return [];
+      });
+      setRemovedTransferredFiles([]);
       setMentions(savedMentions);
       if (content !== value) onChange(content);
     }, [inputDraftKey, value, onChange, saveInputContent, getInputContent, getInputMentions, clearInputContent, debouncedSaveInput]);
@@ -969,8 +1027,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       debouncedSaveInput.cancel();
       const draft = draftRef.current;
       if (draft.sessionId !== undefined) {
-        if (draft.content.trim()) saveInputContent(draft.sessionId, draft.content, draft.mentions);
-        else clearInputContent(draft.sessionId);
+        saveInputContent(draft.sessionId, draft.content, draft.mentions);
       }
     }, [saveInputContent, clearInputContent, debouncedSaveInput]);
 
@@ -984,7 +1041,28 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
       return () => clearInterval(interval);
     }, []);
-    const updateImageList = async (list: RcFile[]) => {
+    const updateImageList = async (list: (RcFile & { uri?: string })[]) => {
+      // Save uploaded references before generating previews, including when the
+      // upload finishes after its conversation's composer has unmounted.
+      if (inputDraftKey !== undefined) {
+        const store = useChatInputStore.getState();
+        const previousFiles = uploaderDraft.files;
+        uploaderDraft.files = new Map(list.map(file => [`upload:${file.uid}`, file.uri]));
+        // Apply only this upload event's changes. Replaying its whole list
+        // would restore files removed or sent by a newer composer instance.
+        const completed = list.filter(file => file.uri && previousFiles.get(`upload:${file.uid}`) !== file.uri);
+        const completedIds = new Set(completed.map(file => `upload:${file.uid}`));
+        store.saveInputFiles(inputDraftKey, [
+          ...(store.inputFiles[inputDraftKey] ?? []).filter(file => !completedIds.has(file.id)
+            && !(previousFiles.has(file.id) && !uploaderDraft.files.has(file.id))),
+          ...completed.map(file => ({
+            id: `upload:${file.uid}`, name: file.name,
+            input: { input_type: allowedImageTypes.includes(file.name.substring(file.name.lastIndexOf('.')).toLowerCase()) ? 'image' as const : 'file' as const,
+              uri: file.uri!, filename: file.name },
+          })),
+        ]);
+      }
+      if (activeUploaderDraft.current !== uploaderDraft) return;
       const data: ChatFileList[] = [];
       for (let i = 0; i < list.length; i++) {
         const suffix = list[i].name
@@ -1010,6 +1088,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           obj.previewUrl = URL.createObjectURL(list[i]);
         }
         data.push(obj);
+      }
+      if (activeUploaderDraft.current !== uploaderDraft) {
+        data.forEach(file => {
+          if (file.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(file.previewUrl);
+        });
+        return;
       }
       setFileList((prev) => {
         prev.forEach((item) => {
@@ -1039,6 +1123,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setTimeout(() => onHeightChange?.(), 0);
     };
 
+    const removeTransferredFiles = useCallback((uids: string[]) => {
+      setRemovedTransferredFiles(ids => [...ids, ...uids]);
+      if (inputDraftKey !== undefined) {
+        const store = useChatInputStore.getState();
+        store.saveInputFiles(inputDraftKey, (store.inputFiles[inputDraftKey] ?? []).filter(file => !uids.includes(file.id)));
+      }
+    }, [inputDraftKey]);
+
     const onKnowledgeBaseChange = (
       knowledgeBaseId: string[],
       creators: string[],
@@ -1058,9 +1150,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     const hasKB = (chatConfig?.knowledgeBaseId?.length ?? 0) > 0;
     const onBeforeAddFiles = useCallback(
-      (newFiles: File[], currentFiles: { name: string }[]) =>
-        preprocessUpload(newFiles, currentFiles, hasKB, t),
-      [hasKB, t],
+      (newFiles: File[], currentFiles: { name: string }[]) => {
+        const result = preprocessUpload(newFiles, [...currentFiles, ...transferredUploads], hasKB, t);
+        if (result.clearFirst) removeTransferredFiles(transferredUploads.map(file => file.id));
+        return result;
+      },
+      [hasKB, t, transferredUploads, removeTransferredFiles],
     );
     const onFilesAdded = useCallback(
       (files: File[]) => {
@@ -1079,13 +1174,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return normalizedCiteMessage ? [normalizedCiteMessage] : [];
     }, [citeMessage, citeMessages]);
     const isPromptPolishing = Boolean(polishingSuggestionKey);
+    const hasSendableDraft = Boolean(value.trim())
+      || composerFiles.some(file => localUploadIds.has(file.id) && file.input?.input_type === 'image')
+      || transferredUploads.some(file => file.input?.input_type === 'image');
     const isSendDisabled =
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
       (runInBackground && (workspacePermissionSaving || !projectValid)) ||
       resolvingSkillWorkflow ||
-      !value?.trim() ||
+      !hasSendableDraft ||
       isUploading;
     const shouldShowPromptSuggestions =
       composerVariant !== "paper" && showPromptSuggestions &&
@@ -1189,6 +1287,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         if (!useWorkflow) {
           return originalMentions;
         }
+        if (!await beforeWorkflowSelect()) return originalMentions;
         return [
           ...originalMentions.filter((mention) => (
             mention.type !== "skill" || mention.resource_id !== skillMention.resource_id
@@ -1203,7 +1302,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       } catch {
         return originalMentions;
       }
-    }, [t]);
+    }, [beforeWorkflowSelect, t]);
 
     const handleSend = async () => {
       if (disabled) {
@@ -1215,7 +1314,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if ((runInBackground && (!projectValid || workspacePermissionSavingRef.current)) || modelSelectionSaving) {
         return;
       }
-      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy) {
+      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy || selectingWorkflow) {
         return;
       }
       const normalizedText = value.trim();
@@ -1225,6 +1324,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       let resolvedMentions = references.mentions;
       try {
         resolvedMentions = await resolveSkillWorkflowMentions(references.mentions);
+        if (resolvedMentions.some((mention) => mention.type === "workflow")
+          && !await validateWorkflowSelection()) return;
       } finally {
         setResolvingSkillWorkflow(false);
       }
@@ -1318,8 +1419,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       const draftMentions = draftRef.current.mentions;
       draftRef.current = { sessionId: inputDraftKey, content: text, mentions: draftMentions };
       if (draftKey !== undefined && inputDraftKey !== undefined) {
-        if (text.trim()) saveInputContent(inputDraftKey, text, draftMentions);
-        else clearInputContent(inputDraftKey);
+        saveInputContent(inputDraftKey, text, draftMentions);
       }
       onChange(text);
       setText(text);
@@ -1486,8 +1586,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             role="status"
             aria-live="polite"
           >
-            <span className="chat-input-disabled-icon" aria-hidden="true">
-              <SettingOutlined />
+            <span className={`chat-input-disabled-icon${disabledLoading ? " is-loading" : ""}`} aria-hidden="true">
+              {disabledLoading ? <LoadingOutlined spin /> : <SettingOutlined />}
             </span>
             <div className="chat-input-disabled-copy">
               {disabledReason ? (
@@ -1511,7 +1611,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           <div className={`chat-input-surface${showWorkspaceEnvironment ? " has-environment" : ""}`}>
           <div className="input-top">
             <div className="input-field">
-              <ShowChatFileList fileList={displayedFiles} onRemove={uid => uid.startsWith("upload:") ? setRemovedTransferredFiles(ids => [...ids, uid]) : removeImage(uid)} />
+              <ShowChatFileList fileList={displayedFiles} onRemove={uid => uid.startsWith("upload:") ? removeTransferredFiles([uid]) : removeImage(uid)} />
               {normalizedCiteMessages.length > 0 && (
                 <div className="cite-message-preview-list">
                   {normalizedCiteMessages.map((messageText, index) => (
@@ -1566,6 +1666,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 conversationId={sessionId}
                 fileCandidates={composerFiles}
                 onQueryOpen={() => setActiveMenu(null)}
+                onEntryModeChange={allowMentions && allowLocalWorkspace ? handleCapabilityModeChange : undefined}
+                entryModeSwitchDisabled={isUploading}
                 initialMentions={inputDraftKey !== undefined ? getInputMentions(inputDraftKey) : props.transferredDraft?.mentions}
                 placeholder={placeholder || t(allowMentions
                   ? "chat.inputPlaceholder"
@@ -1575,6 +1677,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 onMentionsChange={handleMentionsChange}
                 allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
                 allowMentions={allowMentions}
+                workflowDisabled={contextRuntimeSettings?.enable_workflow === false}
+                beforeWorkflowSelect={beforeWorkflowSelect}
                 disabledMentionReasons={knowledgeBaseSelectable ? undefined : {
                   knowledge_base: knowledgeBaseDisabledReason,
                 }}
@@ -1714,6 +1818,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     ) : null}
                     <div className="chat-add-resource-hidden-upload">
                       <ImageUpload
+                        key={inputDraftKey}
                         updateFiles={updateImageList}
                         listNum={fileList.length}
                         ref={fileListRef}
@@ -1781,14 +1886,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     onOpenChange={open => setActiveMenu(open ? "config" : null)}
                     key={configResetKey != null ? `config-reset-${configResetKey}` : undefined}
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
-                    initialSettings={initialConversationSettings}
+                    initialSettings={contextRuntimeSettings}
                     disabled={disabled || isStreaming}
                     hasWorkflowSession={hasWorkflowSession}
                     lockedWorkflowMode={lockedWorkflowMode}
-                    onSave={(settings) => {
-                      setContextRuntimeSettings(settings);
-                      onConversationSettingsChange?.(settings);
-                    }}
+                    onSave={handleRuntimeSettingsChange}
                   />}
                   {composerVariant !== "paper" && showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedWorkflowRestoreButton conversationId={sessionId} />
@@ -1861,8 +1963,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   <div className="input-bottom-actions-right-item">
                     <SendButton
                       canStopGeneration={props.canStopGeneration ?? isStreaming}
-                      hasDraft={Boolean(value.trim())}
-                      sendDisabled={isSendDisabled || featuredBusy}
+                      hasDraft={hasSendableDraft}
+                      sendDisabled={isSendDisabled || featuredBusy || selectingWorkflow}
                       disabled={disabled}
                       sendLabel={t("chat.send")}
                       stopLabel={t("chat.stopGenerate")}

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import inspect
 import json
 import logging
@@ -28,6 +29,15 @@ from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.workspace_context import workflow_execution_scope
 
 LOG = logging.getLogger(__name__)
+
+_active_attempts: set[tuple[str, str]] = set()
+_active_attempts_lock = threading.Lock()
+
+
+def workflow_attempt_is_running(attempt_id: str, lease_token: str) -> bool:
+    """Include setup and cleanup, not just the Agent's token stream."""
+    with _active_attempts_lock:
+        return (attempt_id, lease_token) in _active_attempts
 
 
 def _base_url() -> str:
@@ -81,9 +91,14 @@ class RemoteWorkflowExecutor:
                     await asyncio.sleep(self.poll_seconds)
 
     async def _run_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
+        execution = (str(claim['attempt_id']), str(claim['lease_token']))
+        with _active_attempts_lock:
+            _active_attempts.add(execution)
         try:
             await self._execute_claim(client, claim)
         finally:
+            with _active_attempts_lock:
+                _active_attempts.discard(execution)
             # A fenced lease stops publication immediately, but only executor
             # exit confirms tools have finished. Never acknowledge from heartbeat.
             await self.runtime.acknowledge_stop(client, str(claim['attempt_id']), str(claim['lease_token']))
@@ -94,9 +109,17 @@ class RemoteWorkflowExecutor:
         task_id = ''
         try:
             context = await self.runtime.context(client, attempt_id, lease)
+            if context.get('objective_ref') == '#/prompt':
+                objective = str(context.get('prompt') or '')
+                if context.get('objective'):
+                    objective += '\n\nRuntime objective:\n' + str(context['objective'])
+                context['objective'] = objective
             metadata = context.get('metadata') or {}
             task_id = str(metadata.get('task_id') or attempt_id)
             spec = await self.runtime.execution_spec(client, task_id, lease)
+            from .external_model import model_config
+            spec['llm_config'] = model_config(
+                context, self.base_url, attempt_id, lease, spec.get('llm_config'))
             task = dict(spec.get('task') or {})
             workspace = str(spec['workspace_path'])
             pathlib.Path(workspace).mkdir(parents=True, exist_ok=True)
@@ -167,6 +190,7 @@ class RemoteWorkflowExecutor:
                 # compiled step may request values, references, or fenced local paths.
                 # Keep every form out of attachment-only tools.
                 params['remote_inputs'] = inputs
+                params['remote_input_bindings'] = context.get('inputs') or {}
                 params['remote_input_types'] = input_types
                 params['remote_input_transports'] = input_transports
                 params['remote_input_value_slots'] = direct_value_slots
@@ -177,6 +201,33 @@ class RemoteWorkflowExecutor:
                     'input_slots': task.get('input_slots') or [],
                     'output_slots': task.get('output_slots') or [],
                 })
+                # Both executors receive the same pinned Skills and constraints.
+                # Native tool bindings remain in the task; they do not replace
+                # the package's shared business instructions.
+                execution = context.get('execution') or {}
+                if execution.get('output_validator') == 'paper-agent-v1':
+                    params['_paper_execution'] = {
+                        'session_id': context['session_id'], 'attempt_id': context['attempt_id'],
+                        'revision': context['workflow_revision'], 'step_id': context['step_id'],
+                        'bindings': context.get('inputs') or {},
+                        'request': context.get('user_request') or '',
+                        'launch_request': context.get('launch_request') or '',
+                        'lease_hash': hashlib.sha256(lease.encode()).hexdigest(), 'check_liveness': True,
+                        'knowledge_scope': context.get('knowledge_scope'),
+                        'available_tools': [tool['name'] for tool in execution.get('tools', [])
+                                            if tool.get('source') == 'package'],
+                    }
+
+                shared_instructions = [str(value) for value in execution.get('constraints', [])]
+                for skill in execution.get('skill_files', []):
+                    shared_instructions.append(
+                        f"Pinned workflow Skill ({skill['path']}):\n{skill['content']}")
+                if shared_instructions:
+                    task['objective'] = '\n\n'.join([
+                        str(task.get('objective') or context.get('objective') or context.get('prompt') or ''),
+                        'Shared workflow instructions (apply to every executor):',
+                        *shared_instructions,
+                    ])
                 checkpoint = context.get('post_step_checkpoint')
                 if checkpoint:
                     # Core pins this completed execution only when retrying its
@@ -412,9 +463,8 @@ class RemoteWorkflowExecutor:
     ) -> None:
         """Run pinned deterministic checks without starting another SubAgent.
 
-        The package policy maps function parameters to artifacts produced by the
-        current step. Results are mirrored as ordinary tool events so Chat can
-        render configuration cards and retain an exact failure reason.
+        The package maps function parameters to bound inputs and current step outputs.
+        Chat receives ordinary tool events for the results and failure reasons.
         """
         policy = params.get('workflow_runtime') or {}
         checks = policy.get('post_step_checks') if isinstance(policy, dict) else []
@@ -459,6 +509,18 @@ class RemoteWorkflowExecutor:
                         f'deterministic post-step check input is missing: {material_id}'
                     )
                 arguments[str(parameter)] = values[material_id]
+            inputs = params.get('remote_inputs') or {}
+            for parameter, material in (check.get('input_arguments') or {}).items():
+                if parameter in arguments:
+                    raise RuntimeError(f'duplicate post-step check argument: {parameter}')
+                if material not in inputs:
+                    raise RuntimeError(f'deterministic post-step check input is not bound: {material}')
+                arguments[parameter] = inputs[material]
+            artifacts_argument = str(check.get('artifacts_argument') or '').strip()
+            if artifacts_argument:
+                if artifacts_argument in arguments:
+                    raise RuntimeError(f'duplicate post-step check argument: {artifacts_argument}')
+                arguments[artifacts_argument] = artifacts
             call_id = f'post-step-check-{index}'
             await self.runtime.task_event(client, task_id, lease, {
                 'type': 'tool_calls',

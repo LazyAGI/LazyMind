@@ -68,9 +68,6 @@ func requireDatasetPermission(r *http.Request, datasetID string, action string) 
 	if !canAccessDataset(&ds, userID, action) {
 		return &ds, userID, false
 	}
-	if !datasetAllowedByScanSourceForCaller(r.Context(), caller, ds.ID, action) {
-		return &ds, userID, false
-	}
 	return &ds, userID, true
 }
 
@@ -154,9 +151,9 @@ func subagentWorkspaceRoot() string {
 
 const dockerUploadRootMarker = "/var/lib/lazymind/uploads"
 
-// rewriteCanonicalUploadPath maps Docker-style /var/lib/lazymind/uploads/...
+// ResolveCanonicalUploadPath maps Docker-style /var/lib/lazymind/uploads/...
 // paths onto the configured LAZYMIND_UPLOAD_ROOT used by local runtime.
-func rewriteCanonicalUploadPath(fullPath string) string {
+func ResolveCanonicalUploadPath(fullPath string) string {
 	p := filepath.ToSlash(strings.TrimSpace(fullPath))
 	if p == "" {
 		return fullPath
@@ -177,7 +174,7 @@ func rewriteCanonicalUploadPath(fullPath string) string {
 }
 
 func fileRelativePath(fullPath string) string {
-	p := strings.TrimSpace(rewriteCanonicalUploadPath(fullPath))
+	p := strings.TrimSpace(ResolveCanonicalUploadPath(fullPath))
 	if p == "" {
 		return ""
 	}
@@ -218,14 +215,33 @@ func fileRelativePath(fullPath string) string {
 }
 
 func relFromStaticFilesURL(raw string) string {
-	pathOnly := strings.SplitN(strings.TrimSpace(raw), "?", 2)[0]
-	if idx := strings.Index(pathOnly, "/static-files/"); idx >= 0 {
-		pathOnly = pathOnly[idx:]
-	}
-	if !strings.HasPrefix(pathOnly, "/static-files/") {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User != nil || u.Opaque != "" {
 		return ""
 	}
-	relEncoded := strings.TrimPrefix(pathOnly, "/static-files/")
+	pathOnly := u.EscapedPath()
+	prefix := "/static-files/"
+	if u.IsAbs() {
+		// A matching path on a third-party host is not a Core storage reference.
+		// Absolute URLs must belong to the configured public endpoint, including
+		// its deployment prefix, before their temporary signatures can be removed.
+		base, err := url.Parse(publicBaseURL())
+		if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" ||
+			base.User != nil || base.RawQuery != "" || base.Fragment != "" ||
+			!strings.EqualFold(u.Scheme, base.Scheme) || !strings.EqualFold(u.Host, base.Host) {
+			return ""
+		}
+		prefix = strings.TrimRight(base.EscapedPath(), "/") + prefix
+	} else {
+		if u.Host != "" {
+			return ""
+		}
+		pathOnly = strings.TrimPrefix(pathOnly, "/api/core")
+	}
+	if !strings.HasPrefix(pathOnly, prefix) {
+		return ""
+	}
+	relEncoded := strings.TrimPrefix(pathOnly, prefix)
 	if relEncoded == "" {
 		return ""
 	}
@@ -288,28 +304,7 @@ func staticFileURLFromFullPath(fullPath string) string {
 }
 
 func refreshStaticFileURL(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	if idx := strings.Index(path, "/static-files/"); idx >= 0 {
-		path = path[idx:]
-	}
-	if !strings.HasPrefix(path, "/static-files/") {
-		return ""
-	}
-	rel := strings.TrimPrefix(strings.Split(path, "?")[0], "/static-files/")
-	parts := strings.Split(rel, "/")
-	for i, part := range parts {
-		if decoded, err := url.PathUnescape(part); err == nil {
-			parts[i] = decoded
-		}
-	}
-	rel = strings.Join(parts, "/")
-	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") {
-		return ""
-	}
-	return staticFileURLFromRelativePath(rel)
+	return staticFileURLFromRel(relFromStaticFilesURL(path))
 }
 
 // UploadRoot returns the configured local root used by the signed static file service.
@@ -323,14 +318,14 @@ func StaticFileURLFromFullPath(fullPath string) string {
 }
 
 // StaticFileURLFromAnyStoragePath signs upload-root paths, subagent workspace paths,
-// or re-signs an existing /static-files/ reference (with or without a stale signature).
+// or re-signs a Core static-files URL (with or without a stale signature).
 func StaticFileURLFromAnyStoragePath(pathOrURL string) string {
 	raw := strings.TrimSpace(pathOrURL)
 	if raw == "" {
 		return ""
 	}
-	if strings.HasPrefix(raw, "/static-files/") {
-		return staticFileURLFromRel(relFromStaticFilesURL(raw))
+	if rel := relFromStaticFilesURL(raw); rel != "" {
+		return staticFileURLFromRel(rel)
 	}
 	return staticFileURLFromFullPath(raw)
 }
@@ -1853,7 +1848,14 @@ func loadDatasetDocuments(ctx context.Context, datasetID, keyword, pid string, a
 	for _, doc := range docs {
 		docIDs = append(docIDs, doc.ID)
 	}
-	return loadMergedDocumentsByDocIDs(ctx, docIDs, datasetID, keyword, pid, mergedPIDFilter, limit, offset)
+	rows, total, err := loadMergedDocumentsByDocIDs(ctx, docIDs, datasetID, keyword, pid, mergedPIDFilter, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := applyManualReparseStages(ctx, datasetID, rows); err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
 }
 
 func mergedDocRowFromCoreOnlyWithDatasetDisplay(row orm.Document, datasetDisplay string) mergedDocRow {
@@ -1971,8 +1973,12 @@ func normalizeKeywordList(keywordList []string) []string {
 
 func accessibleDatasetIDs(r *http.Request, userID string) ([]string, error) {
 	ctx := r.Context()
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		return nil, err
+	}
 	var datasets []orm.Dataset
-	if err := store.DB().WithContext(ctx).Where("deleted_at IS NULL").Find(&datasets).Error; err != nil {
+	if err := store.DB().WithContext(ctx).Where("deleted_at IS NULL AND COALESCE(NULLIF(TRIM(tenant_id), ''), 'default') = ?", resourceTenant(caller.TenantID)).Find(&datasets).Error; err != nil {
 		return nil, err
 	}
 	visible := make([]orm.Dataset, 0, len(datasets))
@@ -1981,7 +1987,6 @@ func accessibleDatasetIDs(r *http.Request, userID string) ([]string, error) {
 			visible = append(visible, ds)
 		}
 	}
-	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
 	ids := make([]string, 0, len(visible))
 	for _, ds := range visible {
 		ids = append(ids, ds.ID)
@@ -2517,8 +2522,12 @@ func readableRequestedDatasetIDs(r *http.Request, userID string, datasetIDs []st
 		return nil, nil
 	}
 	ctx := r.Context()
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		return nil, err
+	}
 	var datasets []orm.Dataset
-	if err := store.DB().WithContext(ctx).Where("id IN ? AND deleted_at IS NULL", datasetIDs).Find(&datasets).Error; err != nil {
+	if err := store.DB().WithContext(ctx).Where("id IN ? AND deleted_at IS NULL AND COALESCE(NULLIF(TRIM(tenant_id), ''), 'default') = ?", datasetIDs, resourceTenant(caller.TenantID)).Find(&datasets).Error; err != nil {
 		return nil, err
 	}
 	byID := make(map[string]orm.Dataset, len(datasets))
@@ -2535,7 +2544,6 @@ func readableRequestedDatasetIDs(r *http.Request, userID string, datasetIDs []st
 			visible = append(visible, ds)
 		}
 	}
-	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
 	out := make([]string, 0, len(visible))
 	for _, ds := range visible {
 		out = append(out, ds.ID)

@@ -145,7 +145,7 @@ describe('durable paper notes', () => {
         const retry = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
         render(<ConfigProvider theme={{ token: { motion: false } }}><PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} academic={{ state: { document_id: 'pdf', kind: 'unknown', status: 'failed', paper_id: '', manual: false, error: 'Model unavailable' }, is_important: false }} onClose={() => { }} onAddNote={vi.fn()} onRetryIdentification={retry} onSave={vi.fn().mockResolvedValue(true)}/></ConfigProvider>);
         expect(screen.getByRole('status', { name: '论文信息自动识别' })).toHaveTextContent('识别失败');
-        expect(screen.getByRole('status', { name: '正文解析状态' })).toHaveTextContent('正文解析失败');
+        expect(screen.queryByRole('status', { name: '正文解析状态' })).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: '编辑文献信息' })).toBeEnabled();
         expect(screen.queryByRole('button', { name: '写笔记' })).not.toBeInTheDocument();
         expect(screen.queryByRole('combobox', { name: '论文阅读状态' })).not.toBeInTheDocument();
@@ -168,4 +168,12 @@ it('opens the selected stored attachment in the current tab without waiting for 
  const link=screen.getByRole('link',{name:'阅读此附件'});
  expect(link).toHaveAttribute('href','/lib/knowledge/knowledge/library/saved-document');
  expect(link).not.toHaveAttribute('target','_blank');
+});
+
+it.each(['unknown', 'not_requested', 'ready'] as const)('shows %s beside the PDF attachment', state => {
+ const data = fixture(); data.attachments[0].contentRef = 'pdf'; data.attachments[0].parse = state;
+ render(<PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} initialTab="attachments" onClose={vi.fn()} onAddNote={vi.fn()} />);
+ const label = { unknown: '状态未知', not_requested: '尚未解析', ready: '已解析' }[state];
+ expect(screen.getByRole('button', { name: `PDF 解析：${label}` })).toBeInTheDocument();
+ expect(screen.getByRole('link', { name: '阅读 PDF' })).toHaveAttribute('href', '/lib/knowledge/knowledge/library/pdf');
 });

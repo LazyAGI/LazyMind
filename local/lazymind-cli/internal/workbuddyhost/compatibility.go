@@ -141,7 +141,9 @@ func desktopVersion(application string) (string, error) {
 
 func StatusIssue(status Status) string {
 	switch status.Issue {
-	case "unsupported_version", "version_unreadable", "capability_unavailable", "host_unavailable":
+	case "unsupported_version", "version_unreadable", "capability_unavailable", "host_unavailable",
+		"lazymind_unavailable", "lazymind_auth_required", "pairing_required", "pairing_disabled",
+		"pairing_account_mismatch", "pairing_credential_mismatch", "pairing_invalid", "pairing_unreadable":
 		return status.Issue
 	}
 	if status.Version != "" || status.Ready {

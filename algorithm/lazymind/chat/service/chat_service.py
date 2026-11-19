@@ -51,6 +51,7 @@ from lazymind.chat.service.document_selection import (
     resolve_document_selection_context,
 )
 from lazymind.chat.service.component.tool_policy import build_sidechat_tool_configs
+from lazymind.chat.service.component.tool_rendering import _preview_language
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
@@ -104,6 +105,7 @@ from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_
 from lazymind.chat.engine.tools.intent_writer import (
     append_intentwrite_guidance,
     build_intentwrite_tool,
+    intent_tools_for_query,
     render_intent_section,
 )
 from lazymind.chat.engine.tools.browser_vision import build_browser_visual_inspect_tool
@@ -680,18 +682,22 @@ def _build_ask_user_tool(
     from lazymind.chat.engine.tools.ask_user import ask_user
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy
 
-    if not runtime_policy and not (discovery_mode and workflow_catalog):
-        return [ask_user]
-
     @wraps(ask_user)
     def governed_ask_user(questions, title=None, description=None):
-        return ask_user(
-            enforce_startup_clarification_policy(
-                questions, runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
-            ),
-            title=title,
-            description=description,
+        questions = enforce_startup_clarification_policy(
+            questions, runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
         )
+        if (discovery_mode or not runtime_policy) and isinstance(questions, list):
+            # A discoverable workflow is not an active workflow. Generic chat
+            # questions are skippable; host-issued workflow cards retain their
+            # required fields. Preserve malformed values for schema validation.
+            questions = [
+                {**question, 'required': False}
+                if isinstance(question, dict) and isinstance(question.get('required'), bool)
+                else question
+                for question in questions
+            ]
+        return ask_user(questions, title=title, description=description)
 
     return [governed_ask_user]
 
@@ -771,6 +777,16 @@ def _has_document_preview_input(request: ChatRequest) -> bool:
     )
 
 
+def _allow_library_document_lookup(request: ChatRequest) -> bool:
+    # A library is a search scope, not a replacement for broken preview identity.
+    filters = request.retrieval.filters or {}
+    preview_requested = (
+        request.conversation.surface == 'knowledge_document_preview'
+        or request.document_context or filters.get('docid') or filters.get('doc_id')
+    )
+    return not preview_requested or _has_document_preview_input(request)
+
+
 def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
     query, _ = _normalize_cite_message_query_for_agent(request.message.query)
     user_input, _ = _normalize_cite_message_query_for_agent(request.message.user_query or query)
@@ -800,6 +816,7 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
         ),
         'intent': request.conversation.intent_context,
         'has_attachments': bool(request.message.files) or _has_document_preview_input(request),
+        'allow_library_document_lookup': _allow_library_document_lookup(request),
         'explicit_resources': explicit_resources,
         'thinking_depth': thinking_depth,
     }
@@ -965,7 +982,7 @@ async def _run_chat_with_parse_status(
     if not names or inspect:
         return await _handle_chat_impl(request, **kwargs)
 
-    query = str(request.message.query or '')
+    query = str(request.message.user_query or request.message.query or '')
     session_id = request.conversation.session_id
     started = time.time()
     translator = AgentEventFrameTranslator(query=query, run_id='parse-uploads')
@@ -1065,7 +1082,10 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 ).strip(),
                 session_id=request.conversation.session_id,
             ))
-            for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
+            status_deltas = (('正在', '分析', '用户意图', '，请稍后')
+                             if _preview_language(filter_query) == 'zh'
+                             else ('Analyzing ', 'your request', ', please wait…'))
+            for status_delta in status_deltas:
                 yield log_and_emit_frame(
                     {'think': status_delta, 'text': None, 'sources': []},
                     round(time.time() - started, 3),
@@ -1306,7 +1326,7 @@ async def _handle_chat_impl(
         agent_history, agent.loaded_skills, excluded=agent.excluded_skills,
     )
     translator = AgentEventFrameTranslator(
-        query=query,
+        query=user_input,
         run_id=run_id,
         started_at=metrics_started_at,
     )
@@ -1343,6 +1363,7 @@ async def _handle_chat_impl(
         'mode': conversation.mode if conversation.mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(agent.has_subagents),
         'document_preview_chat': is_document_preview_chat,
+        'document_context': document_context,
         'document_selection_context_available': has_document_selection,
         'conversation_id': conversation_id,
         'query': query or '',
@@ -1455,6 +1476,7 @@ async def _handle_chat_impl(
                 enable_llm_fallback=False,
                 thinking_depth=thinking_depth,
                 has_attachments=bool(files_map) or _has_document_preview_input(request),
+                allow_library_document_lookup=_allow_library_document_lookup(request),
                 explicit_resources=explicit_resource_payload,
             )
         profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
@@ -1491,6 +1513,8 @@ async def _handle_chat_impl(
     effective_workflow_context = workflow.workflow_context
     if str((effective_workflow_context or {}).get('workflow_ref') or '') in excluded_workflow_refs:
         effective_workflow_context = None
+    from lazymind.chat.workflow.ppt_runtime import is_ppt_workflow
+    translator.include_reasoning = not is_ppt_workflow(effective_workflow_context or {})
     effective_workflow_catalog = [
         item for item in workflow.catalog
         if str(item.get('workflow_ref') or '') not in excluded_workflow_refs
@@ -1762,7 +1786,9 @@ async def _handle_chat_impl(
                 host_filesystem_enabled=bool(_cfg['trusted_local_mode']) or bound_local_workspace,
             )
         )
-        intent_tools = [] if workflow_turn_is_bound else [intentwriter]
+        intent_tools = [] if workflow_turn_is_bound else intent_tools_for_query(
+            intentwriter, language_query, has_selected_library=bool(selected_kb_ids),
+        )
         all_tools = (intent_tools + agent_tools + artifact_tools + subagent_tools + attachment_tools
                      + session_env_tools + user_env_tools + ask_user_tools
                      + vocabulary_review_tools + workflow_tools + mcp_tools)
@@ -2067,7 +2093,10 @@ async def _handle_chat_impl(
             'the actual source passage or table values, and page/table labels when available.'
         ),
         'backend.document_preview', priority=38, authoritative=True,
-        content_kind='instruction', skip_if=lambda: not is_document_preview_chat,
+        content_kind='instruction', skip_if=lambda: not is_document_preview_chat or not all(
+            isinstance(document_context.get(key), str) and document_context[key].strip()
+            for key in ('dataset_id', 'document_id')
+        ),
     )
     prompt_builder.runtime(
         'chat_quoted_message', 'Quoted Message', cited_message_context,
@@ -2258,6 +2287,12 @@ async def _handle_chat_impl(
             ),
             required_tool_names=() if sidechat_readonly else (
                 *workflow_contribution.required_tool_names,
+                *(('KBToolkit_read_document',) if (
+                    any(cfg.name == 'kb' for cfg in active_configs)
+                    and (is_document_preview_chat or (
+                        has_document_selection and document_context.get('expand_paper_context') is True
+                    ))
+                ) else ()),
                 *(getattr(tool, '__name__', '') for tool in [
                     *attachment_tools,
                     *([directory_runtime.list_document_directories, directory_runtime.open_document_directory,

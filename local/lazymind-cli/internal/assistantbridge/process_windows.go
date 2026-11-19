@@ -49,10 +49,18 @@ func ownerExited(pid int) bool {
 }
 
 func detachedProcessAttributes() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | 0x00000008 | windows.CREATE_BREAKAWAY_FROM_JOB,
-		HideWindow:    true,
+	flags := uint32(syscall.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS)
+	// A shared Bridge must outlive both the connector launcher and Desktop.
+	if os.Getenv(foregroundLauncherJobEnv) == "1" || currentProcessInJob() {
+		flags |= windows.CREATE_BREAKAWAY_FROM_JOB
 	}
+	return &syscall.SysProcAttr{CreationFlags: flags, HideWindow: true}
+}
+
+func currentProcessInJob() bool {
+	var limits windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+	return windows.QueryInformationJobObject(0, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits)), nil) == nil
 }
 
 func startBridgeProcess(command *exec.Cmd) (<-chan error, func(), error) {

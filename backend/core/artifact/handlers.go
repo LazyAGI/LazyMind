@@ -306,10 +306,12 @@ func EnrichLegacyDTOByBinding(
 		return fallback
 	}
 	changeSummary := ""
+	previewGroup := ""
 	filename := art.Title
 	if len(current.Metadata) > 0 {
 		var meta map[string]any
 		if json.Unmarshal(current.Metadata, &meta) == nil {
+			previewGroup, _ = meta["preview_group"].(string)
 			if summary, ok := meta["change_summary"].(string); ok {
 				changeSummary = summary
 			}
@@ -321,7 +323,11 @@ func EnrichLegacyDTOByBinding(
 	overlay := json.RawMessage(nil)
 	if len(current.InlineJSON) == 0 && current.BlobID != "" {
 		if url, _, err := SignRevisionURL(ctx, svc, userID, current.ID); err == nil && url != "" {
-			overlay, _ = json.Marshal(map[string]any{"url": url, "filename": filename})
+			value := map[string]any{"url": url, "filename": filename}
+			if previewGroup != "" {
+				value["preview_group"] = previewGroup
+			}
+			overlay, _ = json.Marshal(value)
 		}
 	}
 	return LegacyProjection{

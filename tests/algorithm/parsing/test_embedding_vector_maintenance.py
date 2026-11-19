@@ -176,13 +176,17 @@ def _row(engine, table, where):
         return conn.execute(text(f'SELECT * FROM {table} WHERE {where}')).mappings().one()
 
 
-def test_offline_handoff_preserves_parse_chunks_and_image_vectors(monkeypatch):
+@pytest.mark.parametrize('phase', ['ready', 'detached'])
+def test_offline_handoff_preserves_parse_chunks_and_image_vectors(monkeypatch, phase):
     monkeypatch.setenv('LAZYMIND_EMBEDDING_MAINTENANCE_MODE', 'true')
     names = embedding_maintenance.text_collection_names()
     schemas = {name: {'uid', 'embedding_embed_main'} for name in names}
     schemas['col_image'] = {'uid', 'embedding_embed_image'}
     client = FakeMilvusClient(schemas)
     core, tasks = _core_engine(), _task_engine()
+
+    with core.begin() as conn:
+        conn.execute(text("UPDATE embedding_index_states SET phase=:phase"), {'phase': phase})
 
     result = embedding_maintenance.clear_text_vectors_with_core_handoff(
         writers_stopped=True, core_engine=core, task_engine=tasks,
@@ -340,3 +344,19 @@ def test_offline_handoff_rejects_vectors_reappearing_after_cleared_phase(monkeyp
             store_config=_config(), client_factory=lambda **kwargs: client)
     assert name in client.schemas
     assert _row(core, 'embedding_index_states', "scope='global'")['generation'] == 7
+
+
+def test_offline_handoff_preserves_source_rebuild_requirement():
+    core = _core_engine()
+    try:
+        with core.begin() as conn:
+            conn.execute(text("UPDATE document_processing_states SET embedding_version='rebuild:manual'"))
+        embedding_maintenance._mark_clearing(core)
+        embedding_maintenance._finalize_core(core)
+        with core.connect() as conn:
+            versions = conn.execute(text(
+                "SELECT embedding_version FROM document_processing_states WHERE document_id <> 'legacy-doc'"
+            )).scalars().all()
+        assert versions and all(value == 'rebuild:manual' for value in versions)
+    finally:
+        core.dispose()

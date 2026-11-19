@@ -414,7 +414,10 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		return enqueueCredentialBackup(tx, row.ID, row.CredentialRevision, credentialvault.BackupUpsert, now)
 	})
 	if err != nil {
-		if errors.Is(err, errCanonicalGroupExists) || errors.Is(err, errEmbeddingIdentityInUse) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
+		if errors.Is(err, errCanonicalGroupExists) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -723,7 +726,10 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, errConnectionChanged) || errors.Is(err, errEmbeddingIdentityInUse) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
+		if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -872,8 +878,7 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return reconcileProviderActiveKey(tx, &parent)
 	})
 	if err != nil {
-		if errors.Is(err, errEmbeddingInUse) {
-			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		if replyEmbeddingMutationConflict(w, err) {
 			return
 		}
 		common.ReplyErr(w, "delete group failed", http.StatusInternalServerError)
@@ -1216,7 +1221,10 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {
-		if errors.Is(err, errConnectionChanged) || errors.Is(err, errEmbeddingIdentityInUse) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
+		if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -1324,8 +1332,17 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 	}
 	encryptedUpdates["is_verified"] = row.IsVerified && len(filtered) > 0
 	encryptedUpdates["updated_at"] = now
+	var removedMultimodal bool
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := updateConnectionSafely(tx, &parent, &row, connectionBaseURL(parent, row.BaseURL), encryptedUpdates); err != nil {
+			return err
+		}
+		// updateConnectionSafely holds the supplier lock for model providers.
+		// Remove models before reconciling the active key so an embedding
+		// model is detached just as it is by explicit model deletion.
+		var err error
+		removedMultimodal, err = removeBuiltinModelsAfterKeyDeletion(tx, parent, now)
+		if err != nil {
 			return err
 		}
 		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
@@ -1333,7 +1350,10 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {
-		if errors.Is(err, errConnectionChanged) || errors.Is(err, errEmbeddingIdentityInUse) {
+		if replyEmbeddingMutationConflict(w, err) {
+			return
+		}
+		if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -1341,6 +1361,9 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if removedMultimodal {
+		maybeScheduleImageGroupLazyReset(r.Context(), db)
+	}
 	common.ReplyOK(w, map[string]bool{"success": true})
 }
 

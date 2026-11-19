@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	skillmetadata "lazymind/core/skillv2/metadata"
+	"lazymind/core/skillv2/sourceurl"
 )
 
 type Clock interface {
@@ -36,6 +37,10 @@ type ZipDownloader interface {
 type DownloadedZip struct {
 	Path    string
 	Cleanup func()
+	// A source-aware downloader can return a standalone Skill archive instead
+	// of a repository archive. Nil keeps the source's original selection.
+	PathPrefix  *string
+	PackageRoot string
 }
 
 type SkillServiceDeps struct {
@@ -62,6 +67,15 @@ type SourceInput struct {
 	URL        string
 	SourceURL  string
 	PathPrefix string
+	// Website adapters retain SourceURL as provenance while routing downloads
+	// through the concrete upstream GitHub directory.
+	ResolvedSourceURL       string
+	CanonicalName           string
+	PreparedPackage         *sourceurl.PreparedPackage
+	ResolutionTransferBytes int64
+	// True when URL resolution established the ref/path boundary, including
+	// repository roots on branches whose names contain slashes.
+	PathPrefixResolved bool
 }
 
 type CreateSkillRequest struct {

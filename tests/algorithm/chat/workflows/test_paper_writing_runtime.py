@@ -63,7 +63,7 @@ def test_completion_feedback_uses_brief_text_only_after_real_publication(tmp_pat
     ('literature_review', 'refine_topic', 'recovery_research'),
     ('peer_review', 'revise_document', 'recovery_review'),
 ])
-def test_real_artifact_publisher_across_ten_feedback_rounds(tmp_path, start, feedback, recovery, monkeypatch):
+def test_historical_artifact_publisher_across_ten_feedback_rounds(tmp_path, start, feedback, recovery, monkeypatch):
     monkeypatch.setattr(api.ALGORITHMS['research_topic'], 'AutoModel', lambda **_kwargs: lambda _prompt:
                         '# 研究选题\n\n## 研究问题\n如何改善效果？\n\n'
                         '## 文献反馈与调整依据\n根据综述调整路线。')
@@ -98,7 +98,9 @@ def test_real_artifact_publisher_across_ten_feedback_rounds(tmp_path, start, fee
             else:
                 path.write_text(json.dumps(value, ensure_ascii=False))
             bound[key] = str(path)
-        slots = [item['material'] for item in state['steps'][step]['outputs']]
+        # Exercise the retained historical wrapper, whose pinned contract has no Agent receipt.
+        slots = [item['material'] for item in state['steps'][step]['outputs']
+                 if not item['material'].endswith('_receipt') and item['material'] != 'analysis_execution']
         emitted = []
         set_context(SubAgentContext(
             task_id='paper-' + workspace.name, conversation_id='paper-test', agent_type='workflow_step',

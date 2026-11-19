@@ -43,6 +43,7 @@ import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { getLocalizedErrorMessage, axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
 import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import { taskStatusDescription } from './taskStatusDescription';
+import { StatusTag } from './StatusTag';
 import { TASKS_REMOVED_EVENT } from './events';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
@@ -118,11 +119,6 @@ function buildCronExpr(weekdays: number[], time: dayjs.Dayjs): string {
 
 function buildMonthlyCronExpr(days: number[], time: dayjs.Dayjs): string {
   return `${time.minute()} ${time.hour()} ${days.join(',') || '1'} * *`;
-}
-
-function capitalize(s: string) {
-  if (!s) return '';
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /* ────────────────────────────────────────────────
@@ -284,7 +280,7 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
     { text: t('taskCenter.statusRunning'), value: 'running' },
     { text: t('taskCenter.statusCompleted'), value: 'succeeded' },
     { text: t('taskCenter.statusFailed'), value: 'failed' },
-    { text: t('taskCenter.statusInterrupted'), value: 'interrupted' },
+    { text: t('taskCenter.statusPaused'), value: 'paused' },
     { text: t('taskCenter.statusCanceled'), value: 'canceled' },
   ];
 
@@ -313,11 +309,9 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
       width: 150,
       filters: statusOptions,
       filteredValue: statusFilter,
-      onFilter: (value, record) => record.status === value,
+      onFilter: (value, record) => record.status === value || (value === 'failed' && record.status === 'interrupted'),
       render: (v: string, record: Task) => (
-        <div className='schedule-history-status'><Tag color={v === 'succeeded' ? 'green' : v === 'failed' ? 'red' : 'blue'}>
-          {v === 'waiting_inputs' ? t('taskCenter.statusWaitingInputs') : t(`taskCenter.status${capitalize(v)}`) || v}
-        </Tag><small>{taskStatusDescription(record, t)}</small></div>
+        <div className='schedule-history-status'><StatusTag status={v} /><small>{taskStatusDescription(record, t)}</small></div>
       ),
     },
     {

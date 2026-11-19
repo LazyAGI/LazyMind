@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/codexhost"
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -20,12 +21,22 @@ import (
 
 func TestPluginConnectOfflineMigrationFailureAndDisconnect(t *testing.T) {
 	originalPrepare := prepareCodexDesktop
+	originalWait := waitCodexReady
 	originalHealth := startupHealth
+	originalCleanup := cleanupCodexPresentation
+	var cleanupError error
+	cleanupCodexPresentation = func(string) error { return cleanupError }
 	prepareCalls := 0
 	var prepareError error
 	prepareCodexDesktop = func(context.Context, string) error { prepareCalls++; return prepareError }
+	waitCodexReady = func(context.Context, string, string, time.Time) error { return nil }
 	startupHealth = func(context.Context, string) string { return "" }
-	t.Cleanup(func() { prepareCodexDesktop = originalPrepare; startupHealth = originalHealth })
+	t.Cleanup(func() {
+		prepareCodexDesktop = originalPrepare
+		waitCodexReady = originalWait
+		startupHealth = originalHealth
+		cleanupCodexPresentation = originalCleanup
+	})
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX executable fixtures")
 	}
@@ -99,8 +110,8 @@ exit 1
 	if prepareCalls != 2 {
 		t.Fatal("installed plugin skipped desktop connection")
 	}
-	prepareError = errors.New("Codex refused to close")
-	if status := adapter.Connect(context.Background()); status.State != agentintegration.Failed || !strings.Contains(status.Message, prepareError.Error()) {
+	prepareError = &codexhost.SetupError{Code: "launch_failed", Err: errors.New("fixture launch failure")}
+	if status := adapter.Connect(context.Background()); status.State != agentintegration.Failed || status.Issue == nil || status.Issue.Code != "launch_failed" {
 		t.Fatalf("installed plugin hid a failed restart: %+v", status)
 	}
 	prepareError = nil
@@ -116,6 +127,11 @@ exit 1
 	if status := adapter.Status(context.Background()); status.State != agentintegration.Enabled || status.Connection == nil || !status.Connection.MCPConfigured || status.Connection.ControlReady || status.Issue == nil || status.Issue.Code != "capability_unavailable" {
 		t.Fatalf("installed plugin and native compatibility were conflated: %+v", status)
 	}
+	cleanupError = errors.New("fixture cleanup failed")
+	if status := adapter.Disconnect(context.Background()); status.State != agentintegration.Failed || status.Enabled == nil || *status.Enabled || status.RetryAction != "disconnect" {
+		t.Fatalf("cleanup failure lost the removed configuration: %+v", status)
+	}
+	cleanupError = nil
 	if status := adapter.Disconnect(context.Background()); status.State != agentintegration.Ready {
 		t.Fatalf("disconnect failed: %+v", status)
 	}
@@ -127,4 +143,37 @@ exit 1
 	if !strings.Contains(string(config), "other-server") {
 		t.Fatal("disconnect removed unrelated server")
 	}
+	// Reuse the same product registration from a different LazyMind environment.
+	secondHome := filepath.Join(root, "second-state")
+	secondStore, err := credentials.NewStore(secondHome, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secondStore.Save(credentials.Credentials{ServerURL: "http://127.0.0.1:1", AccessToken: "test", RefreshToken: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	second := *adapter
+	second.home = secondHome
+	second.hostID = "host-second"
+	if status := second.Connect(context.Background()); status.State != agentintegration.Enabled || status.Enabled == nil || !*status.Enabled {
+		t.Fatalf("second environment install: %+v", status)
+	}
+	// A native-disabled plugin is still a saved registration and can be cleared.
+	savedConfig, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(savedConfig), "enabled = true", "enabled = false")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if status := second.Status(context.Background()); status.Enabled == nil || !*status.Enabled || status.Connection == nil || status.Connection.MCPEnabled {
+		t.Fatalf("native-disabled registration: %+v", status)
+	}
+	if status := adapter.Status(context.Background()); status.State != agentintegration.Conflict || status.Enabled == nil || !*status.Enabled || !status.CanDisconnect {
+		t.Fatalf("first environment did not detect replacement: %+v", status)
+	}
+	if status := adapter.Disconnect(context.Background()); status.State == agentintegration.Failed || status.Enabled == nil || *status.Enabled {
+		t.Fatalf("cross-environment disconnect: %+v", status)
+	}
+
 }

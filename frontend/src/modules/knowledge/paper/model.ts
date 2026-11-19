@@ -3,7 +3,7 @@ export type ReadingStatus = "unread" | "reading" | "read";
 export type LibraryView = "all" | "important" | "incomplete" | "directory";
 export type ImportSource = "local" | "zotero" | "google_scholar" | "semantic_scholar" | "doi" | "arxiv" | "web" | "unknown";
 export type PaperImportMethod = "upload" | "link" | "bibliography" | "expansion" | "references" | "conversation";
-export type ParseState = "ready" | "parsing" | "failed";
+export type ParseState = "ready" | "parsing" | "failed" | "unknown" | "not_requested" | "queued";
 export type CitationStyle = "gbt" | "apa" | "mla";
 export const paperSourceVersionLabels: Record<string, string> = { submittedVersion: '投稿稿', acceptedVersion: '录用稿', publishedVersion: '出版稿' };
 export interface PaperFolder {
@@ -59,7 +59,7 @@ export function parseAuthorInput(value: string | string[]): string[] {
 export function createPaperRecord(metadata: Partial<PaperMetadata> & {
     title: string;
 }, fields: Partial<Omit<PaperRecord, 'metadata'>> = {}): PaperRecord {
-    return { id: uuidv4(), revision: 0, folderId: null, status: 'unread', important: false, tags: [], source: 'unknown', parse: 'ready', attachmentIds: [], noteIds: [], ...fields,
+    return { id: uuidv4(), revision: 0, folderId: null, status: 'unread', important: false, tags: [], source: 'unknown', parse: 'unknown', attachmentIds: [], noteIds: [], ...fields,
         metadata: { venue: '', year: 0, ...metadata, authors: parseAuthorInput(metadata.authors || []), identifiers: { ...metadata.identifiers } } };
 }
 export function descendantFolderIds(folders: PaperFolder[], parentId: string): Set<string> {
@@ -232,6 +232,13 @@ export function filterPapers(items: PaperRecord[], keyword = '') {
     const needle = keyword.trim().toLowerCase();
     return needle ? items.filter(paper => [paper.metadata.title, ...paper.metadata.authors, paper.metadata.venue, paper.metadata.identifiers.doi, paper.metadata.identifiers.arxiv, ...paper.tags].join(' ').toLowerCase().includes(needle)) : items;
 }
+export function isUserPaperTag(tag: string): boolean {
+    return !!tag.trim() && tag !== 'paper' && !tag.startsWith('arxiv:');
+}
+export function getPaperTags(tags: string[]): string[] {
+    return [...new Set(tags.filter(isUserPaperTag))];
+}
+export const paperTagOrder = new Intl.Collator('zh-CN', { numeric: true });
 export function venueName(item: PaperRecord) {
     const venue = (item.metadata.venue || "未标注").trim();
     return venue.replace(new RegExp(`[,\\s]*${item.metadata.year}$`), "").trim() || venue;

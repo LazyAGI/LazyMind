@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,6 +41,16 @@ type externalSkillSourceError struct {
 	Message    string
 	Suggestion string
 }
+
+type externalAgentSkillSourceLockEntry struct {
+	token chan struct{}
+	refs  int
+}
+
+var externalAgentSkillSourceLocks = struct {
+	sync.Mutex
+	entries map[string]*externalAgentSkillSourceLockEntry
+}{entries: make(map[string]*externalAgentSkillSourceLockEntry)}
 
 func (e externalSkillSourceError) Error() string { return e.Message }
 
@@ -87,7 +97,7 @@ func normalizeExternalAgentWorkflowSkillSource(ctx context.Context, in externalA
 		return externalAgentWorkflowSkillSource{}, externalSkillSourceError{Code: "SKILL_ZIP_INVALID", Message: "skill.zip_base64 is empty", Suggestion: "Provide a non-empty Skill zip package."}
 	}
 	if int64(len(content)) > maxExternalAgentSkillDownloadBytes {
-		return externalAgentWorkflowSkillSource{}, externalSkillSourceError{Code: "SKILL_ZIP_TOO_LARGE", Message: "Skill ZIP must not exceed 20 MiB", Suggestion: "Remove unnecessary files from the Skill package."}
+		return externalAgentWorkflowSkillSource{}, externalSkillSourceError{Code: "SKILL_ZIP_TOO_LARGE", Message: fmt.Sprintf("Skill ZIP must not exceed %d MiB", maxExternalAgentSkillDownloadBytes>>20), Suggestion: "Remove unnecessary files from the Skill package."}
 	}
 	hash := "sha256:" + sha256Hex(content)
 	if providedHash != "" && providedHash != hash {
@@ -106,6 +116,11 @@ func resolveExternalAgentSkillSource(ctx context.Context, db *gorm.DB, ownerUser
 	if err != nil {
 		return externalAgentSkillResolution{}, err
 	}
+	unlock, err := acquireExternalAgentSkillSourceLock(ctx, ownerUserID, source)
+	if err != nil {
+		return externalAgentSkillResolution{}, err
+	}
+	defer unlock()
 	if skillID := findExternalAgentSkillBySource(ctx, db, ownerUserID, source); skillID != "" {
 		if err := recordExternalAgentSkillSource(ctx, db, ownerUserID, source, skillID, "reused"); err != nil {
 			return externalAgentSkillResolution{}, err
@@ -131,6 +146,39 @@ func resolveExternalAgentSkillSource(ctx context.Context, db *gorm.DB, ownerUser
 	return externalAgentSkillResolution{SkillID: skillID, SourceType: source.SourceType, SourceKey: source.SourceKey, InstallStatus: "installed"}, nil
 }
 
+func acquireExternalAgentSkillSourceLock(ctx context.Context, ownerUserID string, source externalAgentWorkflowSkillSource) (func(), error) {
+	key := ownerUserID + "\x00" + source.SourceType + "\x00" + source.SourceKey
+	externalAgentSkillSourceLocks.Lock()
+	entry := externalAgentSkillSourceLocks.entries[key]
+	if entry == nil {
+		entry = &externalAgentSkillSourceLockEntry{token: make(chan struct{}, 1)}
+		entry.token <- struct{}{}
+		externalAgentSkillSourceLocks.entries[key] = entry
+	}
+	entry.refs++
+	externalAgentSkillSourceLocks.Unlock()
+	select {
+	case <-entry.token:
+		return func() {
+			entry.token <- struct{}{}
+			externalAgentSkillSourceLocks.Lock()
+			entry.refs--
+			if entry.refs == 0 {
+				delete(externalAgentSkillSourceLocks.entries, key)
+			}
+			externalAgentSkillSourceLocks.Unlock()
+		}, nil
+	case <-ctx.Done():
+		externalAgentSkillSourceLocks.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(externalAgentSkillSourceLocks.entries, key)
+		}
+		externalAgentSkillSourceLocks.Unlock()
+		return nil, ctx.Err()
+	}
+}
+
 func findExternalAgentSkillBySource(ctx context.Context, db *gorm.DB, ownerUserID string, source externalAgentWorkflowSkillSource) string {
 	var mapping orm.ExternalAgentSkillSource
 	err := db.WithContext(ctx).
@@ -153,6 +201,24 @@ func findExternalAgentSkillBySource(ctx context.Context, db *gorm.DB, ownerUserI
 			return revision.SkillID
 		}
 	}
+	// Long source URLs are stored in the skill provenance JSON when the legacy
+	// revision reference column cannot hold them. Keep source reuse working
+	// across that bounded-column fallback as well.
+	var skills []struct {
+		ID  string
+		Ext []byte
+	}
+	if source.SourceURL != "" {
+		if err := db.WithContext(ctx).Table("skills").Select("id, ext").Where("owner_user_id=? AND category=? AND deleted_at IS NULL", ownerUserID, skillmetadata.ExternalCategory).Find(&skills).Error; err == nil {
+			for _, skill := range skills {
+				ext := decodeJSONMap(skill.Ext)
+				storedURL := strings.TrimSpace(stringFromMap(ext, "import_source_url"))
+				if storedURL != "" && canonicalExternalSkillURL(storedURL) == canonicalExternalSkillURL(source.SourceURL) {
+					return skill.ID
+				}
+			}
+		}
+	}
 	return ""
 }
 
@@ -161,11 +227,11 @@ func installExternalAgentSkillSource(ctx context.Context, db *gorm.DB, ownerUser
 	serviceSource := skillservice.SourceInput{}
 	switch source.SourceType {
 	case "url":
-		downloadURL, prefix, err := normalizeExternalSkillImportURL(ctx, source.SourceURL)
+		resolved, err := skillservice.ResolveURLSource(ctx, source.SourceURL)
 		if err != nil {
 			return "", err
 		}
-		serviceSource = skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: source.SourceURL, PathPrefix: prefix}
+		serviceSource = resolved
 	case "zip":
 		zipPath, err := writeExternalAgentSkillZip(source.ZipContent)
 		if err != nil {
@@ -215,31 +281,6 @@ func recordExternalAgentSkillSource(ctx context.Context, db *gorm.DB, ownerUserI
 	}).Create(&row).Error
 }
 
-func normalizeExternalSkillImportURL(ctx context.Context, rawURL string) (string, string, error) {
-	parsed, err := url.ParseRequestURI(rawURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", "", fmt.Errorf("invalid skill import URL")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", "", fmt.Errorf("skill import URL must use HTTP or HTTPS")
-	}
-	resolution, matched, resolveErr := skillurl.ResolveSkillHubPageURL(parsed)
-	if resolveErr != nil {
-		return "", "", resolveErr
-	}
-	if matched {
-		return resolution.DownloadURL, "", nil
-	}
-	githubResolution, matched, resolveErr := skillurl.ResolveGitHubPageURL(ctx, parsed, &http.Client{Timeout: 10 * time.Second}, skillurl.GitHubAPIBaseURL)
-	if resolveErr != nil {
-		return "", "", resolveErr
-	}
-	if matched {
-		return githubResolution.DownloadURL, githubResolution.PathPrefix, nil
-	}
-	return rawURL, "", nil
-}
-
 func canonicalExternalSkillURL(rawURL string) string {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
@@ -248,6 +289,23 @@ func canonicalExternalSkillURL(rawURL string) string {
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = strings.ToLower(parsed.Host)
 	parsed.Fragment = ""
+	host := strings.TrimPrefix(parsed.Hostname(), "www.")
+	switch host {
+	case "skillhub.cn", "clawhub.ai":
+		// These registry pages only use version/tag as selectors. Tracking
+		// parameters are deliberately ignored by ResolveImportURL.
+		query := url.Values{}
+		for _, key := range []string{"tag", "version"} {
+			if value := parsed.Query().Get(key); value != "" {
+				query.Set(key, value)
+			}
+		}
+		parsed.RawQuery = query.Encode()
+	case "skills.sh", "skillsmp.com", "github.com", "raw.githubusercontent.com":
+		// Website pages and GitHub document links do not use query parameters
+		// to select the imported package.
+		parsed.RawQuery = ""
+	}
 	return parsed.String()
 }
 
@@ -311,3 +369,4 @@ func (s externalAgentZipUploadStore) Get(_ context.Context, uploadID string) (sk
 }
 
 const maxExternalAgentSkillDownloadBytes = skillservice.MaxSkillDownloadBytes
+const maxExternalAgentSkillRequestBytes = skillservice.MaxSkillInstallRequestBytes

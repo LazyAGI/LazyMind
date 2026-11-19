@@ -8,7 +8,6 @@ import (
 	"lazymind/core/pdfir"
 	"lazymind/core/readingpolicy"
 	"lazymind/core/store"
-	"lazymind/core/systemdeps"
 	"net/http"
 	"strings"
 )
@@ -72,19 +71,12 @@ func ReadingPreferences(w http.ResponseWriter, r *http.Request) {
 		key := descriptor.ID
 		c := readingCapability{Capability: descriptor, Available: true, EffectiveMode: p.Modes[key]}
 		switch key {
-		case "overview":
-			c.Available = false
-			c.UnavailableReason = "论文速览尚未提供可运行的生成服务"
 		case readingpolicy.PDFParse:
 			if parseErr != nil {
 				c.Available = false
 				c.UnavailableReason = "请配置可用的 MinerU 解析服务"
 			}
-		case readingpolicy.ChatPrepare:
-			if !systemdeps.PythonComponentActive("rag") {
-				c.Available = false
-				c.UnavailableReason = "请安装本地知识库组件"
-			}
+
 		default:
 			if modelErr != nil {
 				c.Available = false
@@ -99,9 +91,15 @@ func ReadingPreferences(w http.ResponseWriter, r *http.Request) {
 		}
 		caps = append(caps, c)
 	}
+	usage, err := readingpolicy.UsageToday(r.Context(), store.DB(), user, p)
+	if err != nil {
+		common.ReplyErr(w, "读取每日自动额度失败", 500)
+		return
+	}
 	common.ReplyOK(w, struct {
 		readingpolicy.Policy
-		Capabilities       []readingCapability         `json:"capabilities"`
-		ProviderSelections map[string]readingSelection `json:"provider_selections"`
-	}{p, caps, readingSelectionMetadata(r.Context(), user, p, parseErr, modelErr)})
+		Usage              map[string]readingpolicy.Usage `json:"usage"`
+		Capabilities       []readingCapability            `json:"capabilities"`
+		ProviderSelections map[string]readingSelection    `json:"provider_selections"`
+	}{p, usage, caps, readingSelectionMetadata(r.Context(), user, p, parseErr, modelErr)})
 }

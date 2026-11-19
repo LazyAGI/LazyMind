@@ -206,10 +206,10 @@ func TestReleaseDoesNotStopUnmanagedLegacyBridge(t *testing.T) {
 	t.Setenv(connectorconfig.EnvironmentKey, "")
 	var stopped atomic.Bool
 	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/shutdown" {
+		if r.Method != http.MethodGet {
 			stopped.Store(true)
 		}
-		writeJSON(w, 200, map[string]any{"version": "v8", "running": true})
+		writeJSON(w, 200, map[string]any{"version": "v9", "platform": runtime.GOOS, "executable": "/legacy/lazymind"})
 	}))
 	defer legacy.Close()
 	if err := connectorconfig.WriteBridgeEndpoint(root, connectorconfig.BridgeEndpoint{URL: legacy.URL, Broker: legacy.URL}); err != nil {
@@ -223,27 +223,82 @@ func TestReleaseDoesNotStopUnmanagedLegacyBridge(t *testing.T) {
 	}
 }
 
-func TestStartPreservesIncompatibleLegacyBridge(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("LAZYMIND_HOME", root)
+func TestReleaseDrainsPreviousScopedBridgeWithoutStoppingOtherClient(t *testing.T) {
+	s, b := sharedTestServer(t)
+	t.Setenv("LAZYMIND_HOME", b.root)
 	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
 	t.Setenv(connectorconfig.EnvironmentKey, "")
-	var mutations atomic.Int32
-	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			mutations.Add(1)
+	for _, id := range []string{"desktop", "compose"} {
+		w := lifecycleRequest(s, b, "acquire", ClientOptions{ID: id, Home: b.root})
+		if w.Code != http.StatusOK {
+			t.Fatal(w.Body.String())
 		}
-		writeJSON(w, 200, map[string]any{"version": "v8", "platform": runtime.GOOS, "executable": "/legacy/lazymind"})
+	}
+	routes := s.routes()
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/health" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"version": "v9", "service": bridgeProduct, "platform": runtime.GOOS,
+				"home": b.root, "isolated": false,
+			})
+			return
+		}
+		routes.ServeHTTP(w, r)
 	}))
-	defer legacy.Close()
-	_, err := Start(context.Background(), strings.TrimPrefix(legacy.URL, "http://"))
-	if err == nil || !strings.Contains(err.Error(), "incompatible") {
-		t.Fatalf("expected clear compatibility error, got %v", err)
-	}
-	if mutations.Load() != 0 {
-		t.Fatal("modified existing legacy bridge")
-	}
-	if _, err := Health(context.Background(), strings.TrimPrefix(legacy.URL, "http://")); err != nil {
+	defer broker.Close()
+	if err := connectorconfig.WriteBridgeEndpoint(b.root, connectorconfig.BridgeEndpoint{URL: broker.URL, Broker: broker.URL}); err != nil {
 		t.Fatal(err)
+	}
+	if err := ReleaseClient(t.Context(), ClientOptions{ID: "compose"}); err != nil {
+		t.Fatal(err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, ok := b.clients["desktop"]; !ok || len(b.clients) != 1 || b.stopping {
+		t.Fatalf("releasing Compose must keep the Desktop client active: %+v", b.clients)
+	}
+}
+
+func TestStartPreservesIncompatibleLegacyBridge(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		version string
+		scoped  bool
+	}{
+		{name: "legacy v8", version: "v8"},
+		{name: "upstream v9", version: "v9"},
+		{name: "scoped v9", version: "v9", scoped: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("LAZYMIND_HOME", root)
+			t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
+			t.Setenv(connectorconfig.EnvironmentKey, "")
+			status := map[string]any{
+				"version": test.version, "platform": runtime.GOOS, "executable": "/legacy/lazymind",
+			}
+			if test.scoped {
+				status["service"], status["home"], status["isolated"] = bridgeProduct, root, false
+			}
+			var mutations atomic.Int32
+			legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					mutations.Add(1)
+				}
+				writeJSON(w, 200, status)
+			}))
+			defer legacy.Close()
+			address := strings.TrimPrefix(legacy.URL, "http://")
+			_, err := Start(context.Background(), address)
+			if err == nil || !strings.Contains(err.Error(), "incompatible Assistant Bridge is using this environment") {
+				t.Fatalf("expected clear compatibility error, got %v", err)
+			}
+			if mutations.Load() != 0 {
+				t.Fatal("modified existing legacy bridge")
+			}
+			if _, err := Health(context.Background(), address); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

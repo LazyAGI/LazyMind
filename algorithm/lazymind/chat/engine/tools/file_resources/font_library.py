@@ -160,12 +160,95 @@ def local_fonts() -> list[dict]:
     return records
 
 
+def font_resource_url(record: dict) -> str:
+    """Publish immutable font bytes through the existing signed static transport."""
+    from lazymind.chat.service.utils.static_file_url import _upload_root
+    from .portable_fonts import font_bytes
+    if (not re.fullmatch(r'[0-9a-f]{64}', record['id'])
+            or record['file'] not in {record['id'] + '.ttf', record['id'] + '.otf'}):
+        raise ValueError('Invalid font resource identity')
+    data = font_bytes(record)
+    root = Path(_upload_root()) / 'presentation-fonts'
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / record['file']
+    if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != record['id']:
+        temporary = root / f'.{uuid.uuid4().hex}.tmp'
+        try:
+            temporary.write_bytes(data)
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+    # Store no expiring signature. Slide previews sign this reference on opening.
+    return f'/static-files/presentation-fonts/{record["file"]}'
+
+
+def inline_shared_font_resource(url: str) -> str | None:
+    """Embed only immutable, verified fonts from the shared presentation library."""
+    from lazymind.chat.service.utils.static_file_url import _upload_root
+    clean = url.strip().split('#', 1)[0].split('?', 1)[0]
+    if not clean.startswith('/static-files/presentation-fonts/'):
+        return None
+    match = re.fullmatch(r'/static-files/presentation-fonts/([0-9a-f]{64})\.(ttf|otf)', clean)
+    if not match:
+        raise ValueError('Invalid shared presentation font resource')
+    root = Path(_upload_root()).resolve()
+    library = root / 'presentation-fonts'
+    candidate = library / (match[1] + '.' + match[2])
+    if library.resolve() != library or candidate.resolve().parent != library:
+        raise ValueError('Shared presentation font is outside the font library')
+    try:
+        data = candidate.read_bytes()
+    except OSError as exc:
+        raise ValueError('Shared presentation font is missing or unreadable') from exc
+    if hashlib.sha256(data).hexdigest() != match[1]:
+        raise ValueError('Shared presentation font checksum mismatch')
+    return f'data:font/{match[2]};base64,' + base64.b64encode(data).decode('ascii')
+
+
+def font_face_css(family: str, record: dict) -> str:
+    metadata = {'family': family, 'weight': record['weight'], 'style': record['style'], 'sha256': record['id']}
+    token = base64.b64encode(json.dumps(metadata, ensure_ascii=False).encode()).decode()
+    quoted = json.dumps(family, ensure_ascii=False).replace('<', '\\3c ')
+    return (f'/*lazymind-font:{token}*/@font-face{{font-family:{quoted};'
+            f'font-weight:{record["weight"]};font-style:{record["style"]};'
+            f'src:url({font_resource_url(record)})}}')
+
+
+def upgrade_legacy_html_fonts(html: str) -> str:
+    """Replace our old inline subsets only when the exact original is available."""
+    if 'data:font/' not in html:
+        return html
+    records = {record['id']: record for record in local_fonts() if record.get('embeddable')}
+    # Match the historical serializer exactly; authored descriptors stay intact.
+    rule = re.compile(r'/\*lazymind-font:([A-Za-z0-9+/=]+)\*/@font-face\{'
+                      r'font-family:("(?:\\.|[^"\\])*");font-weight:([0-9]+);font-style:(normal|italic);'
+                      r'src:url\(data:font/(?:ttf|woff);base64,[A-Za-z0-9+/=]+\)\}')
+
+    def replace_face(match):
+        try:
+            metadata = json.loads(base64.b64decode(match.group(1), validate=True))
+            if not isinstance(metadata, dict) or not isinstance(metadata.get('family'), str):
+                return match.group(0)
+            if (json.loads(match.group(2)) != metadata['family']
+                    or int(match.group(3)) != metadata.get('weight') or match.group(4) != metadata.get('style')):
+                return match.group(0)
+            record = records.get(metadata.get('sha256'))
+            if (not record or metadata.get('weight') != record['weight']
+                    or metadata.get('style') != record['style']
+                    or metadata['family'].casefold() not in {alias.casefold() for alias in record['aliases']}):
+                return match.group(0)
+            return font_face_css(metadata['family'], record)
+        except (OSError, ValueError, KeyError, TypeError):
+            # Legacy documents remain editable when their original font cache is
+            # absent. Never substitute a different version or download a font.
+            return match.group(0)
+
+    return re.sub(r'<style\b[^>]*\bdata-lazymind-font-required=(["\'])true\1[^>]*>[\s\S]*?</style>',
+                  lambda match: rule.sub(replace_face, match.group(0)), html, flags=re.I)
+
+
 def local_font_css(html: str) -> str:
-    """Self-contained fonts for browser previews; no expiring cloud URLs."""
-    from .portable_fonts import _PageText, _html_font_bytes
-    page = _PageText()
-    page.feed(html)
-    text = ''.join(page.text)
+    """Reference shared font resources without adding font bytes to preview HTML."""
     blocks = []
     packaged = set()
     packaged_families = set()
@@ -183,11 +266,8 @@ def local_font_css(html: str) -> str:
         aliases = [name for name in record['aliases'] if name.casefold() in html.casefold()]
         if not aliases:
             continue
-        encoded = base64.b64encode(_html_font_bytes(record, text)).decode()
         for family in aliases:
-            quoted = json.dumps(family, ensure_ascii=False).replace('<', '\\3c ')
-            blocks.append(f'@font-face{{font-family:{quoted};font-weight:{record["weight"]};'
-                          f'font-style:{record["style"]};src:url(data:font/woff;base64,{encoded})}}')
+            blocks.append(font_face_css(family, record))
     return '\n'.join(blocks)
 
 

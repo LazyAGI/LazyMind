@@ -6,6 +6,12 @@ ErrorTuple = Tuple[int, int, str]
 
 
 class ErrorCodes:
+    GITHUB_STAR_ACCOUNT_CHANGED: ErrorTuple = (409, 1001301, 'GitHub account changed; confirm the account again')
+    GITHUB_STAR_INVALID_CONNECTION: ErrorTuple = (409, 1001302, 'Connect an active GitHub user account')
+    GITHUB_STAR_RESULT_UNKNOWN: ErrorTuple = (503, 1001303, 'The GitHub Star result could not be confirmed')
+    GITHUB_STAR_UNAVAILABLE: ErrorTuple = (503, 1001304, 'GitHub Star is temporarily unavailable')
+    GITHUB_STAR_PERMISSION_REQUIRED: ErrorTuple = (403, 1001305, 'GitHub Star permission is missing')
+    GITHUB_STAR_AUTH_REQUIRED: ErrorTuple = (401, 1001306, 'Reconnect this GitHub account')
     GITHUB_CLI_FAILED: ErrorTuple = (502, 1001201, 'GitHub connection could not be completed')
     GITHUB_CLI_SESSION_NOT_FOUND: ErrorTuple = (404, 1001202, 'GitHub authorization session expired or was not found')
     GITHUB_CLI_RECONNECT_REQUIRED: ErrorTuple = (401, 1001203, 'Reconnect this GitHub CLI connection')

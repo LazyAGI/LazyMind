@@ -10,14 +10,17 @@ afterEach(() => {
   host?.__lazymindCodexWorkflowTail?.dispose(); host?.__lazymindCodexPresentationSession?.dispose()
   dom?.window.close(); vi.unstubAllGlobals()
 })
-function fixture() {
-  dom = new JSDOM('<main><div data-app-action-timeline-scroll data-pip-anchor-host="codex-main-thread"><div id="content"><div data-thread-user-message-navigation-content><div id="messages"></div></div><div class="sticky"></div></div><div data-thread-scroll-footer><button class="group/scroll-to-bottom"></button></div></div></main>', {url:'app://-/index.html'})
+function fixture(
+  trailingMarkup = '<div class="sticky"></div>',
+  scrollAttributes = 'data-app-action-timeline-scroll data-pip-anchor-host="codex-main-thread"',
+) {
+  dom = new JSDOM(`<main><div ${scrollAttributes}><div id="content"><div data-thread-user-message-navigation-content><div id="messages"></div></div>${trailingMarkup}</div><div data-thread-scroll-footer><button class="group/scroll-to-bottom"></button></div></div></main>`, {url:'app://-/index.html'})
   const window = dom.window as any
   for (const key of ['window','document','Element','HTMLElement','Node','MutationObserver','getComputedStyle']) vi.stubGlobal(key,window[key])
-  const scroller = document.querySelector<HTMLElement>('[data-app-action-timeline-scroll]')!
-  scroller.getBoundingClientRect = () => ({width:800} as DOMRect)
+  const scroller = document.querySelector<HTMLElement>('main > div')!
+  scroller.getBoundingClientRect = () => new window.DOMRect(0, 40, 800, 800)
   scroller.parentElement!.getBoundingClientRect = () => ({left:0,top:40,right:900,bottom:800} as DOMRect)
-  Object.defineProperties(scroller,{scrollHeight:{get:()=>1600},clientHeight:{get:()=>800}})
+  Object.defineProperties(scroller,{scrollHeight:{configurable:true,get:()=>1600},clientHeight:{get:()=>800}})
   scroller.scrollTop = 800
   const props = {conversationId:threadA,hostId:'local'}
   ;(scroller as any).__reactFiber$fixture = {memoizedProps:props}
@@ -43,6 +46,103 @@ it('keeps one live iframe after new messages and before composer clearance',asyn
   expect(panel.previousElementSibling).toBe(document.querySelector('[data-thread-user-message-navigation-content]'))
   expect(panel.nextElementSibling?.className).toBe('sticky')
 })
+
+it.each([
+  ['default', 'h-[calc(var(--thread-scroll-padding-bottom)-var(--spacing)*4)]'],
+  ['compact', 'h-(--thread-scroll-padding-bottom)'],
+])('mounts before the non-sticky composer spacer in the %s layout', (_layout, heightClass) => {
+  const { surface } = fixture(`
+    <div id="status" class="z-20 mt-auto grid"><div class="sticky bottom-0"></div></div>
+    <div id="composer-spacer" aria-hidden="true" class="pointer-events-none mt-auto w-full shrink-0 ${heightClass}"></div>
+    <div aria-hidden="true" data-thread-end-snap-target></div>
+  `)
+  const panel = surface.element.parentElement!
+  expect(panel.previousElementSibling).toBe(document.querySelector('#status'))
+  expect(panel.nextElementSibling).toBe(document.querySelector('#composer-spacer'))
+})
+
+it('keeps the panel bottom above a growing composer even before the native spacer updates', () => {
+  const observers: Array<{ callback: () => void; elements: Set<Element> }> = []
+  vi.stubGlobal('ResizeObserver', class {
+    readonly elements = new Set<Element>()
+    constructor(callback: () => void) { observers.push({ callback, elements: this.elements }) }
+    observe(element: Element) { this.elements.add(element) }
+    disconnect() { this.elements.clear() }
+  })
+  const resize = (element: Element) => {
+    for (const observer of observers.filter(observer => observer.elements.has(element))) observer.callback()
+  }
+
+  const f = fixture()
+  const { scroller, surface, window } = f
+  const panel = surface.element.parentElement!
+  const spacer = panel.nextElementSibling!
+  const footer = scroller.querySelector('[data-thread-scroll-footer]')!
+  let footerTop = 720
+  let spacerHeight = 120
+  spacer.getBoundingClientRect = () => new window.DOMRect(0, 0, 800, spacerHeight)
+  // The composer bottom is inset from the scrollport, so its height alone
+  // can't determine where the native surface stops being visible.
+  footer.getBoundingClientRect = () => new window.DOMRect(0, footerTop, 800, 820 - footerTop)
+  const previewHeight = () => Math.min(480, parseFloat(surface.element.style.maxHeight))
+  const previewStart = 1100
+  surface.element.getBoundingClientRect = () => new window.DOMRect(20, 40 + previewStart - scroller.scrollTop, 760, previewHeight())
+  Object.defineProperty(scroller, 'scrollHeight', {
+    get: () => previewStart + previewHeight() + spacerHeight
+      + parseFloat(panel.style.marginBottom) + (parseFloat(panel.style.paddingBottom) || 0),
+  })
+
+  const visibleAtBottom = () => {
+    expect(scroller.scrollTop + scroller.clientHeight).toBe(scroller.scrollHeight)
+    const [rect, clip, visible] = surface.sync.mock.lastCall!
+    expect(visible).toBe(true)
+    expect(clip.y + clip.height).toBe(footerTop)
+    expect(rect.y + rect.height).toBeLessThanOrEqual(footerTop)
+  }
+
+  resize(footer)
+  visibleAtBottom()
+  const originalScrollHeight = scroller.scrollHeight
+
+  // A scroll gesture can cancel following while the viewport is still at the
+  // end, for example when returning there via a native scroll operation.
+  scroller.dispatchEvent(new window.WheelEvent('wheel', { deltaY: -1 }))
+  footerTop = 600
+  resize(footer)
+  visibleAtBottom()
+  const scrollHeightWhileSpacerLags = scroller.scrollHeight
+  expect(scrollHeightWhileSpacerLags).toBeGreaterThan(originalScrollHeight)
+
+  spacerHeight = 216
+  resize(spacer)
+  visibleAtBottom()
+  expect(scroller.scrollHeight).toBe(scrollHeightWhileSpacerLags)
+  expect(document.querySelector('iframe')).toBe(f.frame)
+})
+
+it('mounts on the original conversation when the compact timeline marker is absent', () => {
+  const { surface, scroller } = fixture(
+    '<div id="composer-spacer" aria-hidden="true" class="h-(--thread-scroll-padding-bottom)"></div>',
+    'class="thread-scroll-container" data-mcp-app-scroll-host="true"',
+  )
+  expect(scroller.hasAttribute('data-app-action-timeline-scroll')).toBe(false)
+  expect(readCodexView()?.session).toBe(threadA)
+  expect(surface.element.parentElement?.nextElementSibling?.id).toBe('composer-spacer')
+
+  const other = scroller.cloneNode(true) as HTMLElement
+  other.getBoundingClientRect = scroller.getBoundingClientRect
+  const overlay = document.createElement('aside')
+  overlay.setAttribute('data-app-shell-tab-panel-controller', '')
+  overlay.append(other)
+  document.body.append(overlay)
+  expect(readCodexView()?.scroller).toBe(scroller)
+
+  overlay.removeAttribute('data-app-shell-tab-panel-controller')
+  expect(readCodexView()).toBeNull()
+  overlay.setAttribute('aria-hidden', 'true')
+  expect(readCodexView()?.scroller).toBe(scroller)
+})
+
 it('confirms a loaded page even when its queued ready event has not been forwarded',async()=>{
  const f=fixture(),panel=f.window.__lazymindCodexWorkflowTail
  expect(panel.status().page_status).toBe('loading')
@@ -99,6 +199,18 @@ it('rejects hidden or ambiguous main-chat layouts',()=>{
   expect(readCodexView()).toBeNull()
   other.getBoundingClientRect=()=>({width:0} as DOMRect)
   expect(readCodexView()?.session).toBe(threadA)
+})
+it('keeps the main workflow panel when a subagent chat is visible in a side tab',async()=>{
+  const f=fixture(), side=document.createElement('div')
+  side.dataset.appShellTabPanelController='right'
+  const other=f.scroller.cloneNode(true) as HTMLElement
+  other.getBoundingClientRect=()=>({width:500} as DOMRect)
+  ;(other as any).__reactFiber$fixture={memoizedProps:{conversationId:threadB,hostId:'local'}}
+  side.append(other);document.body.append(side)
+  await Promise.resolve()
+  expect(readCodexView()?.session).toBe(threadA)
+  expect(readPresentationSession().epoch).toBe(f.target.epoch)
+  expect(f.window.__lazymindCodexWorkflowTail.status().status).toBe('mounted')
 })
 it('moves scroll listeners with a replacement scroller while preserving the panel',async()=>{
   const f=fixture(), next=f.scroller.cloneNode(true) as HTMLElement

@@ -28,6 +28,9 @@ interface ChatInputStore {
   setModeDraft: (draft?: ChatModeDraft) => void;
   inputContents: Record<string, string>;
   inputMentions: Record<string, ChatMention[]>;
+  /** Uploaded references only; local files and preview data stay in the uploader. */
+  inputFiles: Record<string, ComposerFileCandidate[]>;
+  saveInputFiles: (conversationId: string, files: ComposerFileCandidate[]) => void;
   /** Pending artifact references to inject into the next message. Keyed by conversationId. */
   artifactRefs: Record<string, ArtifactRef[]>;
   saveInputContent: (conversationId: string, content: string, mentions?: ChatMention[]) => void;
@@ -47,6 +50,10 @@ export const useChatInputStore = create<ChatInputStore>()(
       setModeDraft: modeDraft => set({ modeDraft }),
       inputContents: {},
       inputMentions: {},
+      inputFiles: {},
+      saveInputFiles: (conversationId, files) => set(state => ({
+        inputFiles: { ...state.inputFiles, [conversationId]: files },
+      })),
       artifactRefs: {},
       saveInputContent: (conversationId: string, content: string, mentions?: ChatMention[]) => {
         set((state) => ({
@@ -69,13 +76,15 @@ export const useChatInputStore = create<ChatInputStore>()(
         set((state) => {
           const newContents = { ...state.inputContents };
           const inputMentions = { ...state.inputMentions };
+          const inputFiles = { ...state.inputFiles };
           delete newContents[conversationId];
           delete inputMentions[conversationId];
-          return { inputContents: newContents, inputMentions };
+          delete inputFiles[conversationId];
+          return { inputContents: newContents, inputMentions, inputFiles };
         });
       },
       clearAllInputContents: () => {
-        set({ inputContents: {}, inputMentions: {}, modeDraft: undefined });
+        set({ inputContents: {}, inputMentions: {}, inputFiles: {}, modeDraft: undefined });
       },
       addArtifactRef: (conversationId: string, ref: ArtifactRef) => {
         set((state) => {
@@ -117,7 +126,7 @@ export const useChatInputStore = create<ChatInputStore>()(
     }),
     {
       name: "chat-input-contents",
-      partialize: (state) => ({ inputContents: state.inputContents, inputMentions: state.inputMentions }),
+      partialize: (state) => ({ inputContents: state.inputContents, inputMentions: state.inputMentions, inputFiles: state.inputFiles }),
     },
   ),
 );

@@ -42,12 +42,18 @@
 }
 
 .pdf-temporary-chat__body {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 
   .chat-chat-container {
+    // Status notices share the panel height with the chat and composer.
+    flex: 1;
+    height: auto;
+    min-height: 0;
     width: 100%;
     min-width: 0;
     padding: 0 2px 4px;
@@ -70,6 +76,7 @@
 }
 
 .pdf-temporary-chat__parse-status {
+  flex-shrink: 0;
   margin: 8px 12px 0;
 }
 

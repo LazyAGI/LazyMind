@@ -834,6 +834,7 @@ func init() {
 	registerAdditionalErrorAlias("unable to query conversation status", "Internal server error", http.StatusServiceUnavailable, 2000000)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("load workflow head revision %s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("reconcile workflow stop %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("session_ids must belong to user %q and must not contain plugin conversations", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("cron expression produces no future times within 5 years", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("cron expression has no previous time within 5 years", "Invalid request", http.StatusBadRequest, 2000103)
@@ -861,6 +862,17 @@ func init() {
 	for _, source := range []string{
 		"chat service returned no run terminal",
 		"invalid algorithm stream frame",
+		"algorithm stream interrupted chunked message",
+		"invalid algorithm chunk envelope",
+		"invalid algorithm chunk",
+		"invalid algorithm chunk metadata",
+		"algorithm chunk sequence must start at zero",
+		"algorithm chunk sequence mismatch",
+		"invalid algorithm chunk payload",
+		"invalid UTF-8 in algorithm chunked message",
+		"invalid reassembled algorithm frame",
+		"nested algorithm chunks are not supported",
+		"incomplete algorithm chunked message",
 		"read algorithm stream",
 		"algorithm emitted payload after run_finished",
 		"algorithm combined run_finished with business payload",
@@ -876,6 +888,7 @@ func init() {
 		"invalid model_call_finished data",
 		"model_call_finished fields are required",
 		"model_call_finished finish outcome is invalid",
+		"model_call_finished cancelled outcome is invalid",
 		"unsupported model finish",
 		"model_call_finished failure outcome is invalid",
 		"unsupported model failure origin",
@@ -894,6 +907,7 @@ func init() {
 		"model switch initial reason mismatch",
 		"model switch sequence mismatch",
 		"model output content contains an independent event",
+		"canonical model state must use a separate internal frame",
 		"model output boundary contains semantic content",
 		"model output boundary contains an unrelated runtime event",
 		"model switch has no output commit",
@@ -930,6 +944,7 @@ func init() {
 	for _, source := range []string{
 		"block_id is required",
 		"at least one translation override is required",
+		"supply translation overrides or request rerender without overrides or a provider",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -945,6 +960,7 @@ func init() {
 		"decode translation draft",
 		"save translation overrides failed",
 		"save translation draft failed",
+		"save translation page map failed",
 		"pdf translation renderer did not render every block",
 		"register revised translation failed",
 	} {

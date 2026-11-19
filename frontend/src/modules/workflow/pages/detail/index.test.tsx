@@ -227,6 +227,7 @@ describe('workflow draft lifecycle', () => {
     fireEvent.click(within(progress).getByRole('button', { name: 'Close' }));
     // The test setup assigns the same generated title id to every Ant Modal.
     const title = await screen.findByText('selfEvolutionRun.workflowDetailRepairCloseTitle');
+    await waitFor(() => expect(title).toBeVisible());
     return title.closest('[role="dialog"]') as HTMLElement;
   }
 

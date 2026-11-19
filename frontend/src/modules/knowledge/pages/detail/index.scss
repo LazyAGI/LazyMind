@@ -7,8 +7,99 @@
 
 .knowledge-parsing-notice {
   margin-top: 16px;
-  background: #fff7e6;
-  border-color: #ffd591;
+}
+
+.knowledge-detail-page > .knowledge-import-error {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px 12px;
+  padding: 12px 16px;
+  border: 1px solid #f0d9d6;
+  border-radius: 10px;
+  background: #fffafa;
+
+  .ant-alert-icon {
+    margin: 2px 0 0;
+    color: var(--color-error);
+    font-size: 18px;
+  }
+
+  .ant-alert-content { min-width: 0; }
+
+  .ant-alert-message {
+    margin-bottom: 2px;
+    color: var(--color-text);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 22px;
+  }
+
+  .ant-alert-action {
+    margin: 4px 0 0;
+
+    .ant-btn {
+      height: 30px;
+      padding-inline: 10px;
+      border-color: #e8d8d5;
+      border-radius: 6px;
+      box-shadow: none;
+      font-size: 12px;
+    }
+  }
+}
+
+.knowledge-import-error__heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.knowledge-import-error__count {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #fcecea;
+  color: var(--color-error-text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.knowledge-import-error__details {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+
+  summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    cursor: pointer;
+    list-style: none;
+
+    &::-webkit-details-marker { display: none; }
+    &:hover { color: var(--color-text); }
+    &:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; border-radius: 2px; }
+    .anticon { font-size: 10px; transform: rotate(-90deg); }
+  }
+
+  &[open] summary .anticon { transform: rotate(0); }
+}
+
+.knowledge-import-error__messages {
+  max-height: 160px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #f0e4e2;
+  border-radius: 6px;
+  background: #fff;
+
+  > div + div { margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0e4e2; }
 }
 
 .toolbar-actions {
@@ -210,6 +301,12 @@
 }
 
 @media (max-width: 760px) {
+  .knowledge-detail-page > .knowledge-import-error {
+    grid-template-columns: 18px minmax(0, 1fr);
+
+    .ant-alert-action { grid-column: 2; margin: 0; }
+  }
+
   .knowledge-detail-title-copy {
     align-items: flex-start;
     flex-direction: column;

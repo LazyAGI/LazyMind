@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -208,6 +209,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		}
 		graph.OptionalInputs[id] = node.OptionalInputs
 	}
+	result.Diagnostics = append(result.Diagnostics, compileExecution(graph)...)
 	for i, slotID := range graph.Runtime.PublisherOwnedSlots {
 		if !knownMaterials[slotID] {
 			result.Diagnostics = append(result.Diagnostics, materialDiag(
@@ -281,6 +283,13 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		path := fmt.Sprintf("workflow.yaml.runtime.post_step_checks[%d]", i)
 		check.StepID = strings.TrimSpace(check.StepID)
 		check.Tool = strings.TrimSpace(check.Tool)
+		check.ArtifactsArgument = strings.TrimSpace(check.ArtifactsArgument)
+		if _, duplicate := check.Arguments[check.ArtifactsArgument]; check.ArtifactsArgument != "" && duplicate {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_POST_CHECK_ARGUMENT_INVALID", "error", path+".artifacts_argument",
+				"artifacts_argument must not also be a mapped artifact argument",
+			))
+		}
 		node, stepExists := graph.Nodes[check.StepID]
 		if check.StepID == "" {
 			result.Diagnostics = append(result.Diagnostics, diag(
@@ -331,6 +340,24 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 				))
 			}
 		}
+		stepInputs := expressionMaterials(node.Input)
+		for _, input := range node.OptionalInputs {
+			stepInputs = append(stepInputs, input.Material)
+		}
+		for argument, material := range check.InputArguments {
+			_, duplicate := check.Arguments[argument]
+			if strings.TrimSpace(argument) == "" || strings.TrimSpace(material) == "" || duplicate || argument == check.ArtifactsArgument {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_POST_CHECK_ARGUMENT_INVALID", "error", path+".input_arguments",
+					"input_arguments require distinct non-empty parameter names",
+				))
+			} else if stepExists && !slices.Contains(stepInputs, material) {
+				result.Diagnostics = append(result.Diagnostics, materialNodeDiag(
+					"E_RUNTIME_POST_CHECK_MATERIAL_NOT_BOUND", "error", path+".input_arguments."+argument,
+					check.StepID, material, "runtime post-step check input must be declared by its step",
+				))
+			}
+		}
 	}
 	if followup := graph.Runtime.AttachmentClarification; followup != nil {
 		followup.QuestionIDPrefix = strings.TrimSpace(followup.QuestionIDPrefix)
@@ -361,9 +388,9 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		field.Question = strings.TrimSpace(field.Question)
 		field.Type = strings.ToLower(strings.TrimSpace(field.Type))
 		field.ChoicePolicy = strings.ToLower(strings.TrimSpace(field.ChoicePolicy))
-		if field.Resolution != "" && field.Resolution != "explicit" {
+		if field.Resolution != "" && field.Resolution != "explicit" && field.Resolution != "model" && field.Resolution != "grounded_count" {
 			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_RESOLUTION_INVALID", "error",
-				path+".resolution", "resolution must be empty or explicit"))
+				path+".resolution", "resolution must be empty, explicit, model or grounded_count"))
 		}
 		if field.Required && strings.TrimSpace(field.Reason) == "" {
 			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_REASON_REQUIRED", "error",
@@ -435,6 +462,11 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			}
 		}
 		field.Choices = choices
+		field.Recommended = strings.TrimSpace(field.Recommended)
+		if field.Recommended != "" && (field.Type != "single" || !seenChoices[field.Recommended]) {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_RECOMMENDATION_INVALID", "error",
+				path+".recommended_choice", "recommended_choice must exactly match a declared choice for a single-choice question"))
+		}
 		if field.Default != nil {
 			if err := validateClarificationValue(*field, canonicalClarification(*field, field.Default)); err != nil {
 				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_DEFAULT_INVALID", "error",
@@ -684,6 +716,19 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		}
 		if !valid {
 			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step, bounded positive work limits and an optional timeout"))
+		}
+	}
+	for material, contract := range graph.Runtime.InputContracts {
+		path := "workflow.yaml.runtime.input_contracts." + material
+		if !knownMaterials[material] || graph.MaterialProducers[material].Kind != "external" {
+			result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_INPUT_CONTRACT_INVALID", "error", path, material, "input contract must name an external material"))
+			continue
+		}
+		if contract.Schema != nil && graph.MaterialTypes[material] != "json" {
+			result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_INPUT_CONTRACT_INVALID", "error", path, material, "input schema requires a JSON material"))
+		}
+		if _, err := contract.ResolveSchema(); err != nil {
+			result.Diagnostics = append(result.Diagnostics, materialDiag("E_RUNTIME_INPUT_CONTRACT_INVALID", "error", path, material, err.Error()))
 		}
 	}
 	if graph.Runtime.TriggerInputs != nil {
@@ -1226,6 +1271,9 @@ func validateUI(
 			out = append(out, diag("E_UI_TAB_EMPTY", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].slots", i), "UI tab has no materials"))
 		}
 		for _, ref := range refs {
+			if exposed[ref.Material] && tabMaterials[ref.Material] {
+				out = append(out, materialDiag("E_UI_MATERIAL_DUPLICATE", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].slots", i), ref.Material, "material is placed more than once in the same UI tab"))
+			}
 			tabMaterials[ref.Material] = true
 			if !known[ref.Material] {
 				out = append(out, materialDiag("E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].slots", i), ref.Material, "UI references an unknown material"))
@@ -1290,9 +1338,6 @@ func validateUI(
 	for id := range exposed {
 		if exposed[id] && placed[id] == 0 {
 			out = append(out, materialDiag("E_UI_EXPOSED_MATERIAL_UNPLACED", "error", "workflow.yaml.ui.tabs", id, "exposed material is not placed in the UI"))
-		}
-		if exposed[id] && placed[id] > 1 {
-			out = append(out, materialDiag("E_UI_MATERIAL_DUPLICATE", "error", "workflow.yaml.ui.tabs", id, "material is placed more than once in the UI"))
 		}
 	}
 	return out

@@ -4,6 +4,7 @@ export interface WorkflowDisplayState {
   status: 'running' | 'waiting' | 'waiting_input' | 'paused' | 'failed' | 'completed';
   reason: string;
   approval_step_id: string;
+  input_step_id?: string;
   /** Native Chat turn owning cancellation, including after workflow hand-off. */
   chat_history_id?: string;
 }
@@ -17,6 +18,7 @@ const displayLabels: Record<WorkflowDisplayState['status'], string> = {
 export const workflowDisplayLabel = (status?: WorkflowDisplayState['status'], reason?: string): string =>
   status === 'waiting' && reason === 'inputs_changed' ? 'chat.workflowStatusInputsChanged'
     : status === 'waiting' && reason === 'next_step_required' ? 'chat.workflowStatusNextStep'
+    : status === 'failed' && reason === 'execution_not_started' ? 'chat.workflowStatusStartFailed'
     : status ? displayLabels[status] : 'common.loading';
 
 export interface RuntimeProjectionStatus {

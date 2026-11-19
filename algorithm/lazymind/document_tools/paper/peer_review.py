@@ -12,6 +12,7 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.writer.tools.base import WriterToolBase
 from pydantic import ValidationError
 
+from .model_response import normalize_response
 from .contracts import validate_input
 from .fact_checks import (CATEGORY_LABELS as FACT_LABELS, STATUS_LABELS, NUMERIC, OPERATIONS,
                           _pointer, _quantity_token, check_facts,
@@ -527,6 +528,7 @@ def _unique_fields(pairs):
 
 def parse_response(response):
     """Never use structural JSON guessing: one damaged issue must not become two."""
+    response = normalize_response(response).body
     if not isinstance(response, str):
         return response
     text = WriterToolBase._strip_leading_think_blocks(response).strip()
@@ -629,7 +631,7 @@ def call_once(reviewer: WriterToolBase, prompt: str, schema, trace_id=None, *, a
                model_class=type(model).__name__,
                model_name=model_name if isinstance(model_name, str) else None,
                prompt_chars=len(prompt), streaming=True):
-        response = model(prompt)
+        response = normalize_response(model(prompt)).body
         if preview is not None:
             preview.flush()
     log_event('model_response', trace_id=trace_id, schema=schema.__name__,

@@ -16,30 +16,50 @@ const stepLabels: Record<string, string> = {
     screen_and_supplement: 'expansionDepth.steps.screen',
     analyze_relations: 'expansionDepth.steps.analyze',
     prepareFulltext: 'expansionDepth.steps.prepareFulltext',
-    handoff: 'reviewFlow.stage.handoff',
+    expansion: 'reviewFlow.stage.expand',
+    generateReview: 'reviewFlow.writing',
+    fastScreen: 'reviewFlow.entry.screenRelated',
 };
 
 export interface PaperFlowStep {
     id: string;
     labelKey?: string;
     label?: string;
-    status?: 'done' | 'running' | 'queued' | 'waiting' | 'waitingDirection' | 'waitingInfo' | 'paused' | 'failed' | 'canceled' | 'pending' | 'unrecorded' | 'waitingHandoff' | 'needFulltext' | 'incompleteResearch';
+    status?: 'done' | 'running' | 'queued' | 'waiting' | 'waitingDirection' | 'waitingInfo' | 'paused' | 'failed' | 'canceled' | 'pending' | 'unrecorded' | 'unknown' | 'waitingHandoff' | 'needFulltext' | 'incompleteResearch';
 }
 
 function makeStep(id: string, kind: 'expansion' | 'review', mode: BudgetMode | 'direct', label?: string): PaperFlowStep {
     const labelKey = kind === 'review' && id === 'expand_and_screen'
-        ? mode === 'fast' ? 'reviewFlow.entry.targetedSearch' : 'reviewFlow.entry.search'
+        ? mode === 'fast' ? 'reviewFlow.entry.coreSearch' : 'reviewFlow.entry.search'
         : stepLabels[id];
     return { id, labelKey: labelKey && `paperTasks.${labelKey}`, label };
 }
 
 export function paperFlowSteps(kind: 'expansion' | 'review', mode: BudgetMode | 'direct', directionOnly = false) {
-    const inputs = kind === 'review' ? [directionOnly ? 'topic' : 'inputs'] : [];
-    const preparation = mode === 'fast' || mode === 'direct' ? []
-        : kind === 'review' ? ['prepareDirections'] : ['research', 'chooseDirection'];
-    const expansion = mode === 'direct' ? [] : [...preparation, ...workflowStages[mode], 'prepareFulltext'];
-    const handoff = kind === 'review' ? ['handoff'] : [];
-    return [...inputs, ...expansion, ...handoff].map(id => makeStep(id, kind, mode));
+    if (kind === 'review') {
+        return [directionOnly ? 'topic' : 'inputs', ...(mode === 'direct' ? [] : ['expansion']), 'generateReview']
+            .map(id => makeStep(id, kind, mode));
+    }
+    return mode === 'direct' ? [] : expansionFlowSteps(mode);
+}
+
+export function expansionFlowSteps(mode: BudgetMode, forReview = false) {
+    const preparation = mode === 'fast' ? [] : forReview ? ['prepareDirections'] : ['research', 'chooseDirection'];
+    const stages = forReview && mode === 'fast' ? ['expand_and_screen', 'fastScreen'] : workflowStages[mode];
+    return [...preparation, ...stages, ...(forReview ? [] : ['prepareFulltext'])]
+        .map(id => makeStep(id, forReview ? 'review' : 'expansion', mode));
+}
+
+export function reviewGenerationStatus(entry?: { status: string; terminalStatus?: string }): PaperFlowStep['status'] {
+    if (!entry || entry.status === 'unknown') return 'unknown';
+    if (entry.status === 'running') return 'running';
+    if (entry.status === 'idle') {
+        if (entry.terminalStatus === 'completed') return 'done';
+        if (entry.terminalStatus === 'failed') return 'failed';
+        if (entry.terminalStatus === 'canceled') return 'canceled';
+        return 'waiting';
+    }
+    return 'unknown';
 }
 
 export function reviewMaterialCounts(detail: ExpansionDetail) {
@@ -89,18 +109,18 @@ export const stageArtifacts: Record<string, string> = {
     compose_result: 'expansion_result',
 };
 
-export function paperDetailFlow(detail: ExpansionDetail) {
+export function paperExpansionDetailFlow(detail: ExpansionDetail) {
     const { record, workflow_steps } = detail;
     const kind = record.goal === 'review' ? 'review' : 'expansion';
     const mode = record.budget_mode || 'balanced';
-    const directionOnly = !record.result.papers.some(paper => paper.is_seed);
-    const plan = paperFlowSteps(kind, mode, directionOnly);
+    const plan = kind === 'review'
+        ? [...(mode === 'fast' ? [] : ['prepareDirections']), ...workflowStages[mode], 'prepareFulltext'].map(id => makeStep(id, kind, mode))
+        : paperFlowSteps(kind, mode);
     const preparationStatus = preparationStates[record.status as keyof typeof preparationStates];
     const completed = record.status === 'completed';
     const counts = reviewMaterialCounts(detail);
     const materials = paperMaterialPhase(record, { processing_count: counts.processing, distinct_ready_count: counts.distinctReady });
     const handedOff = kind === 'review' && !!record.auto_review_id;
-    const incomplete = record.report?.research_complete === false;
 
     // Historical records can have a different route. Prefer the pinned workflow
     // or the completed round's execution history when the route is unavailable.
@@ -143,9 +163,6 @@ export function paperDetailFlow(detail: ExpansionDetail) {
     const preparationDone = !!record.preparation?.confirmed_at || !!record.preparation?.selected_directions?.length && !preparationStatus;
     for (const step of steps) {
         switch (step.id) {
-            case 'inputs': case 'topic':
-                step.status = 'done';
-                break;
             case 'prepareDirections': case 'research': case 'chooseDirection':
                 step.status = preparationDone ? 'done' : preparationStatus || 'unrecorded';
                 if (preparationStatus === 'waitingDirection' && step.id === 'research') step.status = 'done';
@@ -155,11 +172,40 @@ export function paperDetailFlow(detail: ExpansionDetail) {
                 step.status = handedOff ? 'done' : !completed ? 'pending' : materials === 'fulltext' ? 'running'
                     : materials === 'needFulltext' ? 'needFulltext' : detail.contents.length ? 'done' : 'unrecorded';
                 break;
-            case 'handoff':
-                step.status = handedOff ? 'done' : materials === 'waitingHandoff' ? 'waitingHandoff'
-                    : completed && materials !== 'fulltext' && incomplete ? 'incompleteResearch' : 'pending';
-                break;
         }
     }
     return steps;
+}
+
+export function reviewExpansionDetailFlow(detail: ExpansionDetail) {
+    const steps = paperExpansionDetailFlow(detail).filter(step => step.id !== 'prepareFulltext');
+    if (detail.record.budget_mode === 'fast') {
+        const search = steps.find(step => step.id === 'expand_and_screen');
+        if (search) {
+            const screening = makeStep('fastScreen', 'review', 'fast');
+            screening.status = search.status === 'done' ? 'done' : 'pending';
+            if (detail.record.progress?.candidate_set?.screening_pending) {
+                screening.status = search.status;
+                search.status = 'done';
+            }
+            steps.splice(steps.indexOf(search) + 1, 0, screening);
+        }
+    }
+    return steps;
+}
+
+export function paperDetailFlow(detail: ExpansionDetail, reviewStatus: PaperFlowStep['status'] = 'unknown') {
+    const { record } = detail;
+    if (record.goal !== 'review') return paperExpansionDetailFlow(detail);
+    const counts = reviewMaterialCounts(detail);
+    const phase = paperMaterialPhase(record, { processing_count: counts.processing, distinct_ready_count: counts.distinctReady });
+    const expansion = paperExpansionDetailFlow(detail);
+    const current = expansion.find(step => !['done', 'pending', 'unrecorded'].includes(step.status || ''));
+    const expansionStatus = record.auto_review_id ? 'done' : phase === 'fulltext' ? 'running'
+        : phase === 'needFulltext' ? 'needFulltext' : phase === 'incompleteResearch' ? 'incompleteResearch'
+            : record.status === 'completed' ? 'done' : current?.status || (record.status === 'pending' ? 'queued' : 'running');
+    return paperFlowSteps('review', record.budget_mode, !record.result.papers.some(paper => paper.is_seed))
+        .map(step => ({ ...step, status: step.id === 'expansion' ? expansionStatus
+            : step.id === 'generateReview' ? record.auto_review_id ? reviewStatus : phase === 'waitingHandoff' ? 'queued' : 'pending'
+                : 'done' } satisfies PaperFlowStep));
 }

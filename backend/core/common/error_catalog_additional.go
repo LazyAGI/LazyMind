@@ -362,6 +362,16 @@ func init() {
 	registerAdditionalError("ffmpeg download checksum mismatch", http.StatusBadGateway, 2001594)
 	registerAdditionalError("workflow session has no pinned public revision", http.StatusUnprocessableEntity, 2001595)
 
+	// systemdeps / managed Node.js dependency management
+	registerAdditionalError("Node.js dependency is only available locally", http.StatusForbidden, 2003180)
+	registerAdditionalError("Node.js installation is only available locally", http.StatusForbidden, 2003181)
+	registerAdditionalError("Node.js installation is unsupported; check platform and LAZYMIND_NODE_BIN", http.StatusBadRequest, 2003182)
+	registerAdditionalError("Node.js installation verification failed", http.StatusInternalServerError, 2003183)
+	registerAdditionalError("download Node.js", http.StatusBadGateway, 2003184)
+	registerAdditionalError("Node.js download checksum mismatch", http.StatusBadGateway, 2003185)
+	registerAdditionalError("downloaded Node.js verification failed", http.StatusInternalServerError, 2003186)
+	registerAdditionalError("Node.js executable missing from archive", http.StatusBadRequest, 2003187)
+
 	// Workflow and hosted external Agent errors.
 	registerAdditionalError("at most one workflow mention is allowed per turn", http.StatusBadRequest, 2002022)
 	registerAdditionalError("resolve conversation workflow binding failed", http.StatusInternalServerError, 2002023)

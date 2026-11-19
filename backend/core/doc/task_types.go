@@ -78,14 +78,27 @@ type CreateTaskItem struct {
 }
 
 type CreateTaskRequest struct {
-	PaperImport *PaperUploadContext `json:"paper_import,omitempty"`
-	Parent      string              `json:"parent,omitempty"`
-	Items       []CreateTaskItem    `json:"items"`
+	// AllowPartial returns a per-input outcome and continues independent uploads.
+	AllowPartial bool                `json:"allow_partial,omitempty"`
+	PaperImport  *PaperUploadContext `json:"paper_import,omitempty"`
+	Parent       string              `json:"parent,omitempty"`
+	Items        []CreateTaskItem    `json:"items"`
+}
+
+type CreateTaskOutcome struct {
+	TargetPID   string   `json:"target_pid,omitempty"`
+	InputIndex  int      `json:"input_index"`
+	DisplayName string   `json:"display_name"`
+	Status      string   `json:"status"`
+	TaskIDs     []string `json:"task_ids"`
+	Code        string   `json:"code,omitempty"`
+	Message     string   `json:"message,omitempty"`
 }
 
 type CreateTasksResponse struct {
-	PaperImportBatchID string         `json:"paper_import_batch_id,omitempty"`
-	Tasks              []TaskResponse `json:"tasks"`
+	Outcomes           []CreateTaskOutcome `json:"outcomes,omitempty"`
+	PaperImportBatchID string              `json:"paper_import_batch_id,omitempty"`
+	Tasks              []TaskResponse      `json:"tasks"`
 }
 
 type StartTaskRequest struct {
@@ -323,23 +336,25 @@ type documentExt struct {
 }
 
 type pdfArtifactRecord struct {
-	ID             string `json:"id"`
-	Kind           string `json:"kind"`
-	CacheKey       string `json:"cache_key"`
-	StoredPath     string `json:"stored_path"`
-	SourcePath     string `json:"source_path,omitempty"`
-	LayoutPath     string `json:"layout_path,omitempty"`
-	DraftPath      string `json:"draft_path,omitempty"`
-	HasLayout      bool   `json:"has_layout,omitempty"`
-	HasDraft       bool   `json:"has_draft,omitempty"`
-	Filename       string `json:"filename"`
-	ContentType    string `json:"content_type"`
-	TargetLanguage string `json:"target_language,omitempty"`
-	ProviderType   string `json:"provider_type,omitempty"`
-	Provider       string `json:"provider,omitempty"`
-	Model          string `json:"model,omitempty"`
-	WarningCount   int    `json:"warning_count,omitempty"`
-	CreatedAt      string `json:"created_at"`
+	ID                     string `json:"id"`
+	Kind                   string `json:"kind"`
+	CacheKey               string `json:"cache_key"`
+	StoredPath             string `json:"stored_path"`
+	SourcePath             string `json:"source_path,omitempty"`
+	LayoutPath             string `json:"layout_path,omitempty"`
+	DraftPath              string `json:"draft_path,omitempty"`
+	HasLayout              bool   `json:"has_layout,omitempty"`
+	HasDraft               bool   `json:"has_draft,omitempty"`
+	Filename               string `json:"filename"`
+	ContentType            string `json:"content_type"`
+	TargetLanguage         string `json:"target_language,omitempty"`
+	ProviderType           string `json:"provider_type,omitempty"`
+	Provider               string `json:"provider,omitempty"`
+	Model                  string `json:"model,omitempty"`
+	WarningCount           int    `json:"warning_count,omitempty"`
+	SupplementalBlockCount int    `json:"supplemental_block_count,omitempty"`
+	LayoutPreserved        bool   `json:"layout_preserved,omitempty"`
+	CreatedAt              string `json:"created_at"`
 }
 
 type pdfRenderJobRecord struct {

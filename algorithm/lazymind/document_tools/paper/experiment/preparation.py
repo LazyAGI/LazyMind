@@ -1,7 +1,6 @@
 """F3 selects existing evidence or a new computation before generating any experiment."""
 import copy
 import json
-import re
 from typing import Literal
 
 from lazyllm import AutoModel
@@ -12,6 +11,7 @@ from ..analysis.schema import DataBundle, DataTable, prompt_tables
 from ..contracts import MissingMaterials
 from ..source_materials import markdown_tables, typed_table
 from .schema import StrictModel, Text, ResultMeta
+from .render import render_tables
 
 
 class Preparation(StrictModel):
@@ -67,9 +67,12 @@ def prepare(inputs, on_event=None):
         'NOT a request to replace existing results. Preserve existing evidence even when baselines or significance '
         'tests are absent. Select the relevant supplied table_ids; never choose reference-paper comparison tables '
         'as the user system measurements. Include all relevant distinct tables, not just the first one. '
-        'Choose simulation ONLY for an explicitly requested modeled study with no existing user data to replace. '
-        'Execution permission or permission to fall back is not a request for simulation. If real data is required '
-        'but unavailable or source prose cannot be safely converted, choose missing and explain the exact gap. '
+        'Choose simulation when a clearly labeled modeled study fits the CURRENT request and there is no '
+        'existing user data to replace. Decide from the research goal and available materials; do not require '
+        'a fixed execution-permission questionnaire. Never present synthetic values as observed findings. '
+        'Never simulate when the request forbids synthetic data or requires actual observed findings. '
+        'If required data is unavailable or source prose cannot be safely converted, choose missing '
+        'and explain the exact gap. '
         'Do not invent any values. Write reason as a concise Chinese research description. '
         'Explain the selected evidence, '
         'its measurement scope and essential limitations in two short paragraphs. Do not expose internal IDs, '
@@ -114,38 +117,7 @@ def existing_output(inputs, tables, reason):
     report = ['# 实验与数据准备',
               '> 数据来自用户提供的实验记录；本阶段整理已有结果，未重新运行实验。',
               '## 研究说明\n\n' + reason]
-    for number, entry in enumerate(tables, 1):
-        table = entry['table']
-        # Extracted descriptions retain source/section separately from the opaque source identity.
-        description = entry['description']
-        source, marker, location = description.partition('；来源 ')
-        parts = [part.strip() for part in source.split('；') if part.strip()]
-        title = parts[-1] if parts else f'数据表 {number}'
-        title = re.sub(r'^\d+(?:\.\d+)*[.、\s]+', '', title)
-        title = ' '.join(title.splitlines()).lstrip('# ').strip() or f'数据表 {number}'
-        if marker:
-            citation = parts[0] if parts else '用户材料'
-            _, _, lines = location.partition('，')
-            if lines:
-                citation += '，' + lines
-        else:
-            citation = description
-        headers = [c if not u or u in c else f'{c}（{u}）'
-                   for c, u in zip(table['columns'], table['units'])]
-
-        def cells(row):
-            values = ['缺失' if cell is None else str(cell).replace('\\', '\\\\').replace('|', '\\|')
-                      .replace('\r', ' ').replace('\n', ' ') for cell in row]
-            return '| ' + ' | '.join(values) + ' |'
-
-        lines = [cells(headers), cells(['---'] * len(headers)),
-                 *(cells(row) for row in table['rows'][:20])]
-        report += [f'## {title}', '\n'.join(lines)]
-        note = f'来源：{citation}' if citation else ''
-        if len(table['rows']) > 20:
-            note += f' 共 {len(table["rows"])} 行，此处展示前 20 行；完整数据见结果文件。'
-        if note:
-            report.append(note.strip())
+    report.append(render_tables(tables))
     if demo:
         report[1] = '> 演示数据：整理已有模拟结果，不代表真实观测。'
     report.append('## 后续分析\n\n基于上述数据生成统计表和图表，并结合样本量、测量口径与实验条件解释结果。')

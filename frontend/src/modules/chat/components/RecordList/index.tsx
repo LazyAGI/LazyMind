@@ -1,4 +1,4 @@
-import { TASKS_REMOVED_EVENT } from '@/modules/taskCenter/events';
+import { TASKS_REMOVED_EVENT, WORKFLOW_TASKS_CHANGED } from '@/modules/taskCenter/events';
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   DndContext, PointerSensor, KeyboardSensor, closestCenter, pointerWithin, useSensor, useSensors,
@@ -7,6 +7,7 @@ import {
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import SortableConversationRow from "./SortableConversationRow";
 import ScopedConversationList from "./ScopedConversationList";
+import { conversationMenuClassName, useConversationMenuDismissal } from "../useConversationMenuDismissal";
 import { conversationDropPlacement, moveConversationItems, type ConversationPlacement } from "./conversationReorder";
 import ConversationRunningIndicator from "./ConversationRunningIndicator";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
@@ -20,6 +21,7 @@ import {
   FolderOutlined,
   InboxOutlined,
   FilePdfOutlined,
+  ApiOutlined,
   MoreOutlined,
   PushpinFilled,
   PushpinOutlined,
@@ -186,6 +188,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [historyList, setHistoryList] = useState<SidebarConversation[]>([]);
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+    useConversationMenuDismissal(openMenuId, setOpenMenuId);
     const [movingConversation, setMovingConversation] = useState<SidebarConversation | null>(null);
     const statusWatcherId = useId();
     useEffect(() => {
@@ -593,6 +596,34 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       },
     }));
 
+    const refreshWhenIdle = useRef<() => boolean>(() => false);
+    refreshWhenIdle.current = () => {
+      if (isHistoryLoading || showBatchExport || renamingId || openMenuId || activeDragId
+        || archiveItem || movingConversation || deleteHistoryInFlightRef.current
+        || pinningConversationRef.current || reorderingConversationRef.current) return false;
+      void getHistory({ isFirst: true, searchText: keyword, preserveWindow: true, silent: true });
+      return true;
+    };
+    useEffect(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const refresh = () => {
+        timer = undefined;
+        if (document.hidden) return;
+        // A refresh must not interrupt a selection, drag or title edit.
+        if (!refreshWhenIdle.current()) timer = setTimeout(refresh, 500);
+      };
+      const schedule = () => { clearTimeout(timer); timer = setTimeout(refresh, 200); };
+      window.addEventListener(WORKFLOW_TASKS_CHANGED, schedule);
+      window.addEventListener('focus', schedule);
+      document.addEventListener('visibilitychange', schedule);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener(WORKFLOW_TASKS_CHANGED, schedule);
+        window.removeEventListener('focus', schedule);
+        document.removeEventListener('visibilitychange', schedule);
+      };
+    }, []);
+
 
     useEffect(() => {
       if (
@@ -666,8 +697,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       isFirst?: boolean;
       searchText?: string;
       preserveWindow?: boolean;
+      silent?: boolean;
     }) {
-      const { isMore = false, isFirst = false, searchText, preserveWindow = false } = params ?? {};
+      const { isMore = false, isFirst = false, searchText, preserveWindow = false, silent = false } = params ?? {};
       const activeFilter = conversationFiltersRef.current;
       const requestId = ++historyRequestRef.current;
       const scope = JSON.stringify([activeFilter, (searchText ?? keyword).trim()]);
@@ -707,7 +739,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       } catch {
         if (!isCurrent()) return;
         rememberView();
-        message.error(t("chat.fork.historyLoadFailed"));
+        if (!silent) message.error(t("chat.fork.historyLoadFailed"));
         setHistoryRevision(revision => revision + 1);
       } finally {
         if (isCurrent()) setIsHistoryLoading(false);
@@ -1084,6 +1116,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         <div
           aria-busy={item.metadata_pending || undefined}
           data-title-revision={item.title_revision}
+          data-conversation-actions={conversationId}
           className={classnames("record", {
             selected,
             "record-child": isChild,
@@ -1099,6 +1132,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             setOpenMenuId(conversationId);
           }}
           onClick={(e) => {
+            // Portaled menu clicks bubble through React, outside the row's DOM.
+            if (!e.currentTarget.contains(e.target as Node)) return;
             e.preventDefault();
             activateConversation();
           }}
@@ -1159,16 +1194,21 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               <FilePdfOutlined className="record-source-icon" aria-label={t("knowledge.pdfChatSavedSource")} />
             </Tooltip>
           ) : null}
+          {source.external_workflow_session_id && <Tooltip title={t('chat.externalWorkflowResult')}>
+            <ApiOutlined className='record-source-icon' aria-label={t('chat.externalWorkflowResult')} />
+          </Tooltip>}
           <span className="update-time">
             {dayjs(item.update_time).format("MM/DD")}
           </span>
           {!showBatchExport && !hideActions ? (
             <Dropdown
               destroyPopupOnHide
+              overlayClassName={conversationMenuClassName(conversationId)}
               trigger={["hover", "click", "contextMenu"]}
               open={!renamingId && openMenuId === conversationId}
               onOpenChange={open => setOpenMenuId(current => open && !renamingId ? conversationId : current === conversationId ? null : current)}
               menu={{
+                rootClassName: conversationMenuClassName(conversationId),
                 onClick: ({ domEvent }) => { domEvent.stopPropagation(); setOpenMenuId(null); },
                 items: [
                   { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: () => setRenamingId(conversationId) },

@@ -11,6 +11,7 @@ import {
   syncUserAgreementFromServer,
   USER_AGREEMENT_VERSION,
 } from '@/legal/consent';
+import { isLocalSessionEnabled, restoreLocalSessionAndGetToken } from '@/runtime/localSession';
 import './index.scss';
 
 interface UserAgreementConsentModalProps {
@@ -127,7 +128,14 @@ export function useUserAgreementConsentGate(enabled: boolean) {
     let cancelled = false;
     setLoading(true);
     setCheckFailed(false);
-    void syncUserAgreementFromServer()
+    const checkAgreement = async () => {
+      if (checkAttempt > 0 && isLocalSessionEnabled()) {
+        await restoreLocalSessionAndGetToken();
+      }
+      if (!cancelled) return syncUserAgreementFromServer();
+      return false;
+    };
+    void checkAgreement()
       .then((ok) => {
         if (!cancelled) {
           setAccepted(ok);

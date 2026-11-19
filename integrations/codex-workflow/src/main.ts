@@ -99,7 +99,10 @@ async function main() {
     const file = path + '.codex-status.json', temp = file + '.' + instance
     while (!signal.aborted) {
       let ready = false, issue = 'host_unavailable'
-      try { ready = (await native.probe(signal)).ready === true; issue = ready ? '' : 'capability_unavailable' } catch { issue = 'cdp_unavailable' }
+      try {
+        const probe = await native.probe(signal)
+        ready = probe.ready; issue = probe.issue
+      } catch { issue = 'cdp_unavailable' }
       try {
         await writeFile(temp, JSON.stringify({ connector_id: pairing.connector_id, checked_at: Date.now(), ready, issue, presentation }), { mode: 0o600 })
         await rename(temp, file)

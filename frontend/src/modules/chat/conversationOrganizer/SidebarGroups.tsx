@@ -3,6 +3,7 @@ import { moveConversationItems } from "../components/RecordList/conversationReor
 import { readConversationSelection } from "../components/RecordList/conversationSelection";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import ConversationPreview from "../components/ConversationPreview";
+import { useConversationMenuDismissal } from "../components/useConversationMenuDismissal";
 import { MessageOutlined, FolderOpenOutlined, PlusOutlined, EllipsisOutlined, PushpinOutlined, LoadingOutlined } from "@ant-design/icons";
 import { Button, Checkbox, Dropdown, message } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -141,6 +142,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
   useEffect(() => { void refresh(); return () => { ++refreshVersion.current; }; }, [refresh]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  useConversationMenuDismissal(openMenuId, setOpenMenuId);
   const batchMode = Boolean(batchSelection);
   useEffect(() => {
     pageRequestRef.current = null;
@@ -233,6 +235,7 @@ export default function SidebarGroups({ assistants, groups, searchText = "", cur
     const visible = batchSelection || keyword || expanded.has(g.id) ? all : all.slice(0, 5);
     const selected = location.pathname.endsWith(`/groups/${g.id}`);
     const renderMember = (c: ConversationGroupMember) => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} groupName={g.name} disabled={Boolean(batchSelection) || renamingId === c.conversation_id || openMenuId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={g.kind !== "project" && renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
+          data-conversation-actions={c.conversation_id}
           onContextMenu={event => { if (batchSelection || renamingId) return; event.preventDefault(); event.stopPropagation(); setOpenMenuId(c.conversation_id); }}
           onDragStart={e => startConversationDrag(e, c.conversation_id, g.id, Boolean(c.is_task_conv))}
           onDragEnd={() => { setDropTarget(''); setMemberDropTarget(null); }}

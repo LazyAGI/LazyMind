@@ -1,5 +1,5 @@
 import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developerMode';
-import { hiddenUserSlots, workflowUIForAudience } from './workflowAudience';
+import { hiddenUserSlots, workflowTabsForAudience, workflowUIForAudience } from './workflowAudience';
 import { WorkflowExtensions } from '../../extensions/WorkflowExtensions';
 import { groupDownloadActions } from './groupDownloadActions';
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
@@ -15,7 +15,8 @@ import { getLocalizedErrorMessage } from "@/components/request";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { message as antdMessage, Popconfirm, Tooltip, Dropdown, Collapse } from 'antd';
+import { useAppVersion } from '@/runtime/useAppVersion';
+import { message as antdMessage, Popconfirm, Tooltip, Dropdown, Collapse, Alert } from 'antd';
 import {
   MoreOutlined,
   InfoCircleOutlined,
@@ -25,11 +26,11 @@ import {
 } from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
 import {
-  filterWorkflowTabs,
   workflowTabAllowsDownload,
   useWorkflowStore,
 } from '@/modules/chat/store/workflowPanel';
 import { workflowDisplayLabel, type NativeWorkflowControl } from '@/modules/chat/store/workflowStatus';
+import { workflowTaskDisplayStatus } from '@/modules/chat/utils/workflowTaskStatus';
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
@@ -65,6 +66,7 @@ import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditing
 import { findWriterArtifactStream, shouldShowArtifactStream } from './writerArtifactStream';
 import { PaperAnalysisProgress } from './PaperAnalysisProgress';
 import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
+import { workflowTabStatus } from './workflowStepStatus';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import type { WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
 import {
@@ -183,12 +185,15 @@ function IntentPopover({
 
 export interface WorkflowPanelControlAdapter {
   execute(intent: WorkflowPanelActionIntent): Promise<void>;
+  continuationStep?(): string | undefined;
 }
 
 interface WorkflowPanelProps {
   /** Optional external host surface; omitted by native chat callers. */
   embedded?: boolean;
   externalPresentation?: ExternalWorkflowPresentation;
+  /** Show persisted user-facing artifacts without execution activity or debug slots. */
+  resultsOnly?: boolean;
   onRefresh?: () => Promise<void>;
   controlAdapter?: WorkflowPanelControlAdapter;
 
@@ -516,15 +521,54 @@ function getCompositeRows(
   session: WorkflowSession,
 ): number[] {
   const participating = new Set(tab.slots.map((s) => s.id));
+  const repeatedSlots = new Set(tab.composite_behavior?.repeat_single_slots);
   const orders = new Set<number>();
+  let hasRepeatedSingle = false;
   const scopeStepId = resolveWorkflowTabStepId(tab, session.steps);
   for (const slot of session.slots ?? []) {
     const matchesTabStep = scopeStepId ? slot.step_id === scopeStepId : slot.selected;
-    if (matchesTabStep && participating.has(slot.slot) && slot.sort_order !== undefined) {
-      orders.add(slot.sort_order);
+    if (!matchesTabStep || !participating.has(slot.slot) || slot.sort_order === undefined) continue;
+    if (slot.sort_order === 0 && slot.list_index == null && repeatedSlots.has(slot.slot)) {
+      hasRepeatedSingle = true;
+      continue;
     }
+    orders.add(slot.sort_order);
   }
+  if (!orders.size && hasRepeatedSingle) return [0];
   return Array.from(orders).sort((a, b) => a - b);
+}
+
+/** File deliveries belong to the whole result, not to an ordered preview page. */
+function compositeFileDeliveries(tab: TabDef, session: WorkflowSession): SlotDef[] {
+  if (!tab.composite_tab_position) return [];
+  return tab.slots.filter(slot => {
+    if (slot.type !== 'file' || slot.cardinality === 'list' || slot.widget?.widgetType === 'html-slide'
+      || tab.composite_behavior?.repeat_single_slots?.includes(slot.id)) return false;
+    const revisions = getTabSlotRevisions(session, tab, slot.id);
+    return slot.cardinality === 'single' || (revisions.length <= 1
+      && !revisions.some(revision => revision.list_index != null));
+  });
+}
+
+/** Preserve the declared tree/legacy layout while removing whole-result files. */
+function compositePageLayout(layout: TabDef['composite_layout'], files: Set<string>): TabDef['composite_layout'] {
+  const prune = (value: unknown): unknown => {
+    if (typeof value === 'string') return files.has(value) ? undefined : value;
+    if (Array.isArray(value)) return value.map(prune).filter(item => item !== undefined);
+    if (!value || typeof value !== 'object') return value;
+    const node = { ...value } as Record<string, unknown>;
+    if ('slot' in node) {
+      node.slot = prune(node.slot);
+      if (node.slot === undefined) return undefined;
+    }
+    for (const key of ['children', 'tabs']) {
+      if (!Array.isArray(node[key])) continue;
+      node[key] = prune(node[key]);
+      if ((node[key] as unknown[]).length === 0) return undefined;
+    }
+    return node;
+  };
+  return prune(layout) as TabDef['composite_layout'];
 }
 
 /** Find a slot revision for (slot, sort_order). */
@@ -534,10 +578,9 @@ function findSlotRevision(
   artifactKey: string,
   sortOrder: number,
 ): SlotRevision | undefined {
-  const revisions = getTabSlotRevisions(session, tab, artifactKey).filter(
-    (slot) => slot.slot === artifactKey,
-  );
-  return findAlignedCompositeRevision(
+  const revisions = getTabSlotRevisions(session, tab, artifactKey);
+  const selected = revisions.find(slot => slot.selected && slot.sort_order === sortOrder);
+  return selected ?? findAlignedCompositeRevision(
     revisions,
     sortOrder,
     tab.composite_behavior?.repeat_single_slots?.includes(artifactKey) ?? false,
@@ -844,9 +887,43 @@ function CompositeThumbnailRail({
   );
 }
 
+function isPptPreviewRevision(slot: SlotRevision): boolean {
+  return slot.step_id === 'generate_ppt' && slot.sort_order !== undefined
+    && (slot.slot === 'preview_html' || slot.slot === 'preview_notes');
+}
+
+function pptPreviewPosition(slot: SlotRevision): string {
+  return `${slot.slot}:${slot.sort_order}`;
+}
+
+function usePptPreviewDuringRetry(session: WorkflowSession, tab: TabDef, provisional = false): WorkflowSession {
+  const saved = useRef<{ sessionId: string; slots: Map<string, SlotRevision> } | null>(null);
+  const enabled = session.workflow_id === 'ppt-workflow' && tab.step_id === 'generate_ppt'
+    && tab.slots.some(slot => slot.id === 'preview_html');
+  const succeeded = enabled && workflowTabStatus(tab, session) === 'succeeded';
+  useEffect(() => {
+    if (!enabled || provisional) return;
+    const latest = (session.slots ?? []).filter(slot => slot.selected && isPptPreviewRevision(slot));
+    const slots = succeeded || saved.current?.sessionId !== session.session_id
+      ? new Map<string, SlotRevision>() : new Map(saved.current.slots);
+    for (const slot of latest) slots.set(pptPreviewPosition(slot), slot);
+    saved.current = { sessionId: session.session_id, slots };
+  }, [enabled, succeeded, provisional, session.session_id, session.slots]);
+
+  if (!enabled || succeeded || saved.current?.sessionId !== session.session_id) return session;
+  const slots = session.slots ?? [];
+  const current = new Set(slots.filter(isPptPreviewRevision).map(pptPreviewPosition));
+  // Rewinds can temporarily clear the selected outputs. Keep the last saved
+  // previews for display while the replacement attempt publishes its pages.
+  const previous = [...saved.current.slots.entries()]
+    .filter(([position]) => !current.has(position))
+    .map(([, slot]) => ({ ...slot, selected: false }));
+  return previous.length ? { ...session, slots: [...slots, ...previous] } : session;
+}
+
 function CompositeSlotGrid({
-  tab,
-  session,
+  tab: declaredTab,
+  session: activeSession,
   onRefresh,
   onReference,
   onFocusSortOrder,
@@ -864,6 +941,21 @@ function CompositeSlotGrid({
   const tabActive = React.useContext(WorkflowPanelTabActiveContext);
   const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const reorderSlotItems = useWorkflowStore((state) => state.reorderSlotItems);
+  const session = usePptPreviewDuringRetry(activeSession, declaredTab, readOnly);
+  const showingPreviousPreviews = session !== activeSession;
+  const fileDefinitions = compositeFileDeliveries(declaredTab, session);
+  const fileIds = new Set(fileDefinitions.map(slot => slot.id));
+  const tab = fileIds.size ? { ...declaredTab,
+    slots: declaredTab.slots.filter(slot => !fileIds.has(slot.id)),
+    composite_layout: compositePageLayout(declaredTab.composite_layout, fileIds),
+  } : declaredTab;
+  const visibleFileIds = resolveVisibleSlotIds(declaredTab, session);
+  const fileDeliveries = fileDefinitions.flatMap(definition => {
+    if (visibleFileIds && !visibleFileIds.has(definition.id)) return [];
+    const revisions = getTabSlotRevisions(session, declaredTab, definition.id);
+    const revision = revisions.find(item => item.selected) ?? revisions[0];
+    return revision ? [{ definition, revision }] : [];
+  });
   const rows = getCompositeRows(tab, session);
   const columns = filterColumnsByVisibleSlots(
     buildColumns(tab),
@@ -904,7 +996,7 @@ function CompositeSlotGrid({
     if (paged && tabActive) onFocusSortOrder?.(currentPage ?? undefined);
   }, [paged, tabActive, currentPage, onFocusSortOrder]);
 
-  const activePage = currentPage ?? rows[0];
+  const activePage = currentPage != null && rows.includes(currentPage) ? currentPage : rows[0];
   const reorderableCompositeSlotIds = tab.slots
     .filter((slot) => slot.cardinality === 'list' && slot.ordered)
     .map((slot) => slot.id)
@@ -914,7 +1006,8 @@ function CompositeSlotGrid({
   const canReorderPages = paged
     && rows.length > 1
     && reorderableCompositeSlotIds.length > 0
-    && !readOnly;
+    && !readOnly
+    && !showingPreviousPreviews;
 
   const handlePageReorder = useCallback(async (nextPages: number[]) => {
     if (!canReorderPages || reordering || nextPages.length !== rows.length) return;
@@ -949,13 +1042,27 @@ function CompositeSlotGrid({
     }
   }, [activePage, canReorderPages, onFocusSortOrder, onRefresh, reorderSlotItems, reordering, reorderableCompositeSlotIds, rows, session, tab, t, pageGroups]);
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && fileDeliveries.length === 0) {
     return (
       <div className='workflow-panel__empty' role='status' aria-live='polite'>
         <span>{t(compactEmptyStates ? workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)) : 'chat.workflowWaitingForResults')}</span>
       </div>
     );
   }
+
+  const files = fileDeliveries.length > 0 && <div className='composite-file-deliveries'>
+    {fileDeliveries.map(({ definition, revision }) => <section key={definition.id}
+      className='composite-file-deliveries__item' aria-label={definition.label}>
+      <DocumentActionScope inline label={definition.label}>
+        <SlotRenderer slot={revision} workflowSession={session} widget={definition.widget}
+          expectedType={definition.type} sessionId={session.session_id} slotId={definition.id}
+          revisionCount={revision.revision_count} onRefresh={onRefresh} onReference={onReference}
+          readOnly={readOnly} />
+      </DocumentActionScope>
+    </section>)}
+  </div>;
+
+  if (rows.length === 0) return <div className='composite-files-only'>{files}</div>;
 
   const renderSlotCell = (
     slotId: string,
@@ -993,7 +1100,7 @@ function CompositeSlotGrid({
               onRefresh={onRefresh}
               onReference={onReference}
               hideImageMutationActions={hideImageMutationActions}
-              readOnly={readOnly}
+              readOnly={readOnly || (session.workflow_id === 'ppt-workflow' && isPptPreviewRevision(rev) && !rev.selected)}
             />
           </DocumentActionScope>
         ) : (
@@ -1159,10 +1266,11 @@ function CompositeSlotGrid({
 
   return (
     <div className='composite-shell composite-shell--paged'>
+      {files}
       <div className={`composite-with-pagebar composite-with-pagebar--${pageBarPosition}`}>
         {(pageBarPosition === 'top' || pageBarPosition === 'left') && rail}
         <div className='composite-main'>
-          <WorkflowTabActions actions={tab.actions} tab={tab} session={session} rows={rows} />
+          <WorkflowTabActions actions={declaredTab.actions} tab={declaredTab} session={session} rows={rows} />
           {session.workflow_id === 'ppt-workflow' && tab.slots.some(def => {
             const revision = findSlotRevision(session, tab, def.id, activePage);
             return revision && !revision.selected;
@@ -1564,6 +1672,7 @@ function TabSlotGrid({
   tab,
   session,
   tasks,
+  allowExternalPreviews = true,
   onRefresh,
   onReference,
   onFocusSortOrder,
@@ -1572,6 +1681,7 @@ function TabSlotGrid({
   tab: TabDef;
   session: WorkflowSession;
   tasks: SubAgentTask[];
+  allowExternalPreviews?: boolean;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
@@ -1627,6 +1737,7 @@ function TabSlotGrid({
       getTabStepId(tab),
       slotDef.id,
       tasks,
+      allowExternalPreviews,
     )));
   };
   const isPaperReportTab = session.workflow_id === 'paper_expansion'
@@ -1643,11 +1754,11 @@ function TabSlotGrid({
     && step.validity !== 'stale' && (step.status === 'running' || step.status === 'pending'));
   const resultReady = process && !producerRunning
     && getTabSlotRevisions(session, tab, process.result_slot).some(revision => revision.selected)
-    && findWriterArtifactStream(session, getTabStepId(tab), process.result_slot, tasks)?.state !== 'streaming';
+    && findWriterArtifactStream(session, getTabStepId(tab), process.result_slot, tasks, allowExternalPreviews)?.state !== 'streaming';
   const processSlots = resultReady ? visibleSlots.filter(slot => slot.id !== process.result_slot && process.slots.includes(slot.id)) : [];
   const allHidden = visibleSlots.length === 0 || tab.composite_behavior?.hide_empty_columns !== false
     && visibleSlots.every(def => getTabSlotRevisions(session, tab, def.id).length === 0
-      && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks));
+      && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks, allowExternalPreviews));
   if (compactEmptyStates && allHidden) return <div className='workflow-panel__empty' role='status'>
     {t(workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)))}
   </div>;
@@ -1659,6 +1770,7 @@ function TabSlotGrid({
       getTabStepId(tab),
       slotDef.id,
       tasks,
+      allowExternalPreviews,
     );
     const hideEmpty = tab.composite_behavior?.hide_empty_columns !== false;
     if (hideEmpty && revisions.length === 0 && !artifactStream) {
@@ -1711,9 +1823,10 @@ export function WorkflowPanel({
   onReference,
   chatBusy = false,
   onDismissed,
-  embedded = false, onRefresh, controlAdapter, externalPresentation,
+  embedded = false, onRefresh, controlAdapter, externalPresentation, resultsOnly = false,
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
+  const appVersion = useAppVersion();
   const { session, loading, refresh: refreshConversation } = useWorkflowSession(conversationId, Boolean(onRefresh));
   const artifactPreview = useArtifactPreview();
   const previewTarget = artifactPreview?.target?.workflow && artifactPreview.target.workflow.sessionId === session?.session_id
@@ -1722,7 +1835,7 @@ export function WorkflowPanel({
   const locatedPreview = useRef<string | null>(null);
   const refresh = onRefresh ?? refreshConversation;
   const activities = externalPresentation?.activities ?? {};
-  const runningTasks = externalPresentation ? activeExecutionTasks(session) : [];
+  const runningTasks = externalPresentation && !resultsOnly ? activeExecutionTasks(session) : [];
   const latestActivity = runningTasks.map(step => activities[step.task_id]).find(activity => activity?.kind && !activity.finished);
   const taskCenterTasks = useTaskCenterStore((state) =>
     conversationId
@@ -1733,14 +1846,13 @@ export function WorkflowPanel({
   const fetchWorkflowUI = useWorkflowStore((s) => s.fetchWorkflowUI);
   const setFocusedTab = useWorkflowStore((s) => s.setFocusedTab);
   const setFocusedSortOrder = useWorkflowStore((s) => s.setFocusedSortOrder);
-  const focusedTabByConversation = useWorkflowStore((s) => s.focusedTabByConversation);
-  const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
   const uiCacheKey = session ? workflowUICacheKey(session.workflow_id, session.pinned_revision_id, i18n.language || '') : '';
   const uiRequestKey = JSON.stringify([session?.session_id, uiCacheKey]);
   const [uiResponse, setUIResponse] = useState<{ requestKey: string; ui: WorkflowUI } | null>(null);
   const uiReady = uiResponse?.requestKey === uiRequestKey && Boolean(session);
   const rawUI = uiReady ? uiResponse!.ui : undefined;
-  const [developerMode, setDeveloperMode] = useState(isDeveloperModeActive);
+  const [developerModeEnabled, setDeveloperMode] = useState(isDeveloperModeActive);
+  const developerMode = developerModeEnabled && !resultsOnly;
   useEffect(() => {
     const update = () => setDeveloperMode(isDeveloperModeActive());
     window.addEventListener(DEVELOPER_ACTIVE_EVENT, update);
@@ -1755,21 +1867,21 @@ export function WorkflowPanel({
   const toggleCollapsed = externalPresentation?.onToggleCollapse ?? (() => setCollapsed(!collapsed));
   const panelExpanded = embedded ? Boolean(externalPresentation?.expanded) : expanded;
   const activeTabId = view.tabId;
-  const followingEnabled = Boolean(ui.follow_mode?.default);
-  const tabs = useMemo(() => filterWorkflowTabs(ui.tabs ?? [], session?.slots ?? [], ui.tab_visibility_ready_material,
-    { steps: session?.steps, projection: session?.projection }, ui.hide_skipped_steps,
-    ui.hide_unstarted_steps && session?.workflow_mode === 'dynamic'), [ui, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
-  const visibleActiveTabIdx = resolveWorkflowActiveTabIndex(tabs, activeTabId);
+  const tabs = useMemo(() => workflowTabsForAudience(rawUI ?? EMPTY_WORKFLOW_UI,
+    { slots: session?.slots, steps: session?.steps, projection: session?.projection, workflow_mode: session?.workflow_mode }, developerMode),
+  [rawUI, developerMode, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
   const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
   const runtimeTabId = tabs[runtimeTabIdx]?.id;
+  const visibleActiveTabIdx = view.mode === 'following' && !previewTarget && runtimeTabIdx !== -1
+    ? runtimeTabIdx
+    : resolveWorkflowActiveTabIndex(tabs, activeTabId);
   const navigation = useRef(0);
   const currentView = useRef({ key: viewKey, runtimeTabId });
   currentView.current = { key: viewKey, runtimeTabId };
   const enterBrowse = useCallback((tabId?: string) => {
     navigation.current++;
-    if (!followingEnabled) return;
-    updateView({ mode: 'free', tabId: tabId ?? tabs[resolveWorkflowActiveTabIndex(tabs, activeTabId)]?.id ?? '' });
-  }, [followingEnabled, updateView, tabs, activeTabId]);
+    updateView({ mode: 'free', tabId: tabId ?? tabs[visibleActiveTabIdx]?.id ?? '' });
+  }, [updateView, tabs, visibleActiveTabIdx]);
   const [resumingFollow, setResumingFollow] = useState(false);
   const resumePending = useRef<number | null>(null);
   useEffect(() => {
@@ -1922,22 +2034,13 @@ export function WorkflowPanel({
 
   useEffect(() => {
     if (!uiReady || !session || !tabs.length || previewTarget) return;
-    if (followingEnabled) {
-      if (view.mode === 'following') {
-        if (runtimeTabId) updateView({ tabId: runtimeTabId });
-      } else if (!tabs.some(tab => tab.id === activeTabId)) {
-        // Fall back to the first visible tab; never follow runtime in free mode.
-        updateView({ tabId: tabs[0].id });
-      }
-      return;
-    }
-    // Unconfigured workflows retain their existing implicit navigation behavior.
-    const focused = tabs.find(tab => tab.id === persistedFocusedTab);
-    if (focused) { updateView({ tabId: focused.id }); return; }
-    // Page order is presentation, not execution. The runtime resolver also
-    // handles cleared terminal pointers, stale attempts and grouped result tabs.
-    if (runtimeTabId) updateView({ tabId: runtimeTabId });
-  }, [uiReady, session, tabs, previewTarget, followingEnabled, view.mode, runtimeTabId, activeTabId, persistedFocusedTab, updateView]);
+    updateView(current => {
+      // Navigation may have switched modes before this passive effect runs.
+      if (current.mode === 'following') return runtimeTabId ? { tabId: runtimeTabId } : {};
+      // Fall back to the first visible tab; never follow runtime in free mode.
+      return tabs.some(tab => tab.id === current.tabId) ? {} : { tabId: tabs[0].id };
+    });
+  }, [uiReady, session, tabs, previewTarget, view.mode, runtimeTabId, activeTabId, updateView]);
 
   const resumeFollowing = async () => {
     if (resumePending.current !== null) return;
@@ -1956,6 +2059,9 @@ export function WorkflowPanel({
       artifactPreview?.close();
       updateView({ mode: 'following', ...(currentView.current.runtimeTabId ? { tabId: currentView.current.runtimeTabId } : {}) });
       setFocusedSortOrder(conversationId, undefined);
+      if (view.mode !== 'following') {
+        antdMessage.info({ key: 'workflow-follow-mode', content: t('chat.workflowFollowProgressChanged'), duration: 3 });
+      }
     } catch {
       if (isCurrent()) antdMessage.error(t('chat.workflowFollowSaveFailed'));
     } finally {
@@ -2003,12 +2109,12 @@ export function WorkflowPanel({
 
   const handleTabChange = useCallback((idx: number, tabId: string) => {
     if (previewTarget) artifactPreview?.close();
-    if (!followingEnabled || view.mode === 'free' || idx !== runtimeTabIdx) enterBrowse(tabId);
+    if (view.mode === 'free' || idx !== runtimeTabIdx) enterBrowse(tabId);
     updateView({ tabId });
     setFocusedTab(conversationId, tabId);
     const group = ui.tabs?.find(tab => tab.id === tabId)?.page_group;
     setFocusedSortOrder(conversationId, group ? groupPages[group] : undefined);
-  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages, previewTarget, artifactPreview?.close, followingEnabled, view.mode, runtimeTabIdx, enterBrowse, updateView]);
+  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages, previewTarget, artifactPreview?.close, view.mode, runtimeTabIdx, enterBrowse, updateView]);
 
   const handleFocusSortOrder = useCallback((sortOrder: number | undefined) => {
     setFocusedSortOrder(conversationId, sortOrder);
@@ -2047,8 +2153,8 @@ export function WorkflowPanel({
   const stopping = stopSubmitting || display?.reason === 'pausing';
   const displayStatus = display?.status === 'running' ? 'active'
     : display?.status === 'paused' ? 'stopped' : display?.status ?? 'loading';
-  // Every surface uses the same projection and button rules. The adapter only
-  // transports the selected action; host delivery is not workflow execution.
+  // The shared projection owns approval and execution. A host may also expose
+  // Core's continuation after delivery of a completed execution notification.
   const sessionBusy = displayStatus === 'active' || displayStatus === 'loading';
   const approvalStepId = display?.status === 'waiting' ? display.approval_step_id : undefined;
   const displayStatusKey = workflowDisplayLabel(display?.status, display?.reason);
@@ -2062,7 +2168,7 @@ export function WorkflowPanel({
     session,
     tabs[visibleActiveTabIdx],
   );
-  const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx]);
+  const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx], controlAdapter?.continuationStep?.());
   const showContinue = Boolean(continueAction);
   const showStepRollback =
     (session.status === 'completed' || session.status === 'failed')
@@ -2087,7 +2193,7 @@ export function WorkflowPanel({
     && all.findIndex((candidate) => candidate.step_id === step.step_id && candidate.validity !== 'stale') === index) : [];
   const stepLabel = (stepId: string) => tabs.find(tab => getTabStepId(tab) === stepId)?.label
     ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
-  const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
+  const continueDisabled = (continueAction?.kind === 'advance' ? chatBusy || actionPending : buttonsDisabled) || currentStepStatus === 'failed';
 
   async function refreshBeforeAction() {
     if (controlAdapter) {
@@ -2142,6 +2248,10 @@ export function WorkflowPanel({
           return;
         }
         const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
+        if (latest?.controller_host === 'external-agent' && display?.status === 'paused') {
+          await onSendMessage?.(message);
+          return;
+        }
         await onSendMessage?.(message, completedContinueStepId
           ? { session_id: sessionId, kind: 'rewind', step_id: completedContinueStepId, expected_state_version: latest?.state_version ?? 0 }
           : display?.status === 'paused'
@@ -2149,7 +2259,7 @@ export function WorkflowPanel({
             : continueAction?.kind === 'regenerate'
               ? { session_id: sessionId, kind: 'continue', expected_state_version: latest?.state_version ?? 0 } : undefined);
       } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
-    });
+    }, undefined, true, continueAction?.kind === 'advance');
   }
 
   // Saving edits is asynchronous: execution may have advanced since the click.
@@ -2165,7 +2275,7 @@ export function WorkflowPanel({
     if (!session || attempts(latest) !== attempts(session)) return false;
     const latestDisplay = latest.projection?.display?.status;
     const action = resolveWorkflowContinueAction(latest,
-      latestDisplay === 'paused' ? 'stopped' : latestDisplay === 'running' ? 'active' : latestDisplay ?? 'loading', tabs[visibleActiveTabIdx]);
+      latestDisplay === 'paused' ? 'stopped' : latestDisplay === 'running' ? 'active' : latestDisplay ?? 'loading', tabs[visibleActiveTabIdx], controlAdapter?.continuationStep?.());
     return action?.kind === continueAction.kind && action.stepId === continueAction.stepId;
   }
 
@@ -2210,6 +2320,12 @@ export function WorkflowPanel({
           await controlAdapter.execute({ kind: display?.status === 'paused' ? 'resume' : 'retry' });
           return;
         }
+        if (latest.controller_host === 'external-agent') {
+          // Resume through the original executor with the existing workflow
+          // context. Native control commands reject externally owned sessions.
+          await onSendMessage?.(t('chat.workflowRetry'));
+          return;
+        }
         await onSendMessage?.(t('chat.workflowRetry'), display?.status === 'paused'
           ? { session_id: latest.session_id, kind: 'resume', expected_state_version: latest.state_version ?? 0 }
           : display?.status === 'failed'
@@ -2240,6 +2356,8 @@ export function WorkflowPanel({
 
   const continueLabel = approvalStepId
     ? t('chat.workflowContinueExecution')
+    : continueAction?.kind === 'advance'
+      ? t('chat.workflowContinue')
     : continueAction?.kind === 'regenerate'
       ? t('chat.workflowRegenerate')
     : continueAction?.kind === 'resume'
@@ -2269,7 +2387,16 @@ export function WorkflowPanel({
       {/* Header */}
       <div className='workflow-panel__header'>
         <div className='workflow-panel__header-left'>
-          <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
+          <div className='workflow-panel__heading'>
+            <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
+            {appVersion && (
+              <span className='workflow-panel__app-version'
+                title={t('settingsPage.appVersion', { version: appVersion })}
+                aria-label={t('settingsPage.appVersion', { version: appVersion })}>
+                v{appVersion}
+              </span>
+            )}
+          </div>
           <button
             type='button'
             className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
@@ -2297,11 +2424,16 @@ export function WorkflowPanel({
               moreButtonRef.current?.focus();
             }} />}
           </div>
-          {followingEnabled && <div className='workflow-panel__follow-mode' role='group' aria-label={t('chat.workflowFollowModeLabel')}>
+          {uiReady && <div className='workflow-panel__follow-mode' role='group' aria-label={t('chat.workflowFollowModeLabel')}>
             <button type='button' aria-pressed={view.mode === 'following'} disabled={resumingFollow}
               onClick={() => void resumeFollowing()}>{t('chat.workflowFollowProgress')}</button>
             <button type='button' aria-pressed={view.mode === 'free'}
-              onClick={() => enterBrowse()}>{t('chat.workflowFreeBrowse')}</button>
+              onClick={() => {
+                enterBrowse();
+                if (view.mode !== 'free') {
+                  antdMessage.info({ key: 'workflow-follow-mode', content: t('chat.workflowFreeBrowseChanged'), duration: 3 });
+                }
+              }}>{t('chat.workflowFreeBrowse')}</button>
           </div>}
           {(!embedded || externalPresentation?.onToggleExpand) && <button
             type='button'
@@ -2407,15 +2539,9 @@ export function WorkflowPanel({
             <span className='workflow-panel__tabs-label'>{t('chat.workflowOutputs')}</span>
           )}
           {tabs.map((tab, idx) => {
-            const statusStepIds = tab.status_step_ids ?? [tab.step_id ?? tab.id];
-            const step = session.steps
-              ?.filter((s) => statusStepIds.includes(s.step_id) && s.validity !== 'stale')
-              .sort((a, b) => (
-                Number(b.step_id === session.current_step_id)
-                - Number(a.step_id === session.current_step_id)
-                || b.attempt - a.attempt
-              ))[0];
-            const stepStatus = step?.status;
+            const stepStatus = workflowTaskDisplayStatus(workflowTabStatus(tab, session), display?.status);
+            const stepStatusLabel = stepStatus ? t(stepStatus === 'waiting_input' ? 'taskCenter.statusWaitingInput' : `taskCenter.status${stepStatus.charAt(0).toUpperCase()}${stepStatus.slice(1)}`, { defaultValue: stepStatus }) : undefined;
+            const isCurrentUnselectedTab = idx === runtimeTabIdx && idx !== visibleActiveTabIdx;
             return (
               <React.Fragment key={tab.id}>
                 {idx > 0 && (
@@ -2438,16 +2564,16 @@ export function WorkflowPanel({
                   )}
                   <span className='workflow-panel__tab-text'>
                     <span className='workflow-panel__tab-label'>{tab.label}</span>
-                    {followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx && (
+                    {isCurrentUnselectedTab && (
                       <span className='workflow-panel__tab-current' role='img'
                         aria-label={t('chat.workflowCurrentStep')} title={t('chat.workflowCurrentStep')} />
                     )}
                   </span>
-                  {stepStatus && stepStatus !== 'succeeded' && !(followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx) && (
+                  {!['pending', 'succeeded', 'skipped'].includes(stepStatus) && !isCurrentUnselectedTab && (
                     <span
                       className={`workflow-panel__step-status workflow-panel__step-status--${stepStatus}`}
-                      aria-label={`Step status: ${stepStatus}`}
-                      title={stepStatus}
+                      aria-label={stepStatusLabel}
+                      title={stepStatusLabel}
                     />
                   )}
                 </button>
@@ -2458,6 +2584,13 @@ export function WorkflowPanel({
       )}
 
       </div>
+
+      {!collapsed && display?.status === 'failed'
+        && ['execution_not_started', 'external_driver_failed'].includes(display.reason) && (
+        <Alert className='workflow-panel__recovery-notice' type='error' showIcon
+          message={t(display.reason === 'execution_not_started'
+            ? 'chat.workflowStartFailedHint' : 'chat.workflowDriverFailedHint')} />
+      )}
 
       {!collapsed && externalPresentation && runningTasks.length > 0 && <div className='workflow-external-activity'>
         <div className='workflow-external-activity__text' role='status'>
@@ -2489,7 +2622,7 @@ export function WorkflowPanel({
             beforeAction={flushPendingEdits} onRefresh={refresh} onSendMessage={onSendMessage} />
           {hasTabs ? (
             tabs.map((tab, idx) => {
-              const preview = externalPresentation && !anySlotEditing ? executionPreview(session, tab, activities) : session;
+              const preview = externalPresentation && !resultsOnly && !anySlotEditing ? executionPreview(session, tab, activities) : session;
               const previewing = preview !== session;
               const isPaperAnalysis = session.workflow_id === 'paper-writing'
                 && resolveWorkflowTabStepId(tab, session.steps) === 'data_analysis';
@@ -2506,15 +2639,21 @@ export function WorkflowPanel({
                 <SlotDownloadContext.Provider value={!previewing && workflowTabAllowsDownload(tab, idx, tabs.length)}>
                   {isPaperAnalysis && <PaperAnalysisProgress session={session} active={idx === visibleActiveTabIdx} />}
                   {previewing && <div className="workflow-panel__preview-label" role="status">{t('chat.workflowGeneratingPreview')}</div>}
-                  <TabSlotGrid
+                  {workflowTabStatus(tab, session) === 'skipped' ? (
+                    <div className='workflow-panel__empty workflow-panel__empty--skipped' role='status'>
+                      <strong>{t('taskCenter.statusSkipped')}</strong>
+                      <span>{tab.skip_reason || t('chat.workflowSkipReasonBranch')}</span>
+                    </div>
+                  ) : <TabSlotGrid
                     tab={executionPreviewTab(tab, session, preview)}
                     session={preview}
                     readOnly={previewing}
                     tasks={taskCenterTasks}
+                    allowExternalPreviews={!anySlotEditing}
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}
-                  />
+                  />}
                 </SlotDownloadContext.Provider>
                 </WorkflowPanelTabActiveContext.Provider>
               </div>;
@@ -2590,7 +2729,7 @@ export function WorkflowPanel({
                   ? t('chat.workflowContinueDisabledFailed')
                   : actionPending
                     ? t('chat.workflowSavingBeforeAction')
-                    : buttonsDisabled
+                    : continueDisabled
                       ? t('chat.workflowBtnDisabledHint')
                       : anySlotEditing
                         ? t('chat.workflowContinueFlushHint')

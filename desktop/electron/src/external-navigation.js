@@ -5,6 +5,7 @@ const CLOUD_TOKEN_PLAN_PATH = /^\/(?:zh|en)\/console\/?$/;
 const MANAGED_PROVIDER_AUTHORIZATION_PATH = /^\/v1\/provider-connections\/authorize\/[A-Za-z0-9_-]{43,256}$/;
 
 function parseUrl(value) {
+  if (typeof value !== 'string' || value.length > 8192 || /[\u0000-\u001f\u007f]/.test(value)) return null;
   try {
     return new URL(value);
   } catch {
@@ -29,7 +30,7 @@ function isOAuthPopup({ frameName, features = "" }) {
 
 function canOpenExternally(url) {
   const target = parseUrl(url);
-  return Boolean(target && (
+  return Boolean(target && !target.username && !target.password && (
     EXTERNAL_PROTOCOLS.has(target.protocol) ||
     (target.protocol === "obsidian:" && target.host === "open" &&
       !target.username && !target.password && !target.pathname && !target.hash &&
@@ -40,6 +41,25 @@ function canOpenExternally(url) {
       target.hostname === "anysphere.cursor-deeplink" &&
       target.pathname === "/mcp/install")
   ));
+}
+
+function canOpenWebURL(url) {
+  const target = parseUrl(url);
+  return Boolean(target && ['http:', 'https:'].includes(target.protocol) && !target.username && !target.password);
+}
+
+function isKnownOAuthURL(url) {
+  const target = parseUrl(url);
+  if (!target || target.protocol !== 'https:' || target.username || target.password) return false;
+  const routes = {
+    'open.feishu.cn': /^\/(open-apis\/authen\/|oauth\/authorize\/?$)/,
+    'open.larksuite.com': /^\/open-apis\/authen\//,
+    'accounts.feishu.cn': /^\/open-apis\/authen\//,
+    'accounts.google.com': /^\/(o\/oauth2\/|signin\/oauth)/,
+    'github.com': /^\/login\/oauth\/authorize\/?$/,
+    'api.notion.com': /^\/v1\/oauth\/authorize\/?$/,
+  };
+  return Boolean(routes[target.hostname]?.test(target.pathname));
 }
 
 function isTrustedCloudNavigation(value, configuredOrigin, purpose) {
@@ -101,10 +121,27 @@ function installExternalNavigationHandler(
   openExternal,
   reportError = () => {},
   sameOriginWindowOptions,
+  trustedAppURL,
 ) {
+  const appURL = trustedAppURL || webContents.getURL();
+  // Only app windows have a privileged preload. OAuth children keep normal web navigation.
+  if (!trustedAppURL || sameOriginWindowOptions?.webPreferences?.preload) {
+    const navigate = (event, url) => {
+      if (isSameOrigin(url, appURL)) return;
+      event.preventDefault();
+      if (canOpenExternally(url)) void Promise.resolve().then(() => openExternal(url)).catch(error => reportError(error, url));
+    };
+    webContents.on('will-navigate', navigate);
+    webContents.on('will-redirect', navigate);
+  }
   webContents.setWindowOpenHandler((details) => {
-    if (isOAuthPopup(details)) {
-      return { action: "allow" };
+    if (isOAuthPopup(details) && (isSameOrigin(details.url, appURL) || isKnownOAuthURL(details.url))) {
+      return {
+        action: "allow",
+        ...(sameOriginWindowOptions?.icon
+          ? { overrideBrowserWindowOptions: { icon: sameOriginWindowOptions.icon } }
+          : {}),
+      };
     }
 
     if (isSameOrigin(details.url, webContents.getURL())) {
@@ -117,7 +154,7 @@ function installExternalNavigationHandler(
     }
 
     if (canOpenExternally(details.url)) {
-      void openExternal(details.url).catch(reportError);
+      void openExternal(details.url).catch(error => reportError(error, details.url));
     }
     return { action: "deny" };
   });
@@ -126,18 +163,22 @@ function installExternalNavigationHandler(
     const childSameOriginWindowOptions = sameOriginWindowOptions &&
       isSameOrigin(details.url, webContents.getURL())
       ? sameOriginWindowOptions
-      : undefined;
+      : sameOriginWindowOptions?.icon
+        ? { icon: sameOriginWindowOptions.icon }
+        : undefined;
     installExternalNavigationHandler(
       childWindow.webContents,
       openExternal,
       reportError,
       childSameOriginWindowOptions,
+      appURL,
     );
   });
 }
 
 module.exports = {
   canOpenExternally,
+  canOpenWebURL,
   installExternalNavigationHandler,
   isOAuthPopup,
   isSameOrigin,

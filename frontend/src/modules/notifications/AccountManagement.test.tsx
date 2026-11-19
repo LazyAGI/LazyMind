@@ -311,7 +311,7 @@ it('keeps an expanded robot card and unsaved remark when its status refreshes', 
   fireEvent.change(screen.getByRole('textbox', { name: 'notifications.accountRemark' }), { target: { value: 'Unsaved remark' } });
   rows = rows.map(row => ({ ...row, updated_at: '2026-10-29', runtime_status: 'stopped' }));
   fireEvent(window, new Event('focus'));
-  await waitFor(() => expect(card.querySelector('summary')).toHaveTextContent('notifications.disconnected'));
+  await waitFor(() => expect(card.querySelector('summary')).toHaveTextContent('notifications.notConnected'));
   expect(screen.getAllByText('Stable robot')[0].closest('details')).toBe(card);
   expect(card.open).toBe(true);
   expect(screen.getByRole('textbox', { name: 'notifications.accountRemark' })).toHaveValue('Unsaved remark');
@@ -323,10 +323,10 @@ it('shows WeCom as awaiting authorization, excludes it from available counts, an
   rows = [{ ...original, provider: 'wecom', label: 'Authorization robot', status: 'connected', binding_status: 'connected', runtime_status: 'running', capabilities: { authorization_required: true } }];
   await mount('wecom');
   const card = screen.getAllByText('Authorization robot')[0].closest('details')!;
-  expect(card.querySelector('summary')).toHaveTextContent('notifications.wecomAuthorizationExpired');
+  expect(card.querySelector('summary')).toHaveTextContent('notifications.notAuthorized');
   expect(card.querySelector('summary')).not.toHaveTextContent('notifications.connected');
   expect(within(card).getByRole('button', { name: 'notifications.wecomRepairAuthorization' })).toBeEnabled();
-  expect(document.querySelector('.notification-provider-tabs button[aria-pressed="true"]')).toHaveTextContent('notifications.wecomAuthorizationExpired');
+  expect(document.querySelector('.notification-provider-tabs button[aria-pressed="true"]')).toHaveTextContent('notifications.notAuthorized');
   expect(document.querySelector('.notification-account-manager > header')).not.toHaveTextContent('notifications.availableCount');
   rows = rows.map(row => ({ ...row, capabilities: { authorization_required: false } }));
   fireEvent(window, new Event('focus'));
@@ -355,7 +355,7 @@ it('keeps a scanned Feishu robot connected and explains a menu permission failur
   await mount();
   const card = screen.getAllByText('Scanned robot')[0].closest('details')!;
   expect(card.querySelector('summary')).toHaveTextContent('notifications.connected');
-  expect(card.querySelector('summary')).not.toHaveTextContent('notifications.disconnected');
+  expect(card.querySelector('summary')).not.toHaveTextContent('notifications.notConnected');
   expect(within(card).getByText('notifications.feishuConnectionReady')).toBeVisible();
   expect(within(card).getByRole('alert')).toHaveTextContent('notifications.feishuMenuPermissionHint');
   expect(within(card).getByRole('button', { name: 'notifications.disconnect' })).toBeEnabled();

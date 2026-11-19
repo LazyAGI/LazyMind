@@ -19,6 +19,7 @@ const (
 	Automatic   = "automatic"
 	Disabled    = "disabled"
 	PDFParse    = "pdf_parse"
+	AIStudy     = "ai_study"
 	ChatPrepare = "chat_prepare"
 	Formula     = "formula"
 	Figure      = "figure"
@@ -28,8 +29,10 @@ const (
 var Keys = configurableKeys()
 
 type Limits struct {
-	DailyDocuments        int `json:"daily_documents"`
-	StudyItemsPerDocument int `json:"study_items_per_document"`
+	DailyPDFDocuments     int `json:"daily_pdf_documents"`
+	DailyStudyDocuments   int `json:"daily_study_documents"`
+	DailyDocuments        int `json:"daily_documents,omitempty"`
+	StudyItemsPerDocument int `json:"study_items_per_document,omitempty"`
 	AutomaticConcurrency  int `json:"automatic_concurrency"`
 }
 type Policy struct {
@@ -42,13 +45,14 @@ type Policy struct {
 }
 
 func Defaults() Policy {
-	p := Policy{Preset: "demand", Modes: map[string]string{}, Limits: Limits{5, 10, 1}}
+	p := Policy{Preset: "demand", Modes: map[string]string{}, Limits: Limits{DailyPDFDocuments: 100, DailyStudyDocuments: 50, AutomaticConcurrency: 1}}
 	for _, k := range Keys {
 		p.Modes[k] = OnDemand
 	}
 	return p
 }
 func Normalize(p Policy) (Policy, error) {
+	p = Migrate(p)
 	switch p.Preset {
 	case "demand", "advance", "full":
 		p.Modes = Defaults().Modes
@@ -56,9 +60,7 @@ func Normalize(p Policy) (Policy, error) {
 			p.Modes[PDFParse] = Automatic
 		}
 		if p.Preset == "full" {
-			for _, k := range []string{Formula, Figure, Table} {
-				p.Modes[k] = Automatic
-			}
+			p.Modes[AIStudy] = Automatic
 		}
 	case "custom":
 	default:
@@ -73,15 +75,9 @@ func Normalize(p Policy) (Policy, error) {
 			return p, fmt.Errorf("%s 准备方式无效", k)
 		}
 	}
-	if p.Modes[PDFParse] != Automatic {
-		for _, k := range []string{Formula, Figure, Table} {
-			if p.Modes[k] == Automatic {
-				return p, errors.New("自动研读需要自动准备结构化 PDF 解析，请先将解析设为自动或关闭自动研读")
-			}
-		}
-	}
-	if p.Limits.DailyDocuments < 1 || p.Limits.DailyDocuments > 100 || p.Limits.StudyItemsPerDocument < 1 || p.Limits.StudyItemsPerDocument > 100 || p.Limits.AutomaticConcurrency != 1 {
-		return p, errors.New("每日自动文档和每篇研读数量须为 1–100；自动并发目前固定为 1")
+
+	if p.Limits.DailyPDFDocuments < 1 || p.Limits.DailyPDFDocuments > 10000 || p.Limits.DailyStudyDocuments < 1 || p.Limits.DailyStudyDocuments > 10000 || p.Limits.AutomaticConcurrency != 1 {
+		return p, errors.New("每日自动解析和精读额度须为 1–10000 篇；自动并发目前固定为 1")
 	}
 	return p, nil
 }
@@ -95,8 +91,7 @@ func Load(ctx context.Context, db *gorm.DB, user string) (Policy, error) {
 	if e != nil {
 		return p, e
 	}
-	e = json.Unmarshal([]byte(row.PolicyJSON), &p)
-	return p, e
+	return Decode([]byte(row.PolicyJSON))
 }
 func HasAutomatic(p Policy) bool {
 	for _, m := range p.Modes {
@@ -141,13 +136,79 @@ func Check(ctx context.Context, db *gorm.DB, user, key string) error {
 	if e != nil {
 		return e
 	}
+	key = Category(key)
+	if key == ChatPrepare {
+		return nil
+	}
+	name := map[string]string{PDFParse: "PDF 解析", AIStudy: "AI 论文精读"}[key]
+	if name == "" {
+		name = key
+	}
 	if p.Modes[key] == Disabled {
-		return fmt.Errorf("已禁止新的%s准备；已有结果仍可查看，请在 AI 阅读准备设置中修改", key)
+		return fmt.Errorf("已禁止新的%s准备；已有结果仍可查看，请在 AI 阅读准备设置中修改", name)
 	}
 	if ctx.Value(automaticKey{}) == true && p.Modes[key] != Automatic {
-		return fmt.Errorf("%s自动准备已停止", key)
+		return fmt.Errorf("%s未开启自动准备；缺少结果时请开启自动或手动准备", name)
 	}
 	return nil
 }
 
 func IsAutomatic(ctx context.Context) bool { return ctx.Value(automaticKey{}) == true }
+
+// Category maps internal block operations onto the two user-facing policies.
+func Category(key string) string {
+	switch key {
+	case Formula, Figure, Table:
+		return AIStudy
+	}
+	return key
+}
+func Mode(p Policy, key string) string { return p.Modes[Category(key)] }
+
+// Migrate is a read-through migration: old JSON and results remain intact until
+// the user saves. Mixed legacy study permissions never broaden authorization.
+func Migrate(p Policy) Policy {
+	if p.Limits.DailyDocuments != 0 {
+		p.Limits.DailyPDFDocuments = p.Limits.DailyDocuments
+		p.Limits.DailyStudyDocuments = p.Limits.DailyDocuments
+	}
+	if p.Limits.DailyPDFDocuments == 0 {
+		p.Limits.DailyPDFDocuments = 100
+	}
+	if p.Limits.DailyStudyDocuments == 0 {
+		p.Limits.DailyStudyDocuments = 50
+	}
+	if p.Limits.AutomaticConcurrency == 0 {
+		p.Limits.AutomaticConcurrency = 1
+	}
+	p.Limits.DailyDocuments, p.Limits.StudyItemsPerDocument = 0, 0
+	modes := map[string]string{PDFParse: p.Modes[PDFParse], AIStudy: p.Modes[AIStudy]}
+	if modes[PDFParse] == "" {
+		modes[PDFParse] = OnDemand
+	}
+	if modes[AIStudy] == "" {
+		modes[AIStudy] = Automatic
+		for _, key := range []string{Formula, Figure, Table} {
+			m := p.Modes[key]
+			if m == Disabled {
+				modes[AIStudy] = Disabled
+				break
+			}
+			if m != Automatic {
+				modes[AIStudy] = OnDemand
+			}
+		}
+	}
+	p.Modes = modes
+	return p
+}
+func Decode(raw []byte) (Policy, error) {
+	var p Policy
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return p, err
+	}
+	if p.Preset == "" {
+		p.Preset = "demand"
+	}
+	return Migrate(p), nil
+}

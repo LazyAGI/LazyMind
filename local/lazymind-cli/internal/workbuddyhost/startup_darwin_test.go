@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"lazymind/agentconnector/internal/integrationstate"
 )
 
 func TestLoginEnvironmentPersistsWithoutLazyMindAndHonorsExplicitDisable(t *testing.T) {
@@ -19,9 +17,7 @@ func TestLoginEnvironmentPersistsWithoutLazyMindAndHonorsExplicitDisable(t *test
 	startupUserHome = func() (string, error) { return root, nil }
 	startupLoginRun = func(context.Context, ...string) ([]byte, error) { return nil, fmt.Errorf("no loaded job in fixture") }
 	t.Cleanup(func() { startupUserHome = oldHome; startupLoginRun = oldRun })
-	if err := integrationstate.Set(home, "workbuddy", true); err != nil {
-		t.Fatal(err)
-	}
+
 	if err := configureLoginEnvironment(context.Background(), home, 9333, true); err != nil {
 		t.Fatal(err)
 	}
@@ -33,24 +29,14 @@ func TestLoginEnvironmentPersistsWithoutLazyMindAndHonorsExplicitDisable(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Substitute only the effect, executing the actual generated preference gate.
+	// Substitute only the effect, executing the actual generated login command.
 	marker := filepath.Join(root, "restored")
 	script := strings.Replace(string(body), "exec /bin/launchctl setenv WORKBUDDY_REMOTE_DEBUGGING_PORT 9333", "touch '"+marker+"'", 1)
 	if output, err := exec.Command("/bin/sh", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("login script %s %v", output, err)
 	}
 	if _, err := os.Stat(marker); err != nil {
-		t.Fatal("enabled preference did not restore")
-	}
-	_ = os.Remove(marker)
-	if err := integrationstate.Set(home, "workbuddy", false); err != nil {
-		t.Fatal(err)
-	}
-	if output, err := exec.Command("/bin/sh", "-c", script).CombinedOutput(); err != nil {
-		t.Fatalf("disabled login script %s %v", output, err)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatal("login job re-enabled a disabled integration")
+		t.Fatal("login job did not restore the environment")
 	}
 	if err := configureLoginEnvironment(context.Background(), home, 0, false); err != nil {
 		t.Fatal(err)

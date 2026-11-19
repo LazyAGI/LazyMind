@@ -622,6 +622,21 @@ describe('SlotText editing', () => {
     ));
   });
 
+  it('passes the complete PPT prompt and height limit to the Markdown editor on edit', () => {
+    const text = '<!-- ppt-page-prompt:v1 -->\n## 风格\n浅色背景';
+    const { container } = render(<SlotRenderer
+      slot={{ slot_id: 'prompt', revision: 1, selected: true, slot: 'prompt',
+        created_at: '2026-08-31T00:00:00Z', artifact_value: { text }, content_type: 'text' }}
+      widget={{ widgetType: 'ppt-prompt', maxHeight: 400 }}
+      sessionId='prompt-session' slotId='prompt'
+    />);
+    fireEvent.click(screen.getByRole('button', { name: '编辑文本' }));
+    const editor = screen.getByRole('button', { name: 'save markdown draft' });
+    expect(editor).toHaveAttribute('data-markdown', text);
+    expect(editor).toHaveAttribute('data-max-height', '400');
+    expect(container.querySelector('.workflow-slot__text-editor')).toBeNull();
+  });
+
   it('keeps the preview footprint and focuses the clicked plain text', () => {
     const text = '## First line\n\n**middle target**\n\nlast line';
     const targetOffset = text.indexOf('middle target') + 7;

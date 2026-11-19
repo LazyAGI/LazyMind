@@ -1,8 +1,9 @@
 """Normalize Python answers and validate complete-program or legacy range repairs."""
 import ast
-from dataclasses import dataclass
 import json
 import re
+
+from ..model_response import normalize_response
 
 
 PYTHON_RESPONSE = re.compile(
@@ -17,44 +18,10 @@ Code may also be returned as a JSON code field. Return the complete initial scri
 '''
 
 
-@dataclass(frozen=True)
-class ModelResponse:
-    body: str | dict
-    reasoning: str = ''
-
-
 def json_body(text):
     text = text.strip()
     match = re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
     return match[1] if match else text
-
-
-def _reasoning_text(message):
-    for field in ('reasoning_content', 'reasoning'):
-        text = message.get(field)
-        if isinstance(text, str) and text:
-            return text
-    details = message.get('reasoning_details')
-    if isinstance(details, dict):
-        details = [details]
-    texts = []
-    for item in details if isinstance(details, list) else []:
-        if not isinstance(item, dict):
-            continue
-        text = item.get('text') or item.get('summary')
-        if isinstance(text, str):
-            texts.append(text)
-    return ''.join(texts)
-
-
-def normalize_response(raw):
-    """Read provider fields verbatim; never recover executable text from reasoning."""
-    if isinstance(raw, dict):
-        if ('content' not in raw and not {'reasoning_content', 'reasoning_details'} & raw.keys()
-                and not (raw.get('role') == 'assistant' and 'reasoning' in raw)):
-            return ModelResponse(raw)
-        return ModelResponse(str(raw.get('content') or ''), _reasoning_text(raw))
-    return ModelResponse(str(raw or ''))
 
 
 def parse_code_response(raw):

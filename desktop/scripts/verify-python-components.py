@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise a slim Python runtime and its real RAG bundle without an installer.
+"""Exercise a slim Python runtime and its optional bundles without an installer.
 
 Run with the staged algorithm Python. Uses temporary data and child processes;
 does not install into the base environment or touch the user's knowledge bases.
@@ -29,6 +29,9 @@ from urllib.request import HTTPRedirectHandler, build_opener
 import zipfile
 
 
+MACOS_CLUSTER_LIBRARY = 'llvmlite/binding/libllvmlite.dylib'
+
+
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
@@ -55,13 +58,15 @@ def signed_team_id(binary, adhoc=False):
     return team
 
 
-def verify_macos_team_id(overlay, python=None, adhoc=False):
+def verify_macos_team_id(overlay, python=None, adhoc=False, required_binary=None):
     require(sys.platform == 'darwin', 'macOS signature verification requires native macOS')
     expected = signed_team_id(Path(python or sys.executable).resolve(), adhoc=adhoc)
     magics = {bytes.fromhex(value) for value in (
         'feedface', 'feedfacf', 'cefaedfe', 'cffaedfe',
         'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca')}
     checked = 0
+    required_path = overlay / required_binary if required_binary else None
+    required_checked = required_path is None
     for binary in sorted(overlay.rglob('*')):
         if not binary.is_file():
             continue
@@ -70,20 +75,27 @@ def verify_macos_team_id(overlay, python=None, adhoc=False):
                 continue
         actual = signed_team_id(binary, adhoc=adhoc)
         require(actual == expected,
-                f'RAG signing TeamIdentifier mismatch: {binary}: {actual}, Python: {expected}')
+                f'Component signing TeamIdentifier mismatch: {binary}: {actual}, Python: {expected}')
         checked += 1
-    require(checked > 0, 'RAG bundle contains no Mach-O binaries to verify')
-    print(f'RAG_SIGNATURE_OK TeamIdentifier={expected} binaries={checked}', flush=True)
+        required_checked = required_checked or binary == required_path
+    require(checked > 0, 'Component contains no Mach-O binaries to verify')
+    require(required_checked, f'Missing required Mach-O library: {required_binary}')
+    print(f'COMPONENT_SIGNATURE_OK TeamIdentifier={expected} binaries={checked}', flush=True)
 
 
-def base_imports(without_grpc=False):
+def base_imports(without_grpc=False, without_cluster=False):
     forbidden = ('spacy', 'pymilvus', 'milvus_lite')
     if without_grpc:
         forbidden += ('grpc', 'opensearchpy', 'opensearch_protobufs', 'volcenginesdkarkruntime')
+    if without_cluster:
+        forbidden += ('umap', 'numba', 'llvmlite', 'pynndescent')
     for name in forbidden:
         require(importlib.util.find_spec(name) is None, f'{name} still exists in base; this is not a slim runtime')
-    for name in ('dashscope', 'numpy', 'pandas', 'sklearn', 'umap', 'fitz', 'docx', 'pptx', 'openpyxl',
-                 'bm25s', 'Stemmer', 'jieba'):
+    imports = ('dashscope', 'numpy', 'pandas', 'sklearn', 'fitz', 'docx', 'pptx', 'openpyxl',
+               'bm25s', 'Stemmer', 'jieba')
+    if not without_cluster:
+        imports += ('umap',)
+    for name in imports:
         importlib.import_module(name)
         print(f'BASE_IMPORT_OK {name}', flush=True)
     importlib.import_module('lazyllm.tools.rag.readers.ocrReader')
@@ -106,6 +118,18 @@ def overlay_imports(overlay):
     for name in ('grpc', 'lazyllm.tools.rag', 'spacy', 'pymilvus', 'milvus_lite', 'bm25s', 'Stemmer', 'sentencepiece', 'nltk'):
         importlib.import_module(name)
         print(f'OVERLAY_IMPORT_OK {name}', flush=True)
+
+
+def cluster_embedding(overlay):
+    site.addsitedir(str(overlay))
+    import numpy as np
+    from umap import UMAP
+
+    vectors = np.random.default_rng(42).normal(size=(12, 4))
+    embedded = UMAP(n_neighbors=3, n_epochs=10, init='random', random_state=42, n_jobs=1).fit_transform(vectors)
+    require(embedded.shape == (12, 2) and np.isfinite(embedded).all(),
+            'Cluster overlay did not produce finite UMAP embeddings')
+    print('CLUSTER_UMAP_OK', flush=True)
 
 
 def serve(overlay, data, port):
@@ -315,13 +339,14 @@ def main():
     parser.add_argument('--require-windows-milvus-patch', action='store_true',
                         help='Reject Windows bundles without the reviewed manifest replacement fix')
     parser.add_argument('--require-macos-team-id', action='store_true',
-                        help='Require valid RAG Mach-O signatures matching the running Python Team ID')
-    parser.add_argument('--worker', choices=['base', 'overlay', 'milvus', 'server'], help=argparse.SUPPRESS)
+                        help='Require valid component Mach-O signatures matching the running Python Team ID')
+    parser.add_argument('--worker', choices=['base', 'overlay', 'cluster', 'milvus', 'server'], help=argparse.SUPPRESS)
     parser.add_argument('--overlay', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--data', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--logs', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--port', type=int, help=argparse.SUPPRESS)
     parser.add_argument('--without-grpc', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--without-cluster', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.worker:
         if args.runtime:
@@ -330,11 +355,13 @@ def main():
             if (source / 'lazyllm').is_dir():
                 sys.path.insert(0, str(source))
         if args.worker == 'base':
-            base_imports(args.without_grpc)
+            base_imports(args.without_grpc, args.without_cluster)
         elif args.worker == 'overlay':
             overlay_imports(args.overlay)
         elif args.worker == 'milvus':
             milvus_roundtrip(args.overlay, args.data, args.logs)
+        elif args.worker == 'cluster':
+            cluster_embedding(args.overlay)
         else:
             serve(args.overlay, args.data, args.port)
         return 0
@@ -366,15 +393,18 @@ def main():
             require(Path(sysconfig.get_path('purelib')).resolve().is_relative_to(
                 (args.runtime / 'deps/python/algorithm').resolve()), 'Run using this runtime\'s algorithm Python')
             catalog = json.loads((args.runtime / 'config/python-components.json').read_text())
-            entry = catalog['components']['rag']
-            for key, value in [('platform', target_platform), ('arch', arch),
-                               ('pythonAbi', f'cp{sys.version_info.major}{sys.version_info.minor}')]:
-                require(entry[key] == value, f'Wrong {key}: catalog {entry[key]}, interpreter {value}')
-            require(Path(entry['filename']).name == entry['filename'], 'Invalid bundle filename')
+            entries = catalog['components']
+            for component_id, entry in entries.items():
+                for key, value in [('id', component_id), ('platform', target_platform), ('arch', arch),
+                                   ('pythonAbi', f'cp{sys.version_info.major}{sys.version_info.minor}')]:
+                    require(entry[key] == value, f'Wrong {key}: catalog {entry[key]}, interpreter {value}')
+                require(Path(entry['filename']).name == entry['filename'], 'Invalid bundle filename')
+            entry = entries['rag']
             report.update(filename=entry['filename'], sha256=entry['sha256'],
                           source=str(args.bundle_dir) if args.bundle_dir else entry['url'])
-            return entry
-        entry = check('runtime compatibility', preflight)
+            return entries
+        entries = check('runtime compatibility', preflight)
+        entry = entries['rag']
         if not args.bundle_dir and entry.get('catalogUrl'):
             entry = check('online tag catalog', lambda: resolve_catalog_entry(entry))
             report.update(filename=entry['filename'], sha256=entry['sha256'], source=entry['url'])
@@ -383,6 +413,8 @@ def main():
         base_args = ['--runtime', str(args.runtime.resolve())]
         if 'grpcio' in entry['packages']:
             base_args.append('--without-grpc')
+        if 'cluster' in entries:
+            base_args.append('--without-cluster')
         check('slim base imports', lambda: run_child('base', base_args, logs))
         with tempfile.TemporaryDirectory(prefix='lazymind-component-check-') as temporary:
             root = Path(temporary)
@@ -400,6 +432,18 @@ def main():
                 'overlay', ['--overlay', str(overlay), '--runtime', str(args.runtime.resolve())], logs))
             check('Milvus insert + flush + restart + search + drop', lambda: run_child(
                 'milvus', ['--overlay', str(overlay), '--data', str(root / 'milvus'), '--logs', str(logs)], logs))
+            if cluster := entries.get('cluster'):
+                if not args.bundle_dir and cluster.get('catalogUrl'):
+                    cluster = check('cluster online tag catalog', lambda: resolve_catalog_entry(cluster))
+                cluster_archive = check('cluster bundle download/local file + SHA256',
+                                        lambda: acquire_bundle(cluster, root, args.bundle_dir))
+                cluster_overlay = check('cluster bundle extraction + manifest',
+                                        lambda: extract_bundle(cluster_archive, root / 'cluster', cluster))
+                if args.require_macos_team_id:
+                    check('macOS cluster signatures match Python Team ID', lambda: verify_macos_team_id(
+                        cluster_overlay, required_binary=MACOS_CLUSTER_LIBRARY))
+                check('UMAP clustering overlay and Numba JIT', lambda: run_child(
+                    'cluster', ['--overlay', str(cluster_overlay)], logs))
         report['passed'] = True
     except Exception as error:
         report['error'] = str(error)
