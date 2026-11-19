@@ -23,6 +23,26 @@ images again. If evidence is insufficient, report the missing material and retur
 to collection only with the user's agreement. Template analysis is local reading,
 not a new research step. Cache hits still require reading the returned content.
 
+- Before composing new text boxes, read the actual source-page colors as well as
+  slot IDs. pptx_analyzer supplies editable slots; if it does not expose colors,
+  call ppt_analyze_template(template_file) in the current deck and read
+  profile.html_template.pages for the chosen source_page. Despite the field name,
+  these are source OOXML styles usable for native PPTX too: background, shape
+  fills, text.paragraphs[].runs[].style.color and default_run_style. Reuse the
+  cached profile when available. Do not infer visible colors from theme swatches
+  alone or assume a missing color means black.
+- For each new text region, choose the corresponding template region and carry
+  its foreground/background relationship, font, size and hierarchy into the
+  generation parameters. Pass text_boxes.color explicitly as a six-digit RGB
+  value derived from that region; omitting it uses a generic dark tool default,
+  not template inheritance. If a source color cannot be resolved, use available
+  visual evidence and disclose uncertainty rather than claiming it was read.
+  Dark template backgrounds normally need the source's light text; light cards
+  inside a dark page may still need dark text. Assess the local background.
+  Uploaded-template styling overrides generic academic white/black defaults.
+  This applies to added content as well as retained slots, in native PPTX and
+  HTML. The model may change any visible styling when the user requests it or
+  the visible result needs repair; this is guidance, not an editing restriction.
 - Use ppt_fill_template pages to plan output order and count. Repeat source_page
   when content needs more room; honor an explicit user page count. Keep each
   reused page's layout, coordinates, typography, backgrounds and branding.

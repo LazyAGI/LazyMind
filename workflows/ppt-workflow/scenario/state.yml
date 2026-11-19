@@ -88,8 +88,8 @@ steps:
       also supply historical evidence with its date and attribution preserved.
 
       Visual decisions:
-      - Preserve explicit user direction. Academic/scientific presentations default
-      to white (#FFFFFF), dark text (#111111), restrained chart accents and
+      - Preserve explicit user direction. Only without an uploaded template or
+      an explicit user palette, academic/scientific presentations default to white (#FFFFFF), dark text (#111111), restrained chart accents and
       readable evidence-led typography; AI backgrounds default to disabled.
       - An uploaded template determines style and disables AI backgrounds. Do not
       ask again for palette, typography, decorative images or background choices.
@@ -715,6 +715,15 @@ steps:
       and fonts. Select, repeat or omit source layouts to meet the requested count.
       Preserve unspecified artwork, layout and styling, remove unapproved sample
       claims, and keep native text, tables, charts and notes editable.
+      - New content must use the corresponding template region's actual colors,
+      fonts and hierarchy as the starting point. Slot inspection may omit colors;
+      use ppt_analyze_template and read profile.html_template.pages for source-page
+      backgrounds and text run styles before filling new boxes. Reuse cached
+      evidence. Pass text_boxes.color explicitly; a new box does not automatically
+      inherit source styling. Do not apply generic black text to a retained dark
+      background, or assume all regions on a dark page share the same background.
+      The model chooses styling from the visible evidence and user intent; any
+      visible property remains editable. Do not invent unseen template colors.
       - Without a template, create native slides from the approved page prompts
       in order. Use speaker_notes_source when available. Report any requested
       elements the generator cannot create.

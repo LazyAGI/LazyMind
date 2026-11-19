@@ -1212,8 +1212,15 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
     Optional shape_boxes: [{shape_id: "6", box: [1, 2, 11, 4]}] repositions
     surviving body text shapes. Preserve brand/title/footer positions.
     Optional text_boxes: [{text: "Problem and method", box: [1, 2, 5, 2],
-    font_size: 22, color: "1F2937", bold: false}] adds editable content blocks
-    after obsolete body placeholders are removed. Do not leave a vacant image
+    font_size: 22, color: "<RGB from the matching template region>", bold: false}] adds editable content blocks
+    after obsolete body placeholders are removed. Choose font/size/color from the
+    matching source-page region, including its local background. Pass color as six
+    hex digits explicitly: new boxes do not inherit template colors automatically.
+    Use ppt_analyze_template profile.html_template.pages when the slot inspection
+    lacks colors; its run styles/backgrounds also apply to native PPTX. Generic
+    white-background/dark-text defaults do not override an uploaded template.
+    All visible styling remains editable when requested or needed for repair.
+    Do not leave a vacant image
     column on text-only pages; use the available width without overlap.
     Required for tabular content: tables: [{headers: ["Metric", "Before", "After"],
     rows: [["Latency (ms)", "100", "60"]], box: [1, 2, 8, 3], font_size: 18}].
@@ -1335,7 +1342,10 @@ def ppt_analyze_template(
     """Analyze one PPTX template without starting a separate Workflow step.
 
     The result is a compact, deterministic OOXML profile covering slide size,
-    theme fonts/colors, masters, layouts, and placeholders. The source template
+    theme fonts/colors, masters, layouts, and placeholders. For actual page colors,
+    read profile.html_template.pages: background and each shape text paragraph
+    run style. These source styles also guide newly added native PPTX text; the
+    field name does not limit this evidence to HTML. The source template
     and profile are cached under the current deck so retries are idempotent.
 
     Args:
@@ -7607,7 +7617,9 @@ def ppt_init_deck(
 
     style = _coerce_str(style_hint)
     if style in {'科研风格', '科研'}:
-        style = ('科研风格：白底 #FFFFFF、黑字 #111111；白色或极浅灰内容区域、细灰分隔线；'
+        style = ('仅在没有上传模板且用户未另定配色时，科研风格默认白底 #FFFFFF、黑字 #111111；'
+                 '使用上传模板时，以对应区域实际背景、文字颜色和字体为准，包括新增内容。'
+                 '无模板默认白色或极浅灰内容区域、细灰分隔线；'
                  '图表使用少量蓝/青/橙/紫强调色，坐标轴、图例、公式和表格使用清晰深色文字；'
                  '不使用深色仪表盘、霓虹/HUD、装饰性渐变背景。')
     enriched = f'{query}\n\n视觉风格参考：\n{style}' if style else query

@@ -44,7 +44,8 @@ keep the user colors in palette and primary_color.hex. The catalog hex and
 compatibility rules below apply only to unspecified properties. Do not infer a
 dark/cyan scheme just because the topic is technical.
 
-The built-in 科研风格 / academic default uses a plain white #FFFFFF canvas,
+Without an uploaded template or an explicit user palette, the built-in
+科研风格 / academic default uses a plain white #FFFFFF canvas,
 black #111111 titles and body text, and restrained blue/teal/orange/purple chart
 accents. Choose the Academic catalog style with Light tone, unless a user
 explicitly requests another direction. Write background and text colors into
