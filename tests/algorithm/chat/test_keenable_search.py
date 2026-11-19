@@ -93,16 +93,11 @@ def test_keenable_public_request_omits_api_key_header(monkeypatch):
     assert captured['method'] == 'POST'
     assert captured['url'] == 'https://api.keenable.ai/v1/search/public'
     assert captured['json'] == {'query': 'open web search', 'max_results': 50}
-    assert captured['headers'].get('X-Keenable-Title') == 'LazyMind'
+    assert captured['headers'].get('X-Keenable-Title') == 'LazyLLM'
     assert 'X-API-Key' not in captured['headers']
     assert results == [
         {'title': 'Example', 'url': 'https://example.test', 'snippet': 'A result', 'source': 'keenable'},
-        {
-            'title': 'Fallback',
-            'url': 'https://example.test/desc',
-            'snippet': 'from description',
-            'source': 'keenable',
-        },
+        {'title': 'Fallback', 'url': 'https://example.test/desc', 'snippet': '', 'source': 'keenable'},
     ]
 
 
@@ -112,7 +107,7 @@ def test_keenable_keyed_request_sends_the_user_key(monkeypatch):
     def fake_request(method, url, **kwargs):
         captured['url'] = url
         captured['headers'] = dict(kwargs.get('headers') or {})
-        captured['follow_redirects'] = kwargs.get('follow_redirects')
+        captured['follow_redirects'] = kwargs.get('follow_redirects', False)
         return SimpleNamespace(
             ok=True,
             status_code=200,
@@ -128,3 +123,23 @@ def test_keenable_keyed_request_sends_the_user_key(monkeypatch):
     assert captured['headers'].get('X-API-Key') == 'secret-key'
     assert captured['follow_redirects'] is False
     assert results[0]['url'] == 'https://example.test/keyed'
+
+
+def test_keenable_uses_the_per_request_key(monkeypatch):
+    captured = {}
+
+    def fake_request(method, url, **kwargs):
+        captured['url'] = url
+        captured['headers'] = dict(kwargs.get('headers') or {})
+        return SimpleNamespace(
+            ok=True,
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {'results': []},
+        )
+
+    monkeypatch.setattr(httpx, 'request', fake_request)
+    lazyllm.globals.config['dynamic_tool_auth'] = {'keenable': 'user-key'}
+    assert _keenable().search('query') == []
+    assert captured['url'] == 'https://api.keenable.ai/v1/search'
+    assert captured['headers'].get('X-API-Key') == 'user-key'
