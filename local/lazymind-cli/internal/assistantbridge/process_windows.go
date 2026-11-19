@@ -97,7 +97,7 @@ func startBridgeOutsideJob(command *exec.Cmd) (<-chan error, func(), error) {
 	defer os.Remove(config.Name())
 	err = json.NewEncoder(config).Encode(map[string]any{
 		"executable": command.Path, "arguments": command.Args[1:],
-		"environment": command.Env, "log": logPath,
+		"environment": command.Env,
 	})
 	closeErr := config.Close()
 	if err != nil {
@@ -106,18 +106,7 @@ func startBridgeOutsideJob(command *exec.Cmd) (<-chan error, func(), error) {
 	if closeErr != nil {
 		return nil, nil, closeErr
 	}
-	path := "'" + strings.ReplaceAll(config.Name(), "'", "''") + "'"
-	script := strings.Join([]string{
-		"$ErrorActionPreference = 'Stop'",
-		"$config = Get-Content -LiteralPath " + path + " -Raw -Encoding UTF8 | ConvertFrom-Json",
-		"Remove-Item -LiteralPath " + path,
-		"foreach ($entry in $config.environment) { $pair = $entry.Split(@('='), 2); if ($pair[0]) { [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process') } }",
-		"$arguments = @($config.arguments)",
-		"$ErrorActionPreference = 'Continue'",
-		// PowerShell redirection treats brackets in paths as wildcards.
-		"& $config.executable @arguments 2>&1 | Out-File -LiteralPath $config.log -Append -Encoding UTF8",
-		"exit $LASTEXITCODE",
-	}, "; ")
+	script := bridgeBootstrapCommand(config.Name(), logPath)
 	childCommand := "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + encodePowerShell(script)
 	create := strings.Join([]string{
 		"$ErrorActionPreference = 'Stop'",
@@ -145,15 +134,18 @@ func startBridgeOutsideJob(command *exec.Cmd) (<-chan error, func(), error) {
 		stop.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 		_ = stop.Run()
 	}
-	// WMI returns before the new PowerShell process has consumed its config.
+	// WMI returns before the new PowerShell process has applied its config.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if _, err := os.Stat(config.Name()); errors.Is(err, os.ErrNotExist) {
 			break
 		}
-		if ownerExited(pid) || time.Now().After(deadline) {
+		if ownerExited(pid) {
+			return nil, nil, fmt.Errorf("independent Assistant Bridge exited during launch preparation; inspect %s", logPath)
+		}
+		if time.Now().After(deadline) {
 			kill()
-			return nil, nil, errors.New("independent Assistant Bridge could not read its launch configuration")
+			return nil, nil, fmt.Errorf("independent Assistant Bridge launch preparation timed out; inspect %s", logPath)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -166,6 +158,41 @@ func startBridgeOutsideJob(command *exec.Cmd) (<-chan error, func(), error) {
 	}()
 	return done, kill, nil
 }
+
+func bridgeBootstrapCommand(configPath, logPath string) string {
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
+	return "$configPath = " + quote(configPath) + "; $logPath = " + quote(logPath) + "\n" + bridgeBootstrapScript
+}
+
+const bridgeBootstrapScript = `
+$ErrorActionPreference = 'Stop'
+$stage = 'read launch configuration'
+try {
+    $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $stage = 'restore environment'
+    foreach ($entry in $config.environment) {
+        # -split avoids binding the limit to StringSplitOptions in Windows PowerShell.
+        $pair = $entry -split '=', 2
+        if ($pair.Count -eq 2 -and $pair[0]) { [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process') }
+    }
+    $stage = 'prepare executable'
+    $executable = (Get-Item -LiteralPath $config.executable -ErrorAction Stop).FullName
+    $arguments = @($config.arguments)
+    Remove-Item -LiteralPath $configPath
+    $stage = 'run executable'
+    $ErrorActionPreference = 'Continue'
+    $global:LASTEXITCODE = 1
+    & $executable @arguments 2>&1 | Out-File -LiteralPath $logPath -Append -Encoding UTF8 -ErrorAction Stop
+    $status = $LASTEXITCODE
+    if ($status -ne 0) {
+        [IO.File]::AppendAllText($logPath, "Assistant Bridge executable returned exit code $status" + [Environment]::NewLine)
+    }
+    exit $status
+} catch {
+    [IO.File]::AppendAllText($logPath, "Assistant Bridge bootstrap failed during ${stage}: $($_.Exception.GetType().Name)" + [Environment]::NewLine)
+    exit 1
+}
+`
 
 func encodePowerShell(script string) string {
 	chars := utf16.Encode([]rune(script))
