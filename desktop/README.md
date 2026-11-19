@@ -199,6 +199,9 @@ deployment receives a private context beneath `~/.lazymind/environments/`.
 Signing out of one deployment does not clear the other's login. Business data
 is neither shared nor migrated.
 
+WorkBuddy has one registration per operating-system user. Disconnect it from
+the owning LazyMind deployment before connecting it to another deployment.
+
 `make up` acquires a deployment reference to the shared bridge; `make down`
 releases that reference. Desktop's Agent Host similarly releases its reference
 when it exits. Closing a Desktop window still uses the existing background mode.

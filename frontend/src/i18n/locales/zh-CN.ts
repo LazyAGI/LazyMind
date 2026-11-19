@@ -2496,6 +2496,7 @@ const zhCN = {
     },
     setupFeedback: {
       environmentMismatch: "现有接入配置属于其他 LazyMind 环境。请核对当前环境，再重新配置接入。",
+      workbuddyRegistrationOccupied: "WorkBuddy 已连接到另一套 LazyMind 部署。请先在原部署中断开，再连接到这里。",
       readFailed: "无法读取接入配置，请重新检测。",
       enableFailed: "开启失败，请重试。",
       disableFailed: "关闭失败，请重试。",

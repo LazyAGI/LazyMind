@@ -2534,6 +2534,7 @@ const enUS = {
     },
     setupFeedback: {
       environmentMismatch: "The existing connection configuration belongs to another LazyMind environment. Check the current environment, then configure access again.",
+      workbuddyRegistrationOccupied: "WorkBuddy is connected to another LazyMind deployment. Disconnect it from that deployment before connecting it here.",
       readFailed: "Unable to read connection settings. Check again.",
       enableFailed: "Could not enable the connection. Try again.",
       disableFailed: "Could not disable the connection. Try again.",

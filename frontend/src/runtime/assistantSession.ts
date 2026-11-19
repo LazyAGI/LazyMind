@@ -47,7 +47,7 @@ async function discoverAssistantBridge(): Promise<string> {
         const response = await fetch(`${base}/health`, { signal: controller.signal });
         if (!response.ok) return undefined;
         const health = await response.json() as { service?: string; version?: string; platform?: string; isolated?: boolean };
-        if (health.service !== "lazymind-assistant-bridge" || health.version !== "v10" || health.isolated !== false) return undefined;
+        if (health.service !== "lazymind-assistant-bridge" || health.version !== "v11" || health.isolated !== false) return undefined;
         if (platform && health.platform !== platform) return undefined;
         return base;
       } catch { return undefined; }

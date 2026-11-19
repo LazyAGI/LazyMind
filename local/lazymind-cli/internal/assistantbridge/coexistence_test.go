@@ -161,6 +161,10 @@ func TestBrowserSessionsRouteToIndependentStores(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatalf("%s: %d %s", method, w.Code, w.Body.String())
 		}
+		origins := w.Header().Values("Access-Control-Allow-Origin")
+		if len(origins) != 1 || origins[0] != "http://localhost:8090" {
+			t.Fatalf("%s: browser needs exactly one allowed origin, got %q", method, origins)
+		}
 		body, _ := os.ReadFile(filepath.Join(b.root, "credentials.json"))
 		if !bytes.Contains(body, []byte("desktop-token")) {
 			t.Fatal("Compose overwrote or cleared Desktop login")
@@ -179,6 +183,70 @@ func TestBrowserSessionsRouteToIndependentStores(t *testing.T) {
 	child.routes().ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatalf("cross-environment request=%d", w.Code)
+	}
+}
+
+func TestComposeOriginDoesNotUseSavedDesktopAddress(t *testing.T) {
+	s, b := sharedTestServer(t)
+	origin := "http://localhost:8090"
+	if err := s.store.Save(credentials.Credentials{ServerURL: origin, AccessToken: "test-access", RefreshToken: "test-refresh", LocalRuntimeID: "old-desktop"}); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := connectorconfig.OriginIdentity(origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose, err := connectorconfig.EnvironmentHome(b.root, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.clients["compose"] = ClientOptions{ID: "compose", Home: compose, ServerURL: origin}
+	home, err := b.browserHome(identity)
+	if err != nil || home != compose {
+		t.Fatalf("registered Compose origin routed to %q, want %q: %v", home, compose, err)
+	}
+	delete(b.clients, "compose")
+	home, err = b.browserHome(identity)
+	if err != nil || home != compose {
+		t.Fatalf("historical Desktop address claimed an unregistered browser: home=%q err=%v", home, err)
+	}
+}
+
+func TestIsolatedDesktopAcceptsOnlyItsRegisteredOrigin(t *testing.T) {
+	root := t.TempDir()
+	const desktopOrigin = "http://localhost:8091"
+	const composeOrigin = "http://localhost:8090"
+	composeIdentity, err := connectorconfig.OriginIdentity(composeOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connectorconfig.EnvironmentHome(root, composeIdentity); err != nil {
+		t.Fatal(err)
+	}
+	desktop, err := connectorconfig.EnvironmentHome(root, "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &sharedBridge{root: root, clients: map[string]ClientOptions{
+		"desktop": {ID: "desktop", Home: desktop, OwnerPID: os.Getpid(), ServerURL: desktopOrigin},
+		"compose": {ID: "compose", Home: root, ServerURL: composeOrigin},
+	}}
+	if err := b.saveClients(); err != nil {
+		t.Fatal(err)
+	}
+	s := scopedTestServer(t, desktop)
+	s.isolated = true
+	for origin, want := range map[string]int{
+		desktopOrigin: http.StatusOK,
+		composeOrigin: http.StatusForbidden,
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/v1/executors", nil)
+		request.Header.Set("Origin", origin)
+		response := httptest.NewRecorder()
+		s.routes().ServeHTTP(response, request)
+		if response.Code != want {
+			t.Fatalf("origin %s: got HTTP %d, want %d", origin, response.Code, want)
+		}
 	}
 }
 

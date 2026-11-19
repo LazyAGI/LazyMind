@@ -3,6 +3,7 @@
 package assistantbridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -102,7 +103,7 @@ func startBridgeOutsideJob(command *exec.Cmd) (<-chan error, func(), error) {
 	path := "'" + strings.ReplaceAll(config.Name(), "'", "''") + "'"
 	script := strings.Join([]string{
 		"$ErrorActionPreference = 'Stop'",
-		"$config = Get-Content -LiteralPath " + path + " -Raw | ConvertFrom-Json",
+		"$config = Get-Content -LiteralPath " + path + " -Raw -Encoding UTF8 | ConvertFrom-Json",
 		"Remove-Item -LiteralPath " + path,
 		"foreach ($entry in $config.environment) { $pair = $entry.Split(@('='), 2); if ($pair[0]) { [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process') } }",
 		"$arguments = @($config.arguments)",
@@ -111,18 +112,26 @@ func startBridgeOutsideJob(command *exec.Cmd) (<-chan error, func(), error) {
 		"exit $LASTEXITCODE",
 	}, "; ")
 	childCommand := "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + encodePowerShell(script)
-	create := "$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '" + childCommand + "' }; if ($result.ReturnValue -ne 0) { throw \"Win32_Process.Create failed: $($result.ReturnValue)\" }; $result.ProcessId"
+	create := strings.Join([]string{
+		"$ErrorActionPreference = 'Stop'",
+		"$ProgressPreference = 'SilentlyContinue'",
+		"$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '" + childCommand + "' }",
+		"if ($result.ReturnValue -ne 0) { throw \"Win32_Process.Create failed: $($result.ReturnValue)\" }",
+		"[Console]::Out.WriteLine([uint32]$result.ProcessId)",
+	}, "; ")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	launcher := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(create))
 	launcher.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
-	output, err := launcher.CombinedOutput()
+	var diagnostics bytes.Buffer
+	launcher.Stderr = &diagnostics
+	output, err := launcher.Output()
 	if err != nil {
-		return nil, nil, fmt.Errorf("launch independent Assistant Bridge: %w: %s", err, strings.TrimSpace(string(output)))
+		return nil, nil, fmt.Errorf("launch independent Assistant Bridge: %w: %s", err, strings.TrimSpace(diagnostics.String()))
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(output)))
 	if err != nil || pid <= 0 {
-		return nil, nil, errors.New("independent Assistant Bridge returned an invalid PID")
+		return nil, nil, fmt.Errorf("independent Assistant Bridge returned an invalid PID (stdout %d bytes, stderr %d bytes)", len(output), diagnostics.Len())
 	}
 	kill := func() {
 		stop := exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F")

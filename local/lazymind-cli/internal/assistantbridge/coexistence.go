@@ -29,9 +29,8 @@ import (
 	"lazymind/agentconnector/internal/localfile"
 )
 
-// Earlier v9 builds lack either deployment isolation or the new agent routes.
-const bridgeProtocol = "v10"
-const previousScopedBridgeProtocol = "v9"
+// Older brokers still route some requests by their saved Desktop session.
+const bridgeProtocol = "v11"
 const bridgeProduct = "lazymind-assistant-bridge"
 const managementHeader = "X-LazyMind-Bridge-Control"
 const foregroundLauncherJobEnv = "LAZYMIND_CONNECTOR_LAUNCHER_JOB"
@@ -82,6 +81,12 @@ func currentClient(options ClientOptions) (ClientOptions, string, error) {
 			options.ID = "desktop:" + owner + ":" + os.Getenv("LAZYMIND_RUNTIME_OWNER_TOKEN")
 		} else {
 			options.ID = "manual:" + home
+		}
+	}
+	if options.ServerURL == "" && options.OwnerPID > 0 && os.Getenv("LAZYMIND_RUNTIME_PROFILE") == "desktop" {
+		options.ServerURL = os.Getenv("LAZYMIND_DESKTOP_OWNER_ORIGIN")
+		if options.ServerURL != "" && !localOrigin(options.ServerURL) {
+			return options, "", errors.New("invalid Desktop Assistant Bridge origin")
 		}
 	}
 	return options, root, nil
@@ -183,9 +188,9 @@ func compatibleBridge(status map[string]any, home string, isolated bool) bool {
 }
 
 func releasableBridge(status map[string]any, home string) bool {
-	// The previous scoped broker still supports authenticated deployment release.
+	// Older scoped brokers still support authenticated deployment release.
 	version := status["version"]
-	return (version == bridgeProtocol || version == previousScopedBridgeProtocol) && bridgeMatchesScope(status, home, false)
+	return (version == bridgeProtocol || version == "v10" || version == "v9") && bridgeMatchesScope(status, home, false)
 }
 
 func launchBridge(ctx context.Context, executable, home, address string, isolated bool) (map[string]any, error) {
@@ -397,25 +402,36 @@ func ReleaseClient(ctx context.Context, options ClientOptions) error {
 	}
 }
 
+func readBridgeClients(root string) (map[string]ClientOptions, error) {
+	body, err := os.ReadFile(filepath.Join(root, "bridge-clients.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]ClientOptions{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var clients map[string]ClientOptions
+	if err := json.Unmarshal(body, &clients); err != nil {
+		return nil, err
+	}
+	if clients == nil {
+		return nil, errors.New("invalid Assistant Bridge client registry")
+	}
+	return clients, nil
+}
+
 func newSharedBridge(server *Server) (*sharedBridge, error) {
 	root := server.store.Directory()
 	token, err := bridgeControlToken(root)
 	if err != nil {
 		return nil, err
 	}
-	shared := &sharedBridge{server: server, root: root, token: token, clients: map[string]ClientOptions{}, children: map[string]string{}}
-	body, err := os.ReadFile(filepath.Join(root, "bridge-clients.json"))
-	if err == nil {
-		if err := json.Unmarshal(body, &shared.clients); err != nil {
-			return nil, err
-		}
-		if shared.clients == nil {
-			return nil, errors.New("invalid Assistant Bridge client registry")
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	clients, err := readBridgeClients(root)
+	if err != nil {
 		return nil, err
 	}
-	for _, client := range shared.clients {
+	shared := &sharedBridge{server: server, root: root, token: token, clients: clients, children: map[string]string{}}
+	for _, client := range clients {
 		if endpoint, err := connectorconfig.ReadBridgeEndpoint(client.Home); err == nil && client.Home != root {
 			shared.children[client.Home] = endpoint.URL
 		}
@@ -616,15 +632,16 @@ func (b *sharedBridge) wrap(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid LazyMind origin"})
 			return
 		}
-		home, err := b.browserHome(origin, identity)
-		if err != nil {
-			writeError(w, err)
-			return
-		}
 		b.mu.Lock()
 		if b.stopping {
 			b.mu.Unlock()
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "bridge is stopping; retry startup"})
+			return
+		}
+		home, err := b.browserHome(identity)
+		if err != nil {
+			b.mu.Unlock()
+			writeError(w, err)
 			return
 		}
 		endpoint, err := b.endpoint(r.Context(), home)
@@ -643,6 +660,13 @@ func (b *sharedBridge) wrap(next http.Handler) http.Handler {
 		}
 		target, _ := url.Parse(endpoint)
 		proxy := httputil.NewSingleHostReverseProxy(target)
+		proxy.ModifyResponse = func(response *http.Response) error {
+			// The broker's browser middleware already wrote these headers.
+			response.Header.Del("Access-Control-Allow-Origin")
+			response.Header.Del("Access-Control-Allow-Headers")
+			response.Header.Del("Access-Control-Allow-Methods")
+			return nil
+		}
 		proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "this environment's Assistant Bridge is unavailable; retry to reconnect"})
 		}
@@ -650,25 +674,31 @@ func (b *sharedBridge) wrap(next http.Handler) http.Handler {
 	})
 }
 
-func (b *sharedBridge) browserHome(origin, identity string) (string, error) {
-	// A browser opened on Desktop's own server uses that environment too.
-	if _, err := os.Stat(filepath.Join(b.root, "environments.json")); errors.Is(err, os.ErrNotExist) {
-		return connectorconfig.EnvironmentHome(b.root, identity)
-	} else if err != nil {
-		return "", err
-	}
-	home, err := connectorconfig.EnvironmentHome(b.root, "desktop")
-	if err != nil {
-		return "", err
-	}
-	var session struct {
-		Server  string `json:"server_url"`
-		Runtime string `json:"local_runtime_id"`
-	}
-	if body, err := os.ReadFile(filepath.Join(home, "credentials.json")); err == nil && json.Unmarshal(body, &session) == nil && session.Runtime != "" && sameOrigin(origin, session.Server) {
-		return home, nil
+// The caller holds b.mu. Browser requests may reuse an active registration, but
+// never establish ownership of a Desktop environment from saved credentials.
+func (b *sharedBridge) browserHome(identity string) (string, error) {
+	if home, err := registeredBrowserHome(b.clients, identity); home != "" || err != nil {
+		return home, err
 	}
 	return connectorconfig.EnvironmentHome(b.root, identity)
+}
+
+func registeredBrowserHome(clients map[string]ClientOptions, identity string) (string, error) {
+	var home string
+	for _, client := range clients {
+		if client.ServerURL == "" || strings.HasPrefix(client.ID, "browser:") {
+			continue
+		}
+		configured, err := connectorconfig.OriginIdentity(client.ServerURL)
+		if err != nil || configured != identity || (client.OwnerPID > 0 && ownerExited(client.OwnerPID)) {
+			continue
+		}
+		if home != "" && home != client.Home {
+			return "", errors.New("multiple LazyMind deployments registered this browser origin")
+		}
+		home = client.Home
+	}
+	return home, nil
 }
 
 func (s *Server) validLifecycleRequest(r *http.Request) bool {
@@ -747,13 +777,21 @@ func (s *Server) originMatchesEnvironment(origin string) bool {
 	if err != nil {
 		return false
 	}
-	if identity == "desktop" {
-		var session struct {
-			Server string `json:"server_url"`
-		}
-		body, err := os.ReadFile(filepath.Join(s.store.Directory(), "credentials.json"))
-		return err == nil && json.Unmarshal(body, &session) == nil && sameOrigin(origin, session.Server)
-	}
 	expected, err := connectorconfig.OriginIdentity(origin)
-	return err == nil && expected == identity
+	if err != nil {
+		return false
+	}
+	if identity == "desktop" {
+		root, err := connectorconfig.RootHome(s.store.Directory())
+		if err != nil {
+			return false
+		}
+		clients, err := readBridgeClients(root)
+		if err != nil {
+			return false
+		}
+		home, err := registeredBrowserHome(clients, expected)
+		return err == nil && home == s.store.Directory()
+	}
+	return expected == identity
 }

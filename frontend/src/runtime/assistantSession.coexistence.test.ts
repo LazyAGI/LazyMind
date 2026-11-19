@@ -7,8 +7,8 @@ it("skips an incompatible default service and sends the session only to the comp
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     if (url.endsWith("/health")) {
-      if (url.includes(":19091/")) return new Response(JSON.stringify({ service: "lazymind-assistant-bridge", version: "v9", platform: "linux", isolated: false }));
-      if (url.includes(":19092/")) return new Response(JSON.stringify({ service: "lazymind-assistant-bridge", version: "v10", platform: "linux", isolated: false }));
+      if (url.includes(":19091/")) return new Response(JSON.stringify({ service: "lazymind-assistant-bridge", version: "v10", platform: "linux", isolated: false }));
+      if (url.includes(":19092/")) return new Response(JSON.stringify({ service: "lazymind-assistant-bridge", version: "v11", platform: "linux", isolated: false }));
       return new Response(JSON.stringify({ version: "v8" }));
     }
     expect(url).toBe("http://127.0.0.1:19092/v1/session");
@@ -24,7 +24,7 @@ it("skips an incompatible default service and sends the session only to the comp
 it("does not replay a mutation after a lost response", async () => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux");
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    if (String(input).endsWith("/health")) return new Response(JSON.stringify({ service: "lazymind-assistant-bridge", version: "v10", platform: "linux", isolated: false }));
+    if (String(input).endsWith("/health")) return new Response(JSON.stringify({ service: "lazymind-assistant-bridge", version: "v11", platform: "linux", isolated: false }));
     throw new TypeError("connection lost after submission");
   });
   const { assistantBridgeFetch } = await import("./assistantSession");
