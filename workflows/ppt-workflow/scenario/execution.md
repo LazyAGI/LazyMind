@@ -56,7 +56,9 @@ to the current step's acceptance criteria. Review actual rendered pixels when a
 visual check is performed; never infer success from filenames or dimensions.
 Use an available image-understanding tool when the executing model cannot inspect
 pixels. Report unavailable checks and unresolved findings. Keep the last usable
-version through at most two bounded quality repairs. Native PPTX visual review is
+version while repairing any visible content or styling, in both native PPTX and HTML.
+Re-render and review candidates without a fixed round limit. Stop on passed review,
+cancellation, unavailable checks, model failure or repeated versions. Native PPTX visual review is
 advisory after a valid delivery; optional missing material images do not block
 collection. Background visual review is advisory and does not block publication.
 

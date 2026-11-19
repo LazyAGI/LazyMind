@@ -733,9 +733,11 @@ steps:
       - Check overflow, clipping, text/graphic collisions, font readability, image
       presence, aspect ratios and chart labels. Preserve natural glyph widths;
       never stretch text/images with unequal scale to fill a box.
-      - Use the supplied review/repair prompts only for this phase. Apply at most
-      two bounded repairs to defective pages, preserving content and the last usable
-      version. Record findings and any unavailable checks without claiming approval.
+      - Use the supplied review/repair prompts only for this phase. Allow changes to any visible content or styling in native PPTX and HTML,
+      including fonts, colors, images, charts, tables, backgrounds and structure.
+      Re-render and review each candidate with no fixed repair-round limit. Stop on
+      passed review, cancellation, unavailable checks, model failure or repeated
+      versions. Preserve factual meaning and the last usable version. Record findings and any unavailable checks without claiming approval.
       - For native PPTX, visual findings or unavailable rendering/vision are advisory:
       keep a structurally valid, usable delivered file and disclose limitations.
       Do not turn optional visual repair into failure or a parent-chat follow-up task.

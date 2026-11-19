@@ -8,7 +8,11 @@ description: Fill an existing PPTX template with evidence-backed content while p
 Read every page with pptx_analyzer(mode="template", all_pages=true). Its quality_contract is this skill and its
 layout_checks are rough hints, never a publication gate or proof of overflow.
 Delivery takes precedence over visual quality. The fill tool publishes a usable
-PPTX first, then reviews screenshots and attempts at most two geometry-only repairs.
+PPTX first, then reviews screenshots and repairs any visible content or styling.
+Repairs can change OOXML text, fonts, colors, backgrounds, images, tables, charts,
+shapes, layering, masters and layouts; they are not restricted to geometry or IDs.
+Re-render and review each candidate. There is no fixed repair-round limit. Stop on
+passed review, cancellation, unavailable checks, model failure or repeated versions.
 Missing rendering/vision, review errors and unsuccessful repairs keep the last
 delivered version and do not fail the step. Do not rewind upstream planning or
 retry generation to satisfy a quality gate. Disclose unresolved issues accurately.
@@ -55,13 +59,13 @@ not a new research step. Cache hits still require reading the returned content.
   content across repeated source pages when needed.
 - The tool rejects clearly over-capacity changed boxes before writing a file.
   Use its page/shape diagnostics to repair only affected text and resubmit the
-  complete action list against the ORIGINAL template hash. At most two repairs;
-  if still blocked, report the exact limitation instead of bypassing validation.
+  complete action list against the ORIGINAL template hash. Continue while making
+  progress; if blocked or cancelled, report the exact limitation instead of bypassing validation.
 - Whole-paragraph replacements use newline-separated independent paragraphs;
   short rich-text run replacements retain inline breaks. Do not paste several
   unrelated sections into a subtitle. The tool resolves inherited typography.
-- Geometry/text estimates are not visual validation. Validation belongs inside
-  generation, before publication. Successful publication completes generation:
+- Geometry/text estimates are not visual validation. The tool publishes a usable
+  file first and performs advisory visual repair inside generation. After it returns,
   neither the subagent nor parent chat should launch post-generation inspection.
   Report any returned limitations briefly without reopening the workflow or
   claiming native visual verification. A disclosure is not a pending task.
