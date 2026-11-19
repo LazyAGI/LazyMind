@@ -5,7 +5,7 @@ description: Fill an existing PPTX template with evidence-backed content while p
 
 # Template filling quality
 
-Read every page with pptx_analyzer. Its quality_contract is this skill and its
+Read every page with pptx_analyzer(mode="template", all_pages=true). Its quality_contract is this skill and its
 layout_checks are rough hints, never a publication gate or proof of overflow.
 Delivery takes precedence over visual quality. The fill tool publishes a usable
 PPTX first, then reviews screenshots and attempts at most two geometry-only repairs.

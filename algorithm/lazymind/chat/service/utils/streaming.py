@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+import uuid
 from typing import Any, Dict
 from lazyllm import LOG
 
@@ -12,8 +14,29 @@ def response_payload(code: int, msg: str, data: Any, cost: float) -> Dict[str, A
     return {'code': code, 'msg': msg, 'data': data, 'cost': cost}
 
 
+# Keep each encoded line below Core's 512 KiB Scanner limit, including envelope.
+MAX_LINE_BYTES = 256 * 1024
+CHUNK_BYTES = 180 * 1024
+MAX_MESSAGE_BYTES = 32 * 1024 * 1024
+
+
 def sse_line(payload: Dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=False, default=str) + '\n\n'
+    encoded = json.dumps(payload, ensure_ascii=False, default=str)
+    raw = encoded.encode('utf-8')
+    if len(raw) > MAX_MESSAGE_BYTES:
+        raise ValueError('algorithm stream frame exceeds 32 MiB reassembly limit')
+    if len(raw) <= MAX_LINE_BYTES:
+        return encoded + '\n\n'
+    message_id = uuid.uuid4().hex
+    total = (len(raw) + CHUNK_BYTES - 1) // CHUNK_BYTES
+    return ''.join(
+        json.dumps({'stream_chunk': {
+            'version': 1, 'id': message_id, 'index': index, 'total': total,
+            'size': len(raw),
+            'payload': base64.b64encode(raw[offset:offset + CHUNK_BYTES]).decode('ascii'),
+        }}, separators=(',', ':')) + '\n\n'
+        for index, offset in enumerate(range(0, len(raw), CHUNK_BYTES))
+    )
 
 
 def log_and_emit_frame(frame: Any, cost: float, query: str, session_id: str, tag: str = 'FRAME') -> str:
