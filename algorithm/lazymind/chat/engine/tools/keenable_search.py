@@ -36,9 +36,15 @@ class KeenableSearch(SearchBase):
         )
         self._base_url = base_url.rstrip('/')
         self._timeout = timeout
-        # SearchBase(skip_auth=True) would otherwise look always-on. Only treat
-        # the provider as active when the user has selected it.
-        self.__key_source__ = self._is_configured
+
+    def __key_source__(self) -> bool:
+        """Whether this request selected Keenable.
+
+        Defined on the class so LazyLLM's InstanceToolGroup, which reads
+        ``type(instance).__key_source__``, sees the same check as the
+        tool list.
+        """
+        return self._is_configured()
 
     def _is_configured(self) -> bool:
         mapping = lazyllm.globals.config['dynamic_tool_auth'] or {}
@@ -46,11 +52,9 @@ class KeenableSearch(SearchBase):
             return False
         return self.source_name in mapping
 
-    def _token(self) -> str:
-        token = ''
-        getter = getattr(self, '_get_token', None)
-        if callable(getter):
-            token = getter() or ''
+    def _get_token(self) -> str:
+        # Keep the internal "public" marker out of outgoing X-API-Key headers.
+        token = super()._get_token() or ''
         token = str(token).strip()
         if token.lower() == _PUBLIC_TOKEN:
             return ''
@@ -59,15 +63,16 @@ class KeenableSearch(SearchBase):
     @fc_register(host_file='NONE')
     def search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
         max_results = min(50, max_results)
-        token = self._token()
+        token = self._get_token()
         path = '/v1/search' if token else '/v1/search/public'
-        resp = self._request(
-            'POST',
-            f'{self._base_url}{path}',
-            json={'query': query, 'max_results': max_results},
-            headers={'X-Keenable-Title': 'LazyMind'},
-            timeout=self._timeout,
-        )
+        request_kwargs: Dict[str, Any] = {
+            'json': {'query': query, 'max_results': max_results},
+            'headers': {'X-Keenable-Title': 'LazyMind'},
+            'timeout': self._timeout,
+        }
+        if token:
+            request_kwargs['follow_redirects'] = False
+        resp = self._request('POST', f'{self._base_url}{path}', **request_kwargs)
         data = resp.json()
         out: List[Dict[str, Any]] = []
         for it in data.get('results') or []:
@@ -77,7 +82,7 @@ class KeenableSearch(SearchBase):
             out.append(_make_result(
                 title=it.get('title') or '',
                 url=url,
-                snippet=it.get('snippet') or '',
+                snippet=it.get('snippet') or it.get('description') or '',
                 source=self.source_name,
             ))
         return out[:max_results]

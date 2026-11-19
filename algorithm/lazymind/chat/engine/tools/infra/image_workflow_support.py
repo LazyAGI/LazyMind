@@ -36,6 +36,8 @@ from lazyllm.tools.tools.search import (
     TavilySearch,
 )
 
+from lazymind.chat.engine.tools.keenable_search import KeenableSearch
+
 from lazymind.chat.service.utils.static_file_url import (
     _upload_root,
     local_path_from_static_file_url,
@@ -52,6 +54,7 @@ _SEARCH_ENGINES = [
     BingSearch(),
     BochaSearch(),
     TavilySearch(),
+    KeenableSearch(),
 ]
 
 _PROBE_BYTES = 8192
@@ -312,7 +315,7 @@ def require_image_search_configuration(engines=None) -> None:
     missing = {
         'id': 'web_search', 'label': '网络图片搜索', 'available': False,
         'settings_url': '/settings?section=knowledge&tool=web-search',
-        'reason': '尚未配置可用的搜索引擎，请配置 Tavily 或 Bocha 后重试当前素材收集步骤。',
+        'reason': '尚未配置可用的搜索引擎，请配置 Tavily、Bocha 或 Keenable 后重试当前素材收集步骤。',
     }
     raise ToolExecutionError('MEDIA_CAPABILITY_DEPENDENCY_MISSING ' + json.dumps({
         'status': 'blocked', 'workflow': 'image_search', 'required': ['web_search'],
