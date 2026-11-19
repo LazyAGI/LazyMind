@@ -83,15 +83,21 @@ func startBridgeOutsideJob(command *exec.Cmd) (<-chan error, func(), error) {
 	if !ok {
 		return nil, nil, errors.New("Assistant Bridge requires a log file")
 	}
+	logPath := log.Name()
+	// The failed Go launch left an open writer. Release it before PowerShell
+	// opens the same path using a sharing mode that disallows other writers.
+	if err := log.Close(); err != nil {
+		return nil, nil, fmt.Errorf("close Assistant Bridge log before WMI launch: %w", err)
+	}
 	// Keep inherited environment values out of observable process command lines.
-	config, err := os.CreateTemp(filepath.Dir(log.Name()), ".bridge-launch-*.json")
+	config, err := os.CreateTemp(filepath.Dir(logPath), ".bridge-launch-*.json")
 	if err != nil {
 		return nil, nil, err
 	}
 	defer os.Remove(config.Name())
 	err = json.NewEncoder(config).Encode(map[string]any{
 		"executable": command.Path, "arguments": command.Args[1:],
-		"environment": command.Env, "log": log.Name(),
+		"environment": command.Env, "log": logPath,
 	})
 	closeErr := config.Close()
 	if err != nil {
@@ -108,7 +114,8 @@ func startBridgeOutsideJob(command *exec.Cmd) (<-chan error, func(), error) {
 		"foreach ($entry in $config.environment) { $pair = $entry.Split(@('='), 2); if ($pair[0]) { [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process') } }",
 		"$arguments = @($config.arguments)",
 		"$ErrorActionPreference = 'Continue'",
-		"& $config.executable @arguments >> $config.log 2>&1",
+		// PowerShell redirection treats brackets in paths as wildcards.
+		"& $config.executable @arguments 2>&1 | Out-File -LiteralPath $config.log -Append -Encoding UTF8",
 		"exit $LASTEXITCODE",
 	}, "; ")
 	childCommand := "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + encodePowerShell(script)

@@ -97,7 +97,13 @@ test('real Windows Bridge starts, reports native staged identity and stops', {
   await new Promise(resolve => listener.close(resolve));
   const f = fixture(t, process.env.LAZYMIND_TEST_BRIDGE_EXE);
   try {
-    success(f.run('start'), 'start');
+    const started = f.run('start');
+    const bridgeLog = path.join(f.env.USERPROFILE, '.lazymind', 'logs', 'assistant-bridge.log');
+    if (started.status !== 0 && existsSync(bridgeLog)) {
+      const recentLog = readFileSync(bridgeLog, 'utf8').slice(-4096).trim();
+      if (recentLog) started.stderr = `${started.stderr || ''}\nBridge log tail:\n${recentLog}`;
+    }
+    success(started, 'start');
     const result = spawnSync(f.installed, ['assistant', 'status'], { encoding: 'utf8', timeout: 10000 });
     assert.equal(result.status, 0, result.stderr);
     const health = JSON.parse(result.stdout);
