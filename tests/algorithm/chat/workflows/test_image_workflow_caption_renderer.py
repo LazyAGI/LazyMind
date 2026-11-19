@@ -7,6 +7,8 @@ import sys
 import pytest
 from PIL import Image, ImageFont, ImageSequence
 
+from lazymind.chat.engine.tools import system_resources
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
@@ -27,6 +29,11 @@ def latin_font(tmp_path):
     path = tmp_path / 'latin.ttf'
     path.write_bytes(font.path.getvalue())
     return str(path)
+
+
+@pytest.fixture(autouse=True)
+def managed_owner(monkeypatch):
+    monkeypatch.setattr(system_resources, 'current_user_id', lambda: 'caption-test-user')
 
 
 def test_caption_layout_centers_text_in_default_normalized_box(latin_font):
