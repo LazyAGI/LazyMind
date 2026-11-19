@@ -5385,7 +5385,7 @@ def _agent_llm_call(
 
     instruction = _sanitize_prompt(system_prompt or '')
     prompt_input = user_prompt or ''
-    idle_timeout = float(os.environ.get('LAZYMIND_PPT_LLM_TIMEOUT', '30'))
+    idle_timeout = float(os.environ.get('LAZYMIND_PPT_LLM_TIMEOUT', '120'))
     # A caller may tighten the inactivity limit, but an old per-request budget
     # must not silently extend the configured stream silence timeout.
     effective_timeout = min(float(timeout), idle_timeout) if timeout is not None else idle_timeout

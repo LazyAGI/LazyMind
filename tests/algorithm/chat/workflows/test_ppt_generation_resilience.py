@@ -906,7 +906,7 @@ def test_slow_active_pages_have_no_default_wall_clock_deadline(monkeypatch, tmp_
     assert result['status'] == 'ok'
     assert result['published_count'] == 2
     assert result['budget']['stop_reason'] is None
-    assert [call['timeout'] for call in model.calls] == [30, 30]
+    assert [call['timeout'] for call in model.calls] == [120, 120]
 
 
 def test_default_page_failures_do_not_skip_remaining_pages(monkeypatch, tmp_path, tools):
@@ -925,7 +925,7 @@ def test_default_page_failures_do_not_skip_remaining_pages(monkeypatch, tmp_path
 
 
 @pytest.mark.parametrize('caller_timeout,configured,expected', [
-    (None, None, 30), (300, None, 30), (10, None, 10), (300, '45', 45),
+    (None, None, 120), (300, None, 120), (10, None, 10), (300, '45', 45),
 ])
 def test_ppt_stream_inactivity_timeout(monkeypatch, tools, caller_timeout, configured, expected):
     monkeypatch.delenv('LAZYMIND_PPT_LLM_TIMEOUT', raising=False)
