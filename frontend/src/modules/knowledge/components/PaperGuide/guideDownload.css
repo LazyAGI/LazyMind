@@ -21,6 +21,8 @@ td, th { padding: .4em; border-bottom: 1px solid var(--paper-border) }
 figure { margin: 1.25rem 0; text-align: center; break-inside: avoid }
 img { max-width: 100%; height: auto }
 iframe { width: 100%; border: 1px solid var(--paper-border); box-sizing: border-box }
+.guide-interaction__provenance, .guide-interaction__parameter-value, .guide-interaction__results small, .guide-interaction__formula small { display: block }
+.guide-interaction__panel { margin-block: .5rem }
 summary { cursor: pointer; font-weight: 600 }
 details { padding: .5rem 0 }
 .is-display, .paper-guide-table-scroll { overflow-x: auto }

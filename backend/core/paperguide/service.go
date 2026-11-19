@@ -95,15 +95,20 @@ type ProgressRequest struct {
 	Offset     int    `json:"offset"`
 	Mode       string `json:"mode"`
 }
+
 func view(r orm.PaperGuideRevision) RevisionView {
 	var m ModelIdentity
 	_ = json.Unmarshal([]byte(r.ModelJSON), &m)
+	var resumeBlockReason string
+	if stop := qualityStop(r); stop != nil {
+		resumeBlockReason = stop.Error()
+	}
 	return RevisionView{
 		ID: r.ID, Status: r.Status, SourceSHA256: r.SourceSHA256, IRDigest: r.IRDigest, Version: r.ChangeVersion,
 		Model: m, CreatedAt: r.CreatedAt,
 		Run: RunView{
 			ID: r.ID, Stage: r.Stage, JobID: r.JobID, ErrorCode: r.ErrorCode,
-			ResumeBlockReason: resumeBlockReason(r),
+			ResumeBlockReason: resumeBlockReason,
 			CallsUsed:         r.CallsUsed, CallLimit: MaxCalls, ActiveMillis: r.ActiveMillis,
 		},
 	}
@@ -135,16 +140,17 @@ func (s Service) Status(ctx context.Context, scope Scope) (StatusResponse, error
 			out.UnavailableReason = ErrMaterial.Error()
 		}
 	}
-	if source.Snapshot == nil && !source.CanPrepare {
-		out.CanGenerate = false
-		out.UnavailableReason = ErrPreparation.Error()
-		if source.PrecisionUnavailable {
-			out.UnavailableReason = ErrPrecision.Error()
+	if out.CanGenerate {
+		switch {
+		case errors.Is(e, ErrSourceChanged):
+			out.UnavailableReason = ErrSourceChanged.Error()
+		case source.Snapshot == nil && !source.CanPrepare:
+			out.UnavailableReason = ErrPreparation.Error()
+			if source.PrecisionUnavailable {
+				out.UnavailableReason = ErrPrecision.Error()
+			}
 		}
-	}
-	if errors.Is(e, ErrSourceChanged) {
-		out.CanGenerate = false
-		out.UnavailableReason = ErrSourceChanged.Error()
+		out.CanGenerate = out.UnavailableReason == ""
 	}
 	g, e := s.Repo.Guide(ctx, scope)
 	if errors.Is(e, gorm.ErrRecordNotFound) {
@@ -481,17 +487,22 @@ func (s Service) observedView(ctx context.Context, r orm.PaperGuideRevision) Rev
 		}
 		return out
 	}
-	if r.Stage == "completed" || r.Stage == "canceled" || r.Stage == "source_changed" || r.Stage == "paused" || r.Stage == "failed" {
-		return out
-	}
-	var job orm.AsyncJob
-	if s.Repo.DB.WithContext(ctx).Where("id = ?", r.JobID).Take(&job).Error == nil {
-		if job.Status == "failed" {
-			out.Run.Stage = "paused"
-			out.Run.ErrorCode = ErrGeneration.Error()
+	if r.Stage != "completed" && r.Stage != "canceled" && r.Stage != "source_changed" && r.Stage != "paused" && r.Stage != "failed" {
+		var job orm.AsyncJob
+		if s.Repo.DB.WithContext(ctx).Where("id = ?", r.JobID).Take(&job).Error == nil {
+			if job.Status == "failed" {
+				out.Run.Stage = "paused"
+				out.Run.ErrorCode = ErrGeneration.Error()
+			}
+			if job.Status == "canceled" {
+				out.Run.Stage = "canceled"
+			}
 		}
-		if job.Status == "canceled" {
-			out.Run.Stage = "canceled"
+	}
+	switch out.Run.Stage {
+	case "paused", "canceled", "failed":
+		if out.Run.ResumeBlockReason == "" && errors.Is(s.Repo.checkResumeBudget(ctx, r), ErrBudget) {
+			out.Run.ResumeBlockReason = ErrBudget.Error()
 		}
 	}
 	return out

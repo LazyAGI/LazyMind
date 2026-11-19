@@ -27,6 +27,7 @@ export function rangeAtUnicodeOffset(
   return range;
 }
 export function visibleTextOffset(element: HTMLElement, top: number): number {
+  if (element instanceof HTMLDetailsElement && !element.open) return 0;
   const length = sourceTextLength(element);
   let low = 0,
     high = length;

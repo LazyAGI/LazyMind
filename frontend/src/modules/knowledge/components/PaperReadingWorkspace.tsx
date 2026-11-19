@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { downloadPaperGuide } from "./PaperGuide/guideDownload";
 import GuideSectionIcon from "./PaperGuide/GuideSectionIcon";
 import GuideGenerationProgress, { GuideSkeleton } from "./PaperGuide/GuideGenerationProgress";
@@ -41,8 +42,15 @@ import type { PdfIRDocument } from "../api/pdfIR";
 
 const languageOptions = [{ value: "zh", label: "简体中文" }, { value: "en", label: "English" }];
 
+const budgetStopCode = "paper_guide_budget_exhausted";
 const qualityStopCode = "paper_guide_review_required";
 const regenerationCode = "paper_guide_regeneration_required";
+
+const blockedResumeReasons = new Map<string, typeof budgetStopCode | typeof qualityStopCode | typeof regenerationCode>([
+  ["2004404", budgetStopCode], [budgetStopCode, budgetStopCode],
+  ["2004411", qualityStopCode], [qualityStopCode, qualityStopCode],
+  ["2004413", regenerationCode], [regenerationCode, regenerationCode],
+] as const);
 
 function guideRequestId(error: unknown): string | undefined {
   const response = (error as { response?: {
@@ -122,7 +130,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const mutationSequence = useRef(0);
   const [rejectedResume, setRejectedResume] = useState<{
     scope: string;
-    reason: typeof qualityStopCode | typeof regenerationCode;
+    reason: typeof qualityStopCode | typeof regenerationCode | typeof budgetStopCode;
     requestId?: string;
   }>();
   const resumeRejection =
@@ -130,6 +138,8 @@ export default function PaperReadingWorkspace(p: Props) {
   const requiresRegeneration =
     candidate?.run.error_code === regenerationCode ||
     resumeRejection === regenerationCode;
+  const budgetBlocked = candidate?.run.resume_block_reason === budgetStopCode ||
+    candidate?.run.error_code === budgetStopCode || resumeRejection === budgetStopCode;
   const qualityBlocked =
     candidate?.run.resume_block_reason === qualityStopCode ||
     candidate?.run.error_code === qualityStopCode ||
@@ -229,7 +239,7 @@ export default function PaperReadingWorkspace(p: Props) {
         const accepted = await paperGuideApi.generate({ ...target, language: generationLanguage }, {
           language: generationLanguage,
           expected_source_hash: guide.status?.source_sha256 || "",
-          idempotency_key: crypto.randomUUID(),
+          idempotency_key: uuidv4(),
           regenerate: action === "regenerate",
           ...(action === "regenerate" && model ? { model_ref: model } : {}),
         });
@@ -253,12 +263,7 @@ export default function PaperReadingWorkspace(p: Props) {
       if (isCurrent()) {
         setPendingGeneration(false);
         const code = action === "resume" ? extractErrorCode(e) : undefined;
-        const reason =
-          code === "2004413"
-            ? regenerationCode
-            : code === "2004411" || code === qualityStopCode
-              ? qualityStopCode
-              : undefined;
+        const reason = code ? blockedResumeReasons.get(code) : undefined;
         if (reason) {
           // Keep this revision blocked if the next status fetch fails or is stale.
           setRejectedResume({ scope: mutationScope, reason, requestId: guideRequestId(e) });
@@ -401,7 +406,7 @@ export default function PaperReadingWorkspace(p: Props) {
   const qualityHelp = zh
     ? "当前版本无法继续生成，请重新生成导读。"
     : "This revision can’t continue. Generate a new guide.";
-  const runReason = requiresRegeneration
+  const runReason = budgetBlocked ? reasonText(budgetStopCode) : requiresRegeneration
     ? reasonText(regenerationCode)
     : qualityBlocked
       ? qualityHelp
@@ -550,9 +555,9 @@ export default function PaperReadingWorkspace(p: Props) {
                     {zh ? "取消后续生成" : "Cancel remaining generation"}
                   </Button>
                 ) : (
-                  (requiresRegeneration || qualityBlocked || resumable || stage === "source_changed") && (
+                  (requiresRegeneration || qualityBlocked || budgetBlocked || resumable || stage === "source_changed") && (
                     <>
-                      {resumable && !requiresRegeneration && !qualityBlocked && (
+                      {resumable && !requiresRegeneration && !qualityBlocked && !budgetBlocked && (
                         <Button
                           disabled={busy || !guide.status?.can_generate}
                           onClick={() => void run("resume")}

@@ -37,6 +37,10 @@ function waitForFigures(article: HTMLElement, zh: boolean) {
     });
     const timer = setTimeout(() => finish(zh ? "原图仍在加载，请稍后重试。" : "Figures are still loading. Try again shortly."), 20000);
     observer.observe(article, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-busy"] });
+    // Removing a reader does not emit a mutation inside its own subtree.
+    for (let parent = article.parentNode; parent; parent = parent.parentNode) {
+      observer.observe(parent, { childList: true });
+    }
   });
 }
 
@@ -63,9 +67,17 @@ export async function guideDownloadDocument(source: HTMLElement, language: strin
     if (!section.querySelector("[data-guide-block]")) section.remove();
     else section.insertAdjacentHTML("beforeend", imprint);
   }
+  for (const control of article.querySelectorAll(".guide-interaction__steps,.guide-interaction__actions,.guide-interaction__filter,.guide-interaction input,.guide-interaction__range,.guide-interaction__panel > small.guide-interaction__direction")) control.remove();
+  for (const item of article.querySelectorAll("[data-export-item]")) {
+    item.removeAttribute("hidden");
+    item.removeAttribute("data-export-item");
+  }
   for (const button of article.querySelectorAll("button")) {
     const image = button.querySelector("img");
-    if (image) button.replaceWith(image);
+    if (image) {
+      image.hidden = false;
+      button.replaceWith(image);
+    }
     else button.replaceWith(button.textContent || "");
   }
   for (const status of article.querySelectorAll(".paper-guide-image-frame [role=status]")) {

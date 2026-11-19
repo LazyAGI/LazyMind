@@ -342,3 +342,77 @@ func TestGuideArchiveReplacementBetweenReads(t *testing.T) {
 		}
 	}
 }
+
+func TestGuideObservationReusesOnlyCurrentAuthorizedMaterial(t *testing.T) {
+	db, hash, source := guideHTTPFixture(t)
+	scope := paperguide.Scope{OwnerID: "owner", DatasetID: "guide-ds", DocumentID: "guide-doc", Language: "en"}
+	provider := paperGuideSource{}
+	load := func() paperguide.SourceState {
+		t.Helper()
+		state, err := provider.Load(t.Context(), scope, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	first := load()
+	if first.Snapshot == nil || first.Snapshot != load().Snapshot {
+		t.Fatal("repeated source check rebuilt the snapshot")
+	}
+	peer := scope
+	peer.OwnerID = "other"
+	if guideMaterialKey(peer, source, hash, nil) == guideMaterialKey(scope, source, hash, nil) {
+		t.Fatal("cache key omitted the snapshot owner")
+	}
+	if _, err := provider.Load(t.Context(), peer, false); !errors.Is(err, paperguide.ErrForbidden) {
+		t.Fatalf("unauthorized viewer reused the observation: %v", err)
+	}
+	var job orm.AsyncJob
+	if err := db.First(&job, "id = ?", "guide-ir").Error; err != nil {
+		t.Fatal(err)
+	}
+	var artifact pdfIRResult
+	if err := json.Unmarshal(job.ResultJSON, &artifact); err != nil {
+		t.Fatal(err)
+	}
+	raw, ir := guidePrecisionFixtureWithBodyBox(t, hash, "85")
+	for path, data := range map[string][]byte{artifact.RawPath: raw, artifact.IRPath: mustJSON(ir)} {
+		old, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, old.ModTime(), old.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := load()
+	if second.Snapshot == nil || second.Snapshot.IRDigest == first.Snapshot.IRDigest {
+		t.Fatal("parser output changed in place but the old projection remained current")
+	}
+	if _, err := provider.Load(t.Context(), scope, true); err != nil {
+		t.Fatal(err)
+	}
+	third := load()
+	if third.Snapshot == nil || third.Snapshot != load().Snapshot {
+		t.Fatal("prepared material was not reused")
+	}
+	files, err := filepath.Glob(filepath.Join(filepath.Dir(artifact.IRPath), "source-precision-*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("missing precision sibling: %v %v", files, err)
+	}
+	if err := os.WriteFile(files[0], []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if observed := load(); !observed.PrecisionUnavailable || observed.Snapshot != nil {
+		t.Fatal("corrupt derived projection remained available")
+	}
+	if err := os.WriteFile(source, []byte("%PDF-modified"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if state := load(); state.Hash == hash || state.Snapshot != nil {
+		t.Fatal("changed PDF reused an old projection")
+	}
+}

@@ -431,6 +431,19 @@ func TestPaperGuideModelTokenLimitsUseConfiguredUnitsAndMinimum(t *testing.T) {
 			t.Fatalf("%s/%s: got %d want %d (%v)", tc.window, tc.input, model.ContextTokens, tc.want, err)
 		}
 	}
+	for _, tc := range []struct {
+		output  string
+		overlap int
+	}{{"32K", 0}, {"112K", 16 * 1024}} {
+		db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "a").Updates(map[string]any{
+			"max_input_tokens": "128K", "input_token_limit": "32K", "max_output_tokens": tc.output,
+		})
+		model, _, err := resolvePaperGuideModel(t.Context(), scope, "own:a")
+		if err != nil || model.ContextTokens != 32*1024 || model.OutputReserveTokens != tc.overlap {
+			t.Fatalf("output %s overlaps the input allowance by %d, got %+v (%v)", tc.output, tc.overlap, model, err)
+		}
+	}
+
 }
 
 func TestPaperGuideCatalogPathDoesNotReuseLegacySnapshot(t *testing.T) {
@@ -789,9 +802,18 @@ func TestGuideErrorReferenceMatchesLogAndRedactsWrappedCause(t *testing.T) {
 }
 
 func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.T) {
-	for _, kind := range []string{"task_type", "task_version", "model_calls", "transport", "timeout", "section_schema"} {
+	for _, kind := range []string{"task_type", "task_version", "model_calls", "transport", "timeout", "token_limit", "section_schema"} {
 		t.Run(kind, func(t *testing.T) {
 			db, hash, _ := guideHTTPFixture(t)
+			if kind == "token_limit" {
+				// Both caps fit concurrently within the full window. Planning must
+				// reach the provider, which reports its own normalized token limit.
+				if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "a").Updates(map[string]any{
+					"max_input_tokens": "128K", "input_token_limit": "32K", "max_output_tokens": "32K",
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
 			t.Setenv("LAZYMIND_PAPER_GUIDE_ENABLED", "true")
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
 			previous := http.DefaultTransport
@@ -827,6 +849,9 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 				}
 				if kind == "transport" {
 					return nil, errors.New("provider-secret")
+				}
+				if kind == "token_limit" {
+					return testJSONResponse(400, `{"detail":{"error_code":"token_limit","usage":{"model_calls":1}}}`), nil
 				}
 				if kind == "timeout" {
 					return testJSONResponse(504, `{"detail":{"error_code":"task_timeout","usage":{"model_calls":1,"elapsed_ms":120000}}}`), nil
@@ -866,6 +891,9 @@ func TestPaperGuideClientContractFailuresReachRunnerAsEvidenceErrors(t *testing.
 			}
 			if kind == "transport" {
 				want, class = paperguide.ErrModelRequest, "transport"
+			}
+			if kind == "token_limit" {
+				want, class = paperguide.ErrContext, "context"
 			}
 			if kind == "timeout" {
 				want, class = paperguide.ErrModelTimeout, "timeout"

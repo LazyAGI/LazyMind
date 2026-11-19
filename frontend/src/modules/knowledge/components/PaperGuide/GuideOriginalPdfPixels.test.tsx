@@ -133,7 +133,7 @@ it("renders exact figure and equation pixels on their own pages of an authentica
       .some((value, index) => index % 4 === 0 && value < 80)).toBe(true);
 
     const onOpenPage = vi.fn();
-    render(
+    const asset = render(
       <PaperGuideAsset
         language="en"
         evidence={equation}
@@ -143,12 +143,16 @@ it("renders exact figure and equation pixels on their own pages of an authentica
       />,
     );
     const equationImage = await screen.findByRole("img", { name: /PDF page 3/ });
-    expect(equationImage).toHaveAttribute("src", eq!.url);
+    const displayedUrl = equationImage.getAttribute("src")!;
+    expect(displayedUrl).not.toBe(eq!.url);
+    expect(await pixels(displayedUrl, 86, 32)).toEqual([255, 255, 0, 255]);
     expect(screen.queryByText(/Equation \(4\)/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open PDF page 3" }));
     expect(onOpenPage).toHaveBeenCalledWith(expect.objectContaining({
       source_type: "formula", locator: { kind: "page", page: 2 },
     }));
+    asset.unmount();
+    expect(images.has(displayedUrl)).toBe(false);
   } finally {
     hook.unmount();
     vi.restoreAllMocks();

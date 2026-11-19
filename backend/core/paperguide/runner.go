@@ -16,17 +16,18 @@ import (
 )
 
 type execution struct {
-	started          time.Time
-	callTime         int64
-	overheadReserved bool
-	s                Service
-	scope            Scope
-	rev              orm.PaperGuideRevision
-	model            ModelIdentity
-	snap             GuideSourceSnapshot
-	f                asyncjob.FencedReporter
-	steps            map[string]orm.PaperGuideStep
-	excerpts         []sourceExcerpt
+	chapterReservations *attemptReservations
+	started             time.Time
+	callTime            int64
+	overheadReserved    bool
+	s                   Service
+	scope               Scope
+	rev                 orm.PaperGuideRevision
+	model               ModelIdentity
+	snap                GuideSourceSnapshot
+	f                   asyncjob.FencedReporter
+	steps               map[string]orm.PaperGuideStep
+	excerpts            []sourceExcerpt
 }
 
 func (s Service) Run(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
@@ -281,40 +282,66 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 	}
 	attemptTimeout := ModelAttemptTimeout(task)
 	attemptMillis := attemptTimeout.Milliseconds()
-	cfg, e := x.check(ctx)
-	if e != nil {
-		return e
-	}
-	started := time.Now()
+	var cfg map[string]any
+	var started time.Time
 	ticket := "request:" + key + ":" + uuid.NewString()
-	e = x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
-		hashes, e := requestHashes(tx, r.ID, key)
-		if e != nil {
-			return e
-		}
-		for _, seen := range hashes {
-			if seen != hash {
-				return ErrConflict
+	reserve := func() error {
+		started = time.Now()
+		return x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
+			hashes, e := requestHashes(tx, r.ID, key)
+			if e != nil {
+				return e
 			}
+			for _, seen := range hashes {
+				if seen != hash {
+					return ErrConflict
+				}
+			}
+			recovery := len(hashes) > 0
+			if r.CallsUsed >= MaxCalls || recovery && r.RecoveryCalls >= maxRecoveryCalls || !recovery && r.PlannedCalls >= maxPlannedCalls {
+				return ErrBudget
+			}
+			if r.ActiveMillis+attemptMillis > MaxActiveMillis {
+				return errAttemptTimeUnavailable
+			}
+			updates := map[string]any{"calls_used": gorm.Expr("calls_used + 1"), "active_millis": gorm.Expr("active_millis + ?", attemptMillis)}
+			if !recovery {
+				updates["planned_calls"] = gorm.Expr("planned_calls + 1")
+			}
+			if recovery {
+				updates["recovery_calls"] = gorm.Expr("recovery_calls + 1")
+			}
+			if e := tx.Model(r).Updates(updates).Error; e != nil {
+				return e
+			}
+			return tx.Create(&orm.PaperGuideStep{ID: uuid.NewString(), RevisionID: r.ID, StepKey: ticket, InputHash: hash, Epoch: r.Epoch, CreatedAt: started.UTC()}).Error
+		})
+	}
+	for {
+		var err error
+		cfg, err = x.check(ctx)
+		if err != nil {
+			return err
 		}
-		recovery := len(hashes) > 0
-		if r.CallsUsed >= MaxCalls || r.ActiveMillis+attemptMillis > MaxActiveMillis || recovery && r.RecoveryCalls >= 2 || !recovery && r.PlannedCalls >= 14 {
-			return ErrBudget
+		if x.chapterReservations == nil {
+			if err := reserve(); err != nil {
+				return err
+			}
+			break
 		}
-		updates := map[string]any{"calls_used": gorm.Expr("calls_used + 1"), "active_millis": gorm.Expr("active_millis + ?", attemptMillis)}
-		if !recovery {
-			updates["planned_calls"] = gorm.Expr("planned_calls + 1")
+		changed, err := x.chapterReservations.reserve(reserve)
+		if err != nil {
+			return err
 		}
-		if recovery {
-			updates["recovery_calls"] = gorm.Expr("recovery_calls + 1")
+		if changed == nil {
+			defer x.chapterReservations.finish()
+			break
 		}
-		if e := tx.Model(r).Updates(updates).Error; e != nil {
-			return e
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		return tx.Create(&orm.PaperGuideStep{ID: uuid.NewString(), RevisionID: r.ID, StepKey: ticket, InputHash: hash, Epoch: r.Epoch, CreatedAt: started.UTC()}).Error
-	})
-	if e != nil {
-		return e
 	}
 	callCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 	raw, callErr := x.s.Call(callCtx, task, input, cfg)
@@ -343,7 +370,7 @@ func (x *execution) task(ctx context.Context, key, task string, input map[string
 	// Settle only this invocation, once. Unknown crashed requests retain
 	// the full attempt reservation; diagnostic metadata never includes raw
 	// provider errors, model config or private source text.
-	e = x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
+	e := x.s.Repo.fenced(ctx, x.f, x.rev.ID, x.rev.Epoch, func(tx *gorm.DB, r *orm.PaperGuideRevision, g *orm.PaperGuide) error {
 		marker := tx.Model(&orm.PaperGuideStep{}).Where("revision_id = ? AND step_key = ? AND output_json = ?", r.ID, ticket, "").Update("output_json", string(mustMarshal(map[string]any{"task": task, "error_class": diagnostic, "elapsed_ms": elapsed})))
 		if marker.Error != nil {
 			return marker.Error

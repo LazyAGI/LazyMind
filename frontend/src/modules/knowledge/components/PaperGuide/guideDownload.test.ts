@@ -50,6 +50,17 @@ describe("downloaded paper guide", () => {
     }
   });
 
+  it("cancels an export immediately when its reader is removed while figures load", async () => {
+    const source = sample();
+    const reader = document.createElement("main");
+    reader.append(source);
+    document.body.append(reader);
+    source.querySelector("figure")!.innerHTML = '<div class="paper-guide-image-frame" aria-busy="true"></div>';
+    const pending = guideDownloadDocument(source, "en", "html");
+    reader.remove();
+    await expect(pending).rejects.toThrow("The reading version changed");
+  });
+
   it("keeps offline demos in an isolated frame", async () => {
     const source = sample();
     const frame = document.createElement("iframe");

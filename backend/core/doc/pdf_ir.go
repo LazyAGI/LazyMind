@@ -75,11 +75,17 @@ func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRRespo
 }
 func pdfIRStatusWithProjection(ctx context.Context, row orm.Document, hash string, upgrade bool) (pdfIRResponse, error) {
 	s := pdfIRResponse{Status: "not_requested", SourceSHA256: hash}
-	var jobs []orm.AsyncJob
-	if e := store.DB().WithContext(ctx).Where("job_type = ? AND resource_type = ? AND resource_id = ?", pdfIRJobType, "document_pdf_ir", pdfIRResource(row.DatasetID, row.ID)).Order("created_at DESC").Find(&jobs).Error; e != nil {
-		return s, e
+	jobs, err := pdfIRJobs(ctx, row)
+	if err != nil {
+		return s, err
 	}
 	return pdfIRStatusFromJobsWithProjection(row, hash, jobs, upgrade), nil
+}
+
+func pdfIRJobs(ctx context.Context, row orm.Document) ([]orm.AsyncJob, error) {
+	var jobs []orm.AsyncJob
+	err := store.DB().WithContext(ctx).Where("job_type = ? AND resource_type = ? AND resource_id = ?", pdfIRJobType, "document_pdf_ir", pdfIRResource(row.DatasetID, row.ID)).Order("created_at DESC").Find(&jobs).Error
+	return jobs, err
 }
 
 func pdfIRStatusFromJobs(row orm.Document, hash string, jobs []orm.AsyncJob) pdfIRResponse {
@@ -178,12 +184,7 @@ func lookupPDFIRSharedArtifact(source, hash string, upgrade bool) ([]byte, pdfir
 		if path == "" {
 			continue
 		}
-		candidates := []string{path}
-		legacy := filepath.Join(filepath.Dir(source), ".lazymind-artifacts", "mineru-cache-v1", filepath.Base(path))
-		if legacy != path {
-			candidates = append(candidates, legacy)
-		}
-		for _, candidate := range candidates {
+		for _, candidate := range sharedArchivePaths(source, path) {
 			f, err := os.Open(candidate)
 			if err != nil {
 				continue
@@ -204,6 +205,14 @@ func lookupPDFIRSharedArtifact(source, hash string, upgrade bool) ([]byte, pdfir
 		}
 	}
 	return nil, pdfir.Document{}, incomplete, pdfIRResult{}
+}
+
+func sharedArchivePaths(source, path string) []string {
+	legacy := filepath.Join(filepath.Dir(source), ".lazymind-artifacts", "mineru-cache-v1", filepath.Base(path))
+	if legacy == path {
+		return []string{path}
+	}
+	return []string{path, legacy}
 }
 
 func readPDFIRJobResult(j orm.AsyncJob, hash string, upgrade bool) (*pdfir.Document, pdfIRResult, string) {

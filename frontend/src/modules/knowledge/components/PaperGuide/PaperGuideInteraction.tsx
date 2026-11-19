@@ -14,8 +14,7 @@ const quantity = (value: string | number, unit: string) =>
 
 function Stepper({ steps, zh }: { steps: Interaction["steps"]; zh: boolean }) {
   const [index, setIndex] = useState(0);
-  const selected = steps[index];
-  if (!selected) return null;
+  if (!steps[index]) return null;
   return (
     <>
       <ol className="guide-interaction__steps">
@@ -28,8 +27,10 @@ function Stepper({ steps, zh }: { steps: Interaction["steps"]; zh: boolean }) {
         ))}
       </ol>
       <div className="guide-interaction__panel" aria-live="polite">
-        <strong>{selected.label}</strong>
-        <p><PaperGuideText mapSource={false} text={selected.text} /></p>
+        {steps.map((step, i) => <div key={i} hidden={i !== index} data-export-item>
+          <strong>{step.label}</strong>
+          <p><PaperGuideText mapSource={false} text={step.text} /></p>
+        </div>)}
       </div>
       <div className="guide-interaction__actions">
         <button type="button" disabled={index === 0} onClick={() => setIndex(index - 1)}>{zh ? "上一步" : "Previous"}</button>
@@ -57,8 +58,8 @@ function Comparison({ steps, zh }: { steps: Interaction["steps"]; zh: boolean })
         </div>
       )}
       <div className="guide-interaction__comparison" aria-live="polite">
-        {[first, selected].map(({ label, text }, i) => (
-          <div className="guide-interaction__panel" key={i}>
+        {steps.map(({ label, text }, i) => (
+          <div className="guide-interaction__panel" key={i} hidden={i !== 0 && i !== index} data-export-item>
             <strong>{label}</strong>
             <p><PaperGuideText mapSource={false} text={text} /></p>
           </div>
@@ -72,7 +73,6 @@ function Results({ interaction, zh }: { interaction: Interaction; zh: boolean })
   const { rows, metric, unit, higher_is_better } = interaction;
   const [filter, setFilter] = useState(0);
   const groups = [...new Set(rows.map(({ group }) => group))];
-  const shown = rows.filter(({ group }) => !filter || group === groups[filter - 1]);
 
   // Normalize first to avoid overflow when the signed data span a wide interval.
   // Keep this scale over all reported rows, including those hidden by the filter.
@@ -108,10 +108,10 @@ function Results({ interaction, zh }: { interaction: Interaction; zh: boolean })
           </tr>
         </thead>
         <tbody>
-          {shown.map(({ label, value, note, group }, i) => {
+          {rows.map(({ label, value, note, group }, i) => {
             const end = percent(value / magnitude);
             return (
-              <tr key={i}>
+              <tr key={i} hidden={!!filter && group !== groups[filter - 1]} data-export-item>
                 <th scope="row">
                   <div>{label}</div>
                   {group && <small>{group}</small>}
@@ -162,7 +162,7 @@ function Calculator({ interaction, zh }: { interaction: Interaction; zh: boolean
           return (
             <div className="guide-interaction__panel" key={parameter.id}>
               <label htmlFor={inputId}>{parameter.label}</label>
-              {aligned && <span className="guide-interaction__parameter-value">{quantity(value, parameter.unit)}</span>}
+              <span className="guide-interaction__parameter-value" hidden={!aligned} data-export-item>{quantity(value, parameter.unit)}</span>
               <input
                 id={inputId}
                 type={aligned ? "range" : "number"}

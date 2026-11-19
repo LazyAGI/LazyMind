@@ -244,11 +244,16 @@ func (r Repository) Cancel(ctx context.Context, s Scope, id string) error {
 	})
 }
 
-func resumeBlockReason(rev orm.PaperGuideRevision) string {
-	if rev.ErrorCode == ErrQuality.Error() {
-		return rev.ErrorCode
+func qualityStop(rev orm.PaperGuideRevision) error {
+	if rev.ErrorCode != ErrQuality.Error() {
+		return nil
 	}
-	return ""
+	// A historical quality stop retains the original hard-limit precedence.
+	// Its legacy checkpoints do not describe missing fast-pipeline chapters.
+	if rev.CallsUsed >= MaxCalls || rev.ActiveMillis >= MaxActiveMillis {
+		return ErrBudget
+	}
+	return ErrQuality
 }
 
 func (r Repository) Resume(ctx context.Context, s Scope, id string, m ModelIdentity) (out orm.PaperGuideRevision, err error) {
@@ -285,11 +290,11 @@ func (r Repository) Resume(ctx context.Context, s Scope, id string, m ModelIdent
 				return ErrConflict
 			}
 		}
-		if rev.CallsUsed >= MaxCalls || rev.ActiveMillis >= MaxActiveMillis {
-			return ErrBudget
+		if e = qualityStop(rev); e != nil {
+			return e
 		}
-		if resumeBlockReason(rev) != "" {
-			return ErrQuality
+		if e = rr.checkResumeBudget(ctx, rev); e != nil {
+			return e
 		}
 		g.Epoch++
 		rev.Epoch = g.Epoch

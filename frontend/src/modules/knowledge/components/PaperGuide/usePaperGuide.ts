@@ -7,12 +7,6 @@ import { paperGuideApi } from "../../api/paperGuide";
 import { usePaperReaderSession } from "../../api/paperReader";
 import { isGuideRunActive } from "./guideRunState";
 
-export function unicodeRange(text: string, start: number, end: number) {
-  return {
-    start: Array.from(text.slice(0, start)).length,
-    end: Array.from(text.slice(0, end)).length,
-  };
-}
 export function mergeRevision(
   previous: PaperGuideRevisionResponse | undefined,
   next: PaperGuideRevisionResponse,

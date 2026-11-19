@@ -71,10 +71,12 @@ type ExplainerBlock struct {
 	HTML        string   `json:"html"`
 }
 
+const minExplainerChapters = 8
+
 var chapterSlug = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
 func validateExplainerPlan(p ExplainerPlan) error {
-	if strings.TrimSpace(p.Title) == "" || len(p.Chapters) < 8 || len(p.Chapters) > 12 {
+	if strings.TrimSpace(p.Title) == "" || len(p.Chapters) < minExplainerChapters || len(p.Chapters) > 12 {
 		return ErrEvidence
 	}
 	backbone := []string{"overview", "why-it-matters", "big-idea", "results", "limitations", "glossary"}
@@ -196,6 +198,7 @@ func (x *execution) executeFast(ctx context.Context) error {
 		concurrency = 4
 	}
 	concurrency = min(concurrency, 8)
+	x.chapterReservations = &attemptReservations{}
 	work := make(chan ExplainerChapterPlan, len(plan.Chapters))
 	for _, c := range plan.Chapters {
 		work <- c

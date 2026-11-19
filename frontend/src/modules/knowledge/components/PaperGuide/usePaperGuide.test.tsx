@@ -1,6 +1,6 @@
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi, beforeEach } from "vitest";
-import { usePaperGuide, mergeRevision, unicodeRange } from "./usePaperGuide";
+import { usePaperGuide, mergeRevision } from "./usePaperGuide";
 import { revision, section, status } from "./fixtures";
 import PaperGuideReader from "./PaperGuideReader";
 const api = vi.hoisted(() => ({
@@ -43,9 +43,6 @@ it("merges corrected immutable section versions and flags without dropping uncha
   expect(next.sections).toHaveLength(4);
   expect(next.sections[2].key).toBe(corrected.key);
   expect(next.sections[0].publication_status).toBe("correction_required");
-});
-it("converts UTF16 ranges to Unicode code points", () => {
-  expect(unicodeRange("甲😀乙𐐀丙", 1, 6)).toEqual({ start: 1, end: 4 });
 });
 it("keeps the opened published revision when a new published candidate arrives", async () => {
   const h = renderHook(() => usePaperGuide("ds", "doc", "zh", true));

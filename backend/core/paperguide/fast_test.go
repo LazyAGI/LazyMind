@@ -736,3 +736,132 @@ func TestChapterBudgetKeepsAssignedExcerptsAndFitsTheSharedPlan(t *testing.T) {
 		t.Fatal("unfit required evidence was lost or billed")
 	}
 }
+
+func TestChapterReservationsWaitForPeersToSettle(t *testing.T) {
+	svc, _, rev, job := fastFixture(t)
+	// Leave room for one full chapter reservation plus a minute of actual use.
+	if err := svc.Repo.DB.Model(&rev).Update("active_millis", (22 * time.Minute).Milliseconds()).Error; err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	svc.Call = func(ctx context.Context, task string, input map[string]any, _ map[string]any) (json.RawMessage, error) {
+		if task == "paper.explainer.plan" {
+			return json.Marshal(fastFixturePlan())
+		}
+		if calls.Add(1) == 1 {
+			// Wait until another worker has actually started a chapter checkpoint.
+			for {
+				var count int64
+				err := svc.Repo.DB.WithContext(ctx).Model(&orm.PaperGuideStep{}).Where("revision_id = ? AND step_key LIKE ?", rev.ID, "chapter-start:%").Count(&count).Error
+				if err != nil {
+					return nil, err
+				}
+				if count >= 4 {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(time.Millisecond):
+				}
+			}
+		}
+		return json.Marshal(fastFixtureChapter(input["chapter_id"].(string)))
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := svc.Run(ctx, job, testFence{svc.Repo.DB}); err != nil {
+		t.Fatalf("available budget after a peer settled: %v", err)
+	}
+	if calls.Load() != 8 {
+		t.Fatalf("called model for %d chapters", calls.Load())
+	}
+}
+
+func TestResumeRejectsMissingChapterWithoutAttemptBudget(t *testing.T) {
+	for _, reason := range []string{"time", "recovery"} {
+		t.Run(reason, func(t *testing.T) {
+			svc, scope, rev, _ := fastFixture(t)
+			ctx := t.Context()
+			fence := testFence{svc.Repo.DB}
+			plan := fastFixturePlan()
+			put := func(key string, value any) {
+				t.Helper()
+				if err := svc.Repo.PutStep(ctx, fence, rev.ID, rev.Epoch, StepWrite{Key: key, InputHash: key, Output: mustMarshal(value)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			put("fast:plan", plan)
+			for _, chapter := range plan.Chapters[1:] {
+				put("fast:chapter:"+chapter.ID, fastFixtureChapter(chapter.ID))
+			}
+			if reason == "time" {
+				if err := svc.Repo.DB.Model(&rev).Update("active_millis", (24 * time.Minute).Milliseconds()).Error; err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				put("request:fast:chapter:overview:ticket", "receipt")
+				if err := svc.Repo.DB.Model(&rev).Update("recovery_calls", 2).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := svc.Repo.Cancel(ctx, scope, rev.ID); err != nil {
+				t.Fatal(err)
+			}
+			model, _, _ := svc.ResolveModel(ctx, scope, "")
+			if _, err := svc.Repo.Resume(ctx, scope, rev.ID, model); !errors.Is(err, ErrBudget) {
+				t.Fatalf("requeued run without enough budget: %v", err)
+			}
+			status, err := svc.Status(ctx, scope)
+			if err != nil || status.CandidateRevision.Run.ResumeBlockReason != ErrBudget.Error() {
+				t.Fatalf("resume availability: %+v %v", status, err)
+			}
+		})
+	}
+}
+
+func TestResumeRejectsUnplannedGuideWithoutMinimumChapterBudget(t *testing.T) {
+	svc, scope, rev, _ := fastFixture(t)
+	ctx := t.Context()
+	if err := svc.Repo.DB.Model(&rev).Update("active_millis", (24 * time.Minute).Milliseconds()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Repo.Cancel(ctx, scope, rev.ID); err != nil {
+		t.Fatal(err)
+	}
+	model, _, _ := svc.ResolveModel(ctx, scope, "")
+	if _, err := svc.Repo.Resume(ctx, scope, rev.ID, model); !errors.Is(err, ErrBudget) {
+		t.Fatalf("plan could run but no chapter attempt can fit: %v", err)
+	}
+}
+
+func TestChapterReservationWaitEndsAtDeadline(t *testing.T) {
+	svc, _, rev, job := fastFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if err := svc.Repo.DB.Model(&rev).Update("active_millis", (22 * time.Minute).Milliseconds()).Error; err != nil {
+		t.Fatal(err)
+	}
+	var chapters atomic.Int32
+	svc.Call = func(ctx context.Context, task string, _ map[string]any, _ map[string]any) (json.RawMessage, error) {
+		if task == "paper.explainer.plan" {
+			return json.Marshal(fastFixturePlan())
+		}
+		chapters.Add(1)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if _, err := svc.Run(ctx, job, testFence{svc.Repo.DB}); !errors.Is(err, ErrBudget) {
+		t.Fatalf("deadline was not reported: %v", err)
+	}
+	if chapters.Load() != 1 {
+		t.Fatalf("expected one outstanding request, got %d", chapters.Load())
+	}
+	var stored orm.PaperGuideRevision
+	if err := svc.Repo.DB.Take(&stored, "id = ?", rev.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.CallsUsed != 2 || stored.ActiveMillis > MaxActiveMillis {
+		t.Fatalf("charge for blocked chapter: calls=%d active=%d", stored.CallsUsed, stored.ActiveMillis)
+	}
+}

@@ -2,7 +2,7 @@ import { Modal } from "antd";
 import PaperGuideText from "./PaperGuideText";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type { PaperGuideEvidence, PaperGuideOriginalDisplay } from "@/api/generated/core-client";
-type AssetImage = { url: string; width: number; height: number; mode: "region" | "page" };
+type AssetImage = { blob?: Blob; url: string; width: number; height: number; mode: "region" | "page" };
 export type GuidePreview = (
   e: PaperGuideEvidence,
   original?: PaperGuideOriginalDisplay,
@@ -38,6 +38,7 @@ export default function PaperGuideAsset({
   const opener = useRef<HTMLButtonElement>();
   useEffect(() => {
     let stale = false;
+    let ownedUrl: string | undefined;
     setImage(undefined);
     setFailed(false);
     setLarge(false);
@@ -46,7 +47,8 @@ export default function PaperGuideAsset({
     void preview(evidence, originalDisplay ?? undefined)
       .then((v) => {
         if (!stale) {
-          setImage(v ? { ...v, evidence, originalDisplay, preview } : undefined);
+          if (v?.blob) ownedUrl = URL.createObjectURL(v.blob);
+          setImage(v ? { ...v, url: ownedUrl ?? v.url, evidence, originalDisplay, preview } : undefined);
           setFailed(!v);
         }
       })
@@ -55,6 +57,7 @@ export default function PaperGuideAsset({
       });
     return () => {
       stale = true;
+      if (ownedUrl) URL.revokeObjectURL(ownedUrl);
     };
   }, [evidence, originalDisplay, preview, unavailable]);
   const zh = language === "zh";
@@ -87,13 +90,14 @@ export default function PaperGuideAsset({
             }}
             aria-label={compactPage ? undefined : enlargeLabel}
           >
-            {compactPage ? (zh ? `查看原文第 ${page} 页` : `View PDF page ${page}`) : <img
+            {compactPage && (zh ? `查看原文第 ${page} 页` : `View PDF page ${page}`)}
+            <img hidden={compactPage}
               src={loaded.url}
               width={loaded.width}
               height={loaded.height}
               alt={alt}
               onError={() => { setImage(undefined); setFailed(true); }}
-            />}
+            />
           </button>
         ) : (
           <div role="status">

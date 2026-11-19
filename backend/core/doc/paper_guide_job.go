@@ -41,7 +41,7 @@ func paperGuideService() paperguide.Service {
 					class = "rate_limited"
 				case "model_refusal":
 					class = "refusal"
-				case "context_length_exceeded":
+				case "token_limit":
 					class = "context"
 				}
 			}

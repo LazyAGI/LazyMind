@@ -19,13 +19,17 @@ The light check does not certify every scientific statement or execute generated
 
 ## Article and paper-specific interactions
 
-The article has a chapter directory, a concise overview, substantial mechanism explanations, worked examples and paper-specific topics. Examples include LoRA's parameter and subspace explorations, a noise-process demonstration, or a search-tree walkthrough. Interaction designs are selected for the learning question, rather than from a fixed set of four widgets. The planner assigns distinct learning goals to avoid duplicate scenes and reserves a compact HTML table or chart for primary reported results when available. Tables and charts in Experimental Results open as comparisons. The reader offers reset for hands-on demonstrations and retry for a results chart that failed to load. Headline variants keep their configuration labels. Plain prose uses text and math; richer formatting belongs inside the HTML module.
+The article has a chapter directory, a concise overview, substantial mechanism explanations, worked examples and paper-specific topics. Examples include LoRA's parameter and subspace explorations, a noise-process demonstration, or a search-tree walkthrough. Interaction designs are selected for the learning question, rather than from a fixed set of four widgets. The planner assigns distinct learning goals to avoid duplicate scenes and reserves a compact HTML table or chart for primary reported results when available. Tables and charts in Experimental Results open as comparisons. The reader offers reset for hands-on demonstrations and retry for a results chart that failed to load. Headline variants keep their configuration labels. Prose supports math and inline emphasis. Readers can copy text directly.
 
 A chapter's playground is a self-contained document with inline styles, SVG/canvas and ordinary JavaScript. It can manipulate geometry, matrices, paths, plots and calculations locally. The host supplies the theme and places it in an opaque-origin iframe with `sandbox="allow-scripts"`, without same-origin or top-navigation permissions. The host prepares markup using an HTML parser that cannot load resources. Inside the iframe, CSP blocks external subresources and fetch connections. Browser sandboxing prevents top-level navigation but permits a script to navigate its own frame. Generated content runs only inside the sandbox. See the [iframe srcdoc isolation guidance](https://developer.mozilla.org/en-US/docs/Web/API/HTMLIFrameElement/srcdoc).
 
 The reader bundles KaTeX inside each sandbox and renders delimited TeX in HTML text as native MathML, including labels updated by controls. Use `$...$` for inline formulas and `$$...$$` for display formulas. SVG text, canvas drawings and native option labels use Unicode notation or positioned SVG spans. Put longer formulas in HTML alongside the graphic.
 
 The explanatory text outside the scene remains readable when an interaction is unavailable. Source controls belong to the article and open the source preview/PDF; generated scenes do not receive application credentials or document API access. A module's runtime failure can show its static explanation and a reload control rather than blocking the rest of the article.
+
+## Download
+
+The toolbar exports readable chapters to a standalone HTML file or opens a print layout for saving a PDF. A partially generated guide includes a chapter count in the export. The HTML embeds original figures, retains the sandbox for interactive scenes, and includes a LazyMind mark after each chapter. The print version expands glossary definitions.
 
 ## Models, source versions and history
 

@@ -1,6 +1,7 @@
 import { ConfigProvider } from "antd";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { guideDownloadDocument } from "./guideDownload";
 import PaperGuideAsset from "./PaperGuideAsset";
 import type { PaperGuideEvidence } from "@/api/generated/core-client";
 it("restores the enlarged figure opener after Escape closes the guide modal", async () => {
@@ -111,4 +112,40 @@ it("offers a page preview on demand without embedding a whole page as a figure",
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
   expect(screen.getByRole("img", { name: "PDF 第 8 页" })).toHaveAttribute("src", "blob:page");
   expect(open).not.toHaveBeenCalled();
+});
+
+it.each(["html", "pdf"] as const)("embeds fallback page pixels in %s", async format => {
+  const url = "data:image/png;base64,AA==";
+  const view = render(<article><section data-guide-role="method"><div data-guide-block="f"><PaperGuideAsset
+    compactCaption language="en" evidence={{ id: "f", source_type: "image", source_block_id: "i", text: "", locator: { kind: "page", page: 1 } }}
+    preview={async () => ({ url, width: 500, height: 700, mode: "page" })} /></div></section></article>);
+  await screen.findByRole("button", { name: "View PDF page 2" });
+  const result = await guideDownloadDocument(view.container.querySelector("article")!, "en", format);
+  const doc = new DOMParser().parseFromString(result.html, "text/html");
+  expect(doc.querySelector("figure img:not([hidden])")?.getAttribute("src")).toBe(url);
+});
+
+it("owns a mounted figure URL independently from cache eviction and releases it on unmount", async () => {
+  const create = vi.fn(() => "blob:mounted");
+  const revoke = vi.fn();
+  vi.stubGlobal("URL", class extends URL {
+    static createObjectURL = create;
+    static revokeObjectURL = revoke;
+  });
+  try {
+    const blob = new Blob(["pixels"], { type: "image/png" });
+    const view = render(<PaperGuideAsset language="en"
+      evidence={{ id: "f", source_type: "image", source_block_id: "i", text: "", locator: { kind: "page", page: 0 } }}
+      preview={async () => ({ url: "blob:evicted", blob, width: 100, height: 100, mode: "region" })} />);
+    const button = await screen.findByRole("button", { name: "Enlarge original figure" });
+    expect(create).toHaveBeenCalledWith(blob);
+    URL.revokeObjectURL("blob:evicted");
+    fireEvent.click(button);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.querySelector("img")?.getAttribute("src")).toBe("blob:mounted");
+    view.unmount();
+    expect(revoke).toHaveBeenCalledWith("blob:mounted");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

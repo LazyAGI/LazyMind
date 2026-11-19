@@ -76,38 +76,26 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 		return out, paperguide.ErrSourceChanged
 	}
 	out.Hash = hash
-	status, e := pdfIRStatusWithProjection(ctx, row, hash, false)
+	jobs, e := pdfIRJobs(ctx, row)
 	if e != nil {
 		return out, e
 	}
-	out.DependencyFailed = status.Status == "failed"
-	if status.Document != nil {
-		var figures []pdfir.OriginalFigureProof
-		precise, _, err := loadGuidePrecisionWithFigures(*status.Document, status.Artifact, prepare, &figures)
-		if err != nil {
-			out.DependencyFailed = true
-			out.PrecisionUnavailable = true
-			if prepare {
-				return out, paperguide.ErrPrecision
-			}
-			return out, nil
-		}
-		snapshot, e := paperguide.BuildSourceSnapshotWithFigureProofs(precise, paperguide.SourceIdentity{SourceSHA256: hash, OwnerID: scope.OwnerID, DatasetID: scope.DatasetID, DocumentID: scope.DocumentID}, figures)
-		if e != nil {
-			return out, paperguide.ErrEvidence
-		}
-		dir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", row.ID, "paper-guides", pdfir.Digest(scope.OwnerID))
-		path := filepath.Join(dir, snapshot.SnapshotFilename())
-		// This immutable personal snapshot is independent of the shared parser cache.
-		// It contains no original PDF copy or model credentials.
-		if prepare {
-			if err := freezeGuideSnapshot(ctx, path, snapshot); err != nil {
-				return out, err
-			}
-		}
-		out.Snapshot = &snapshot
-		out.Path = path
-		return out, nil
+	source := pdfIRSource(ext)
+	load := func() (guideObservation, error) {
+		status := pdfIRStatusFromJobsWithProjection(row, hash, jobs, false)
+		var precisionPath string
+		state, err := guideMaterial(ctx, scope, source, hash, status, prepare, &precisionPath)
+		return guideObservation{state: state, precisionPath: precisionPath}, err
+	}
+	if prepare {
+		var observed guideObservation
+		observed, e = load()
+		out = observed.state
+	} else {
+		out, e = observedGuideMaterial(scope, source, hash, jobs, load)
+	}
+	if e != nil || out.Snapshot != nil || out.PrecisionUnavailable {
+		return out, e
 	}
 	if out.DependencyFailed {
 		if prepare {
@@ -146,6 +134,41 @@ func (paperGuideSource) Load(ctx context.Context, scope paperguide.Scope, prepar
 		return out, e
 	}
 	out.DependencyID = job.ID
+	return out, nil
+}
+
+func guideMaterial(ctx context.Context, scope paperguide.Scope, source, hash string, status pdfIRResponse, prepare bool, precisionPath *string) (paperguide.SourceState, error) {
+	out := paperguide.SourceState{Hash: hash}
+	out.DependencyFailed = status.Status == "failed"
+	if status.Document != nil {
+		var figures []pdfir.OriginalFigureProof
+		precise, path, err := loadGuidePrecisionWithFigures(*status.Document, status.Artifact, prepare, &figures)
+		if err != nil {
+			out.DependencyFailed = true
+			out.PrecisionUnavailable = true
+			if prepare {
+				return out, paperguide.ErrPrecision
+			}
+			return out, nil
+		}
+		*precisionPath = path
+		snapshot, e := paperguide.BuildSourceSnapshotWithFigureProofs(precise, paperguide.SourceIdentity{SourceSHA256: hash, OwnerID: scope.OwnerID, DatasetID: scope.DatasetID, DocumentID: scope.DocumentID}, figures)
+		if e != nil {
+			return out, paperguide.ErrEvidence
+		}
+		dir := filepath.Join(filepath.Dir(source), ".lazymind-artifacts", scope.DocumentID, "paper-guides", pdfir.Digest(scope.OwnerID))
+		path = filepath.Join(dir, snapshot.SnapshotFilename())
+		// This immutable personal snapshot is independent of the shared parser cache.
+		// It contains no original PDF copy or model credentials.
+		if prepare {
+			if err := freezeGuideSnapshot(ctx, path, snapshot); err != nil {
+				return out, err
+			}
+		}
+		out.Snapshot = &snapshot
+		out.Path = path
+		return out, nil
+	}
 	return out, nil
 }
 
@@ -231,19 +254,27 @@ func resolvePaperGuideModel(ctx context.Context, scope paperguide.Scope, ref str
 	if candidate == nil {
 		return paperguide.ModelIdentity{}, nil, paperguide.ErrModelChanged
 	}
-	tokens := 0
-	for _, value := range []*string{selected.MaxInputTokens, selected.InputTokenLimit} {
-		if n := modelconfig.ConfiguredChatWindow(value); n != nil && *n <= int64(int(^uint(0)>>1)) && (tokens == 0 || int(*n) < tokens) {
-			tokens = int(*n)
+	configuredTokens := func(value *string) int {
+		if n := modelconfig.ConfiguredChatWindow(value); n != nil && *n <= int64(int(^uint(0)>>1)) {
+			return int(*n)
+		}
+		return 0
+	}
+	window := configuredTokens(selected.MaxInputTokens)
+	inputLimit := configuredTokens(selected.InputTokenLimit)
+	if window == 0 {
+		window = inputLimit
+		if window == 0 {
+			window = 32768
 		}
 	}
-	if tokens == 0 {
-		tokens = 32768
+	tokens := window
+	if inputLimit > 0 {
+		tokens = min(inputLimit, window)
 	}
-	outputReserve := 0
-	if n := modelconfig.ConfiguredChatWindow(selected.MaxOutputTokens); n != nil && *n <= int64(int(^uint(0)>>1)) {
-		outputReserve = int(*n)
-	}
+	// Only reserve output capacity that overlaps the input allowance. The rest
+	// of the model's context window is already unavailable to the input.
+	outputReserve := max(0, configuredTokens(selected.MaxOutputTokens)-(window-tokens))
 	// Only a one-way hash of non-secret settings/endpoint enters persistence.
 	// Credential rotation alone does not change the frozen model identity.
 	parameters, _ := json.Marshal([]any{safeGuideModelConfig(candidate.LLMConfig), selected.ProviderID, selected.ProviderGroupID})

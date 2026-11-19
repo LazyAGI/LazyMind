@@ -1067,3 +1067,28 @@ it("remembers paper color independently of lighting across papers", async () => 
   fireEvent.click(screen.getByRole("button", { name: "Lights on" }));
   expect(next.container.querySelector(".paper-reading-workspace")).toHaveAttribute("data-guide-paper", "cream");
 });
+
+it("offers regeneration when an interrupted run has exhausted its budget", async () => {
+  const candidate = pausedCandidate();
+  state.value.status = { ...status(), candidate_revision: { ...candidate,
+    run: { ...candidate.run, resume_block_reason: "paper_guide_budget_exhausted" } } };
+  render(<Harness />);
+  await act(async () => openGuide("Guide"));
+  expect(screen.getByText("errors.2004404")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Generate a new guide" })).toBeEnabled();
+});
+
+it("submits a generation key on HTTP origins without crypto.randomUUID", async () => {
+  vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+  try {
+    state.value = { ...state.value, revision: undefined, status: { ...status(), published_revision: null, candidate_revision: null } };
+    render(<Harness />);
+    await act(async () => openGuide());
+    fireEvent.click(screen.getByRole("button", { name: "Prepare paper and generate guide" }));
+    await waitFor(() => expect(api.generate).toHaveBeenCalledWith(expect.anything(),
+      expect.objectContaining({ idempotency_key: expect.stringMatching(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i) })));
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

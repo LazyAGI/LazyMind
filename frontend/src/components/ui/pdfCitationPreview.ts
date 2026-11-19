@@ -15,7 +15,7 @@ export interface PdfCitationPreviewDocument {
   numPages?: number;
   getPage(pageNumber: number): Promise<PreviewPage>;
 }
-export interface PdfCitationPreview { url: string; width: number; height: number; region?: PdfCitationRegion }
+export interface PdfCitationPreview { blob?: Blob; url: string; width: number; height: number; region?: PdfCitationRegion }
 interface RenderedPreview extends PdfCitationPreview { bytes: number }
 export interface PdfCitationPreviewOptions { maxEntries?: number; maxBytes?: number; renderScale?: number }
 
@@ -286,7 +286,7 @@ async function renderPreview(pdf: PdfCitationPreviewDocument, target: PdfCitatio
         if (!blob) { reject(new Error("PDF preview encoding failed")); return; }
         try {
           // Deliver the owned URL with the encoding result, before cache validity is checked.
-          resolve({ url: URL.createObjectURL(blob), width: output.width, height: output.height, bytes: blob.size });
+          resolve({ blob, url: URL.createObjectURL(blob), width: output.width, height: output.height, bytes: blob.size });
         } catch (error) {
           reject(error);
         }
@@ -393,8 +393,8 @@ export function createPdfCitationPreviewCache(options: PdfCitationPreviewOptions
           URL.revokeObjectURL(rendered.url);
           return undefined;
         }
-        const { url, width, height, bytes, region } = rendered;
-        const preview = { url, width, height, region };
+        const { blob, url, width, height, bytes, region } = rendered;
+        const preview = { blob, url, width, height, region };
         const entry = { state: requestState, key, preview, bytes };
         requestState.resolved.set(key, entry);
         lru.set(entry, true);

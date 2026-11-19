@@ -2,6 +2,7 @@ import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import type { PaperGuideClaim, PaperGuideInteraction, PaperGuidePlan } from "@/api/generated/core-client";
 import { expect, it, vi } from "vitest";
 import PaperGuideReader from "./PaperGuideReader";
+import { guideDownloadDocument } from "./guideDownload";
 import { revision } from "./fixtures";
 
 function groundedClaim(id: string, ...evidenceIds: string[]): PaperGuideClaim {
@@ -539,7 +540,7 @@ it("selects a comparison while retaining its fixed reference", () => {
   fireEvent.click(screen.getByRole("button", { name: "Interpret" }));
   expect(screen.getByText(steps[0].text)).toBeVisible();
   expect(screen.getByText(steps[2].text)).toBeVisible();
-  expect(screen.queryByText(steps[1].text)).not.toBeInTheDocument();
+  expect(screen.getByText(steps[1].text)).not.toBeVisible();
 });
 
 it("filters only reported rows and shows original values, units and notes in the table", () => {
@@ -560,7 +561,7 @@ it("filters only reported rows and shows original values, units and notes in the
   expect(table.getByText("Table 2 · comparison row")).toBeVisible();
   expect(screen.getByText("Reported by the paper")).toBeVisible();
   fireEvent.change(screen.getByRole("combobox", { name: "Filter by group" }), { target: { value: "2" } });
-  expect(table.queryByText("82.15")).not.toBeInTheDocument();
+  expect(table.getByText("82.15")).not.toBeVisible();
   expect(table.getByText("-0.44")).toBeVisible();
 });
 
@@ -619,4 +620,34 @@ it("groups a negated base in both the power formula and its default substitution
   expect(screen.getByText("(−(x)) ^ 2")).toBeVisible();
   expect(screen.getByText("(−(3)) ^ 2 = 9")).toBeVisible();
   expect(screen.getByLabelText("Squared negative")).toHaveTextContent(/^9$/);
+});
+
+it.each(["html", "pdf"] as const)("exports every legacy step and comparison for %s", async format => {
+  for (const kind of ["stepper", "comparison"] as const) {
+    const view = renderInteractive({ kind, steps });
+    const result = await guideDownloadDocument(view.container.querySelector("article")!, "en", format);
+    const doc = new DOMParser().parseFromString(result.html, "text/html");
+    expect(doc.querySelector(".guide-interaction [hidden], .guide-interaction button")).toBeNull();
+    for (const step of steps) expect(doc.body.textContent).toContain(step.text);
+    view.unmount();
+  }
+});
+
+it("exports all reported results and a fixed calculator snapshot", async () => {
+  const results = renderInteractive({ kind: "results", provenance: "reported", metric: "Score",
+    rows: [{ label: "Baseline", group: "A", note: "", value: 10 }, { label: "Variant", group: "B", note: "", value: 20 }] });
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "2" } });
+  const table = await guideDownloadDocument(results.container.querySelector("article")!, "en", "html");
+  const doc = new DOMParser().parseFromString(table.html, "text/html");
+  expect(doc.querySelectorAll("tbody tr:not([hidden])")).toHaveLength(2);
+  expect(doc.querySelector("select")).toBeNull();
+  results.unmount();
+  const calc = renderInteractive({ kind: "calculator", parameters: [{ id: "x", label: "Input", min: 0, max: 4, step: 1, value: 1, unit: "ms" }],
+    outputs: [{ label: "Double", tokens: ["x", "2", "mul"], unit: "ms" }] });
+  fireEvent.change(screen.getByRole("slider"), { target: { value: "3" } });
+  const snapshot = await guideDownloadDocument(calc.container.querySelector("article")!, "en", "pdf");
+  const printed = new DOMParser().parseFromString(snapshot.html, "text/html");
+  expect(printed.querySelector("input")).toBeNull();
+  expect(printed.querySelector(".guide-interaction__parameter-value")?.textContent).toBe("3 ms");
+  expect(printed.querySelector("output")?.textContent).toBe("6 ms");
 });
