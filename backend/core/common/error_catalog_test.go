@@ -502,3 +502,32 @@ func TestRecordingStreamErrorsResolveToUpstreamFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestAlgorithmStreamProtocolErrorsResolveToUpstreamFailure(t *testing.T) {
+	for _, message := range []string{
+		"invalid algorithm stream frame: unexpected end of JSON input",
+		"algorithm stream interrupted chunked message",
+		"invalid algorithm chunk envelope",
+		"invalid algorithm chunk: cannot unmarshal string into Go struct field",
+		"invalid algorithm chunk metadata",
+		"algorithm chunk sequence must start at zero",
+		"algorithm chunk sequence mismatch",
+		"invalid algorithm chunk payload",
+		"invalid UTF-8 in algorithm chunked message",
+		"invalid reassembled algorithm frame: unexpected end of JSON input",
+		"nested algorithm chunks are not supported",
+		"incomplete algorithm chunked message",
+	} {
+		t.Run(message, func(t *testing.T) {
+			base, _ := splitErrorMessage(message)
+			catalogued, ok := lookupErrorCatalog(base)
+			if !ok || catalogued.HTTPStatus != 502 {
+				t.Fatalf("protocol error must be catalogued as an upstream failure: %q", message)
+			}
+			appErr := ResolveAppError(message, 502)
+			if appErr.Code != 2002077 || appErr.HTTPStatus != 502 || appErr.Message != "algorithm chat stream failed" {
+				t.Fatalf("unexpected algorithm stream error: %#v", appErr)
+			}
+		})
+	}
+}

@@ -78,6 +78,21 @@ func TestCompileBuiltinClarificationPolicies(t *testing.T) {
 					t.Fatalf("invalid field contract: %#v", diagnostic)
 				}
 			}
+			if id == "ppt-workflow" {
+				result, err := ResolveClarifications(compiled.Graph.Runtime.ClarificationFields, map[string]any{"topic": "庆典", "slide_count": "3"})
+				if err != nil || len(result.Questions) != 2 || len(result.Missing) != 2 {
+					t.Fatalf("expected two unresolved PPT questions: %+v %v", result, err)
+				}
+				want := map[string]string{
+					"presentation_output_format": "HTML｜交互预览，可导出 PPTX",
+					"generate_background_images": "启用｜为每页生成独立 AI 底图",
+				}
+				for _, question := range result.Questions {
+					if question.Recommended != want[question.ID] || question.Choices[0] != question.Recommended {
+						t.Fatalf("incorrect PPT recommendation: %+v", question)
+					}
+				}
+			}
 		})
 	}
 }

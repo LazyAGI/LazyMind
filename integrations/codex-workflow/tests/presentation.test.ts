@@ -10,11 +10,14 @@ afterEach(() => {
   host?.__lazymindCodexWorkflowTail?.dispose(); host?.__lazymindCodexPresentationSession?.dispose()
   dom?.window.close(); vi.unstubAllGlobals()
 })
-function fixture(trailingMarkup = '<div class="sticky"></div>') {
-  dom = new JSDOM(`<main><div data-app-action-timeline-scroll data-pip-anchor-host="codex-main-thread"><div id="content"><div data-thread-user-message-navigation-content><div id="messages"></div></div>${trailingMarkup}</div><div data-thread-scroll-footer><button class="group/scroll-to-bottom"></button></div></div></main>`, {url:'app://-/index.html'})
+function fixture(
+  trailingMarkup = '<div class="sticky"></div>',
+  scrollAttributes = 'data-app-action-timeline-scroll data-pip-anchor-host="codex-main-thread"',
+) {
+  dom = new JSDOM(`<main><div ${scrollAttributes}><div id="content"><div data-thread-user-message-navigation-content><div id="messages"></div></div>${trailingMarkup}</div><div data-thread-scroll-footer><button class="group/scroll-to-bottom"></button></div></div></main>`, {url:'app://-/index.html'})
   const window = dom.window as any
   for (const key of ['window','document','Element','HTMLElement','Node','MutationObserver','getComputedStyle']) vi.stubGlobal(key,window[key])
-  const scroller = document.querySelector<HTMLElement>('[data-app-action-timeline-scroll]')!
+  const scroller = document.querySelector<HTMLElement>('main > div')!
   scroller.getBoundingClientRect = () => new window.DOMRect(0, 40, 800, 800)
   scroller.parentElement!.getBoundingClientRect = () => ({left:0,top:40,right:900,bottom:800} as DOMRect)
   Object.defineProperties(scroller,{scrollHeight:{configurable:true,get:()=>1600},clientHeight:{get:()=>800}})
@@ -115,6 +118,29 @@ it('keeps the panel bottom above a growing composer even before the native space
   visibleAtBottom()
   expect(scroller.scrollHeight).toBe(scrollHeightWhileSpacerLags)
   expect(document.querySelector('iframe')).toBe(f.frame)
+})
+
+it('mounts on the original conversation when the compact timeline marker is absent', () => {
+  const { surface, scroller } = fixture(
+    '<div id="composer-spacer" aria-hidden="true" class="h-(--thread-scroll-padding-bottom)"></div>',
+    'class="thread-scroll-container" data-mcp-app-scroll-host="true"',
+  )
+  expect(scroller.hasAttribute('data-app-action-timeline-scroll')).toBe(false)
+  expect(readCodexView()?.session).toBe(threadA)
+  expect(surface.element.parentElement?.nextElementSibling?.id).toBe('composer-spacer')
+
+  const other = scroller.cloneNode(true) as HTMLElement
+  other.getBoundingClientRect = scroller.getBoundingClientRect
+  const overlay = document.createElement('aside')
+  overlay.setAttribute('data-app-shell-tab-panel-controller', '')
+  overlay.append(other)
+  document.body.append(overlay)
+  expect(readCodexView()?.scroller).toBe(scroller)
+
+  overlay.removeAttribute('data-app-shell-tab-panel-controller')
+  expect(readCodexView()).toBeNull()
+  overlay.setAttribute('aria-hidden', 'true')
+  expect(readCodexView()?.scroller).toBe(scroller)
 })
 
 it('confirms a loaded page even when its queued ready event has not been forwarded',async()=>{

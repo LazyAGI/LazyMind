@@ -3,10 +3,65 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
-	"lazymind/core/common/orm"
 	"strings"
 	"testing"
+
+	"lazymind/core/common/orm"
+	workflowstore "lazymind/core/workflow/store"
 )
+
+func TestHTMLDeckEditsAndDisplaysWithoutLegacyPPTX(t *testing.T) {
+	db := newHandlerTestDB(t)
+	if err := db.AutoMigrate(&orm.WorkflowHumanArtifact{}); err != nil {
+		t.Fatal(err)
+	}
+	session := orm.WorkflowSession{ID: "mixed-ppt", ConversationID: "conv", WorkflowID: "ppt-workflow", Status: "completed", CreateUserID: "owner"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	zero := 0
+	for _, row := range []orm.WorkflowSlotRevision{
+		{ID: "format", SlotID: "presentation_output_format", StepID: "analyze_requirements", ContentSnapshot: json.RawMessage(`{"data":"html"}`)},
+		{ID: "slide", SlotID: "preview_html", StepID: "generate_ppt", ListIndex: &zero, ContentSnapshot: json.RawMessage(`"<html><body>Slide</body></html>"`)},
+		{ID: "legacy-export", SlotID: "native_pptx", StepID: "generate_ppt", ContentSnapshot: json.RawMessage(`{"path":"/static-files/deck.pptx"}`)},
+	} {
+		row.SessionID, row.Slot, row.Selected, row.Revision, row.Attempt = session.ID, row.SlotID, true, 1, 1
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Create(&orm.WorkflowSlotOrder{SessionID: session.ID, SlotID: "preview_html", OrderList: json.RawMessage(`[0]`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows, err := LoadDisplaySlots(t.Context(), db.DB, session.ID)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("unexpected display artifacts: %+v, %v", rows, err)
+	}
+	artifacts, err := workflowstore.New(db.DB).ListArtifacts(t.Context(), "owner", session.ID)
+	if err != nil || len(artifacts) != 2 {
+		t.Fatalf("unexpected artifacts sent to the agent: %+v, %v", artifacts, err)
+	}
+	for i := range rows {
+		if rows[i].SlotID == "native_pptx" || artifacts[i].SlotID == "native_pptx" {
+			t.Fatal("legacy PPTX leaked into HTML output")
+		}
+	}
+	policy := artifactEditPolicy{Slots: []string{"preview_html", "native_pptx"}, RequiredIfPresent: []string{"native_pptx"}}
+	edit := artifactEditBundle{StateVersion: session.StateVersion, Slots: map[string][]artifactEditItem{
+		"preview_html": {{ListIndex: &zero, ContentType: "text", Value: json.RawMessage(`"<html><body>Moved slide title</body></html>"`)}},
+	}}
+	if err := commitArtifactEditBundle(t.Context(), db.DB, session.ID, edit, policy); err != nil {
+		t.Fatalf("HTML edit required the historical PPTX: %v", err)
+	}
+	var updated orm.WorkflowSlotRevision
+	if err := db.First(&updated, "session_id = ? AND slot_id = ? AND selected = ?", session.ID, "preview_html", true).Error; err != nil || updated.Revision != 2 {
+		t.Fatalf("HTML edit did not create the next revision: %+v, %v", updated, err)
+	}
+	var archived orm.WorkflowSlotRevision
+	if err := db.First(&archived, "id = ?", "legacy-export").Error; err != nil || archived.Revision != 1 {
+		t.Fatalf("historical file was changed: %+v, %v", archived, err)
+	}
+}
 
 func TestCompletedEditBundleInsertDeleteAndConflict(t *testing.T) {
 	db := newHandlerTestDB(t)

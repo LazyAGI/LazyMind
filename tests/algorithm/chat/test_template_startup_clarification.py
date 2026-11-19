@@ -147,16 +147,18 @@ def test_academic_prompt_defaults_preserve_explicit_visual_requirements():
     from lazymind.chat.workflow.clarification import resolve_fields
     package = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow/workflow.yaml'
     policy = yaml.safe_load(package.read_text(encoding='utf-8'))['runtime']
-    request = '请根据附件生成科研汇报 PPT，主题：方法比较，8页。科研风格，不生成 AI 底图。'
+    request = '请根据附件生成 HTML 版科研汇报，主题：方法比较，8页。科研风格，不生成 AI 底图。'
     values, missing = resolve_fields(policy, request, {
         'topic': '方法比较', 'slide_count': '8', 'visual_style': '科研风格', 'generate_background_images': 'disabled',
+        'presentation_output_format': 'html',
     }, extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['visual_style'] == '科研风格'
     assert values['generate_background_images'] == 'disabled'
     assert not missing
-    explicit = '请根据附件生成科研汇报 PPT，主题：方法比较，8页。使用深色风格，启用AI底图'
+    explicit = '请根据附件生成 HTML 版科研汇报，主题：方法比较，8页。使用深色风格，启用AI底图'
     values, missing = resolve_fields(policy, explicit, {
         'topic': '方法比较', 'slide_count': '8', 'visual_style': '深色风格', 'generate_background_images': 'enabled',
+        'presentation_output_format': 'html',
     }, extractions={'slide_count': [{'value': '8', 'evidence': '8页'}]})
     assert values['visual_style'] == '深色风格'
     assert values['generate_background_images'] == 'enabled'

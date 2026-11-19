@@ -187,14 +187,14 @@ def test_count_extractions_cannot_supply_model_resolved_backgrounds():
     )
     assert values['slide_count'] == '3'
     assert 'generate_background_images' not in values
-    assert [field['id'] for field in missing] == ['generate_background_images']
+    assert [field['id'] for field in missing] == ['presentation_output_format', 'generate_background_images']
 
 
 @pytest.mark.parametrize('background', ['enabled', 'disabled'])
 def test_ppt_background_uses_model_binding_and_prior_answer_takes_precedence(background):
     runtime = policy('ppt-workflow')
-    request = '做一个关于气候变化的PPT，8页'
-    bindings = {'topic': '气候变化', 'generate_background_images': background}
+    request = '做一个关于气候变化的 HTML 版 PPT，8页'
+    bindings = {'topic': '气候变化', 'presentation_output_format': 'html', 'generate_background_images': background}
     values, missing = resolve_fields(runtime, request, bindings,
                                      extractions=count_extraction('8', '8页'))
     assert not missing
@@ -214,7 +214,9 @@ def test_ppt_background_uses_model_binding_and_prior_answer_takes_precedence(bac
 def test_ppt_fields_are_not_extracted_from_request_text_by_host(brief):
     values, missing = resolve_fields(policy('ppt-workflow'), brief)
     assert values == {'template_mode': 'none'}
-    assert [field['id'] for field in missing] == ['topic', 'slide_count', 'generate_background_images']
+    assert [field['id'] for field in missing] == [
+        'topic', 'slide_count', 'presentation_output_format', 'generate_background_images',
+    ]
 
 
 @pytest.mark.parametrize('instruction,expected', [
@@ -488,10 +490,11 @@ def startup_tools(monkeypatch):
 def test_ppt_trigger_accepts_all_model_choices_together(startup_tools, brief, model_choice, count_evidence):
     build, _, toolkit, events = startup_tools
     holder = {}
+    brief += '，先做 HTML 再导出 PPTX'
     trigger = build(policy('ppt-workflow'), brief, workflow_id='ppt-workflow', session_holder=holder)
     assert 'pending_ask' not in holder
     assert 'send all resolved fields in one trigger call' in trigger.__doc__
-    inputs = {'topic': '垃圾分类', 'slide_count': '12'}
+    inputs = {'topic': '垃圾分类', 'slide_count': '12', 'presentation_output_format': 'html'}
     if '英雄联盟' in brief:
         inputs.update(topic='2026年英雄联盟世界赛比赛进程', presentation_duration='15分钟',
                       target_customer='游戏观众', visual_style='赛博朋克风格')
@@ -571,9 +574,10 @@ def test_trigger_transports_grounded_count_without_an_extra_model_call(
 ):
     import json
     build, _client, toolkit, events = startup_tools
-    trigger = build(policy('ppt-workflow'), brief + '，主题：周末回血，生成AI底图')
+    trigger = build(policy('ppt-workflow'), brief + '，主题：周末回血，输出 HTML 并生成 AI 底图')
     _, calls = run_startup_agent([trigger], trigger.__name__, json.dumps({
-        'input_bindings': {'topic': '周末回血', 'generate_background_images': 'enabled'},
+        'input_bindings': {'topic': '周末回血', 'presentation_output_format': 'html',
+                           'generate_background_images': 'enabled'},
         'clarification_extractions': count_extraction('3', evidence),
     }), stop_tools=[trigger.__name__])
     assert calls == 1
@@ -589,11 +593,11 @@ def test_trigger_keeps_conflicting_totals_in_one_question_card(startup_tools):
                      clarification_extractions={'slide_count': [
                          {'value': '3', 'evidence': '3页'}, {'value': '5', 'evidence': '5页'},
                      ]})
-    assert result['missing_clarification_fields'] == ['slide_count']
+    assert result['missing_clarification_fields'] == ['slide_count', 'presentation_output_format']
     assert result['_agent_control']['stop'] is True
     toolkit.prepare_workflow.assert_not_called()
     assert len(events) == 1
-    assert [q['id'] for q in events[0][1]['questions']] == ['slide_count']
+    assert [q['id'] for q in events[0][1]['questions']] == ['slide_count', 'presentation_output_format']
     assert events[0][1]['questions'][0]['choices'] == ['3', '5', '__ask_user_other__']
 
 
@@ -608,22 +612,27 @@ def test_ppt_conflict_card_preserves_user_candidates_and_clean_topic(startup_too
         {'value': '3', 'evidence': '制作份3页PPT'},
         {'value': '3', 'evidence': '制作份3页PPT'},
     ]})
-    assert result['missing_clarification_fields'] == ['slide_count', 'generate_background_images']
+    assert result['missing_clarification_fields'] == [
+        'slide_count', 'presentation_output_format', 'generate_background_images',
+    ]
     toolkit.prepare_workflow.assert_not_called()
     assert len(events) == 1
     card = events[0][1]
     assert card['questions'][0]['choices'] == ['3', '4', '__ask_user_other__']
-    assert card['questions'][1]['choices'] == [
+    assert card['questions'][1]['choices'] == ['HTML｜交互预览，可导出 PPTX', '原生 PPTX｜直接生成文件']
+    assert card['questions'][2]['choices'] == [
         '启用｜为每页生成独立 AI 底图', '不启用｜使用纯色、渐变和矢量装饰',
     ]
     saved = json.loads(card['workflow']['values_json'])
     assert saved['topic'] == '打工人的周末回血指南'
     assert 'slide_count' not in saved
     values, missing = resolve_fields(runtime, request, previous={
-        **saved, 'slide_count': '4', 'generate_background_images': '不启用｜使用纯色、渐变和矢量装饰',
+        **saved, 'slide_count': '4', 'presentation_output_format': '原生 PPTX｜直接生成文件',
+        'generate_background_images': '不启用｜使用纯色、渐变和矢量装饰',
     })
     assert values['topic'] == '打工人的周末回血指南'
     assert values['slide_count'] == '4'
+    assert values['presentation_output_format'] == 'native_pptx'
     assert not missing
     assert next(f for f in runtime['clarification_fields'] if f['id'] == 'slide_count')['choices'][:3] == [
         '3 页', '5 页', '8 页',

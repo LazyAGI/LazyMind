@@ -1,8 +1,14 @@
 /** Presentation identity comes from the committed main-chat view, never binds a run. */
 export function readCodexView() {
-  const scrollers = Array.from(document.querySelectorAll<HTMLElement>('[data-app-action-timeline-scroll]'))
-    .filter(element => element.getBoundingClientRect().width > 0
-      && !element.closest('[data-app-shell-tab-panel-controller]'))
+  const visibleMainScrollers = (selector: string) =>
+    Array.from(document.querySelectorAll<HTMLElement>(selector))
+      .filter(element => element.getBoundingClientRect().width > 0
+        && !element.closest('[data-app-shell-tab-panel-controller], [inert], [aria-hidden="true"]'))
+  const timelineScrollers = visibleMainScrollers('[data-app-action-timeline-scroll]')
+  // Compact Codex chats omit the timeline action marker. Other Work Mode
+  // surfaces host MCP apps, so require the native Codex transcript class.
+  const scrollers = timelineScrollers.length > 0 ? timelineScrollers
+    : visibleMainScrollers('.thread-scroll-container[data-mcp-app-scroll-host="true"]')
   if (scrollers.length !== 1) return null
   const scroller = scrollers[0]
   const fiberKey = Object.keys(scroller).find(key => key.startsWith('__reactFiber$'))
@@ -30,7 +36,7 @@ export function readCodexView() {
 export function readPresentationSession(readView = readCodexView) {
   const host = window as any
   const key = '__lazymindCodexPresentationSession'
-  const version = 'codex-view-v2'
+  const version = 'codex-view-v3'
   if (host[key]?.version !== version) host[key]?.dispose()
   if (!host[key]) {
     let view = readView(), epoch = crypto.randomUUID(), queued = false

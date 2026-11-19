@@ -163,6 +163,10 @@ func ExecuteArtifactAction(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid workflow action response", http.StatusBadGateway)
 		return
 	}
+	if isPPTHTMLSelectionEdit(target.session.WorkflowID, body.Action, target.revision.SlotID) {
+		actionResult.Companion = nil
+		delete(result, "native_companion")
+	}
 
 	cardinality := "single"
 	if target.revision.ListIndex != nil {
