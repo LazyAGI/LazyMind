@@ -4,8 +4,8 @@ package doc
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 
@@ -23,8 +23,11 @@ func guideFileIdentity(path string) (string, error) {
 	defer f.Close()
 	h := sha256.New()
 	n, err := io.Copy(h, io.LimitReader(f, pdfir.MaxArchiveBytes+1))
-	if err != nil || n > pdfir.MaxArchiveBytes {
-		return "", fmt.Errorf("cannot identify guide artifact %q", path)
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("%x", h.Sum(nil)), nil
+	if n > pdfir.MaxArchiveBytes {
+		return "", errPDFIRTooLarge
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
