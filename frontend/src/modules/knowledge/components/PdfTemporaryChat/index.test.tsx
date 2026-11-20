@@ -1,6 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
 import { createRef } from "react";
 import PdfTemporaryChat, { type PdfTemporaryChatHandle } from "./index";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
@@ -70,26 +69,6 @@ afterEach(() => {
 });
 
 describe("document question context", () => {
-  it.each([true, false])("sends the document model on the first request with explicit selection=%s", fromComposer => {
-    render(<PdfTemporaryChat datasetId="d" documentId="draft-model" fileName="notes.md" onClose={vi.fn()} />);
-    const key = String(chatActions.composer.sessionId);
-    const model = { mode: "fixed" as const, model_id: "selected-model" };
-    useModelSelectionStore.getState().setSelection(key, { ...model, version: 1 });
-    try {
-      if (fromComposer) {
-        chatActions.openSSE?.([{ query: "Question" }], "query", {}, { initial_model_selection: model });
-      } else {
-        fireEvent.click(screen.getByRole("button", { name: "Ask document" }));
-      }
-      expect(JSON.parse(requests.options[0].payload)).toMatchObject({
-        initial_model_selection: model,
-        document_context: { dataset_id: "d", document_id: "draft-model" },
-      });
-    } finally {
-      useModelSelectionStore.getState().clearSelection(key);
-    }
-  });
-
   it("passes visual model readiness to the document chat composer", async () => {
     const view = render(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
@@ -388,7 +367,7 @@ it('keeps ordinary PDFs in document chat when the library is not a paper collect
  expect(container.querySelector('.pdf-temporary-chat--paper')).toBeNull();
  expect(screen.getByRole('button',{name:/knowledge.pdfChatSave/})).toBeInTheDocument();
  expect(screen.queryByText('Make sense of this paper')).toBeNull();
- expect(chatActions.composer).toMatchObject({composerVariant:'default',showModelSelector:true,modelSelectionDraft:true});
+ expect(chatActions.composer).toMatchObject({composerVariant:'default',showModelSelector:false,modelSelectionDraft:false});
 });
 
 it('lets the workspace title bar start a new paper conversation without remounting chat',()=>{
