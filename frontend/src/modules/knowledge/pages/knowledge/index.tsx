@@ -1,3 +1,4 @@
+import PaperReadingWorkspace from "@/modules/knowledge/components/PaperReadingWorkspace";
 import ExternalLink from '@/components/ExternalLink';
 import { createPdfScrollSync } from "@/components/ui/pdfScrollSync";
 import FileUtils from "@/modules/knowledge/utils/file";
@@ -175,6 +176,11 @@ const KnowledgeDocumentContent = () => {
   const [segmentDetail, setSegmentDetail] = useState<Segment>();
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const fileViewerRef = useRef<FileViewerRef>(null);
+  const [guideMode, setGuideMode] = useState(false);
+  const [guidePreviousPdfPosition,setGuidePreviousPdfPosition]=useState<{page:number;progress:number}>();
+  useEffect(()=>setGuidePreviousPdfPosition(undefined),[knowledgeBaseId,knowledgeId]);
+  const [sourceMounted, setSourceMounted] = useState(false);
+  const sourcePaneRef = useCallback((node: HTMLDivElement | null) => setSourceMounted(!!node), []);
   const paperChatRef = useRef<PdfTemporaryChatHandle>(null);
   const [canExportImagePdf, setCanExportImagePdf] = useState(false);
   const [exportingImagePdf, setExportingImagePdf] = useState(false);
@@ -204,16 +210,16 @@ const KnowledgeDocumentContent = () => {
   const [paperIR, setPaperIR] = useState<PdfIRDocument>();
   const [pdfNavigateTo, setPdfNavigateTo] = useState<{id:string;requestId:number}>();
   const [pdfNavigateToPage, setPdfNavigateToPage] = useState<{page:number;requestId:number}>();
-  const [pdfNavigateToPosition,setPdfNavigateToPosition]=useState<{page:number;progress:number;requestId:number}>();
+  const [pdfNavigateToPosition,setPdfNavigateToPosition]=useState<{page:number;progress:number;requestId:number;sourceLocator?:boolean;bbox?:number[]}>();
   useEffect(()=>{
-    if(!isPaperDocument)return;
+    if(!isPaperDocument || !sourceMounted)return;
     const key=`${knowledgeBaseId}/${knowledgeId}`;
     let cancelled=false;
     void listPdfDocumentHighlights(knowledgeBaseId,knowledgeId).then(highlights=>{
       if(!cancelled)setSavedNotes({key,highlights});
     }).catch(()=>{/* Notes remain usable while the library request is unavailable. */});
     return()=>{cancelled=true;};
-  },[isPaperDocument,knowledgeBaseId,knowledgeId,notesRevision]);
+  },[isPaperDocument,sourceMounted,knowledgeBaseId,knowledgeId,notesRevision]);
   const [nativePdfOutline,setNativePdfOutline]=useState<import('@/modules/knowledge/api/pdfOutline').PdfNativeOutlineItem[]>([]);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const previewPaperAssistantWidth = useCallback((width: number | undefined) => {
@@ -388,7 +394,7 @@ const KnowledgeDocumentContent = () => {
     }
   }, [knowledgeBaseId, knowledgeId]);
 
-  useEffect(() => { void refreshPdfCapabilities(); }, [refreshPdfCapabilities]);
+  useEffect(() => { if (sourceMounted) void refreshPdfCapabilities(); }, [sourceMounted, refreshPdfCapabilities]);
 
   useEffect(() => {
     cancelledPdfJobsRef.current.clear();
@@ -415,7 +421,7 @@ const KnowledgeDocumentContent = () => {
   }, [knowledgeId]);
 
 
-  useEffect(()=>{ if(!knowledgeBaseId)return; Promise.all([getLearningCatalog(),getKnowledgeBaseCapabilities(knowledgeBaseId)]).then(([catalog,configured])=>{const enabled=new Set(configured.filter(x=>x.enabled).map(x=>x.capability_key));setLearningCapabilities(catalog.capabilities.filter(x=>enabled.has(x.key)));setLearningLocalAvailable(catalog.local_available)}).catch(()=>setLearningCapabilities([])); },[knowledgeBaseId]);
+  useEffect(()=>{ if(!sourceMounted || !knowledgeBaseId)return; Promise.all([getLearningCatalog(),getKnowledgeBaseCapabilities(knowledgeBaseId)]).then(([catalog,configured])=>{const enabled=new Set(configured.filter(x=>x.enabled).map(x=>x.capability_key));setLearningCapabilities(catalog.capabilities.filter(x=>enabled.has(x.key)));setLearningLocalAvailable(catalog.local_available)}).catch(()=>setLearningCapabilities([])); },[sourceMounted,knowledgeBaseId]);
 
   useEffect(()=>setLearningAnalysisSelection(undefined),[knowledgeId]);
 
@@ -553,7 +559,7 @@ const KnowledgeDocumentContent = () => {
       });
   }, [knowledgeId, isPaperDocument]);
 
-  useEffect(() => { preanalyzeReferences(); }, [preanalyzeReferences, referencePreanalysisRetry]);
+  useEffect(() => { if (sourceMounted) preanalyzeReferences(); }, [sourceMounted, preanalyzeReferences, referencePreanalysisRetry]);
 
 
   const handleSegmentViewOptionsChange = useCallback(
@@ -686,6 +692,12 @@ const KnowledgeDocumentContent = () => {
   }, [knowledgeDetail?.display_name, knowledgeDetail?.download_file_url, knowledgeDetail?.file_url]);
 
   const previewFile = originalPreviewFile;
+  const sourceVersion = useMemo(() => ({ url: originalPreviewFile, updated: knowledgeDetail?.update_time }),
+    [originalPreviewFile, knowledgeDetail?.update_time]);
+  const getGuidePdfVersion = useCallback(() => fileViewerRef.current?.getPdfVersion() ??
+    (originalPreviewFile ? sourceVersion : null), [sourceVersion, originalPreviewFile]);
+  const getGuidePdfData = useCallback(() => fileViewerRef.current?.getPdfData() ??
+    (originalPreviewFile ? getPdfData(originalPreviewFile) : null), [originalPreviewFile]);
 
   const handleExportImagePdf = useCallback(async () => {
     if (!canExportImagePdf || exportingImagePdf) {
@@ -1058,14 +1070,21 @@ const KnowledgeDocumentContent = () => {
   return (
     <div className={`knowledge-container is-document-reader !h-full !items-start${isPaperDocument ? " is-paper-document" : ""}`}>
       <div ref={workspaceRef} className="knowledge-preview-layout knowledge-paper-workspace" data-panel-layout={panelLayout} data-panel-open={!previewSideCollapsed} data-narrow={workspaceWidth<1100} data-compact={workspaceWidth<900} style={{"--paper-assistant-width": `${Math.min(paperAssistantWidth, Math.max(320, workspaceWidth * .5))}px`} as React.CSSProperties}>
-        <div className="knowledge-preview-file-column paper-reader-pane">
+        <PaperReadingWorkspace dataset={knowledgeBaseId} document={knowledgeId} title={knowledgeDetail?.display_name || ""} eligible={isPaperDocument} back={readerBackButton}
+          ir={paperIR} getPdfData={getGuidePdfData} getPdfVersion={getGuidePdfVersion} onModeChange={setGuideMode}
+          auxiliaryOpen={!previewSideCollapsed} auxiliaryTab={previewSideTab}
+          onAuxiliary={tab=>{setPreviewSideCollapsed(!tab);if(tab){setPreviewSideTab(tab);if(tab==="chat")setActivatedDocumentChatKey(documentKey);}}}
+          onReturnSource={guidePreviousPdfPosition?()=>{setPdfNavigateToPosition({...guidePreviousPdfPosition,requestId:++navigationSequence.current});setGuidePreviousPdfPosition(undefined);}:undefined}
+          onNavigate={e=>{setGuidePreviousPdfPosition(pdfViewPosition);setPdfNavigateTo(undefined);const bbox=e.locator.kind==="page"?undefined:e.locator.bbox;setPdfNavigateToPosition({page:e.locator.page+1,progress:Math.max(0,(bbox?.[1]||0)-.1),requestId:++navigationSequence.current,sourceLocator:true,bbox});}}
+          source={(readingModeSwitch) => <>        <div ref={sourcePaneRef} className="knowledge-preview-file-column paper-reader-pane">
           {!isPdfDocument && <header className="document-reader-header">{readerBackButton}<span title={knowledgeDetail?.display_name}>{knowledgeDetail?.display_name}</span>{readerDocumentActions()}</header>}
-          {isPdfDocument && <PaperOutlineRail document={paperIR} nativeOutline={nativePdfOutline} currentPage={pdfViewPosition.page} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage}/> }
+          {isPdfDocument && !guideMode && <PaperOutlineRail document={paperIR} nativeOutline={nativePdfOutline} currentPage={pdfViewPosition.page} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage}/> }
             <FileViewer
               ref={fileViewerRef}
-              pdfScrollSync={scrollSync.source}
+              pdfScrollSync={guideMode ? undefined : scrollSync.source}
               paperMode={isPaperDocument}
               pdfHeaderStart={readerBackButton}
+              pdfHeaderCenter={readingModeSwitch}
               pdfHeaderEnd={readerDocumentActions}
               pdfIRTarget={isPaperDocument ? {dataset: knowledgeBaseId, document: knowledgeId, canWrite: hasWritePermission} : undefined}
               onPdfIRDocumentChange={setPaperIR}
@@ -1111,8 +1130,10 @@ const KnowledgeDocumentContent = () => {
             />
 
         </div>
-        {!previewSideCollapsed && (panelLayout==="left" || panelLayout==="right") && workspaceWidth >= 900 && <PaperPaneDivider side={panelLayout==="left"?"left":"right"} width={Math.min(paperAssistantWidth, Math.max(320,workspaceWidth*.5))} maxWidth={Math.max(320,workspaceWidth*.5)} onChange={resizePaperAssistant} onPreview={previewPaperAssistantWidth} label={i18n.language.startsWith("zh") ? "调整助手宽度" : "Resize assistant"} />}
-        <div ref={panelRef} style={panelLayout==="floating"?{"--paper-panel-x":`${floatingPosition.x}px`,"--paper-panel-y":`${floatingPosition.y}px`} as React.CSSProperties:undefined} className={`paper-chat-pane knowledge-preview-panel-column${previewSideCollapsed?" is-collapsed":""}`} aria-hidden={previewSideCollapsed}>
+</>}
+          divider={<>        {!previewSideCollapsed && (panelLayout==="left" || panelLayout==="right") && workspaceWidth >= 900 && <PaperPaneDivider side={panelLayout==="left"?"left":"right"} width={Math.min(paperAssistantWidth, Math.max(320,workspaceWidth*.5))} maxWidth={Math.max(320,workspaceWidth*.5)} onChange={resizePaperAssistant} onPreview={previewPaperAssistantWidth} label={i18n.language.startsWith("zh") ? "调整助手宽度" : "Resize assistant"} />}
+</>}
+          auxiliary={<>        <div ref={panelRef} style={panelLayout==="floating"?{"--paper-panel-x":`${floatingPosition.x}px`,"--paper-panel-y":`${floatingPosition.y}px`} as React.CSSProperties:undefined} className={`paper-chat-pane knowledge-preview-panel-column${previewSideCollapsed?" is-collapsed":""}`} aria-hidden={previewSideCollapsed}>
           {knowledgeDetail&&<>
             <div className="paper-chat-open-content">
               <div className="paper-chat-toolbar" tabIndex={panelLayout==='floating'?0:undefined} aria-label={panelLayout==='floating'?(i18n.language.startsWith("zh")?"移动浮动面板":"Move floating panel"):undefined}
@@ -1142,7 +1163,7 @@ const KnowledgeDocumentContent = () => {
                 {translationPanelMode === "document" && <FullDocumentTranslationPanel
                   datasetId={knowledgeBaseId} documentId={knowledgeId}
                   artifact={sidebarTranslation}
-                  scrollSync={scrollSync.translation} syncScroll={syncScroll} onSyncScrollChange={toggleSyncScroll}
+                  scrollSync={guideMode ? undefined : scrollSync.translation} syncScroll={guideMode ? false : syncScroll} onSyncScrollChange={toggleSyncScroll}
                   supported={canTranslateDocument} busy={translationInProgress}
                   canWrite={hasWritePermission}
                   progressNotice={<PdfTranslationNotice progress={pdfProgress} documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={displayTranslationName(getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider))} onCancel={() => void cancelTranslationJob()} />}
@@ -1160,7 +1181,8 @@ const KnowledgeDocumentContent = () => {
 
           </>}
         </div>
-        <PaperToolDock label={i18n.language.startsWith("zh")?"阅读工具":"Reading tools"} activeTool={previewSideCollapsed ? undefined : previewSideTab}
+</>}
+          dock={<>        <PaperToolDock label={i18n.language.startsWith("zh")?"阅读工具":"Reading tools"} activeTool={previewSideCollapsed ? undefined : previewSideTab}
           tools={[
             ...(isPaperDocument?[{id:"notes",label:paperNotesLabel,icon:<EditOutlined/>}]:[]),
             ...(!isPaperDocument?[{id:"navigation",label:t("paperShell.documentNavigation"),icon:<MenuOutlined/>}]:[]),
@@ -1169,7 +1191,8 @@ const KnowledgeDocumentContent = () => {
           ]}
           onChange={tool=>{if(!tool){setPreviewSideCollapsed(true);return;}setPreviewSideTab(tool);setPreviewSideCollapsed(false);if(tool==="chat")setActivatedDocumentChatKey(documentKey);}}
         >
-        </PaperToolDock>
+        </PaperToolDock></>}
+        />
       </div>
       <Modal
         open={translationModalOpen}

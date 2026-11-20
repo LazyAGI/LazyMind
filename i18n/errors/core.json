@@ -2240,5 +2240,21 @@
   "2003228": {"en-US": "Local PDF translation layout failed; retry or repair the desktop Python runtime", "zh-CN": "本地 PDF 翻译排版失败，请重试；若仍失败，请修复桌面应用的 Python 运行环境"},
   "2003229": {"en-US": "Local PDF translation returned an invalid result", "zh-CN": "本地 PDF 翻译组件返回了无效结果，请重试"},
   "2003230": {"en-US": "MinerU request cannot be replayed; retry the operation", "zh-CN": "MinerU 请求无法重放，请重新发起操作"},
-  "2003231": {"en-US": "PDF font preparation is only available in local mode", "zh-CN": "仅本地模式支持准备 PDF 字体"}
+  "2003231": {"en-US": "PDF font preparation is only available in local mode", "zh-CN": "仅本地模式支持准备 PDF 字体"},
+  "2004401": { "en-US": "The PDF or its parsed structure changed. Generate a new revision.", "zh-CN": "原文或解析结构已变化，请基于当前原文重新生成。" },
+  "2004402": { "en-US": "Ask a user with write permission to prepare the PDF structure first.", "zh-CN": "请由有写权限的用户先准备 PDF 结构化解析。" },
+  "2004403": { "en-US": "The original model is unavailable or changed. Restore it or generate a new revision.", "zh-CN": "原运行模型不可用或配置已变化，请恢复原配置或重新生成。" },
+  "2004404": { "en-US": "This run has exhausted its budget. Explicitly generate a new revision.", "zh-CN": "本次导读预算已用完，请明确发起新的生成。" },
+  "2004405": { "en-US": "The source exceeds the bounded context budget. Select a model with a larger context.", "zh-CN": "论文超出本次可覆盖的上下文范围，请选择更大上下文的模型。" },
+  "2004406": { "en-US": "Generated content or evidence did not pass validation. Inspect the source before resuming.", "zh-CN": "生成内容或引用未通过检查，请检查原文后续跑或重新生成。" },
+  "2004407": { "en-US": "Readable material is insufficient for a full guide. Supply the complete source or parsing.", "zh-CN": "可读材料不足以完成整篇导读，请补充完整原文或解析。" },
+  "2004408": { "en-US": "The document is unavailable or access was revoked.", "zh-CN": "文档不存在或已无权访问。" },
+  "2004409": { "en-US": "The guide run changed. Refresh and try again.", "zh-CN": "导读任务已变化，请刷新后重试。" },
+  "2004410": { "en-US": "New guide generation is disabled. Existing authorized results remain readable.", "zh-CN": "新的整篇导读生成已禁用，已有结果仍可阅读。" },
+  "2004411": { "en-US": "Some statements still need review. Generation is paused and published sections are preserved.", "zh-CN": "部分表述仍需检查，已暂停生成并保留已发布章节。" },
+  "2004412": { "en-US": "Guide generation failed. Resume later; used budget and published content are preserved.", "zh-CN": "导读生成失败，请稍后续跑；已用预算和已发布内容会保留。" },
+  "2004413": { "en-US": "The guide format or generation instructions changed. Generate a new revision; existing content remains readable.", "zh-CN": "导读格式或生成规则已更新，请重新生成；已有内容仍可阅读。" },
+  "2004414": { "en-US": "The model request timed out. Published content and used budget are preserved; resume later or explicitly generate with another model.", "zh-CN": "模型请求超时，已保留已发布内容和已用预算；可稍后续跑，或明确选择其他模型重新生成。" },
+  "2004415": { "en-US": "The model service could not complete the request. Published content and used budget are preserved; retry later.", "zh-CN": "模型服务未能完成请求，已保留已发布内容和已用预算，请稍后重试。" },
+  "2004416": { "en-US": "The source pages could not be verified. The original PDF and earlier guides are still available.", "zh-CN": "无法核实来源页码。仍可阅读原文和已有导读。" }
 }

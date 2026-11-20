@@ -3,9 +3,13 @@ package algo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestStructuredTaskPreservesObjectAndSingleAttemptContract(t *testing.T) {
@@ -97,7 +101,7 @@ func TestStructuredTaskPreservesSafeFailureClassificationAndUsage(t *testing.T) 
 }
 
 func TestStructuredTaskKeepsProviderAndUnknownFailureMetadata(t *testing.T) {
-	for _, code := range []string{"quota_exhausted", "permission_denied", "provider_overloaded", "service_unavailable", "unknown-private-provider-error"} {
+	for _, code := range []string{"task_timeout", "quota_exhausted", "permission_denied", "provider_overloaded", "service_unavailable", "unknown-private-provider-error"} {
 		t.Run(code, func(t *testing.T) {
 			endpoint := startGenerateTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(502)
@@ -114,5 +118,94 @@ func TestStructuredTaskKeepsProviderAndUnknownFailureMetadata(t *testing.T) {
 				t.Fatalf("lost safe error metadata: %#v", err)
 			}
 		})
+	}
+}
+
+func TestPaperGuideStructuredTaskTransportPreservesChapterID(t *testing.T) {
+	endpoint := startGenerateTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			TaskType string `json:"task_type"`
+			Input    struct {
+				Data struct {
+					ChapterID string `json:"chapter_id"`
+				} `json:"data"`
+			} `json:"input"`
+			Options map[string]string `json:"options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode structured task: %v", err)
+		}
+		if request.TaskType != "paper.explainer.chapter" || request.Options["task_version"] != "paper-guide-v28" ||
+			request.Input.Data.ChapterID != "overview" {
+			t.Errorf("lost guide request metadata: %+v", request)
+		}
+		fmt.Fprint(w, `{"status":"succeeded","output":{"id":"overview"},"usage":{"model_calls":1,"task_type":"paper.explainer.chapter","task_version":"paper-guide-v28"}}`)
+	}))
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
+	result, err := RunStructuredTask(context.Background(), StructuredTaskRequest{
+		Task: "paper.explainer.chapter", Version: "paper-guide-v28", Input: map[string]any{"chapter_id": "overview"},
+	})
+	if err != nil || string(result.Output) != `{"id":"overview"}` {
+		t.Fatalf("response %s: %v", result.Output, err)
+	}
+}
+
+func TestStructuredTaskSuccessContractMismatchRetainsSafeTypedUsage(t *testing.T) {
+	for _, field := range []string{"task_type", "task_version", "model_calls"} {
+		t.Run(field, func(t *testing.T) {
+			usage := StructuredTaskUsage{Task: "paper.explainer.plan", Version: "paper-guide-v28", ModelCalls: 1, ElapsedMS: 19}
+			switch field {
+			case "task_type":
+				usage.Task = "paper.explainer.chapter"
+			case "task_version":
+				usage.Version = "paper-guide-v2"
+			case "model_calls":
+				usage.ModelCalls = 2
+			}
+			calls := 0
+			endpoint := startGenerateTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				json.NewEncoder(w).Encode(map[string]any{"status": "succeeded", "output": map[string]any{"private": "provider-secret"}, "usage": usage})
+			}))
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", endpoint)
+			result, err := RunStructuredTask(t.Context(), StructuredTaskRequest{Task: "paper.explainer.plan", Version: "paper-guide-v28"})
+			var failure *StructuredTaskError
+			if !errors.As(err, &failure) || failure.Code != "invalid_model_output" || failure.Usage != usage || failure.Retryable || len(result.Output) != 0 || calls != 1 {
+				t.Fatalf("wrong classification, usage or attempts: result=%+v err=%#v calls=%d", result, err, calls)
+			}
+			if strings.Contains(err.Error(), "provider-secret") {
+				t.Fatal("raw output leaked")
+			}
+		})
+	}
+}
+
+type structuredTaskTrip func(*http.Request) (*http.Response, error)
+
+func (trip structuredTaskTrip) RoundTrip(r *http.Request) (*http.Response, error) { return trip(r) }
+
+func TestStructuredTaskTransportTimeoutDefaultsAndRejectsNegative(t *testing.T) {
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://fixture.invalid")
+	previous := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	calls := 0
+	http.DefaultTransport = structuredTaskTrip(func(r *http.Request) (*http.Response, error) {
+		calls++
+		deadline, ok := r.Context().Deadline()
+		if remaining := time.Until(deadline); !ok || remaining > 120*time.Second || remaining < 119*time.Second {
+			t.Errorf("default HTTP deadline %v (present=%t)", remaining, ok)
+		}
+		body := `{"status":"succeeded","output":{},"usage":{"model_calls":1,"task_type":"paper.formula.explain","task_version":"formula-explanation-v7-low-latency"}}`
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	req := StructuredTaskRequest{Task: FormulaExplanationTask, Version: FormulaExplanationTaskVersion}
+	if _, err := RunStructuredTask(context.Background(), req); err != nil || calls != 1 {
+		t.Fatalf("default call: calls=%d err=%v", calls, err)
+	}
+	req.TransportTimeout = -time.Second
+	_, err := RunStructuredTask(context.Background(), req)
+	var taskErr *StructuredTaskError
+	if !errors.As(err, &taskErr) || taskErr.Code != "invalid_task_config" || calls != 1 {
+		t.Fatalf("negative timeout reached transport: calls=%d err=%v", calls, err)
 	}
 }

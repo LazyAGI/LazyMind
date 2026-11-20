@@ -15,6 +15,7 @@ type Capability struct {
 // automatically enabled by existing presets.
 func Registry() []Capability {
 	return []Capability{
+		{PaperGuide, "整篇论文导读", []string{PDFParse}, []string{OnDemand, Disabled}, []string{"explicit"}, "document", "model_request", "paper-guide-v1"},
 		{PDFParse, "结构化 PDF 解析", []string{}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "document", "paper", "mineru-vlm-ir-v1"},
 		{AIStudy, "AI 论文精读", []string{PDFParse}, []string{OnDemand, Automatic, Disabled}, []string{"explicit", "future_document"}, "document", "paper", "paper-reading-v2-grounded-findings"},
 	}
