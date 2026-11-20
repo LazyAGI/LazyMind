@@ -2191,8 +2191,12 @@ export function WorkflowPanel({
     && !ui.task_presentation?.hidden_steps?.includes(step.step_id)
     && step.validity !== 'stale'
     && all.findIndex((candidate) => candidate.step_id === step.step_id && candidate.validity !== 'stale') === index) : [];
-  const stepLabel = (stepId: string) => ui.stepLabels?.[stepId] ?? tabs.find(tab => getTabStepId(tab) === stepId)?.label
-    ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
+  const stepLabel = (stepId: string) => {
+    const label = ui.stepLabels?.[stepId]?.trim();
+    if (label && label !== stepId) return label;
+    return tabs.find(tab => getTabStepId(tab) === stepId)?.label
+      ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
+  };
   const continueDisabled = (continueAction?.kind === 'advance' ? chatBusy || actionPending : buttonsDisabled) || currentStepStatus === 'failed';
 
   async function refreshBeforeAction() {
