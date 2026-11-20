@@ -1,10 +1,16 @@
 import hashlib
+import math
 import os
 import secrets
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from jose import jwt
+
+
+_MIN_JWT_SECRET_BYTES = 32
+_MIN_JWT_SECRET_ENTROPY_BITS = 128.0
 
 
 def jwt_secret() -> str:
@@ -12,6 +18,30 @@ def jwt_secret() -> str:
     if not s:
         raise RuntimeError('LAZYMIND_JWT_SECRET is required')
     return s
+
+
+def _estimated_entropy_bits(secret: str) -> float:
+    raw = secret.encode('utf-8')
+    if not raw:
+        return 0.0
+
+    length = len(raw)
+    counts = Counter(raw)
+    entropy_per_byte = -sum(
+        (count / length) * math.log2(count / length)
+        for count in counts.values()
+    )
+    return entropy_per_byte * length
+
+
+def validate_jwt_secret() -> str:
+    secret = jwt_secret()
+    secret_bytes = secret.encode('utf-8')
+    if len(secret_bytes) < _MIN_JWT_SECRET_BYTES:
+        raise RuntimeError('LAZYMIND_JWT_SECRET must be at least 32 bytes')
+    if _estimated_entropy_bits(secret) < _MIN_JWT_SECRET_ENTROPY_BITS:
+        raise RuntimeError('LAZYMIND_JWT_SECRET has insufficient entropy')
+    return secret
 
 
 def _env_int(key: str, default: int) -> int:
