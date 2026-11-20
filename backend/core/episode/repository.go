@@ -211,6 +211,10 @@ func (r *Repository) List(
 	pageSize int,
 	pageToken string,
 ) (Page, error) {
+	return r.list(ctx, userID, pageSize, pageToken, 0)
+}
+
+func (r *Repository) list(ctx context.Context, userID string, pageSize int, pageToken string, offset int) (Page, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return Page{}, fmt.Errorf("user_id is required")
@@ -240,6 +244,7 @@ func (r *Repository) List(
 	if err := query.
 		Order("recorded_at_ms DESC").
 		Order("id DESC").
+		Offset(offset).
 		Limit(pageSize + 1).
 		Find(&rows).Error; err != nil {
 		return Page{}, fmt.Errorf("list episodes: %w", err)

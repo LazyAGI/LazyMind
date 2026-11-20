@@ -71,12 +71,6 @@ export function isChildConversation(
   );
 }
 
-// Right-side sidechat entry points can consume this helper without duplicating
-// relationship rules. A child conversation cannot create another sidechat.
-export function canStartSidechat(
-  conversation?: ConversationRelationInput | null,
-) {
-  return !(
-    conversation as ConversationRelationFields | undefined
-  )?.parent_conversation_id?.trim();
+export function canStartSidechat(relation: ConversationRelation | null) {
+  return !relation || relation.relationType === CONVERSATION_RELATION_FORK;
 }

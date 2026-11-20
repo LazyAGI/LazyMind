@@ -1,7 +1,7 @@
 import { tr } from "./translations";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { Alert, Button, Pagination, Popover } from "antd";
-import { CloseOutlined, FileTextOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { CloseOutlined, DownOutlined, FileTextOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { type ChatSource, type ChatSourceCollection, getCitationSources, getSourceDedupKey, getSourceEvidenceText, getSourceFaviconUrl, getSourceOriginalHref, getSourceLabel, getSourceSubtitle, isExternalSource } from "../../utils/sourceAdapter";
 import { SourceImportActions, useSourceImports, findInspectedSource, uniquePapers } from "./index";
@@ -82,7 +82,7 @@ const paperPriority = (paper?: InspectedSource) => {
   return paper.needs_pdf_lookup ? 1 : 2;
 };
 
-export function ChatSourcePanel({ sources, onClose, embedded = false }: { sources: ChatSource[]; onClose: () => void; embedded?: boolean }) {
+export function ChatSourcePanel({ sources, onClose, embedded = false, hideListCount = false }: { sources: ChatSource[]; onClose: () => void; embedded?: boolean; hideListCount?: boolean }) {
   const { t } = useTranslation();
   const imports = useSourceImports();
   useEffect(() => { void imports?.load(); }, [imports?.load]);
@@ -118,8 +118,8 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
       {!embedded && <Button type="text" icon={<CloseOutlined />} onClick={onClose} aria-label={t("common.close")} />}
     </div>}
     {showList && imports?.inspectError && <Alert type="warning" message={tr("inspectionUnavailable")} />}
-    {showList && imports && <div className="source-selection-bar">
-      {sources.length > 0 && <span>{groups.length < sources.length ? tr("sourceCount", { v0: groups.length, v1: sources.length }) : tr("reference", { v0: sources.length })}</span>}
+    {showList && imports && (!hideListCount || imports.items.length > 0) && <div className="source-selection-bar">
+      {!hideListCount && sources.length > 0 && <span>{groups.length < sources.length ? tr("sourceCount", { v0: groups.length, v1: sources.length }) : tr("reference", { v0: sources.length })}</span>}
       {imports.items.length > 0 && <Button type="link" onClick={() => imports.setOpened(true)}>{tr("history")}</Button>}
     </div>}
     <div className={`chat-source-panel-body${showList ? " chat-source-page-body" : ""}`}>
@@ -175,7 +175,7 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
   </aside>;
 }
 
-export function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollection }) {
+export function ReferenceSourcesButton({ sources, inline = false }: { sources?: ChatSourceCollection; inline?: boolean }) {
   const { t } = useTranslation();
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const imports = useSourceImports();
@@ -183,6 +183,16 @@ export function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollec
     const displaySources = getCitationSources(sources);
     const groups = groupPaperSources(displaySources, imports?.inspections);
     if (!displaySources.length) return null;
+    if (inline) return (
+      <div className="task-section task-reference-sources">
+        <button type="button" className="task-section-header" aria-expanded={sourcesOpen} onClick={() => setSourcesOpen(value => !value)}>
+          <span className="task-section-icon">{sourcesOpen ? <DownOutlined /> : <RightOutlined />}</span>
+          <span className="task-section-title">{t("chat.references")}</span>
+          <span className="ordinary-section-count">{groups.length}</span>
+        </button>
+        {sourcesOpen && <ChatSourcePanel sources={displaySources} embedded hideListCount onClose={() => setSourcesOpen(false)} />}
+      </div>
+    );
     return (
       <Popover
         trigger="click"

@@ -487,6 +487,19 @@ describe("ChatLayout conversation loading", () => {
     expect(JSON.parse(mocks.sseConstructor.mock.calls[1][1].payload)).not.toHaveProperty("workflow_control");
   });
 
+  it("sends the visible rewind label separately from the runtime command", async () => {
+    render(<ChatLayout setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    const input = [{ input_type: "text", text: "请重新执行步骤 step_4ee50e" }];
+    const extras = {
+      display_query: "请重新执行步骤 整理验收清单",
+      workflow_control: { session_id: "workflow", kind: "rewind", step_id: "step_4ee50e", expected_state_version: 4 },
+    };
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE(input, "chat_action_next", {}, extras);
+    });
+    expect(JSON.parse(mocks.sseConstructor.mock.calls[0][1].payload)).toMatchObject({ input, ...extras });
+  });
+
   it("sends an initial model selection only for the first new-conversation request", async () => {
     const initialModelSelection = { mode: "fixed", model_id: "model-1" };
     mocks.pendingMessage = {

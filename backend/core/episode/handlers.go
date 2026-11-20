@@ -261,12 +261,21 @@ func ListEpisodes(w http.ResponseWriter, r *http.Request) {
 		pageSize = parsed
 	}
 	pageToken := strings.TrimSpace(r.URL.Query().Get("page_token"))
+	offset := 0
+	if r.URL.Query().Has("page") {
+		number, err := strconv.ParseInt(r.URL.Query().Get("page"), 10, 32)
+		if err != nil || number < 1 || pageToken != "" {
+			common.ReplyErr(w, "page must be positive and cannot be combined with page_token", http.StatusBadRequest)
+			return
+		}
+		offset = int(number-1) * pageSize
+	}
 	repo, err := repository()
 	if err != nil {
 		common.ReplyErr(w, "episode repository unavailable", http.StatusInternalServerError)
 		return
 	}
-	page, err := repo.List(r.Context(), userID, pageSize, pageToken)
+	page, err := repo.list(r.Context(), userID, pageSize, pageToken, offset)
 	if err != nil {
 		if strings.Contains(err.Error(), "page_token") {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -280,9 +289,10 @@ func ListEpisodes(w http.ResponseWriter, r *http.Request) {
 		publicItems = append(publicItems, publicEpisode(item))
 	}
 	common.ReplyOK(w, PublicPage{
-		Items:         publicItems,
-		TotalSize:     page.TotalSize,
-		NextPageToken: page.NextPageToken,
+		SupportsPageNumber: true,
+		Items:              publicItems,
+		TotalSize:          page.TotalSize,
+		NextPageToken:      page.NextPageToken,
 	})
 }
 

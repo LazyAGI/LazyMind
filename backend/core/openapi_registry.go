@@ -2580,11 +2580,12 @@ type knowledgeMarketTaskProgressOpenAPIResponse struct {
 }
 
 type knowledgeMarketTaskListItemOpenAPIResponse struct {
-	Parse        *knowledgeMarketTaskParseOpenAPIResponse `json:"parse,omitempty"`
-	DisplayState string                                   `json:"display_state,omitempty"`
-	CanCancel    bool                                     `json:"can_cancel,omitempty"`
-	CanRetry     bool                                     `json:"can_retry,omitempty"`
-	CanDelete    bool                                     `json:"can_delete,omitempty"`
+	DatasetDeleted bool                                     `json:"dataset_deleted,omitempty"`
+	Parse          *knowledgeMarketTaskParseOpenAPIResponse `json:"parse,omitempty"`
+	DisplayState   string                                   `json:"display_state,omitempty"`
+	CanCancel      bool                                     `json:"can_cancel,omitempty"`
+	CanRetry       bool                                     `json:"can_retry,omitempty"`
+	CanDelete      bool                                     `json:"can_delete,omitempty"`
 
 	Stage          string                                     `json:"stage,omitempty"`
 	OverallPercent int64                                      `json:"overall_percent,omitempty"`

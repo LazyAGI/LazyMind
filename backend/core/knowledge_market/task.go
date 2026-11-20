@@ -312,6 +312,7 @@ func buildTaskListItems(r *http.Request, db *gorm.DB, userID string, jobs []orm.
 	if err != nil {
 		return nil, err
 	}
+	datasetIDs := make([]string, 0, len(jobs))
 	for i := range jobs {
 		install := installByItem[jobs[i].ResourceID]
 		effectiveInstall, parse := taskProgress(r, db, jobs[i], install)
@@ -319,7 +320,19 @@ func buildTaskListItems(r *http.Request, db *gorm.DB, userID string, jobs []orm.
 		item["stage"], item["overall_percent"] = installStageAndPercent(jobs[i], effectiveInstall, parse)
 		item["parse"] = parse
 		addMarketControl(r, db, item, jobs[i], parse)
+		if id, _ := item["dataset_id"].(string); id != "" {
+			datasetIDs = append(datasetIDs, id)
+		}
 		items = append(items, item)
+	}
+	deleted, err := doc.DeletedDatasetIDs(r, db, datasetIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if id, _ := item["dataset_id"].(string); deleted[id] {
+			item["dataset_deleted"] = true
+		}
 	}
 	return items, nil
 }
