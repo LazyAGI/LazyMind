@@ -129,6 +129,9 @@ async def academic_search(payload: AcademicSearchRequest,
     except ValueError as exc:
         if str(exc) == 'missing_configuration':
             raise HTTPException(422, 'missing_configuration') from None
+        status = {'rate_limited': 429, 'quota_exhausted': 402, 'authentication_failed': 401}.get(str(exc))
+        if status:
+            raise HTTPException(status, {'code': str(exc)}) from None
         raise HTTPException(502, 'academic source request failed') from None
     except Exception as exc:
         from lazyllm.common import AllKeysExhaustedError, KeyAuthError
