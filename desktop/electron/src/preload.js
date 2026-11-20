@@ -1,6 +1,7 @@
 function createDesktopBridge(ipcRenderer) {
   return {
     platform: process.platform,
+    openExternal: (url) => ipcRenderer.invoke("lazymind:openExternal", url),
     ...(process.platform === "darwin" ? {
       recordingNativeStart: () => ipcRenderer.invoke("lazymind:recordingNativeStart"),
       recordingNativeStop: (id) => ipcRenderer.invoke("lazymind:recordingNativeStop", id),

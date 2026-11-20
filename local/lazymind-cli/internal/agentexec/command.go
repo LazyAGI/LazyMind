@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 )
 
 type cappedBuffer struct {
@@ -340,7 +341,11 @@ func ConnectorRuntime() (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return self, home, nil
+	launcher, err := connectorlauncher.Ensure(context.Background(), home, self)
+	if err != nil {
+		return "", "", err
+	}
+	return launcher, home, nil
 }
 
 func LazyMindHome() (string, error) { return lazyMindHome() }
@@ -443,21 +448,4 @@ func EnsureConversationWorkspace(conversationID string) (string, error) {
 	return workspace, nil
 }
 
-func lazyMindHome() (string, error) {
-	if _, err := connectorconfig.Current(); err != nil {
-		return "", err
-	}
-	home := strings.TrimSpace(connectorconfig.Value("LAZYMIND_HOME"))
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve LazyMind home: %w", err)
-		}
-		home = filepath.Join(userHome, ".lazymind")
-	}
-	home, err := filepath.Abs(home)
-	if err != nil {
-		return "", fmt.Errorf("resolve LazyMind home: %w", err)
-	}
-	return filepath.Clean(home), nil
-}
+func lazyMindHome() (string, error) { return connectorconfig.Home() }

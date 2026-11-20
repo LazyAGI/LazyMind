@@ -8,10 +8,19 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 
 HTML_DOCUMENT = re.compile(r'(?is)(<!doctype\s+html\b[\s\S]*?</html>|<html\b[\s\S]*?</html>)')
 _THINK_BLOCK = re.compile(r'<think\b[^>]*>[\s\S]*?</think>', re.IGNORECASE)
+_RASTER_SUFFIXES = frozenset({'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'})
+
+
+def background_suffix_mismatch(reference: Path, background: Path) -> bool:
+    """Match a generated background by name when only its raster suffix differs."""
+    return (reference.stem == background.stem
+            and reference.suffix.lower() in _RASTER_SUFFIXES
+            and reference.suffix != background.suffix)
 
 
 def page_generation_query(

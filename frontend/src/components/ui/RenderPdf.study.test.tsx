@@ -22,6 +22,13 @@ function document(hash='hash'):PdfIRDocument{return {version:1,projection_versio
 function pageButton(page:number){return screen.getByRole('button',{name:`pdfReader.page ${page} / 3`});}
 function expectPage(page:number){expect(pageButton(page)).toBeInTheDocument();}
 
+// jsdom has no scrolling layout; model the browser's synchronous scroll offset
+// update so geometry tests exercise the live viewport rather than a no-op stub.
+beforeEach(()=>{vi.spyOn(HTMLElement.prototype,'scrollTo').mockImplementation(function(this:HTMLElement,options?:ScrollToOptions|number,y?:number){
+ if(typeof options==='number'){this.scrollLeft=options;this.scrollTop=y??0;}
+ else {if(options?.top!==undefined)this.scrollTop=options.top;if(options?.left!==undefined)this.scrollLeft=options.left;}
+});});
+
 beforeEach(()=>{vi.mocked(readPdfPinBoard).mockClear().mockResolvedValue([]);vi.mocked(writePdfPinBoard).mockClear().mockResolvedValue(true);state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';state.error_code=undefined;state.error_message=undefined;state.start.mockClear();});
 beforeEach(async()=>{await returnPositionI18n.init({lng:'zh-CN',fallbackLng:false,resources:{'zh-CN':{translation:zhCN},'en-US':{translation:enUS}}});});
 
@@ -680,4 +687,99 @@ it('paints imported PDF-space annotation geometry when highlights arrive after t
  act(()=>{state.pageLoads.get(1)?.(600,800);});
  view.rerender(<RenderPdf {...props} savedNoteHighlights={[{id:'zotero',page:1,color:'yellow',rects:[],pdfRects:[[60,600,180,640]]}]}/>);
  await waitFor(()=>expect(view.container.querySelector('[data-pdf-note-highlight="yellow"] path')).toHaveAttribute('d','M0.1 0.2H0.3V0.25H0.1Z'));
+});
+
+it('does not rewind continued scrolling when the parent echoes a reported page position',async()=>{
+ const report=vi.fn();
+ const props={fileData:'scroll-feedback.pdf',defaultPageWidth:600,onViewPositionChange:report};
+ const view=render(<RenderPdf {...props} viewPosition={{page:1,progress:0}}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ const scroll=vi.spyOn(viewport,'scrollTo').mockImplementation(options=>{
+  if(typeof options==='object')viewport.scrollTop=options.top||0;
+ });
+ // Cross into page two, then keep moving before React receives the echoed prop.
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ const reported=report.mock.calls.at(-1)![0];
+ expect(reported.page).toBe(2);
+ viewport.scrollTop=1100;fireEvent.scroll(viewport);
+ scroll.mockClear();
+ view.rerender(<RenderPdf {...props} viewPosition={reported}/>);
+ expect(viewport.scrollTop).toBe(1100);
+ expect(scroll).not.toHaveBeenCalled();
+ // Explicit external navigation must still work.
+ view.rerender(<RenderPdf {...props} viewPosition={{page:3,progress:.5}}/>);
+ expect(scroll).toHaveBeenCalled();
+ expectPage(3);
+});
+
+it('does not rewind live scrolling when a newly loaded later page changes size',async()=>{
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
+ const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
+ const view=render(<RenderPdf fileData="delayed-page.pdf" defaultPageWidth={600}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ const scroll=vi.spyOn(viewport,'scrollTo').mockImplementation(options=>{
+  if(typeof options==='object')viewport.scrollTop=options.top||0;
+ });
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ // The compositor has advanced, but its next scroll event has not reached React.
+ viewport.scrollTop=1100;
+ scroll.mockClear();
+ await act(async()=>{state.pageLoads.get(3)!(600,900);});
+ expect(viewport.scrollTop).toBe(1100);
+ expect(scroll).not.toHaveBeenCalled();
+ view.unmount();width.mockRestore();height.mockRestore();
+});
+
+it('does not cancel scrolling when only an offscreen page height changes',async()=>{
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
+ const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
+ const view=render(<RenderPdf fileData="offscreen-size.pdf" defaultPageWidth={600}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ viewport.scrollTop=100;fireEvent.scroll(viewport);
+ const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
+ await act(async()=>{state.pageLoads.get(3)!(600,900);});
+ expect(scroll).not.toHaveBeenCalled();
+ view.unmount();width.mockRestore();height.mockRestore();
+});
+
+it('ignores older progress acknowledgements after multiple pages load during fast scrolling',async()=>{
+ const report=vi.fn();
+ const props={fileData:'delayed-ack.pdf',defaultPageWidth:600,onViewPositionChange:report};
+ const view=render(<RenderPdf {...props} viewPosition={{page:1,progress:0}}/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ const scroll=vi.spyOn(viewport,'scrollTo').mockImplementation(options=>{
+  if(typeof options==='object')viewport.scrollTop=options.top||0;
+ });
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ const pageTwo=report.mock.calls.at(-1)![0];
+ viewport.scrollTop=1700;fireEvent.scroll(viewport);
+ const pageThree=report.mock.calls.at(-1)![0];
+ expect(pageTwo.page).toBe(2);expect(pageThree.page).toBe(3);
+ viewport.scrollTop=1800;fireEvent.scroll(viewport);scroll.mockClear();
+ view.rerender(<RenderPdf {...props} viewPosition={pageTwo}/>);
+ expect(viewport.scrollTop).toBe(1800);
+ view.rerender(<RenderPdf {...props} viewPosition={pageThree}/>);
+ expect(viewport.scrollTop).toBe(1800);
+ expect(scroll).not.toHaveBeenCalled();
+ // A fresh navigation object is a command, even if its coordinates were reported.
+ view.rerender(<RenderPdf {...props} viewPosition={{...pageTwo}}/>);
+ expect(viewport.scrollTop).toBe(1000);
+});
+
+it('shows only selectable document content in a control-free metadata preview',async()=>{
+ const report=vi.fn();
+ const view=render(<RenderPdf fileData="metadata-preview.pdf" pdfToolbarMode="none" pdfSelectableText defaultPageWidth={600} onViewPositionChange={report}/>);
+ await act(async()=>{});
+ expect(view.container.querySelector('.pdf-reader-header')).toBeNull();
+ expect(screen.queryByRole('button')).toBeNull();
+ expect(screen.queryByRole('navigation')).toBeNull();
+ expect(screen.getAllByTestId('pdf-text-layer').length).toBeGreaterThan(0);
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ viewport.scrollTop=1000;fireEvent.scroll(viewport);
+ expect(viewport.scrollTop).toBe(1000);
+ expect(report).toHaveBeenLastCalledWith(expect.objectContaining({page:2}));
 });

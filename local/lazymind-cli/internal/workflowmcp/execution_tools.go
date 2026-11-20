@@ -39,7 +39,7 @@ func registerExecutionTools(server *mcp.Server, client *Client) {
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.tool.call", Title: "Call a tool for a Workflow execution",
 		OutputSchema: map[string]any{"type": "object", "additionalProperties": true},
-		Description:  "Call a declared tool using its listed name and schema. The controller supplies the execution_handle and a command_id stable across identical retries. arguments_file reads worker-prepared JSON locally. result_directory saves the full response and files for handoff. Correct arguments or configuration using the returned error code and message. Workflow publication and completion use their own endpoints.", Annotations: annotations(false)},
+		Description:  "Call a declared tool using its listed name and schema. The controller supplies the execution_handle and a command_id stable across identical retries. arguments_file reads worker-prepared JSON locally. result_directory saves the full response and files for handoff, including ready-to-publish publication_outputs for validated paper bundles. Correct arguments or configuration using the returned error code and message. Workflow publication and completion use their own endpoints.", Annotations: annotations(false)},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ExecutionToolCallInput) (*mcp.CallToolResult, any, error) {
 			value, err := client.CallExecutionTool(ctx, input)
 			var failure *coreapi.Error

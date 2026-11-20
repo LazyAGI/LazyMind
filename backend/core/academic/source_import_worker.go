@@ -349,7 +349,11 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 			return err
 		}
 		if item.DocumentID == "" {
-			existing, err := sourcePresentDocument(store.DB().WithContext(ctx), b.TargetDatasetID, item.AcademicWorkID, "", false)
+			var candidate FulltextCandidate
+			if err := json.Unmarshal(item.SelectedCandidateJSON, &candidate); err != nil {
+				return err
+			}
+			existing, err := sourcePresentDocument(store.DB().WithContext(ctx), b.TargetDatasetID, item.AcademicWorkID, "", true, candidate.Version, candidate.SourceProvider)
 			if err == nil {
 				return completePresentImport(ctx, job, b, item, item.AcademicWorkID, existing.ID)
 			}
@@ -386,7 +390,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 	if err = json.Unmarshal(item.SelectedCandidateJSON, &selected); err != nil {
 		return err
 	}
-	if item.DocumentID == "" && b.EntryType == "conversation_sources" {
+	if item.DocumentID == "" && b.EntryType == "conversation_sources" && !isMetadataEnrichmentBatch(b) {
 		if err := prepareConversationImportCandidate(ctx, job, b, &item, selected, originals); err != nil {
 			return err
 		}

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
+import { paperChartMediaUrls } from './paperCharts';
 import { PaperAnalysisCharts, paperChartDescriptions } from './PaperAnalysisCharts';
 
 vi.mock('./SlotComponents', async () => ({ SlotDownloadContext: (await import('react')).createContext(true) }));
@@ -23,8 +24,9 @@ const metadata = [revision('data_analysis_pool', { data: {
   ] }],
 } })];
 
-it('groups exports into one figure with its external title, caption and download links', async () => {
-  render(<PaperAnalysisCharts revisions={files} metadataSlots={metadata} />);
+it.each(['分析图表-', ''])('groups %s exports into one figure with title and downloads', async prefix => {
+  const chartFiles = files.map(file => ({ ...file, artifact_value: { ...file.artifact_value, filename: `${prefix}means.${file.artifact_value.filename.split('.').pop()}` } }));
+  render(<PaperAnalysisCharts revisions={chartFiles} metadataSlots={metadata} />);
   const image = await screen.findByRole('img', { name: 'Mean scores' });
   expect(image).toHaveAttribute('src', '/static-files/means.png');
   expect(screen.getByRole('heading', { name: 'Mean scores' })).toBeInTheDocument();
@@ -56,4 +58,14 @@ it.each(['paper-material-pool.v1', 'paper-material-pool.v2'])('reads figure meta
     { id: 'means', title: 'Mean scores', caption: 'Synthetic group means.' },
   ]);
   expect(paperChartDescriptions({ ...value, schema: 'unknown' })).toEqual([]);
+});
+
+
+it('maps paper placeholders only to selected chart exports', () => {
+  expect(paperChartMediaUrls([
+    ...files.map(file => ({ ...file, artifact_value: { ...file.artifact_value,
+      filename: file.artifact_value.filename.replace('分析图表-', '') } })),
+    { ...revision('analysis_chart', { filename: 'obsolete.svg', path: '/static-files/old.svg' }), selected: false },
+    revision('other', { filename: 'other.svg', path: '/static-files/other.svg' }),
+  ])).toEqual({ 'media-placeholder://means': '/static-files/means.svg' });
 });

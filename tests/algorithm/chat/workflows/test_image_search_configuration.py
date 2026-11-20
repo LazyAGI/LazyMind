@@ -11,7 +11,7 @@ from lazymind.chat.engine.tools.infra import image_workflow_support as tools
 
 @pytest.fixture
 def unconfigured(monkeypatch):
-    for engine_type in (tools.GoogleSearch, tools.BingSearch, tools.BochaSearch, tools.TavilySearch):
+    for engine_type in (tools.GoogleSearch, tools.BingSearch, tools.BochaSearch, tools.TavilySearch, tools.KeenableSearch):
         monkeypatch.setattr(engine_type, '__key_source__', lambda self: '')
     network = Mock(side_effect=AssertionError('No network request expected'))
     monkeypatch.setattr(tools.requests, 'request', network)

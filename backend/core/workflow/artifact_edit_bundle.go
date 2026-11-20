@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/controlstore"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -69,6 +70,9 @@ func GetArtifactEditContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := LoadSelectedSlots(r.Context(), db, session.ID)
+	if err == nil {
+		rows, err = controlstore.PresentationSlots(db.WithContext(r.Context()), rows)
+	}
 	if err != nil {
 		common.ReplyErr(w, "cannot load artifacts", 500)
 		return
@@ -141,6 +145,9 @@ func commitArtifactEditBundle(ctx context.Context, db *gorm.DB, id string, input
 			}
 		}
 		rows, err := LoadSelectedSlots(ctx, tx, id)
+		if err == nil {
+			rows, err = controlstore.PresentationSlots(tx, rows)
+		}
 		if err != nil {
 			return err
 		}

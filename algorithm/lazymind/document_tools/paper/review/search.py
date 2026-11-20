@@ -8,7 +8,7 @@ import threading
 import time
 import unicodedata
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from urllib.parse import unquote, urlsplit
 
 import httpx
@@ -152,14 +152,23 @@ def arxiv_query(terms):
     return ' OR '.join(groups)
 
 
-def _fetch(source, query, limit, key, year_from=None, year_to=None):
+def _fetch(source, query, limit, key, year_from=None, year_to=None, *, deadline=None):
     global _ARXIV_LAST
     headers = {'User-Agent': 'LazyMind scholarly-retrieval/1.0'}
     method, payload = 'GET', None
     if source == 'arxiv':
-        with _ARXIV_GATE:
-            time.sleep(max(0, 3 - (time.monotonic() - _ARXIV_LAST)))
+        acquired = (_ARXIV_GATE.acquire() if deadline is None else
+                    _ARXIV_GATE.acquire(timeout=max(0, deadline - time.monotonic())))
+        if not acquired:
+            raise httpx.ReadTimeout('Academic search deadline reached')
+        try:
+            delay = max(0, 3 - (time.monotonic() - _ARXIV_LAST))
+            if deadline is not None and time.monotonic() + delay >= deadline:
+                raise httpx.ReadTimeout('Academic search deadline reached')
+            time.sleep(delay)
             _ARXIV_LAST = time.monotonic()
+        finally:
+            _ARXIV_GATE.release()
         url = 'https://export.arxiv.org/api/query'
         params = {'search_query': '(' + query + ')', 'max_results': limit, 'start': 0,
                   'sortBy': 'relevance', 'sortOrder': 'descending'}
@@ -207,8 +216,11 @@ def _fetch(source, query, limit, key, year_from=None, year_to=None):
         else:
             params.update({name: year for name, year in [('as_ylo', year_from), ('as_yhi', year_to)]
                            if year is not None})
+    timeout = 40 if deadline is None else min(40, deadline - time.monotonic())
+    if timeout <= 0:
+        raise httpx.ReadTimeout('Academic search deadline reached')
     response = httpx.request(method, url, params=params, json=payload, headers=headers,
-                             timeout=40, follow_redirects=True)
+                             timeout=timeout, follow_redirects=True)
     raw = _response(response, source)
     items = []
     if source == 'arxiv':
@@ -300,30 +312,52 @@ def fuse(runs):
     return papers
 
 
-def search_papers(query, *, limit=20, api_keys=None, arxiv_terms=None, year_from=None, year_to=None):
+def search_papers(query, *, limit=20, api_keys=None, arxiv_terms=None, year_from=None, year_to=None,
+                  time_budget=None):
+    """Search complementary queries together; a deadline returns only completed, genuine sources."""
     api_keys = api_keys or {}
     sources = ['arxiv', *external_sources(api_keys)]
-    if not query.strip() or not 1 <= limit <= 20:
-        raise ValueError('A query and between 1 and 20 candidates per source are required')
+    queries = [query] if isinstance(query, str) else query
+    if (not isinstance(queries, list) or not 1 <= len(queries) <= 3
+            or any(not isinstance(q, str) or not q.strip() for q in queries) or not 1 <= limit <= 20):
+        raise ValueError('1–3 queries and between 1 and 20 candidates per source are required')
+    if time_budget is not None and (not isinstance(time_budget, (int, float)) or not 0 < time_budget <= 40):
+        raise ValueError('Search time budget must be between 0 and 40 seconds')
+    deadline = None if time_budget is None else time.monotonic() + time_budget
 
-    def run(source):
+    def run(source, query):
         source_query = arxiv_query(arxiv_terms or [query]) if source == 'arxiv' else query
         for attempt in range(3):
+            if deadline is not None and time.monotonic() >= deadline:
+                return {'source': source, 'query': query, 'status': 'timed_out', 'papers': []}
             try:
-                papers = _fetch(source, source_query, limit, api_keys.get(source, ''), year_from, year_to)
-                return {'source': source, 'status': 'ok', 'papers': papers}
+                kwargs = {} if deadline is None else {'deadline': deadline}
+                papers = _fetch(source, source_query, limit, api_keys.get(source, ''), year_from, year_to, **kwargs)
+                return {'source': source, 'query': query, 'status': 'ok', 'papers': papers}
             except QuotaExceeded:
-                return {'source': source, 'status': 'quota_exhausted', 'papers': []}
+                return {'source': source, 'query': query, 'status': 'quota_exhausted', 'papers': []}
             except (httpx.HTTPError, ValueError, KeyError, ET.ParseError) as error:
                 status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
                 if status is not None and status < 500 and status != 429:
                     break
                 if attempt < 2:
-                    time.sleep(2 ** attempt)
-        return {'source': source, 'status': 'failed', 'papers': []}
+                    delay = 2 ** attempt
+                    if deadline is not None and time.monotonic() + delay >= deadline:
+                        return {'source': source, 'query': query, 'status': 'timed_out', 'papers': []}
+                    time.sleep(delay)
+        return {'source': source, 'query': query, 'status': 'failed', 'papers': []}
 
-    with ThreadPoolExecutor(max_workers=len(sources)) as executor:
-        runs = list(executor.map(run, sources))
+    jobs = [(source, query) for query in queries for source in sources]
+    executor = ThreadPoolExecutor(max_workers=min(8, len(jobs)))
+    futures = [executor.submit(run, source, query) for source, query in jobs]
+    try:
+        done, _ = wait(futures, timeout=None if deadline is None else max(0, deadline - time.monotonic()))
+        runs = [future.result() if future in done else {
+            'source': source, 'query': query, 'status': 'timed_out', 'papers': []}
+            for future, (source, query) in zip(futures, jobs)]
+    finally:
+        # Do not let executor shutdown turn a partial result into another wait for a slow HTTP request.
+        executor.shutdown(wait=deadline is None, cancel_futures=True)
     return {'sources': runs, 'papers': fuse(runs)}
 
 

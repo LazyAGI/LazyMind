@@ -1,3 +1,5 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
+import ExternalLink from '@/components/ExternalLink';
 import DocumentPdfParseStatus from './DocumentPdfParseStatus';
 import type { PdfIRState } from '../api/pdfIR';
 import PaperAuthors from './PaperAuthors';
@@ -176,9 +178,9 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
           <div className="paper-detail-section-head"><h3>全文附件</h3></div>
           <p className="paper-detail-muted">{pdfs.length ? <button type="button" className="paper-detail-tab-link" onClick={() => changeTab('attachments')}>PDF · {pdfs.length} 份，查看附件与版本</button> : attachments.length ? '尚未添加入库 PDF，可在附件页查看其他材料。' : '仅题录，尚未添加 PDF。'}</p>
           <div className="paper-detail-section-head"><h3>导入信息</h3></div>
-          <dl aria-label="论文导入信息"><dt>导入方式</dt><dd>{paperImportMethodName(current.importMethod)}</dd><dt>导入来源</dt><dd>{sourceLabel[current.source] || '未记录'}</dd><dt>原始链接</dt><dd>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer">{sourceUrl}</a> : '未记录'}</dd></dl>
+          <dl aria-label="论文导入信息"><dt>导入方式</dt><dd>{paperImportMethodName(current.importMethod)}</dd><dt>导入来源</dt><dd>{sourceLabel[current.source] || '未记录'}</dd><dt>原始链接</dt><dd>{sourceUrl ? <ExternalLink href={sourceUrl} target="_blank" rel="noopener noreferrer">{sourceUrl}</ExternalLink> : '未记录'}</dd></dl>
           {primary && <><div className="paper-detail-section-head"><h3>主附件来源</h3></div>
-          <dl aria-label="主附件来源"><dt>附件导入方式</dt><dd>{paperImportMethodName(primary.importMethod)}</dd><dt>原文来源</dt><dd>{sourceName(primary)}</dd><dt>全文提供方</dt><dd>{paperSourceProviderLabels[primary.sourceProvider || ''] || '未记录'}</dd><dt>附件链接</dt><dd>{attachmentSourceUrl ? <a href={attachmentSourceUrl} target="_blank" rel="noopener noreferrer">{attachmentSourceUrl}</a> : '未记录'}</dd><dt>来源版本</dt><dd>{primary.sourceVersion || '未记录'}</dd></dl></>}
+          <dl aria-label="主附件来源"><dt>附件导入方式</dt><dd>{paperImportMethodName(primary.importMethod)}</dd><dt>原文来源</dt><dd>{sourceName(primary)}</dd><dt>全文提供方</dt><dd>{paperSourceProviderLabels[primary.sourceProvider || ''] || '未记录'}</dd><dt>附件链接</dt><dd>{attachmentSourceUrl ? <ExternalLink href={attachmentSourceUrl} target="_blank" rel="noopener noreferrer">{attachmentSourceUrl}</ExternalLink> : '未记录'}</dd><dt>来源版本</dt><dd>{primary.sourceVersion || '未记录'}</dd></dl></>}
         </div> },
             { key: 'attachments', label: `附件 ${summary.attachments}`, children: selectedAttachment ? <div className="paper-attachment-frame">
               <div className="paper-attachment-bar">
@@ -191,7 +193,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
                     disabledReason={disabled ? '当前文档暂不可编辑' : saving || editing ? '正在编辑，暂不可解析' : !onReparse ? '当前文档为只读' : reparseDisabledReason?.(selectedAttachment.contentRef!)} /></div>}
                 </div></div>
                 <div className="paper-attachment-controls">
-                  {selectedAttachment.contentRef ? <Button href={onOpenAttachment ? undefined : `/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(selectedAttachment.contentRef)}`} onClick={onOpenAttachment ? () => onOpenAttachment(selectedAttachment.contentRef!) : undefined}>阅读此附件</Button> : safePaperUrl(selectedAttachment.sourceUrl) ? <Button href={safePaperUrl(selectedAttachment.sourceUrl)} target="_blank" rel="noopener noreferrer">打开原文 ↗</Button> : null}
+                  {selectedAttachment.contentRef ? <Button href={onOpenAttachment ? undefined : `/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(selectedAttachment.contentRef)}`} onClick={onOpenAttachment ? () => onOpenAttachment(selectedAttachment.contentRef!) : undefined}>阅读此附件</Button> : safePaperUrl(selectedAttachment.sourceUrl) ? <Button {...externalLinkProps(safePaperUrl(selectedAttachment.sourceUrl))} target="_blank" rel="noopener noreferrer">打开原文 ↗</Button> : null}
                   {onSetPrimaryAttachment && isStoredPdfAttachment(selectedAttachment) && selectedAttachment.id !== primaryPdf?.id && <Button type="text" aria-label="设为主附件" icon={<PushpinOutlined aria-hidden />} disabled={disabled || saving || editing} onClick={() => void run(() => onSetPrimaryAttachment(selectedAttachment), '主附件设置失败，请重试')}>设为主附件</Button>}
                   {(onAddPdf || onDetachAttachment) && <Dropdown trigger={['click']} menu={{ items: [
                     ...(onAddPdf ? [{ key: 'add', label: '添加 PDF', icon: <PlusOutlined aria-hidden />, disabled: disabled || saving || editing, onClick: onAddPdf }] : []),

@@ -235,6 +235,30 @@ func legacyUserStoppedAt(db *gorm.DB, current []orm.WorkflowSessionStep) (time.T
 
 func preparingState(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep) (View, error) {
 	preparing := View{Status: "running", Reason: "preparing"}
+	if session.ControllerHost == "lazymind" {
+		historyID, err := ChatHistoryID(session)
+		if err != nil {
+			return View{}, err
+		}
+		if historyID != "" {
+			var history orm.ChatHistory
+			err := db.Select("run_status").Where("id = ? AND conversation_id = ?", historyID, session.ConversationID).Take(&history).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return View{}, err
+			}
+			if err == nil && (history.RunStatus == "completed" || history.RunStatus == "failed") {
+				for _, step := range current {
+					if step.Status != "succeeded" {
+						return View{Status: "failed", Reason: step.Status}, nil
+					}
+				}
+				if history.RunStatus == "failed" {
+					return View{Status: "failed", Reason: "controller_failed"}, nil
+				}
+				return View{Status: "waiting", Reason: "next_step_required"}, nil
+			}
+		}
+	}
 	if session.ControllerHost != "external-agent" || !strings.HasPrefix(session.OriginRef, "run_") {
 		return preparing, nil
 	}

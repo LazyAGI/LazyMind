@@ -571,6 +571,11 @@ func LoadSearchToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[
 	}
 	keys := splitOCRAuthKeys(row.APIKey)
 	if len(keys) == 0 {
+		// Selected keyless Keenable uses the public endpoint; other
+		// providers still require a key.
+		if toolName == "keenable" {
+			return map[string]any{"keenable": "public"}, nil
+		}
 		return nil, nil
 	}
 	var value any = keys[0]
@@ -736,6 +741,8 @@ func normalizeSearchToolName(providerName string) string {
 		return "bing"
 	case "tavily":
 		return "tavily"
+	case "keenable", "keenablesearch":
+		return "keenable"
 	case "sciverse", "sciversesearch":
 		return "sciverse"
 	default:

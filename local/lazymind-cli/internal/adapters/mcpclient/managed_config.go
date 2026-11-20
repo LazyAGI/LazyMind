@@ -29,6 +29,23 @@ type managedConfigState struct {
 
 type rawMCPFile map[string]json.RawMessage
 
+var errWorkBuddyRegistrationOccupied = errors.New("WorkBuddy is linked to another LazyMind deployment")
+
+func checkWorkBuddyRegistration(servers map[string]json.RawMessage, home, hostID string) error {
+	raw, exists := servers[serverName]
+	if !exists {
+		return nil
+	}
+	var entry stdioMCPDefinition
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return fmt.Errorf("decode WorkBuddy registration: %w", err)
+	}
+	if !ownedManagedStdio(entry, home, hostID, WorkBuddy, "") {
+		return errWorkBuddyRegistrationOccupied
+	}
+	return nil
+}
+
 func readManagedConfig(kind Kind, path, self, home, hostID string) (managedConfigState, error) {
 	if kind == DeepSeekHarness {
 		return readDSHConfig(path, self, home, hostID)
@@ -65,6 +82,11 @@ func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled b
 	if err != nil {
 		return err
 	}
+	if kind == WorkBuddy {
+		if err := checkWorkBuddyRegistration(servers, home, hostID); err != nil {
+			return err
+		}
+	}
 
 	if _, err := connectorconfig.Save(connectorconfig.Config{Home: home, Provider: string(kind), HostID: hostID, Controlled: kind == WorkBuddy}); err != nil {
 		return err
@@ -86,7 +108,7 @@ func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled b
 	return writeConfigFile(path, append(body, '\n'))
 }
 
-func removeManagedConfig(kind Kind, path string) error {
+func removeManagedConfig(kind Kind, path, home, hostID string) error {
 	if kind == DeepSeekHarness {
 		return removeDSHConfig(path)
 	}
@@ -104,6 +126,11 @@ func removeManagedConfig(kind Kind, path string) error {
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
 		return err
+	}
+	if kind == WorkBuddy {
+		if err := checkWorkBuddyRegistration(servers, home, hostID); err != nil {
+			return err
+		}
 	}
 	if _, exists := servers[serverName]; !exists {
 		return nil
@@ -155,62 +182,63 @@ func managedStdio(self, home, hostID string, kind Kind) stdioMCPDefinition {
 	return stdioMCPDefinition{Type: "stdio", Command: self, Args: []string{"mcp", "proxy"}, Env: connectorconfig.Environment(connectorconfig.Path(home, string(kind), ""))}
 }
 
-func ownedStdio(entry stdioMCPDefinition, self, home string) bool {
-	if entry.Type != "" && entry.Type != "stdio" ||
-		!agentexec.SameExecutable(entry.Command, self) || len(entry.Args) != 2 ||
-		entry.Args[0] != "mcp" || entry.Args[1] != "proxy" {
-		return false
-	}
-	if path := entry.Env[connectorconfig.EnvironmentKey]; path != "" {
-		config, err := connectorconfig.Load(path)
-		return err == nil && filepath.Clean(config.Home) == filepath.Clean(home)
-	}
-	configuredHome := normalizedManagedHome(entry.Env["LAZYMIND_HOME"])
-	if configuredHome == home {
-		return true
-	}
-	if configuredHome != "" || home == "" {
-		return false
-	}
-	userHome, err := os.UserHomeDir()
-	return err == nil && filepath.Clean(home) == filepath.Join(userHome, ".lazymind")
-}
-
-func currentStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind) bool {
-	if !ownedStdio(entry, self, home) || len(entry.Env) != 1 {
-		return false
-	}
-	c, err := connectorconfig.Load(entry.Env[connectorconfig.EnvironmentKey])
-	return err == nil && c.Provider == string(kind) && c.HostID == hostID && (kind != WorkBuddy || c.Controlled)
-}
-
 func stateForStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind) managedConfigState {
-	owned := ownedStdio(entry, self, home)
-	if reference := entry.Env[connectorconfig.EnvironmentKey]; reference != "" && owned {
+	return stateForProfileStdio(entry, self, home, hostID, kind, "")
+}
+
+func stateForProfileStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind, profile string) managedConfigState {
+	owned := ownedManagedStdio(entry, home, hostID, kind, profile)
+	current := owned && agentexec.SameExecutable(entry.Command, self)
+	if reference := entry.Env[connectorconfig.EnvironmentKey]; reference != "" && current && kind == WorkBuddy {
 		c, err := connectorconfig.Load(reference)
-		owned = err == nil && c.Provider == string(kind) && c.HostID == hostID
-	}
-	if kind == WorkBuddy && !owned {
-		owned = legacyWorkBuddyStdio(entry, home, hostID)
+		current = err == nil && c.Controlled
 	}
 	return managedConfigState{
 		configured: true, owned: owned,
-		current: currentStdio(entry, self, home, hostID, kind),
+		current: current,
 		command: entry.Command, arguments: append([]string(nil), entry.Args...), reference: entry.Env[connectorconfig.EnvironmentKey],
 	}
 }
 
-// Older desktop packages wrote their staging path into WB. Match the exact
-// managed invocation and local identity before relocating that entry.
-func legacyWorkBuddyStdio(entry stdioMCPDefinition, home, hostID string) bool {
-	command := filepath.ToSlash(entry.Command)
-	return filepath.IsAbs(entry.Command) &&
-		strings.HasSuffix(command, "/LazyMind.app/Contents/Resources/runtime/bin/lazymind") &&
-		(entry.Type == "" || entry.Type == "stdio") && len(entry.Args) == 2 &&
-		entry.Args[0] == "mcp" && entry.Args[1] == "proxy" &&
-		home != "" && normalizedManagedHome(entry.Env["LAZYMIND_HOME"]) == home &&
-		hostID != "" && entry.Env["LAZYMIND_AGENT_HOST_ID"] == hostID &&
-		entry.Env["LAZYMIND_AGENT_PROVIDER"] == "workbuddy"
+// Identity is independent of an executable's lifetime: an upgrade may have
+// removed that executable already. Never infer ownership from its name alone.
+func ownedManagedStdio(entry stdioMCPDefinition, home, hostID string, kind Kind, profile string) bool {
+	if (entry.Type != "" && entry.Type != "stdio") || !filepath.IsAbs(entry.Command) ||
+		len(entry.Args) != 2 || entry.Args[0] != "mcp" || entry.Args[1] != "proxy" {
+		return false
+	}
+	if reference := entry.Env[connectorconfig.EnvironmentKey]; reference != "" {
+		return ownedConnectionReference(reference, home, hostID, kind, profile)
+	}
+	if home == "" || hostID == "" || normalizedManagedHome(entry.Env["LAZYMIND_HOME"]) != filepath.Clean(home) ||
+		entry.Env["LAZYMIND_AGENT_HOST_ID"] != hostID || entry.Env["LAZYMIND_AGENT_PROVIDER"] != string(kind) {
+		return false
+	}
+	if profile == "" {
+		return true
+	}
+	// Old DSH entries predate connector records. Their scoped pairing provides
+	// the profile identity; a home/host match alone must not claim another profile.
+	file := entry.Env["LAZYMIND_WORKFLOW_PAIRING_FILE"]
+	if filepath.Dir(file) != filepath.Join(home, "workflow-hosts") {
+		return false
+	}
+	var pair struct {
+		Provider    string `json:"provider"`
+		Profile     string `json:"profile"`
+		ConnectorID string `json:"connector_id"`
+	}
+	body, err := os.ReadFile(file)
+	if err != nil || json.Unmarshal(body, &pair) != nil || pair.Profile != profile {
+		return false
+	}
+	return pair.Provider == string(kind) || (pair.Provider == "" && kind == DeepSeekHarness && strings.HasPrefix(pair.ConnectorID, "dsh-"))
+}
+
+func ownedConnectionReference(reference, home, hostID string, kind Kind, profile string) bool {
+	c, err := connectorconfig.Load(reference)
+	return err == nil && home != "" && hostID != "" && filepath.Clean(c.Home) == filepath.Clean(home) &&
+		c.HostID == hostID && c.Provider == string(kind) && c.Profile == profile
 }
 
 func normalizedManagedHome(value string) string {
@@ -282,8 +310,8 @@ func readDSHConfig(path, self, home, hostID string) (managedConfigState, error) 
 	if entry == nil {
 		return managedConfigState{workflowConfigured: workflowConfigured, workflowReference: workflowReference}, nil
 	}
-	stdio := decodeDSHStdio(entry)
-	state := stateForStdio(stdio, self, home, hostID, DeepSeekHarness)
+	stdio := scopedDSHStdio(document, entry)
+	state := stateForProfileStdio(stdio, self, home, hostID, DeepSeekHarness, filepath.Dir(path))
 	state.workflowConfigured, state.workflowReference = workflowConfigured, workflowReference
 	if reference := stdio.Env[connectorconfig.EnvironmentKey]; reference != "" {
 		c, err := connectorconfig.Load(reference)
@@ -412,6 +440,29 @@ func decodeDSHStdio(item *yaml.Node) stdioMCPDefinition {
 		}
 	}
 	return result
+}
+
+// Older DSH packages kept the pairing reference on the Workflow row rather
+// than in MCP's env. Use it only as ownership evidence; never change those keys.
+func scopedDSHStdio(document, item *yaml.Node) stdioMCPDefinition {
+	entry := decodeDSHStdio(item)
+	if entry.Env[connectorconfig.EnvironmentKey] != "" || entry.Env["LAZYMIND_WORKFLOW_PAIRING_FILE"] != "" {
+		return entry
+	}
+	for _, row := range yamlSequence(document).Content {
+		if scalarValue(row, "id") != dshWorkflowRow {
+			continue
+		}
+		file := scalarValue(mappingValue(row, "config"), "pairingFile")
+		if file != "" {
+			if entry.Env == nil {
+				entry.Env = map[string]string{}
+			}
+			entry.Env["LAZYMIND_WORKFLOW_PAIRING_FILE"] = file
+		}
+		break
+	}
+	return entry
 }
 
 func newDSHEntry(self, configPath string) (*yaml.Node, error) {

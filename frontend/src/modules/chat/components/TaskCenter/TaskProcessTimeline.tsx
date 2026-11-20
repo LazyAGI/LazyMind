@@ -8,11 +8,11 @@ import { formatModelSwitchLabel } from "@/modules/chat/utils/modelSwitchDisplay"
 import { workflowTaskDisplayStatus } from "@/modules/chat/utils/workflowTaskStatus";
 
 export function TaskModelSwitchSummary({ record }: { record: ChatModelSwitchRecord }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const unknown = t("chat.modelFallbackWindowUnknown");
   return <>
-    <span><span>{formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknown)}</span>{" → "}
-      <span>{formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknown)}</span></span>
+    <span><span>{formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknown, i18n.language)}</span>{" → "}
+      <span>{formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknown, i18n.language)}</span></span>
     <span>{record.reason_code === "model_config_unavailable" || record.reason_code === "model_context_not_fit"
       ? t(`chat.modelFallbackReason.${record.reason_code}`)
       : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") })}</span>

@@ -187,7 +187,7 @@ func ownedRuntimeProcesses(paths RuntimePaths, registered, inventory []LocalProc
 	}
 	if skipped != nil {
 		for _, process := range inventory {
-			if _, ok := owned[process.PID]; !ok && process.PID != os.Getpid() && processTextMatchesRuntime(paths, process.Executable) {
+			if _, ok := owned[process.PID]; !ok && process.PID != os.Getpid() && (processTextMatchesRuntime(paths, process.Executable) || legacyRuntimeService(paths, process) != "") {
 				skipped(process)
 			}
 		}

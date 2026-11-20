@@ -1,6 +1,8 @@
 export interface PdfScrollSyncEndpoint {
   connect: (element: HTMLElement) => () => void;
   onScroll: () => void;
+  // Call after a layout correction writes scrollTop, before its scroll event.
+  onLayoutChange?: () => void;
 }
 
 // Share scroll geometry directly: a wheel tick must not rerender the workspace.
@@ -24,6 +26,11 @@ export function createPdfScrollSync() {
       expected[index] = undefined;
       align(0);
       return () => { if (elements[index] === element) { elements[index] = undefined; expected[index] = undefined; } };
+    },
+    onLayoutChange: () => {
+      // Resizing or measuring a PDF preserves this pane's reading position.
+      // Its native scroll event must not navigate the other pane backwards.
+      expected[index] = elements[index]?.scrollTop;
     },
     onScroll: () => {
       const element = elements[index];

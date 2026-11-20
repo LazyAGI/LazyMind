@@ -66,7 +66,17 @@ type Result struct {
 	Error  *ToolError `json:"error,omitempty"`
 }
 
+// ToolAdapter is an audited server implementation selected by the pinned contract.
+// Business arguments remain separate from service-owned execution context.
+type ToolAdapter interface {
+	Prepare(context.Context, executor.AttemptContext, CallInput) (map[string]any, error)
+	Reserve(context.Context, executor.AttemptContext, CallInput, orm.WorkflowCommand) (bool, error)
+}
+
+type trustedContextKey struct{}
+
 type Service struct {
+	Adapters   map[string]ToolAdapter
 	DB         *gorm.DB
 	HTTPClient *http.Client
 	Endpoint   string
@@ -228,6 +238,17 @@ func (s *Service) Call(ctx context.Context, owner, sessionID, attemptID string, 
 	if input.Source != "" && input.Source != source {
 		return Result{}, controlstore.Reject("EXTERNAL_TOOL_UNDECLARED", "tool source does not match the pinned contract")
 	}
+	var adapter ToolAdapter
+	if contract.Execution != nil {
+		adapter = s.Adapters[contract.Execution.OutputValidator]
+	}
+	if adapter != nil {
+		trusted, err := adapter.Prepare(ctx, contract, input)
+		if err != nil {
+			return Result{}, err
+		}
+		ctx = context.WithValue(ctx, trustedContextKey{}, trusted)
+	}
 	canonical, err := json.Marshal(map[string]any{"source": source, "tool_name": input.ToolName, "arguments": input.Arguments, "revision": contract.WorkflowRevision})
 	if err != nil {
 		return Result{}, err
@@ -236,11 +257,17 @@ func (s *Service) Call(ctx context.Context, owner, sessionID, attemptID string, 
 	row := orm.WorkflowCommand{CommandID: commandID, OwnerUserID: owner, SessionID: sessionID,
 		ContractVersion: "workflow.tool.v1", RequestHash: controlstore.Hash(canonical), HTTPStatus: http.StatusAccepted,
 		ResponseJSON: json.RawMessage(`{}`), CreatedAt: time.Now().UTC()}
-	reservation := s.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
-	if reservation.Error != nil {
-		return Result{}, reservation.Error
+	created := false
+	if adapter != nil {
+		created, err = adapter.Reserve(ctx, contract, input, row)
+	} else {
+		reservation := s.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+		created, err = reservation.RowsAffected != 0, reservation.Error
 	}
-	if reservation.RowsAffected == 0 {
+	if err != nil {
+		return Result{}, err
+	}
+	if !created {
 		var previous orm.WorkflowCommand
 		if err := s.DB.WithContext(ctx).Where("command_id = ?", commandID).First(&previous).Error; err != nil {
 			return Result{}, err
@@ -375,6 +402,9 @@ func (s *Service) packageRequest(ctx context.Context, contract executor.AttemptC
 		"step_id": contract.StepID, "package": map[string]any{"files": files, "tree_hash": revision.TreeHash}}
 	if operation == "call" {
 		payload["tool_name"], payload["arguments"] = name, arguments
+		if trusted, ok := ctx.Value(trustedContextKey{}).(map[string]any); ok {
+			payload["trusted_context"] = trusted
+		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -433,4 +463,9 @@ func (s *Service) packageRequest(ctx context.Context, contract executor.AttemptC
 		return errors.New("invalid workflow tool response")
 	}
 	return nil
+}
+
+// ReadSelectedKnowledge reuses the existing ACL and frozen-scope data adapter.
+func (s *Service) ReadSelectedKnowledge(ctx context.Context, owner string, contract executor.AttemptContext, name string, arguments map[string]any) (Result, error) {
+	return s.callKnowledge(ctx, owner, contract, name, arguments)
 }

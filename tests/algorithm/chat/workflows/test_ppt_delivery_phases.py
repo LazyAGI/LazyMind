@@ -73,6 +73,46 @@ def test_incomplete_page_pair_does_not_start_export(tools, monkeypatch):
         tools.ppt_export_deck()
 
 
+@pytest.mark.parametrize('stem', ['page_001_background', 'unrelated_image'])
+def test_export_repairs_only_missing_bound_background_suffix(tools, monkeypatch, tmp_path, stem):
+    import base64
+    from PIL import Image
+
+    deck = tmp_path / 'ppt_decks' / 'example'
+    background = deck / 'images/page_001_background.png'
+    background.parent.mkdir(parents=True)
+    Image.new('RGB', (8, 8), 'blue').save(background)
+    (deck / 'background_images.json').write_text(json.dumps({
+        'enabled': True, 'pages': [{'page_no': 1, 'local_path': 'images/page_001_background.png'}],
+    }))
+    data = 'data:image/png;base64,' + base64.b64encode(background.read_bytes()).decode()
+    html = (f'<html><head><style>#bg{{background-image:url(../images/{stem}.jpg)}}'
+            f'#bg{{background-image:url({data})}}</style></head><body><div id="bg"></div></body></html>')
+    current = {'preview_html': html, 'preview_notes': 'Saved notes'}
+    monkeypatch.setattr(tools, '_bound_workflow_deck', lambda: deck)
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda _: [0])
+    monkeypatch.setattr(tools, '_resolve_artifact_text', lambda _, slot, **kw: (current[slot], 'text'))
+    monkeypatch.setattr(external_ppt_tools, '_cli', lambda: ('node', tmp_path / 'export.mjs'))
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kw: {'ok': True})
+
+    def exporter(command, **kwargs):
+        directory = Path(command[command.index('--deck-dir') + 1])
+        exported = (directory / 'pages/page_001.html').read_text()
+        assert '.jpg' not in exported and exported.count(data) == 2
+        presentation = Presentation()
+        presentation.slides.add_slide(presentation.slide_layouts[6])
+        presentation.save(directory / 'presentation.pptx')
+        return SimpleNamespace(returncode=0, stderr='', stdout='{"status":"ok"}')
+
+    monkeypatch.setattr(tools.subprocess, 'run', exporter)
+    if stem == 'page_001_background':
+        assert tools.ppt_export_deck()['published']
+    else:
+        with pytest.raises(tools.ToolExecutionError, match='Page 1 export resource failed'):
+            tools.ppt_export_deck()
+    assert current == {'preview_html': html, 'preview_notes': 'Saved notes'}
+
+
 def test_preparation_uses_approved_order_without_extra_model_calls(tools, monkeypatch, tmp_path):
     (tmp_path / 'task_pack.json').write_text('{"params":{"page_count":2}}')
     monkeypatch.setattr(tools, '_selected_slide_outline_items', lambda: [

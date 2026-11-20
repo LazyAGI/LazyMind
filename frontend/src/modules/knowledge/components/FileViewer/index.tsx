@@ -55,7 +55,7 @@ interface FileViewerProps {
   parsedFallbackTarget?: ParsedPreviewTarget;
   paperMode?: boolean;
   pdfScrollSync?: PdfScrollSyncEndpoint;
-  pdfToolbarMode?: "full" | "navigation";
+  pdfToolbarMode?: "full" | "navigation" | "none";
   pdfSelectableText?: boolean;
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];

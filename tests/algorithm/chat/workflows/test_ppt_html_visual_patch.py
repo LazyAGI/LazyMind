@@ -30,8 +30,12 @@ def deck(tmp_path):
     return tmp_path
 
 
-def test_html_refinement_patches_only_reviewed_element_then_verifies(runtime, deck, monkeypatch):
+def test_html_refinement_can_change_structure_colors_charts_and_unanchored_elements(runtime, deck, monkeypatch):
     renders, reviews = [], []
+    refined = HTML.replace('<main ', '<section ').replace('</main>', '</section>')
+    refined = refined.replace('height:500px', 'height:auto;color:white;background:navy')
+    refined = refined.replace('<script>', '<script>const chartColor="white";')
+    refined = refined.replace('Other content', '<img src="asset.png">Other content')
 
     def render(_deck, page, **kwargs):
         path = kwargs.get('html_path') or deck / 'pages/page_001.html'
@@ -39,55 +43,80 @@ def test_html_refinement_patches_only_reviewed_element_then_verifies(runtime, de
         return deck / 'screenshot.png'
 
     def vision(system, prompt, images):
+        assert images
+        if '返回修改后的完整 HTML' in system:
+            return refined
         reviews.append(prompt)
         return json.dumps({'issues': [ISSUE] if len(reviews) == 1 else []})
 
     monkeypatch.setattr(runtime, '_screenshot_page', render)
-    code, result = runtime._capture_cmd(runtime.cmd_refine_page, deck, 1,
-                                        llm_call=lambda *_a, **_k: json.dumps(PLAN), vlm_call=vision)
+    code, result = runtime._capture_cmd(runtime.cmd_refine_page, deck, 1, vlm_call=vision)
     assert code == 0 and result['visual_validation'] == 'passed'
-    refined = (deck / result['refined_path']).read_text()
-    assert len(renders) == 2 and renders[1] == refined
-    assert refined.replace('height:500px; height: auto !important;', 'height:500px') == HTML
+    assert (deck / result['refined_path']).read_text() == refined
+    assert renders == [HTML, refined]
     assert (deck / 'pages/page_001.html').read_text() == HTML
     assert not list((deck / 'pages').glob('.refine-*'))
 
 
 def test_clean_page_does_not_call_rewrite_model(runtime, deck, monkeypatch):
     monkeypatch.setattr(runtime, '_screenshot_page', lambda *_a, **_k: deck / 'shot.png')
+    calls = []
 
-    def unexpected(*_args, **_kwargs):
-        raise AssertionError('No repair is necessary')
+    def vision(*_args, **_kwargs):
+        calls.append(True)
+        assert len(calls) == 1
+        return '{"issues":[]}'
 
-    code, result = runtime._capture_cmd(runtime.cmd_refine_page, deck, 1, llm_call=unexpected,
-                                        vlm_call=lambda *_a, **_k: '{"issues":[]}')
+    code, result = runtime._capture_cmd(runtime.cmd_refine_page, deck, 1, vlm_call=vision)
     assert code == 0 and result['changed'] is False
     assert not (deck / 'pages/page_001.refined.html').exists()
 
 
-@pytest.mark.parametrize('failure', ['whole_html', 'other_element', 'unverified', 'stale', 'hidden', 'delete'])
-def test_rejected_html_candidate_never_becomes_refined_output(runtime, deck, monkeypatch, failure):
-    monkeypatch.setattr(runtime, '_screenshot_page', lambda *_a, **_k: deck / 'shot.png')
-    calls = []
+@pytest.mark.parametrize('outcome', ['passed', 'repeat', 'cycle', 'stale', 'malformed', 'render', 'cancel', 'model'])
+def test_html_repair_continues_without_round_limit_and_checks_each_candidate(runtime, deck, monkeypatch, outcome):
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError
+    calls, reviews, renders = [], [], []
 
-    def vision(*_a, **_k):
-        calls.append(True)
-        if len(calls) == 2 and failure == 'stale':
-            (deck / 'pages/page_001.html').write_text(HTML.replace('Other content', 'New revision'))
-        return json.dumps({'issues': [ISSUE] if len(calls) == 1 or failure == 'unverified' else []})
+    def render(*_a, **_k):
+        renders.append(True)
+        return None if outcome == 'render' and len(renders) > 1 else deck / 'shot.png'
 
-    plans = {
-        'whole_html': HTML,
-        'other_element': json.dumps({'ops': [{'op': 'set_style', 'el': 'other', 'styles': {'height': 'auto'}}]}),
-        'hidden': json.dumps({'ops': [{'op': 'set_style', 'el': 'card', 'styles': {'display': 'none'}}]}),
-        'delete': json.dumps({'ops': [{'op': 'delete_node', 'el': 'card'}]}),
-    }
-    code, _ = runtime._capture_cmd(runtime.cmd_refine_page, deck, 1, vlm_call=vision,
-                                   llm_call=lambda *_a, **_k: plans.get(failure, json.dumps(PLAN)))
-    assert code == 1
-    assert not (deck / 'pages/page_001.refined.html').exists()
-    expected = HTML.replace('Other content', 'New revision') if failure == 'stale' else HTML
-    assert (deck / 'pages/page_001.html').read_text() == expected
+    def vision(system, prompt, images):
+        assert images
+        if '返回修改后的完整 HTML' in system:
+            calls.append(prompt)
+            if outcome == 'model':
+                raise runtime.ModelClientError('provider failed')
+            if outcome == 'malformed':
+                return '<div>fragment</div>'
+            if outcome == 'repeat':
+                return HTML
+            if outcome == 'stale':
+                (deck / 'pages/page_001.html').write_text('New revision')
+            iteration = 1 if outcome == 'cycle' and len(calls) == 3 else len(calls)
+            return HTML.replace('height:500px', f'height:{500 + iteration}px')
+        reviews.append(prompt)
+        return json.dumps({'issues': [] if len(calls) >= 3 and outcome == 'passed' else [
+            {'problem': 'low contrast', 'fix': 'change background'}]})
+
+    def cancel():
+        if outcome == 'cancel' and calls:
+            raise UserCancelledError('stopped by user')
+
+    monkeypatch.setattr(runtime, '_screenshot_page', render)
+    if outcome == 'cancel':
+        with pytest.raises(UserCancelledError):
+            runtime._capture_cmd(runtime.cmd_refine_page, deck, 1, vlm_call=vision, cancel_check=cancel)
+    else:
+        code, result = runtime._capture_cmd(runtime.cmd_refine_page, deck, 1,
+                                            vlm_call=vision, cancel_check=cancel)
+        assert code == (0 if outcome == 'passed' else 1)
+        if outcome == 'passed':
+            assert result['repairs'] == 3 and len(reviews) == len(renders) == 4
+        if outcome == 'model':
+            assert 'provider failed' in result['error']
+    assert (deck / 'pages/page_001.refined.html').exists() == (outcome == 'passed')
+    assert (deck / 'pages/page_001.html').read_text() == ('New revision' if outcome == 'stale' else HTML)
     assert not list((deck / 'pages').glob('.refine-*'))
 
 

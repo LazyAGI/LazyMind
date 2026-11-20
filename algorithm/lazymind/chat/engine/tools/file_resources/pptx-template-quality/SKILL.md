@@ -5,10 +5,14 @@ description: Fill an existing PPTX template with evidence-backed content while p
 
 # Template filling quality
 
-Read every page with pptx_analyzer. Its quality_contract is this skill and its
+Read every page with pptx_analyzer(mode="template", all_pages=true). Its quality_contract is this skill and its
 layout_checks are rough hints, never a publication gate or proof of overflow.
 Delivery takes precedence over visual quality. The fill tool publishes a usable
-PPTX first, then reviews screenshots and attempts at most two geometry-only repairs.
+PPTX first, then reviews screenshots and repairs any visible content or styling.
+Repairs can change OOXML text, fonts, colors, backgrounds, images, tables, charts,
+shapes, layering, masters and layouts; they are not restricted to geometry or IDs.
+Re-render and review each candidate. There is no fixed repair-round limit. Stop on
+passed review, cancellation, unavailable checks, model failure or repeated versions.
 Missing rendering/vision, review errors and unsuccessful repairs keep the last
 delivered version and do not fail the step. Do not rewind upstream planning or
 retry generation to satisfy a quality gate. Disclose unresolved issues accurately.
@@ -19,6 +23,26 @@ images again. If evidence is insufficient, report the missing material and retur
 to collection only with the user's agreement. Template analysis is local reading,
 not a new research step. Cache hits still require reading the returned content.
 
+- Before composing new text boxes, read the actual source-page colors as well as
+  slot IDs. pptx_analyzer supplies editable slots; if it does not expose colors,
+  call ppt_analyze_template(template_file) in the current deck and read
+  profile.html_template.pages for the chosen source_page. Despite the field name,
+  these are source OOXML styles usable for native PPTX too: background, shape
+  fills, text.paragraphs[].runs[].style.color and default_run_style. Reuse the
+  cached profile when available. Do not infer visible colors from theme swatches
+  alone or assume a missing color means black.
+- For each new text region, choose the corresponding template region and carry
+  its foreground/background relationship, font, size and hierarchy into the
+  generation parameters. Pass text_boxes.color explicitly as a six-digit RGB
+  value derived from that region; omitting it uses a generic dark tool default,
+  not template inheritance. If a source color cannot be resolved, use available
+  visual evidence and disclose uncertainty rather than claiming it was read.
+  Dark template backgrounds normally need the source's light text; light cards
+  inside a dark page may still need dark text. Assess the local background.
+  Uploaded-template styling overrides generic academic white/black defaults.
+  This applies to added content as well as retained slots, in native PPTX and
+  HTML. The model may change any visible styling when the user requests it or
+  the visible result needs repair; this is guidance, not an editing restriction.
 - Use ppt_fill_template pages to plan output order and count. Repeat source_page
   when content needs more room; honor an explicit user page count. Keep each
   reused page's layout, coordinates, typography, backgrounds and branding.
@@ -55,13 +79,13 @@ not a new research step. Cache hits still require reading the returned content.
   content across repeated source pages when needed.
 - The tool rejects clearly over-capacity changed boxes before writing a file.
   Use its page/shape diagnostics to repair only affected text and resubmit the
-  complete action list against the ORIGINAL template hash. At most two repairs;
-  if still blocked, report the exact limitation instead of bypassing validation.
+  complete action list against the ORIGINAL template hash. Continue while making
+  progress; if blocked or cancelled, report the exact limitation instead of bypassing validation.
 - Whole-paragraph replacements use newline-separated independent paragraphs;
   short rich-text run replacements retain inline breaks. Do not paste several
   unrelated sections into a subtitle. The tool resolves inherited typography.
-- Geometry/text estimates are not visual validation. Validation belongs inside
-  generation, before publication. Successful publication completes generation:
+- Geometry/text estimates are not visual validation. The tool publishes a usable
+  file first and performs advisory visual repair inside generation. After it returns,
   neither the subagent nor parent chat should launch post-generation inspection.
   Report any returned limitations briefly without reopening the workflow or
   claiming native visual verification. A disclosure is not a pending task.

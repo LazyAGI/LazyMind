@@ -1,4 +1,6 @@
+import { externalWebURL, openExternalUrl } from '@/runtime/externalNavigation';
 import type { PdfScrollSyncEndpoint } from "./pdfScrollSync";
+import { resolvePdfAnchorScrollTop } from "./pdfReadingAnchor";
 import { createPdfViewportScheduler } from "./pdfViewportScheduler";
 import ReadingPreparationAction from "@/modules/knowledge/paper/ReadingPreparationAction";
 import {PdfPageControl} from "./PdfPageControl";
@@ -59,7 +61,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 interface RenderPdfProps {
   pdfScrollSync?: PdfScrollSyncEndpoint;
   paperMode?: boolean;
-  pdfToolbarMode?: "full" | "navigation";
+  pdfToolbarMode?: "full" | "navigation" | "none";
   pdfSelectableText?: boolean;
   pdfHeaderStart?: React.ReactNode;
   pdfHeaderEnd?: React.ReactNode | ((tools: React.ReactNode) => React.ReactNode);
@@ -244,6 +246,13 @@ export default function RenderPdf({
   const [studyHighlight, setStudyHighlight] = useState<FormulaEvidence>();
   const [studyReturn, setStudyReturn] = useState<PdfViewPosition>();
   const [pendingStudyNavigation, setPendingStudyNavigation] = useState<FormulaEvidence>();
+  const pendingStudyRequest = useRef<FormulaEvidence>();
+  const pendingStudyScrollTop = useRef<number>();
+  const cancelStudyNavigation = () => {
+    pendingStudyRequest.current = undefined;
+    pendingStudyScrollTop.current = undefined;
+    setPendingStudyNavigation(undefined);
+  };
   const studyPointer = useRef<{x:number;y:number}>();
   const studyBlocks = useMemo(() => (formulaDocument?.blocks || []).filter(block => block.type === "formula" && !!block.latex?.trim()), [formulaDocument]);
   const numberedFormulas = useMemo(() => formulaNumberMap(studyBlocks), [studyBlocks]);
@@ -251,7 +260,7 @@ export default function RenderPdf({
   useEffect(() => {
     studyExplanationRef.current=undefined;
     setVisualSelection(undefined);
-    setStudyOpen(false); setStudyPinned(false); setActiveStudyPinId(undefined); setTableStudyOpen(false); setTableSelection(undefined); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); setPendingStudyNavigation(undefined);
+    setStudyOpen(false); setStudyPinned(false); setActiveStudyPinId(undefined); setTableStudyOpen(false); setTableSelection(undefined); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); cancelStudyNavigation();
   }, [studySourceKey]);
   const releasePinnedStudy=()=>{
     if(!activeStudyPinId)return;
@@ -297,6 +306,7 @@ export default function RenderPdf({
   const appliedPositionRef = useRef("");
   const positionIdleTimer=useRef<ReturnType<typeof setTimeout>>();
   const pendingPosition=useRef<PdfViewPosition>();
+  const reportedScrollPositions=useRef(new WeakSet<PdfViewPosition>());
   const reportedPage=useRef(viewPosition?.page||1);
   const reportPosition=useRef(onViewPositionChange);
   reportPosition.current=onViewPositionChange;
@@ -361,8 +371,10 @@ export default function RenderPdf({
   const lastPageNavigation = useRef("");
   useEffect(() => {
     lastPageNavigation.current = "";
+    cancelStudyNavigation();
     clearTimeout(positionIdleTimer.current);
     pendingPosition.current=undefined;
+    reportedScrollPositions.current=new WeakSet<PdfViewPosition>();
     reportedPage.current=viewPosition?.page||1;
     setScrollTop(0);
     appliedPositionRef.current = "";
@@ -438,11 +450,20 @@ export default function RenderPdf({
   }, [pdfScrollSync, pdfLoaded]);
 
   const onScroll = () => {
-    pdfScrollSync?.onScroll();
-    if (!containerRef.current) {
-      return;
+    if (!containerRef.current) return;
+    const viewport = containerRef.current;
+    const liveTop = viewport.scrollTop;
+    // A viewport resize may clamp before its ResizeObserver update reaches React.
+    const layoutClamp = resolvePdfAnchorScrollTop({liveTop, recordedTop:scrollTop,
+      previousMaxScrollTop:previousGeometry.current.maxScrollTop,
+      maxScrollTop:Math.max(0,viewport.scrollHeight-viewport.clientHeight)}) !== liveTop;
+    if (layoutClamp) {
+      pdfScrollSync?.onLayoutChange?.();
+      if (pendingStudyRequest.current) pendingStudyScrollTop.current = liveTop;
     }
-    setScrollTop(containerRef.current.scrollTop);
+    pdfScrollSync?.onScroll();
+    if (!layoutClamp && pendingStudyRequest.current && (pendingStudyScrollTop.current === undefined || Math.abs(liveTop - pendingStudyScrollTop.current) > 1)) cancelStudyNavigation();
+    setScrollTop(liveTop);
     // Focusing or typing in the note editor can scroll its caret into view.
     // Keep the captured quote and draft while the user is editing the toolbar.
     if (!containerRef.current.querySelector('[data-pdf-selection-toolbar]')?.contains(document.activeElement)) {
@@ -462,7 +483,7 @@ export default function RenderPdf({
       };
       pendingPosition.current=position;
       clearTimeout(positionIdleTimer.current);
-      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;reportPosition.current?.(latest);};
+      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;reportedScrollPositions.current.add(latest);reportPosition.current?.(latest);};
       if(position.page!==reportedPage.current){reportedPage.current=position.page;publish();}
       else positionIdleTimer.current=setTimeout(publish,250);
     }
@@ -623,7 +644,7 @@ export default function RenderPdf({
   const navigateCitation = useCallback((target:PdfCitationTarget) => {
     const first = target.regions[0];
     const pageNumber = first?.page ?? target.fallbackPage;
-    if (pageNumber !== undefined) setNativeDestination({source:fileData,pageNumber,bbox:first?.bbox});
+    if (pageNumber !== undefined) { cancelStudyNavigation(); setNativeDestination({source:fileData,pageNumber,bbox:first?.bbox}); }
   }, [fileData]);
   useEffect(()=>{
     const request=nativeDestination;
@@ -664,6 +685,7 @@ export default function RenderPdf({
   const currentPage = Math.max(1, pageTops.reduce((page, top, index) => top <= scrollTop + 1 ? index + 1 : page, 1));
   const jumpPage = (value: number) => {
     if (!pdfLoaded || !Number.isFinite(value)) return;
+    cancelStudyNavigation();
     const page = Math.min(numPages, Math.max(1, Math.round(value)));
     const top = pageTops[page - 1] || 0;
     containerRef.current?.scrollTo({top, behavior:"auto"});
@@ -685,6 +707,7 @@ export default function RenderPdf({
     const key=`${request.requestId}:${request.page}:${request.progress}`;
     if(lastNoteNavigation.current===key)return;
     lastNoteNavigation.current=key;
+    cancelStudyNavigation();
     let originPage=0;
     for(let index=0;index<pageTops.length;index++)if(pageTops[index]<=scrollTop+1)originPage=index;else break;
     setNoteReturn({page:originPage+1,progress:Math.max(0,Math.min(1,(scrollTop-(pageTops[originPage]||0))/(pageHeightsPx[originPage]||1)))});
@@ -694,21 +717,39 @@ export default function RenderPdf({
     onViewPositionChange?.({page,progress});
   },[pdfNavigateToPosition,pdfLoaded,fileData,numPages,pageTops,pageHeightsPx,scrollTop,onViewPositionChange]);
   const changeZoom = (value: number) => {
+    cancelStudyNavigation();
     zoomPosition.current = {page:currentPage,progress:Math.max(0,(scrollTop-(pageTops[currentPage-1]||0))/(pageHeightsPx[currentPage-1]||1))};
     setZoom(Math.min(2, Math.max(.5, Math.round(value * 100) / 100)));
   };
-  const previousGeometry = useRef({width:pageWidthPx,tops:pageTops,heights:pageHeightsPx});
+  const previousGeometry = useRef({width:pageWidthPx,tops:pageTops,heights:pageHeightsPx,maxScrollTop:0});
   useLayoutEffect(() => {
     const previous = previousGeometry.current;
-    previousGeometry.current = {width:pageWidthPx,tops:pageTops,heights:pageHeightsPx};
-    if (previous.width === pageWidthPx && previous.heights.length === pageHeightsPx.length && previous.heights.every((height,index)=>height===pageHeightsPx[index]) && !zoomPosition.current) return;
-    const previousPage = previous.tops.reduce((page, top, index)=>top<=scrollTop+1?index:page,0);
-    const position = zoomPosition.current || {page:previousPage+1,progress:Math.max(0,(scrollTop-(previous.tops[previousPage]||0))/(previous.heights[previousPage]||1))};
+    const viewport = containerRef.current;
+    const maxScrollTop = viewport ? Math.max(0, viewport.scrollHeight - viewport.clientHeight) : 0;
+    previousGeometry.current = {width:pageWidthPx,tops:pageTops,heights:pageHeightsPx,maxScrollTop};
+    const liveTop = viewport?.scrollTop ?? scrollTop;
+    const anchorTop = resolvePdfAnchorScrollTop({liveTop, recordedTop:scrollTop, previousMaxScrollTop:previous.maxScrollTop, maxScrollTop});
+    const clampedByLayout = anchorTop !== liveTop;
+    if (previous.width === pageWidthPx && previous.heights.length === pageHeightsPx.length && previous.heights.every((height,index)=>height===pageHeightsPx[index]) && !zoomPosition.current) {
+      if (clampedByLayout) {
+        pdfScrollSync?.onLayoutChange?.();
+        if (pendingStudyRequest.current) pendingStudyScrollTop.current = liveTop;
+        setScrollTop(liveTop);
+      }
+      return;
+    }
+    const previousPage = previous.tops.reduce((page, top, index)=>top<=anchorTop+1?index:page,0);
+    const position = zoomPosition.current || {page:previousPage+1,progress:Math.max(0,(anchorTop-(previous.tops[previousPage]||0))/(previous.heights[previousPage]||1))};
     zoomPosition.current = undefined;
     const top = (pageTops[position.page-1]||0) + (pageHeightsPx[position.page-1]||0)*position.progress;
-    containerRef.current?.scrollTo({top,behavior:"auto"});
-    setScrollTop(top);
-  }, [pageWidthPx,pageTops,pageHeightsPx]);
+    // An unrelated page measurement must not cancel native momentum scrolling.
+    if (viewport && Math.abs(top - liveTop) > .5) {
+      viewport.scrollTo({top,behavior:"auto"});
+      if (pendingStudyRequest.current) pendingStudyScrollTop.current = viewport.scrollTop;
+    }
+    if (clampedByLayout || Math.abs(top - liveTop) > .5) pdfScrollSync?.onLayoutChange?.();
+    setScrollTop(viewport?.scrollTop ?? top);
+  }, [pageWidthPx,pageTops,pageHeightsPx,viewportHeight]);
   useLayoutEffect(()=>{
     if(!resolvedDestination || resolvedDestination.source!==fileData)return;
     const {page,progress}=resolvedDestination;
@@ -724,9 +765,16 @@ export default function RenderPdf({
     if (!viewPosition || !pdfLoaded || !containerRef.current || !pageTops.length) return;
     const page = Math.min(Math.max(viewPosition.page, 1), numPages) - 1;
     const progress = Math.min(1, Math.max(0, viewPosition.progress));
+    // Acknowledgements are not consumed navigation commands. Invalidate the old
+    // command key so a fresh command can return to these exact coordinates.
+    if (reportedScrollPositions.current.has(viewPosition)) {
+      appliedPositionRef.current = "";
+      return;
+    }
     const key = `${page}:${progress.toFixed(4)}`;
     if (appliedPositionRef.current === key) return;
     appliedPositionRef.current = key;
+    cancelStudyNavigation();
     const top = (pageTops[page] || 0) + (pageHeightsPx[page] || 0) * progress;
     containerRef.current.scrollTo({ top, behavior: "auto" });
     setScrollTop(top);
@@ -998,6 +1046,8 @@ export default function RenderPdf({
       setStudyReturn({page:page+1,progress:Math.max(0,(top-pageTops[page])/(pageHeightsPx[page] || 1))});
     }
     setStudyHighlight(evidence);
+    pendingStudyRequest.current = evidence;
+    pendingStudyScrollTop.current = undefined;
     setPendingStudyNavigation(evidence);
   };
   const navigateFromStudy = (evidence:FormulaEvidence) => {
@@ -1007,19 +1057,21 @@ export default function RenderPdf({
   useEffect(() => {
     if (!pendingStudyNavigation) return;
     const timer = window.setTimeout(() => {
+      if (pendingStudyRequest.current !== pendingStudyNavigation) return;
       const page = pendingStudyNavigation.page;
       const y = pendingStudyNavigation.bbox?.[1] || 0;
       const top = Math.max(0,(pageTops[page] || 0) + y * (pageHeightsPx[page] || 0) - 64);
       containerRef.current?.scrollTo({top,behavior:"auto"});
+      pendingStudyScrollTop.current = containerRef.current?.scrollTop;
       setScrollTop(top);
-      if (pageSizesMap[page]) setPendingStudyNavigation(undefined);
+      if (pageSizesMap[page]) cancelStudyNavigation();
     }, 100);
     return () => window.clearTimeout(timer);
   }, [pendingStudyNavigation,pageTops,pageHeightsPx,pageSizesMap]);
   const openTableStudy = (block: PdfIRBlock) => {
     releasePinnedStudy();
     setVisualSelection(undefined);setStudyOpen(false); setTableStudyOpen(true); setTableSelection(block);
-    setPendingStudyNavigation(undefined);setStudyHighlight(undefined);setStudyReturn(undefined);
+    cancelStudyNavigation();setStudyHighlight(undefined);setStudyReturn(undefined);
   };
   const currentStudyPin = ():Omit<PdfStudyPinRecord,'id'|'geometry'|'minimized'>|undefined => {
     const kind=studyOpen?'formula':tableStudyOpen?'table':visualSelection?.type==='table'?'table':visualSelection?'image':undefined;
@@ -1039,7 +1091,7 @@ export default function RenderPdf({
     setTableSelection(record.kind==='table'&&record.view!=='visual'?block:undefined);
     setVisualPreview(record.sourcePreview);
     setVisualSelection(record.kind==='image'||record.view==='visual'?block:undefined);
-    setPendingStudyNavigation(undefined);setStudyHighlight(undefined);setStudyReturn(undefined);
+    cancelStudyNavigation();setStudyHighlight(undefined);setStudyReturn(undefined);
     return true;
   },[formulaDocument]);
   const rememberStudyExplanation=(kind:'formula'|'table'|'image',blockId:string,data:FormulaExplanation|VisualExplanation)=>{
@@ -1089,7 +1141,7 @@ export default function RenderPdf({
     if(activeStudyPinId)pinBoard.update(activeStudyPinId,{geometry,minimized:true});
     setActiveStudyPinId(undefined);setStudyPinned(false);
     setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(false);
-    setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);
+    setStudyHighlight(undefined);cancelStudyNavigation();setStudyReturn(undefined);
   };
   const restorePin=(id:string)=>{
     const record=pinBoard.records.find(item=>item.id===id);
@@ -1105,14 +1157,14 @@ export default function RenderPdf({
     if(activeStudyPinId)pinBoard.remove(activeStudyPinId);
     restoredStudyPinId.current=undefined;
     setActiveStudyPinId(undefined);
-    setVisualSelection(undefined);setStudyOpen(false);setStudyPinned(false);setTableStudyOpen(false);setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);
+    setVisualSelection(undefined);setStudyOpen(false);setStudyPinned(false);setTableStudyOpen(false);setStudyHighlight(undefined);cancelStudyNavigation();setStudyReturn(undefined);
   };
   const returnFromStudy = () => {
     if (!studyReturn) return;
     const page=studyReturn.page-1;
     const top=(pageTops[page] || 0) + studyReturn.progress * (pageHeightsPx[page] || 0);
     containerRef.current?.scrollTo({top,behavior:"auto"}); setScrollTop(top);
-    setStudyHighlight(undefined); setPendingStudyNavigation(undefined); setStudyReturn(undefined);
+    setStudyHighlight(undefined); cancelStudyNavigation(); setStudyReturn(undefined);
     if(!studyPinned){setVisualSelection(undefined); setStudyOpen(false); setTableStudyOpen(false);}
   };
 
@@ -1124,7 +1176,7 @@ export default function RenderPdf({
     releasePinnedStudy();
     studyExplanationRef.current=undefined;
     setStudyOpen(false);setTableStudyOpen(false);setVisualPreview(undefined);setVisualSelection(block);
-    setPendingStudyNavigation(undefined);setStudyHighlight(undefined);setStudyReturn(undefined);
+    cancelStudyNavigation();setStudyHighlight(undefined);setStudyReturn(undefined);
   };
   const currentStudySnapshot=currentStudyPin();
   const activeStoredStudyPin=activeStudyPinId?pinBoard.records.find((item):item is PdfStudyPinRecord=>item.kind!=='region'&&item.id===activeStudyPinId):undefined;
@@ -1266,7 +1318,7 @@ export default function RenderPdf({
     </div>
   );
 
-  const readerHeader = (
+  const readerHeader = pdfToolbarMode === "none" ? null : (
     <nav className={`pdf-reader-modebar pdf-reader-header${pdfToolbarMode === "navigation" ? " pdf-reader-header--compact" : ""}`} aria-label={paperMode ? readerLabel("reading") : t("paperShell.document",{defaultValue:"Document"})}>
       <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
       <div className="pdf-reader-header-end">
@@ -1333,6 +1385,7 @@ export default function RenderPdf({
       className={[className,handPan.active?'pdf-reader-hand-active':'',handPan.dragging?'is-dragging':''].filter(Boolean).join(' ')}
       ref={containerRef}
       onScroll={onScroll}
+      onWheel={cancelStudyNavigation}
       onPointerDownCapture={handPan.onPointerDown}
       onPointerMove={handPan.onPointerMove}
       onPointerUp={handPan.onPointerEnd}
@@ -1351,6 +1404,8 @@ export default function RenderPdf({
         overflow: "auto",
         position: "relative",
         ...style,
+        // Geometry anchoring is managed above; native anchoring would apply it twice.
+        overflowAnchor: "none",
         backgroundColor: GAP_BACKGROUND,
         flex: "1 1 0", minWidth: 0, minHeight: 0, height: "100%",
       }}
@@ -1396,7 +1451,7 @@ export default function RenderPdf({
               if(onAddVocabularySelection && /[A-Za-z]/.test(selectionAction.selection.text))actions.push({key:"vocabulary",label:addVocabularySelectionLabel,onClick:()=>onAddVocabularySelection(selectionAction.selection)});
               for(const action of visibleLearningSelectionActions(learningSelectionActions,selectionAction.selection.text,Boolean(onTranslateSelection)))actions.push({key:action.key,label:action.label,disabled:action.disabled,title:action.disabledTip,onClick:()=>onLearningSelection?.(action.key,selectionAction.selection)});
               const reference=selectionAction.referenceAction;
-              if(reference?.href && (reference.kind==="open" || reference.kind==="external"))actions.push({key:"reference",label:reference.kind==="open"?"打开知识库文档":"打开链接",onClick:()=>{if(reference.kind==="external")window.open(reference.href,"_blank","noopener,noreferrer");else window.location.assign(reference.href!);}});
+              if(reference?.href && (reference.kind==="open" || reference.kind==="external"))actions.push({key:"reference",label:reference.kind==="open"?"打开知识库文档":"打开链接",onClick:()=>{if(reference.kind==="external"){if(externalWebURL(reference.href))void openExternalUrl(reference.href!);else window.open(reference.href,"_blank","noopener,noreferrer");}else window.location.assign(reference.href!);}});
               return actions;
             })()}
           />
@@ -1407,7 +1462,7 @@ export default function RenderPdf({
         externalLinkTarget="_blank"
         externalLinkRel="noopener noreferrer"
         // react-pdf retains this handler from mount; read the active source from a ref.
-        onItemClick={({pageNumber,dest})=>setNativeDestination({source:currentSource.current,pageNumber,dest:Array.isArray(dest)?dest:undefined})}
+        onItemClick={({pageNumber,dest})=>{cancelStudyNavigation();setNativeDestination({source:currentSource.current,pageNumber,dest:Array.isArray(dest)?dest:undefined});}}
         file={pdfFile}
         renderMode={renderMode}
         loading={renderNoDataFn()}

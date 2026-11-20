@@ -22,11 +22,13 @@ import (
 	"lazymind/agentconnector/internal/assistantbridge"
 	"lazymind/agentconnector/internal/chatagent"
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workflowhost"
+	"lazymind/agentconnector/internal/workflowmcp"
 )
 
 const agentDiscoveryRetryDelay = 2 * time.Second
@@ -37,6 +39,12 @@ const maxInternalSessionBytes = 1 << 20
 var invalidateDesktopApplications = agentexec.InvalidateDesktopApplications
 
 func main() {
+	if handled, code, err := connectorlauncher.Forward(os.Args[1:]); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+		}
+		os.Exit(code)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -405,6 +413,8 @@ func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	flags := flag.NewFlagSet("assistant "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	address := flags.String("listen", "", "Assistant Bridge loopback address")
+	clientID := flags.String("client-id", "", "deployment identity for shared service ownership")
+	serverURL := flags.String("server-url", "", "deployment origin (credentials remain isolated)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -423,7 +433,7 @@ func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	case "serve":
 		return serveAssistant(ctx, *address, stderr)
 	case "start":
-		status, err := assistantbridge.Start(ctx, *address)
+		status, err := assistantbridge.StartWithClient(ctx, *address, assistantbridge.ClientOptions{ID: *clientID, ServerURL: *serverURL})
 		if err != nil {
 			return err
 		}
@@ -435,17 +445,18 @@ func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		}
 		return printJSON(stdout, status)
 	case "stop":
-		if err := assistantbridge.Stop(ctx, *address); err != nil {
+		if err := assistantbridge.ReleaseClient(ctx, assistantbridge.ClientOptions{ID: *clientID, ServerURL: *serverURL}); err != nil {
 			return err
 		}
-		return printJSON(stdout, map[string]any{"ok": true, "running": false})
+		return printJSON(stdout, map[string]any{"ok": true, "released": true})
 	default:
 		return fmt.Errorf("unsupported Assistant Bridge action %q", action)
 	}
 }
 
 func serveAssistant(ctx context.Context, address string, stderr io.Writer) error {
-	store, err := credentials.NewStore("", "")
+	home := os.Getenv("LAZYMIND_HOME")
+	store, err := credentials.NewStore(home, "")
 	if err != nil {
 		return err
 	}
@@ -453,7 +464,7 @@ func serveAssistant(ctx context.Context, address string, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	policy, err := newExecutorPolicy()
+	policy, err := executorpolicy.New(store.Directory())
 	if err != nil {
 		return err
 	}
@@ -535,6 +546,15 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		}
 		defer stopOwnerWatch()
 		if *ownerPID > 0 {
+			defer func() {
+				releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := assistantbridge.ReleaseClient(releaseCtx, assistantbridge.ClientOptions{}); err != nil {
+					_, _ = fmt.Fprintln(stderr, "Assistant Bridge release:", err)
+				}
+			}()
+		}
+		if *ownerPID > 0 {
 			for _, provider := range providers {
 				if provider == "workbuddy" || provider == "codex" {
 					go assistantbridge.KeepDesktopAgentsAvailable(hostCtx, credentialStore, stderr)
@@ -610,6 +630,11 @@ func newAgentRunner(provider, binary string) (chatagent.Runner, error) {
 }
 
 func runAgentHosts(ctx context.Context, api *coreapi.Client, policy *executorpolicy.Store, providers []string, binary string, stderr io.Writer) error {
+	// This runs once per desktop/Assistant startup, rather than in a provider's
+	// retry loop. A still-running older process must not republish its location.
+	if err := assistantbridge.ReconcileInstallations(ctx); err != nil {
+		_, _ = fmt.Fprintln(stderr, "LazyMind Agent installation migration:", err)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan error, len(providers))
@@ -673,6 +698,14 @@ func waitAgentDiscovery(ctx context.Context) bool {
 }
 
 func runMCP(ctx context.Context, args []string) error {
+	if len(args) == 2 && args[0] == "workflow-worker" {
+		store, err := credentials.NewStore("", "")
+		if err != nil {
+			return err
+		}
+		return workflowmcp.RunToolWorker(ctx, store, args[1])
+	}
+
 	if len(args) == 1 && args[0] == "codex-workflow" {
 		return runCodexWorkflowMCP(ctx)
 	}

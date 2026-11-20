@@ -23,24 +23,29 @@ def test_replay_is_pinned_and_context_is_reset():
     assert generate('native', 'request') is None
 
 
-def test_real_ppt_planner_uses_external_generation_and_validates(tmp_path, monkeypatch):
+@pytest.mark.parametrize('instruction,plan,expected', [
+    ('让副标题更精简', {'op': 'replace_text', 'value': 'Clear subtitle'}, '>Clear subtitle</h2>'),
+    ('把副标题往下挪一点', {'op': 'set_style', 'styles': {'margin-top': '8px'}}, 'style="margin-top: 8px">Original'),
+])
+def test_real_ppt_planner_uses_external_generation_and_validates(tmp_path, monkeypatch, instruction, plan, expected):
     path = Path(__file__).resolve().parents[4] / 'workflows/ppt-workflow/scripts/tools.py'
     spec = importlib.util.spec_from_file_location('external_action_ppt_test', path)
     tools = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tools)
     monkeypatch.setattr(tools, 'available_font_families', lambda: ['Arial'])
-    html = '<!doctype html><html><head><title>Title</title></head><body><h1 data-el="title">Original</h1><p data-el="other">Keep</p></body></html>'
-    args = dict(artifact=html, instruction='让标题更精简', selection={'type': 'ppt_html', 'el': 'title', 'page': 1}, artifact_store=str(tmp_path), slot='preview_html')
+    html = '<!doctype html><html><head><title>Title</title></head><body><h1 data-el="title">Keep</h1><h2 data-el="subtitle">Original</h2></body></html>'
+    args = dict(artifact=html, instruction=instruction, selection={'type': 'ppt_html', 'el': 'subtitle', 'page': 1}, artifact_store=str(tmp_path), slot='preview_html')
     with generation_scope([]), pytest.raises(GenerationRequired) as pending:
         tools.ppt_preview_selection_edit(**args)
     request = pending.value.request
     assert json.loads(request['user_prompt'])['selected_element']['text'] == 'Original'
-    with generation_scope([{'request_hash': request['request_hash'], 'text': '{"op":"replace_text","value":"Clear title"}'}]):
+    with generation_scope([{'request_hash': request['request_hash'], 'text': json.dumps(plan)}]):
         preview = tools.ppt_preview_selection_edit(**args)
-    assert '>Clear title</h1>' in preview['candidate_html']
-    assert '>Keep</p>' in preview['candidate_html']
+    assert expected in preview['candidate_html']
+    assert '>Keep</h1>' in preview['candidate_html']
     committed = tools.ppt_apply_selection_edit(preview['commit']['token'], artifact=html, artifact_store=str(tmp_path), slot='preview_html')
     assert committed['artifact']['value'] == preview['candidate_html']
+    assert committed['native_companion'] is None
     with generation_scope([{'request_hash': request['request_hash'], 'text': '{"op":"arbitrary_code","value":"bad"}'}]), pytest.raises(ValueError):
         tools.ppt_preview_selection_edit(**args)
 

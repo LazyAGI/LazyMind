@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useSettingsDraft, useSettingsEditor } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -210,6 +211,19 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "configured",
   },
   {
+    key: "keenable",
+    name: "Keenable",
+    description: "",
+    summary: "",
+    category: "search",
+    fields: ["apiKey"],
+    logo: <SearchOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=keenable.ai&sz=96",
+    tone: "green",
+    status: "missing",
+    capabilities: ["keyless_search"],
+  },
+  {
     key: "openalex", name: "OpenAlex", description: "", summary: "", category: "academic",
     fields: ["apiKey"], logo: <SearchOutlined />, logoUrl: "https://www.google.com/s2/favicons?domain=openalex.org&sz=96", tone: "green", status: "missing",
   },
@@ -231,12 +245,13 @@ const fallbackServiceByName = new Map<string, ExternalServiceConfig>(
   externalServiceConfigs.map((service) => [normalizeProviderName(service.name), service])
 );
 
-/** Display order for search engines: Tavily → Bocha → Bing → Google Custom Search */
+/** Display order for search engines: Tavily → Bocha → Bing → Google Custom Search → Keenable */
 const SEARCH_ENGINE_DISPLAY_ORDER: Array<{ match: RegExp; order: number }> = [
   { match: /^tavily/, order: 0 },
   { match: /^bocha/, order: 1 },
   { match: /^bing/, order: 2 },
   { match: /^google/, order: 3 },
+  { match: /^keenable/, order: 4 },
 ];
 
 function getSearchEngineDisplayOrder(name: string) {
@@ -315,6 +330,14 @@ function getTranslationSetupUrl(service: ExternalServiceConfig) {
 
 function isKeylessTranslation(service?: ExternalServiceConfig | null) {
   return service?.category === "translation" && service.capabilities?.includes("keyless_translation") === true;
+}
+
+function isKeylessSearch(service?: ExternalServiceConfig | null) {
+  return service?.category === "search" && service.capabilities?.includes("keyless_search") === true;
+}
+
+function isKeylessService(service?: ExternalServiceConfig | null) {
+  return isKeylessTranslation(service) || isKeylessSearch(service);
 }
 
 function translationCredentialPair(service?: ExternalServiceConfig | null) {
@@ -405,14 +428,14 @@ export function renderExternalServiceDescription(description: string) {
   return parts.map((part, index) => {
     if (/^https?:\/\//.test(part)) {
       return (
-        <a
+        <ExternalLink
           href={part}
           key={`${part}-${index}`}
           rel="noreferrer"
           target="_blank"
         >
           {part}
-        </a>
+        </ExternalLink>
       );
     }
 
@@ -938,16 +961,23 @@ export default function ExternalServicesPage({
   }
 
   async function handleEnableKeylessTranslation() {
-    if (!activeService || !isKeylessTranslation(activeService) || !keysLoaded || keysError || addingKey) return;
+    if (!activeService || !isKeylessService(activeService) || !keysLoaded || keysError || addingKey) return;
     setAddingKey(true);
     try {
       const group = groupForActiveService || await createProviderGroup(activeService, {
         name: activeService.name,
         base_url: activeService.baseUrl || "",
         api_key: "",
-        verify: false,
+        verify: isKeylessSearch(activeService),
       });
+      if (isKeylessSearch(activeService) && group.check && group.check.success !== true) {
+        message.error(localizeErrorCode("2000509"));
+        return;
+      }
       setGroupForActiveService(group);
+      if (isKeylessSearch(activeService)) {
+        await selectServiceProvider(activeService, group.id);
+      }
       setActiveService((current) => current?.key === activeService.key
         ? { ...current, status: "configured" }
         : current);
@@ -996,7 +1026,7 @@ export default function ExternalServicesPage({
       }
 
       const hasSavedKeys = savedGroup?.has_api_key || Boolean(savedGroup?.keys?.length) || keyList.length > 0;
-      if (activeService.category !== "translation" && activeService.category !== "parsing" && savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+      if (activeService.category !== "translation" && activeService.category !== "parsing" && savedGroup && (hasSavedKeys || isKeylessSearch(activeService) || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
         await selectServiceProvider(activeService, savedGroup.id);
       }
 
@@ -1293,11 +1323,15 @@ export default function ExternalServicesPage({
           <Button
             disabled={addingKey || !keysLoaded || keysError}
             key="save"
-            loading={isKeylessTranslation(activeService) ? addingKey : savingServiceConfig}
-            onClick={isKeylessTranslation(activeService) ? handleEnableKeylessTranslation : handleSaveServiceConfig}
+            loading={isKeylessService(activeService) ? addingKey : savingServiceConfig}
+            onClick={isKeylessService(activeService) ? handleEnableKeylessTranslation : handleSaveServiceConfig}
             type="primary"
           >
-            {t(isKeylessTranslation(activeService) ? "modelProvider.external.enableTranslationSource" : "modelProvider.external.saveConfig")}
+            {t(isKeylessTranslation(activeService)
+              ? "modelProvider.external.enableTranslationSource"
+              : isKeylessSearch(activeService)
+                ? "modelProvider.external.enableKeylessSearch"
+                : "modelProvider.external.saveConfig")}
           </Button>,
         ]}
       >
@@ -1331,10 +1365,10 @@ export default function ExternalServicesPage({
                 <div className="model-provider-translation-setup-head">
                   <strong>{t("modelProvider.external.translationGuideTitle", { name: serviceDisplayName(activeService) })}</strong>
                   {getTranslationSetupUrl(activeService) ? (
-                    <a href={getTranslationSetupUrl(activeService)} rel="noreferrer" target="_blank">
+                    <ExternalLink href={getTranslationSetupUrl(activeService)} rel="noreferrer" target="_blank">
                       {t("modelProvider.external.translationGuideOpenOfficial")}
                       <RightOutlined aria-hidden="true" />
-                    </a>
+                    </ExternalLink>
                   ) : null}
                 </div>
                 <ol>
@@ -1392,6 +1426,9 @@ export default function ExternalServicesPage({
               ) : null}
             </Form>
 
+            {isKeylessSearch(activeService) ? (
+              <Alert type="info" showIcon message={t("modelProvider.external.keylessSearchNote")} />
+            ) : null}
             {isKeylessTranslation(activeService) ? (
               <Alert type="info" showIcon message={t("modelProvider.external.keylessTranslationNote")} />
             ) : <div className="model-provider-key-list">

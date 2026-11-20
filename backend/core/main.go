@@ -246,6 +246,10 @@ func externalAgentOperation(method, path string) externallease.Operation {
 		(strings.HasSuffix(path, ":start") || strings.HasSuffix(path, ":finish")) {
 		return externallease.OperationInvocationWrite
 	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/workflow-sessions/") &&
+		strings.Contains(path, "/hosted-attempts/") && strings.HasSuffix(path, "/tools:list") {
+		return externallease.OperationWorkflowRead
+	}
 	if method == http.MethodGet && (path == "/workflow-runtime/v1/workflows" ||
 		strings.HasPrefix(path, "/workflow-runtime/v1/workflows/") || path == "/workflow-sessions" ||
 		strings.HasPrefix(path, "/workflow-input-resources/") || strings.HasPrefix(path, "/workflow-artifacts/") ||
@@ -262,7 +266,8 @@ func externalAgentOperation(method, path string) externallease.Operation {
 				strings.HasSuffix(path, ":advance-step-and-hand-off") ||
 				(strings.Contains(path, "/hosted-attempts/") &&
 					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit") ||
-						strings.HasSuffix(path, ":complete") || strings.HasSuffix(path, "/artifacts")))))) {
+						strings.HasSuffix(path, ":complete") || strings.HasSuffix(path, "/artifacts") ||
+						strings.HasSuffix(path, "/workers:grant") || strings.HasSuffix(path, "/preview") || strings.HasSuffix(path, "/tools:call")))))) {
 		return externallease.OperationWorkflowWrite
 	}
 	return ""

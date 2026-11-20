@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import os
 from pathlib import Path
@@ -27,7 +28,8 @@ def generation_contract():
                 required_functions=dict(analyze=['tables', 'plan', 'rng']),
                 runtime_plan=dict(questions='host-assigned research questions', outline='short analysis outline',
                                   facts='complete supplied research context, identical to generation input'),
-                top_level='imports, function definitions and literal constants only',
+                top_level=('imports, function definitions and literal constants, '
+                           'including references to earlier constants'),
                 randomness='use supplied rng; no filesystem/network/environment access',
                 result_coordinates='Each emitted row owns a copied/frozen coordinate snapshot before later mutations.')
 
@@ -46,11 +48,22 @@ def validate_code(code):
         functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name]
         if len(functions) != 1 or [a.arg for a in functions[0].args.args] != args:
             raise ValueError(f'统计程序必须定义 {name}({", ".join(args)})')
+    constants = set()
+
+    class ConstantReferences(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if node.id not in constants:
+                raise ValueError(f'统计代码第 {node.lineno} 行引用了未定义的顶层常量: {node.id}')
+            return ast.copy_location(ast.Constant(value=0), node)
+
     for node in tree.body:
         if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef)):
             continue
         if isinstance(node, ast.Assign):
-            ast.literal_eval(node.value)
+            if any(not isinstance(target, ast.Name) for target in node.targets):
+                raise ValueError('统计程序顶层常量必须赋给普通变量名')
+            ast.literal_eval(ConstantReferences().visit(copy.deepcopy(node.value)))
+            constants.update(target.id for target in node.targets)
             continue
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
             continue
@@ -89,7 +102,7 @@ def configuration():
     return timeout
 
 
-def execute(payload):
+def execute(payload, *, cancelled=None):
     timeout = configuration()
     validate_code(payload['code'])
     raw = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
@@ -97,7 +110,8 @@ def execute(payload):
         raise ValueError('统计执行输入超过 32 MiB')
     try:
         result = container.execute(payload, Path(__file__).with_name('generated_worker.py'),
-                                   timeout, label='生成统计代码')
+                                   timeout, label='生成统计代码',
+                                   **({'cancelled': cancelled} if cancelled is not None else {}))
     except container.ContainerEnvironmentError as exc:
         raise AnalysisEnvironmentError(str(exc)) from exc
     if set(result) != {'results', 'versions', 'seed'} or result['seed'] != payload['seed']:

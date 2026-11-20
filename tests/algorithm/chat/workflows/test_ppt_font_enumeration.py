@@ -6,6 +6,9 @@ import subprocess
 from types import SimpleNamespace
 
 import pytest
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTCollection
 
 from lazymind.chat.engine.tools.file_resources import font_library, portable_fonts, presentation_edit
 
@@ -16,6 +19,7 @@ def font_discovery(monkeypatch):
         {'embeddable': True, 'aliases': ['Managed Font']},
     ])
     monkeypatch.setattr(presentation_edit.shutil, 'which', lambda _: 'fc-list')
+    monkeypatch.setattr(presentation_edit, 'office_yahei_font_paths', lambda: ())
     # Keep the regression independent from fonts installed on the test machine.
     monkeypatch.setattr(Path, 'rglob', lambda *args: iter(()))
 
@@ -82,3 +86,50 @@ def test_fontconfig_paths_are_decoded_as_utf8(monkeypatch, font_discovery, inval
 
     monkeypatch.setattr(portable_fonts.subprocess, 'run', run)
     assert list(portable_fonts._system_font_paths()) == [Path('C:/Windows/Fonts/中文.ttf')]
+
+
+@pytest.mark.parametrize('embedding', [8, 4])
+def test_macos_office_yahei_selection_preview(tmp_path, monkeypatch, embedding):
+    monkeypatch.setattr(presentation_edit, 'sys', SimpleNamespace(platform='darwin'))
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    monkeypatch.setattr(Path, 'rglob', lambda *args: iter(()))
+    original_is_file = Path.is_file
+    monkeypatch.setattr(Path, 'is_file', lambda p: not p.is_relative_to('/Applications') and original_is_file(p))
+    monkeypatch.setattr(presentation_edit.shutil, 'which', lambda _: 'fc-list')
+    monkeypatch.setattr(presentation_edit.subprocess, 'run', lambda *a, **kw: SimpleNamespace(stdout='Other Font'))
+    monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'fonts'))
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path / 'uploads'))
+    monkeypatch.setenv('LAZYMIND_RUNTIME_MODE', 'local')
+    bundled = tmp_path / 'Applications/Microsoft PowerPoint.app/Contents/Resources/DFonts/msyh.ttc'
+    bundled.parent.mkdir(parents=True)
+    builder = FontBuilder(1000, isTTF=True)
+    glyphs = ['.notdef', 'title']
+    builder.setupGlyphOrder(glyphs)
+    builder.setupCharacterMap({ord('甲'): 'title'})
+    builder.setupGlyf({glyph: TTGlyphPen(None).glyph() for glyph in glyphs})
+    builder.setupHorizontalMetrics({glyph: (500, 0) for glyph in glyphs})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupNameTable({'familyName': 'Microsoft YaHei', 'styleName': 'Regular'})
+    builder.setupOS2(fsType=embedding)
+    builder.setupPost()
+    collection = TTCollection()
+    collection.fonts = [builder.font]
+    collection.save(bundled)
+
+    path = Path(__file__).resolve().parents[4] / 'workflows/ppt-workflow/scripts/tools.py'
+    spec = importlib.util.spec_from_file_location('ppt_yahei_preview_test', path)
+    tools = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tools)
+    monkeypatch.setattr(tools, '_agent_llm_call', lambda *a, **kw: pytest.fail('Exact font request called the model'))
+    assert presentation_edit.available_font_families(include_managed=False) == {'Other Font'}
+    html = '<html><head></head><body><h1 data-el="title">甲</h1><p>Keep</p></body></html>'
+    edit = dict(artifact=html, instruction='这个字体 换成微软雅黑',
+                selection={'type': 'ppt_html', 'el': 'title', 'page': 1},
+                artifact_store=str(tmp_path), slot='preview_html')
+    if embedding == 8:
+        candidate = tools.ppt_preview_selection_edit(**edit)['candidate_html']
+        assert 'Microsoft YaHei' in candidate and '/static-files/presentation-fonts/' in candidate
+        assert '>甲</h1>' in candidate and '<p>Keep</p>' in candidate
+    else:
+        with pytest.raises(ValueError, match='没有可嵌入的字体文件'):
+            tools.ppt_preview_selection_edit(**edit)

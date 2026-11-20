@@ -23,13 +23,17 @@ beforeEach(() => {
 afterEach(cleanup);
 describe("source imports", () => {
   it("opens the currently selected citation and offers single import from a grouped inline card", async () => {
-    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const popup = { opener: window as Window | null, document: document.implementation.createHTMLDocument(), location: { replace: vi.fn() } };
+    const open = vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
     try {
       const { container } = view(<MarkdownViewer sources={sources}>{"Compare [1](#source-a) and [2](#source-b)."}</MarkdownViewer>);
       fireEvent.focus(container.querySelector(".md-source-chip")!);
       fireEvent.click(await screen.findByRole("button", { name: "Next source" }));
       fireEvent.click(screen.getByRole("button", { name: "打开原文" }));
-      expect(open).toHaveBeenCalledWith(sources[1].url, "_blank", "noopener,noreferrer");
+      expect(open).toHaveBeenCalledWith("about:blank", "_blank");
+      expect(popup.opener).toBeNull();
+      expect(popup.document.querySelector('meta[name="referrer"]')?.getAttribute("content")).toBe("no-referrer");
+      expect(popup.location.replace).toHaveBeenCalledWith(sources[1].url);
       expect(await screen.findByRole("button", { name: "加入知识库" })).toBeEnabled();
     } finally {
       open.mockRestore();

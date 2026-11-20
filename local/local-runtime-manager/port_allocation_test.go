@@ -5,10 +5,43 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestDesktopDefaultPortLeavesComposeEntryAvailable(t *testing.T) {
+	t.Setenv(frontendPortEnvVar, "")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	options := RuntimeConfigOptions{Profile: "desktop", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"), ResourcesRoot: filepath.Join(t.TempDir(), "resources")}
+	desktop, _, err := newRuntimeConfigWithOptions(options, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desktop.FrontendPort != 8091 {
+		t.Fatalf("Desktop port=%d, want 8091", desktop.FrontendPort)
+	}
+	options.Profile = "local"
+	options.ResourcesRoot = ""
+	local, _, err := newRuntimeConfigWithOptions(options, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.FrontendPort != 8090 {
+		t.Fatalf("standalone Local port=%d, want unchanged 8090", local.FrontendPort)
+	}
+	t.Setenv(frontendPortEnvVar, "28901")
+	options.Profile = "desktop"
+	explicit, _, err := newRuntimeConfigWithOptions(options, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit.FrontendPort != 28901 {
+		t.Fatalf("explicit port not preserved: %d", explicit.FrontendPort)
+	}
+}
 
 func TestLocalPortAllocatorMovesOccupiedPreferredPort(t *testing.T) {
 	allocator := newLocalPortAllocator()

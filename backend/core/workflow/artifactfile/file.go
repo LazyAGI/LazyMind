@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -56,11 +58,15 @@ func Materialize(sessionID, artifactID string, raw json.RawMessage) (json.RawMes
 	}
 
 	scope := sha256.Sum256([]byte(sessionID))
-	directory := filepath.Join(doc.UploadRoot(), "workflow-artifacts", hex.EncodeToString(scope[:16]), artifactID)
+	fullPath, err := StoragePath(filepath.Join(doc.UploadRoot(), "workflow-artifacts"),
+		"file"+StorageExtension(name), hex.EncodeToString(scope[:16]), artifactID)
+	if err != nil {
+		return nil, "", err
+	}
+	directory := filepath.Dir(fullPath)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, "", fmt.Errorf("create Workflow artifact directory: %w", err)
 	}
-	fullPath := filepath.Join(directory, name)
 	if err := writeAtomic(fullPath, content); err != nil {
 		_ = os.RemoveAll(directory)
 		return nil, "", err
@@ -196,7 +202,7 @@ func int64Field(value map[string]any, key string) (int64, bool) {
 
 func validFilename(name string) bool {
 	if name == "" || name == "." || name == ".." || utf8.RuneCountInString(name) > 255 ||
-		filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
+		strings.ContainsAny(name, "/\\") {
 		return false
 	}
 	for _, char := range name {
@@ -205,6 +211,17 @@ func validFilename(name string) bool {
 		}
 	}
 	return true
+}
+
+var storageExtension = regexp.MustCompile(`^\.[A-Za-z0-9]{1,16}$`)
+
+// StorageExtension preserves a short extension for MIME detection on disk.
+func StorageExtension(name string) string {
+	extension := path.Ext(name)
+	if storageExtension.MatchString(extension) {
+		return extension
+	}
+	return ".bin"
 }
 
 func managedFilePath(fullPath string) (string, bool) {

@@ -25,11 +25,15 @@ import {
 
 describe("browser Assistant Bridge session synchronization", () => {
   beforeEach(() => {
+    // These tests cover session/action ordering; automatic discovery has its own suite.
+    vi.stubEnv("VITE_LAZYMIND_ASSISTANT_BRIDGE_URL", "http://127.0.0.1:19091");
     vi.restoreAllMocks();
     mocks.user.mockReset();
     mocks.user.mockReturnValue({ token: "access", refreshToken: "refresh" });
     Reflect.deleteProperty(window, "lazymindDesktop");
   });
+
+  afterEach(() => { vi.unstubAllEnvs(); });
 
   it("passes an explicit refresh to the browser Assistant Bridge", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ agents: {} }), { status: 200 }));

@@ -107,6 +107,73 @@ func TestWorkBuddyConnectChecksAuthenticationBeforeConfigurationOrRestart(t *tes
 	}
 }
 
+func TestWorkBuddyRegistrationOnInstallFailure(t *testing.T) {
+	for _, registration := range []string{"first connection", "existing", "existing with old launcher"} {
+		t.Run(registration, func(t *testing.T) {
+			root := t.TempDir()
+			setTestHome(t, root)
+			home := filepath.Join(root, "lazy-home")
+			t.Setenv("LAZYMIND_HOME", home)
+			t.Setenv("LAZYMIND_CONNECTOR_CONFIG", "")
+			t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
+			t.Setenv("LAZYMIND_NODE_BIN", filepath.Join(root, "missing-node"))
+			installWorkBuddyAuthTestDesktop(t, root)
+			previous := workBuddyAuthentication
+			workBuddyAuthentication = func() workbuddyadapter.AuthenticationResult {
+				return workbuddyadapter.AuthenticationResult{Ready: true}
+			}
+			t.Cleanup(func() { workBuddyAuthentication = previous })
+
+			adapter := testAdapter(WorkBuddy)
+			adapter.self, _ = os.Executable()
+			adapter.home = home
+			adapter.bridge = workBuddyTestProbe{}
+			store, err := credentials.NewStore(home, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Save(credentials.Credentials{
+				ServerURL: "http://localhost:8091", Username: "tester", AccessToken: "access", RefreshToken: "refresh",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			path := configPath(WorkBuddy)
+			var original []byte
+			if registration != "first connection" {
+				command := adapter.self
+				if registration == "existing with old launcher" {
+					command = filepath.Join(root, "old-launcher.exe")
+				}
+				entry := struct {
+					stdioMCPDefinition
+					Disabled bool   `json:"disabled"`
+					Cwd      string `json:"cwd"`
+				}{legacyTestStdio(command, home, adapter.hostID, WorkBuddy), true, root}
+				original, err = json.Marshal(map[string]any{"mcpServers": map[string]any{serverName: entry}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeTestFile(t, path, string(original))
+			}
+			status := adapter.Connect(t.Context())
+			if status.State != agentintegration.Failed || status.Issue == nil || status.Issue.Code != "runtime_unavailable" {
+				t.Fatalf("expected a Node runtime failure, got %+v", status)
+			}
+			if original != nil {
+				got, err := os.ReadFile(path)
+				if err != nil || string(got) != string(original) {
+					t.Fatalf("failed reconnect rewrote the existing registration: %s, %v", got, err)
+				}
+				return
+			}
+			state, err := readManagedConfig(WorkBuddy, path, adapter.self, home, adapter.hostID)
+			if err != nil || !state.owned || !status.CanDisconnect {
+				t.Fatalf("failed first install lost the registration or cleanup action: %+v, %v", state, err)
+			}
+		})
+	}
+}
+
 func installWorkBuddyAuthTestDesktop(t *testing.T, root string) {
 	t.Helper()
 	app := filepath.Join(root, "WorkBuddy.exe")

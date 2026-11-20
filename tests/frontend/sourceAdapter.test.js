@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const browser = vi.hoisted(() => ({ externalWebURL: vi.fn(), openExternalUrl: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('@/runtime/externalNavigation', () => browser);
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 import {
   findSourceByCitationId,
@@ -33,10 +37,12 @@ describe('chat source adapter', () => {
   it('gives every displayed source a click target', () => {
     const open = vi.fn();
     vi.stubGlobal('window', { open });
+    browser.externalWebURL.mockReturnValueOnce(external.url);
 
     expect(getSourceHref(external)).toBe(external.url);
     expect(openSource(external)).toBe(true);
-    expect(open).toHaveBeenCalledWith(external.url, '_blank', 'noopener,noreferrer');
+    expect(browser.openExternalUrl).toHaveBeenCalledWith(external.url);
+    expect(open).not.toHaveBeenCalled();
     expect(getSourceHref(knowledge)).toContain('/lib/knowledge/knowledge/kb-1/doc-1?');
     expect(getSourceHref(knowledge)).toContain('segement_id=segment-1');
     expect(getSourceHref({ source_type: 'external', url: 'not-yet-resolvable' })).toBe('#source-unknown');
@@ -44,8 +50,7 @@ describe('chat source adapter', () => {
     expect(getSourceHref({ url: 'https://legacy.example/page', index: '6.1' })).toBe('https://legacy.example/page');
     expect(getSourceHref({ ...knowledge, dataset_id: 'default' })).toContain('/default/doc-1?');
     expect(openSource({ file_name: 'temporary.txt', dataset_id: 'default' })).toBe(true);
-
-    vi.unstubAllGlobals();
+    expect(open).toHaveBeenCalledWith(getSourceHref({ file_name: 'temporary.txt', dataset_id: 'default' }), '_blank', 'noopener,noreferrer');
   });
 
   it('keeps source identities for citation lookup without drawer deduplication', () => {

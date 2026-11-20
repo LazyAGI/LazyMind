@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -339,6 +340,24 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 				))
 			}
 		}
+		stepInputs := expressionMaterials(node.Input)
+		for _, input := range node.OptionalInputs {
+			stepInputs = append(stepInputs, input.Material)
+		}
+		for argument, material := range check.InputArguments {
+			_, duplicate := check.Arguments[argument]
+			if strings.TrimSpace(argument) == "" || strings.TrimSpace(material) == "" || duplicate || argument == check.ArtifactsArgument {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_POST_CHECK_ARGUMENT_INVALID", "error", path+".input_arguments",
+					"input_arguments require distinct non-empty parameter names",
+				))
+			} else if stepExists && !slices.Contains(stepInputs, material) {
+				result.Diagnostics = append(result.Diagnostics, materialNodeDiag(
+					"E_RUNTIME_POST_CHECK_MATERIAL_NOT_BOUND", "error", path+".input_arguments."+argument,
+					check.StepID, material, "runtime post-step check input must be declared by its step",
+				))
+			}
+		}
 	}
 	if followup := graph.Runtime.AttachmentClarification; followup != nil {
 		followup.QuestionIDPrefix = strings.TrimSpace(followup.QuestionIDPrefix)
@@ -443,6 +462,11 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			}
 		}
 		field.Choices = choices
+		field.Recommended = strings.TrimSpace(field.Recommended)
+		if field.Recommended != "" && (field.Type != "single" || !seenChoices[field.Recommended]) {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_RECOMMENDATION_INVALID", "error",
+				path+".recommended_choice", "recommended_choice must exactly match a declared choice for a single-choice question"))
+		}
 		if field.Default != nil {
 			if err := validateClarificationValue(*field, canonicalClarification(*field, field.Default)); err != nil {
 				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_DEFAULT_INVALID", "error",

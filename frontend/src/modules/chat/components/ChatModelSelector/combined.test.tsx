@@ -19,6 +19,7 @@ vi.mock("react-i18next", async (load) => {
   return ({
   ...actual,
   useTranslation: () => ({
+    i18n: { language: localeState.language },
     t: (key: string, params?: Record<string, string>) => {
       const locale = localeState.language === "zh-CN" ? zh : en;
       if (key.startsWith("chat.thinkingDepthLabels.")) {

@@ -91,6 +91,18 @@ describe('workflow continuation checkpoints', () => {
       .toEqual({ kind: 'completed', stepId: 'write_document' });
   });
 
+  it('offers the projected successor after a successful retry ends its driver', () => {
+    const session = checkpoint(false);
+    session.status = 'active';
+    session.steps![0].attempt = 3;
+    session.projection!.display = { status: 'waiting', reason: 'next_step_required', approval_step_id: '' };
+    session.steps!.unshift({ ...session.steps![0], id: 'old-failure', task_id: 'old-failure',
+      attempt: 2, status: 'failed', validity: 'stale' });
+    expect(resolveWorkflowContinueAction(session, 'waiting')).toEqual({ kind: 'advance', stepId: 'collect' });
+    session.projection!.ready = [];
+    expect(resolveWorkflowContinueAction(session, 'waiting')).toBeUndefined();
+  });
+
   it('does not reuse a stale current step pointer after a newer automatic attempt succeeds', () => {
     const session = checkpoint(true);
     session.steps!.push({ ...session.steps![0], id: 'b', task_id: 'b', step_id: 'collect', attempt: 2 });

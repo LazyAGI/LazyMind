@@ -113,9 +113,10 @@ runtime:
     inspection_tools: [pptx_analyzer]
     instructions: Read every page before asking for missing dates.
   post_step_checks:
-    - step_id: b
+    - step_id: f
       tool: check_ready
-      arguments: {brief: b_result}
+      arguments: {result: final}
+      input_arguments: {brief: b_result}
       artifacts_argument: published_artifacts
   clarification_fields:
     - id: topic
@@ -156,8 +157,11 @@ runtime:
 	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" || policy.ClarificationFields[1].ChoicePolicy != "subset" {
 		t.Fatalf("runtime clarification fields were not compiled: %#v", policy.ClarificationFields)
 	}
-	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "b" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["brief"] != "b_result" {
+	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "f" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["result"] != "final" {
 		t.Fatalf("runtime post-step checks were not compiled: %#v", policy.PostStepChecks)
+	}
+	if decoded.Runtime.PostStepChecks[0].InputArguments["brief"] != "b_result" {
+		t.Fatal("bound input arguments were lost in the compiled graph")
 	}
 	if policy.PostStepChecks[0].ArtifactsArgument != "published_artifacts" {
 		t.Fatalf("post-step artifact list argument was lost: %#v", policy.PostStepChecks)

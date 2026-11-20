@@ -53,6 +53,9 @@ func enqueueArtifactAction(w http.ResponseWriter, r *http.Request, target *artif
 	for _, prior := range pending {
 		var saved algo.WorkflowActionInvokeRequest
 		if json.Unmarshal([]byte(prior.RequestJSON), &saved) == nil {
+			if isPPTHTMLSelectionEdit(saved.WorkflowID, saved.Action, saved.Slot) {
+				delete(saved.Arguments, "native_companion")
+			}
 			a, _ := json.Marshal(saved.Arguments)
 			b, _ := json.Marshal(req.Arguments)
 			index := -1
@@ -177,6 +180,9 @@ func SubmitArtifactActionJob(w http.ResponseWriter, r *http.Request) {
 			if len(*req.GenerationResponses) > 16 {
 				return fmt.Errorf("edit generation limit reached")
 			}
+			if isPPTHTMLSelectionEdit(req.WorkflowID, req.Action, req.Slot) {
+				delete(req.Arguments, "native_companion")
+			}
 			response, _, err := algo.InvokeWorkflowAction(r.Context(), req)
 			if err != nil {
 				return err
@@ -263,8 +269,16 @@ func checkExternalActionPackage(r *http.Request, target *artifactActionTarget, v
 	return nil
 }
 
+func isPPTHTMLSelectionEdit(workflowID, action, slot string) bool {
+	return workflowID == "ppt-workflow" && action == "rewrite_selection" && slot == "preview_html"
+}
+
 // The package declares its companion slot; the host cannot choose a file path.
 func attachActionCompanion(r *http.Request, target *artifactActionTarget, req *algo.WorkflowActionInvokeRequest) error {
+	// Older packages still declare a companion, even for an HTML-only edit.
+	if isPPTHTMLSelectionEdit(req.WorkflowID, req.Action, req.Slot) {
+		return nil
+	}
 	pkg, err := workflowstore.New(target.db).GetWorkflowPackage(r.Context(), target.session.CreateUserID, target.session.WorkflowRef, req.RevisionID)
 	if err != nil {
 		return err

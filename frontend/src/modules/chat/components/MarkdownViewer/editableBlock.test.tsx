@@ -59,7 +59,8 @@ describe("MarkdownViewer editable writing blocks", () => {
   });
 
   it("opens the source selected from an editable citation", () => {
-    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const popup = { opener: window as Window | null, document: document.implementation.createHTMLDocument(), location: { replace: vi.fn() } };
+    const open = vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
     render(
       <MarkdownViewer
         conversationId="conversation-1"
@@ -78,11 +79,10 @@ describe("MarkdownViewer editable writing blocks", () => {
     fireEvent.click(screen.getByRole("button", { name: "open source" }));
 
     expect(screen.getByTestId("source-label")).toHaveTextContent("docs.python.org");
-    expect(open).toHaveBeenCalledWith(
-      "https://docs.python.org/3/",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    expect(open).toHaveBeenCalledWith("about:blank", "_blank");
+    expect(popup.opener).toBeNull();
+    expect(popup.document.querySelector('meta[name="referrer"]')?.getAttribute('content')).toBe('no-referrer');
+    expect(popup.location.replace).toHaveBeenCalledWith("https://docs.python.org/3/");
   });
 
   it("keeps an editable fence read-only while the response is streaming", () => {

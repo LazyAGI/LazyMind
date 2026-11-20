@@ -99,15 +99,50 @@ func FinishChat(ctx context.Context, db *gorm.DB, id, status string, now time.Ti
 			return err
 		}
 		var root orm.TaskExecutionTiming
-		err := tx.WithContext(ctx).Where("id = ? AND workflow_session_id = ''", id).First(&root).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
+		err := tx.WithContext(ctx).Where("id = ?", id).First(&root).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
 		}
+		if err == nil && root.WorkflowSessionID == "" {
+			if err := finishChatRound(ctx, tx, root, status, now); err != nil {
+				return err
+			}
+		}
+		return syncNativeWorkflowChat(ctx, tx, id, now)
+	})
+}
+
+// Chat completion can change the Workflow display without a Workflow event.
+// Reconcile only the current controller's persisted terminal run: a late reply
+// must not settle a replacement controller, and live children keep their clock.
+func syncNativeWorkflowChat(ctx context.Context, db *gorm.DB, runID string, now time.Time) error {
+	if !db.Migrator().HasTable(&orm.ChatHistory{}) || !db.Migrator().HasTable(&orm.WorkflowSession{}) {
+		return nil
+	}
+	var history orm.ChatHistory
+	err := db.WithContext(ctx).Where("run_id = ? AND run_status IN ?", runID, []string{"completed", "failed", "cancelled"}).Take(&history).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var sessions []orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("conversation_id = ? AND controller_host = ? AND dismissed = false", history.ConversationID, "lazymind").Find(&sessions).Error; err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		bound, err := displaystate.ChatHistoryID(session)
 		if err != nil {
 			return err
 		}
-		return finishChatRound(ctx, tx, root, status, now)
-	})
+		if bound == history.ID {
+			if err := SyncWorkflow(ctx, db, session.ID, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func finishChatRound(ctx context.Context, db *gorm.DB, root orm.TaskExecutionTiming, status string, now time.Time) error {

@@ -88,7 +88,7 @@ func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.Provid
 	if count == 0 && resolution != credentialvault.ConflictSaveCopy && strings.EqualFold(name, source.Name) && normalizeBaseURLForCompare(payload.BaseURL) == normalizeBaseURLForCompare(source.BaseURL) {
 		updates := map[string]any{}
 		if payload.RequestConfig != "" {
-			source.RequestConfig, err = encryptRestoredRequestConfig(source, payload.RequestConfig, managers...)
+			source.RequestConfig, err = restoredRequestConfig(payload.RequestConfig)
 			if err != nil {
 				return source, err
 			}
@@ -116,7 +116,7 @@ func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.Provid
 	row.Capabilities = strings.Join(modelSupplierCapabilities(row.Capabilities), ",")
 	row.ActiveKeyGroupID, row.ActiveKeyID, row.ActiveKeyInitialized, row.ActiveKeyRevision = "", "", false, 0
 	row.BaseModel = orm.BaseModel{CreateUserID: userID, CreatedAt: now, UpdatedAt: now}
-	row.RequestConfig, err = encryptRestoredRequestConfig(row, payload.RequestConfig, managers...)
+	row.RequestConfig, err = restoredRequestConfig(payload.RequestConfig)
 	if err != nil {
 		return row, err
 	}

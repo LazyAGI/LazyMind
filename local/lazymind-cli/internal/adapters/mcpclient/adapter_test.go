@@ -185,7 +185,7 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 		t.Fatalf("backup missing: %v", err)
 	}
 
-	if err := removeManagedConfig(Cursor, path); err != nil {
+	if err := removeManagedConfig(Cursor, path, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	body, _ = os.ReadFile(path)
@@ -251,7 +251,7 @@ func TestManagedDSHConfigPreservesOtherPatchEntries(t *testing.T) {
 	if err := writeManagedConfig(DeepSeekHarness, path, self, home, "host-1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := removeManagedConfig(DeepSeekHarness, path); err != nil {
+	if err := removeManagedConfig(DeepSeekHarness, path, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	body, _ := os.ReadFile(path)

@@ -146,6 +146,18 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		return err
 	}
 	controlled := controlstore.Controlled(sessionInfo)
+	if UsesPPTImageContract(attempt) && attempt.StepID == "generate_ppt" {
+		switch artifact.Slot {
+		case "native_pptx", "preview_html", "preview_notes":
+			format, err := pptOption(sink.DB.WithContext(ctx), attempt, "presentation_output_format")
+			if err != nil {
+				return err
+			}
+			if !controlstore.PresentationSlotAllowed(format, artifact.Slot) {
+				return controlstore.Reject("INVALID_ARTIFACT", "Output slot does not match the selected presentation format: "+artifact.Slot)
+			}
+		}
+	}
 	validatePPT := attempt.Metadata["executor_host"] == "external-agent" && UsesPPTImageContract(attempt)
 	if validatePPT && (artifact.Slot == "material_images" || artifact.Slot == "background_images") {
 		imageValue, err := normalizePPTImageUpload(artifact.Slot, artifact.Value)
@@ -512,6 +524,9 @@ func ValidateRequiredOutputs(ctx context.Context, db *gorm.DB, attempt AttemptCo
 	}
 	if validatePPT {
 		return validatePPTCompletion(db.WithContext(ctx), attempt, rows)
+	}
+	if UsesPaperAgentContract(attempt) {
+		return validatePaperCompletion(ctx, db, attempt, rows)
 	}
 	return nil
 }

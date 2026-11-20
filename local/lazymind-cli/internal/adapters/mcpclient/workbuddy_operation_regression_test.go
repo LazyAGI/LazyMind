@@ -24,7 +24,7 @@ func TestWorkBuddyOperationLockFailureClassification(t *testing.T) {
 					ctx, cancel = context.WithCancel(ctx)
 					cancel()
 					want = "operation_cancelled"
-				} else if err := os.MkdirAll(filepath.Join(a.home, "workbuddy-workflow", "operation.lock"), 0700); err != nil {
+				} else if err := os.MkdirAll(configPath(WorkBuddy)+".lazymind-operation-lock", 0700); err != nil {
 					t.Fatal(err)
 				}
 				var status agentintegration.Status

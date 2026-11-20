@@ -442,6 +442,7 @@ export interface ProviderRequestAdvanced {
 }
 
 export interface ProviderRequestConfig {
+  advanced_unavailable?: boolean;
   advanced?: ProviderRequestAdvanced;
   default_protocol: RequestProtocol;
   protocols: Array<{

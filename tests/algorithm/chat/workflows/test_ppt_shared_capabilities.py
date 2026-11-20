@@ -250,3 +250,19 @@ def test_paper_order_rejects_unsupported_or_inconsistent_graph(tools, edges, rea
     papers = [{'source_id': key, 'title': f'Paper {key}'} for key in ['A', 'B']]
     with pytest.raises(ValueError, match=reason):
         tools.ppt_plan_paper_order(json.dumps(papers), json.dumps(edges))
+
+
+def test_workflow_pptx_analyzer_keeps_template_default_and_supports_content(tools, tmp_path, monkeypatch):
+    from pptx import Presentation
+    source = tmp_path / 'template.pptx'
+    deck = Presentation()
+    deck.slides.add_slide(deck.slide_layouts[0]).shapes.title.text = '模板标题'
+    deck.save(source)
+    monkeypatch.setattr(tools, '_resolve_template_file', lambda filename: (source, source.name))
+    template = tools.pptx_analyzer(source.name, all_pages=True)
+    assert template['quality_contract']
+    assert template['pages'][0]['shapes'] and template['pages'][0]['slots']
+    content = tools.pptx_analyzer(source.name, all_pages=True, mode='content')
+    assert content['pages'][0]['text'] == '模板标题'
+    assert 'quality_contract' not in content
+    assert tools.ppt_inspect_template_page(source.name)['slots']

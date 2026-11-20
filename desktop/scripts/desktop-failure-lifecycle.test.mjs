@@ -16,15 +16,24 @@ function declaration(name, next) {
 
 test("main supplies its Windows icon when installing popup navigation", () => {
   let options;
+  const frontendURL = "http://localhost:8090/agent/chat/home";
+  const owner = { webContents: new EventEmitter() };
+  const recoveryAttachments = [];
   const context = vm.createContext({
-    installExternalNavigationHandler: (...args) => { options = args[3]; },
+    installExternalNavigationHandler: (...args) => { options = args[3]; assert.equal(args[4], frontendURL); },
+    pageRecovery: { attach: (...args) => recoveryAttachments.push(args) },
     windowsDesktopIconPath: () => "/runtime/LazyMind.ico",
-    path, __dirname: "/runtime", shell: { openExternal() {} },
+    path, URL, __dirname: "/runtime", shell: { openExternal() {} },
     appendStartupLog() {}, serializeError: String,
   });
   vm.runInContext(declaration("attachExternalNavigationHandler", "configuredCloudOrigin"), context);
-  context.attachExternalNavigationHandler({ webContents: {} });
+  context.attachExternalNavigationHandler(owner, frontendURL);
   assert.equal(options.icon, "/runtime/LazyMind.ico");
+  assert.deepEqual(recoveryAttachments, [[owner, frontendURL]]);
+  const child = { webContents: new EventEmitter() };
+  owner.webContents.emit("did-create-window", child, { url: "http://localhost:8090/lib/knowledge/list" });
+  owner.webContents.emit("did-create-window", {}, { url: "https://example.org" });
+  assert.deepEqual(recoveryAttachments, [[owner, frontendURL], [child, frontendURL]]);
 });
 
 for (const completed of [false, true]) test(`macOS confirms a loaded cleanup guard before warmup (previously completed=${completed})`, async () => {

@@ -113,7 +113,7 @@ func TestNativePauseRetriesSQLiteContentionWithoutDuplicateCancellation(t *testi
 func TestNativeResumeWithConcurrentSQLiteWrite(t *testing.T) {
 	for _, changedID := range []string{"other", "paused"} {
 		t.Run(changedID, func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{})
+			db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{}, &orm.ChatHistory{})
 			if db.Dialector.Name() != orm.DriverSQLite {
 				t.Skip("SQLite snapshot contention regression")
 			}
