@@ -211,6 +211,19 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "configured",
   },
   {
+    key: "keenable",
+    name: "Keenable",
+    description: "",
+    summary: "",
+    category: "search",
+    fields: ["apiKey"],
+    logo: <SearchOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=keenable.ai&sz=96",
+    tone: "green",
+    status: "configured",
+    capabilities: ["keyless_search"],
+  },
+  {
     key: "openalex", name: "OpenAlex", description: "", summary: "", category: "academic",
     fields: ["apiKey"], logo: <SearchOutlined />, logoUrl: "https://www.google.com/s2/favicons?domain=openalex.org&sz=96", tone: "green", status: "missing",
   },
@@ -232,12 +245,12 @@ const fallbackServiceByName = new Map<string, ExternalServiceConfig>(
   externalServiceConfigs.map((service) => [normalizeProviderName(service.name), service])
 );
 
-/** Display order for search engines: Tavily → Bocha → Bing → Google Custom Search */
 const SEARCH_ENGINE_DISPLAY_ORDER: Array<{ match: RegExp; order: number }> = [
-  { match: /^tavily/, order: 0 },
-  { match: /^bocha/, order: 1 },
-  { match: /^bing/, order: 2 },
-  { match: /^google/, order: 3 },
+  { match: /^keenable/, order: 0 },
+  { match: /^tavily/, order: 1 },
+  { match: /^bocha/, order: 2 },
+  { match: /^bing/, order: 3 },
+  { match: /^google/, order: 4 },
 ];
 
 function getSearchEngineDisplayOrder(name: string) {
@@ -316,6 +329,10 @@ function getTranslationSetupUrl(service: ExternalServiceConfig) {
 
 function isKeylessTranslation(service?: ExternalServiceConfig | null) {
   return service?.category === "translation" && service.capabilities?.includes("keyless_translation") === true;
+}
+
+function isKeylessSearch(service?: ExternalServiceConfig | null) {
+  return service?.category === "search" && service.capabilities?.includes("keyless_search") === true;
 }
 
 function translationCredentialPair(service?: ExternalServiceConfig | null) {
@@ -494,7 +511,7 @@ function mapApiProviderToService(provider: ApiExternalProvider, t: ReturnType<ty
     logo: fallback?.logo || getProviderIcon(category),
     logoUrl: fallback?.logoUrl || getProviderLogoUrl(provider.name),
     tone: fallback?.tone || serviceToneByCategory[category],
-    status: provider.is_configured ? "configured" : "missing",
+    status: provider.is_configured || provider.capabilities?.includes("keyless_search") ? "configured" : "missing",
     baseUrl: provider.base_url,
     baseUrlPresets: mapBaseUrlPresets(provider, fallback),
     capabilities: provider.capabilities,
@@ -776,7 +793,7 @@ export default function ExternalServicesPage({
   const loadGroupKeysGenRef = useRef(0);
   const formValues = Form.useWatch([], form);
   const confirmConfigClose = useSettingsDraft({
-    dirty: Boolean(activeService) && (Boolean(newKeyValue || newKeyEngineId) || (keysLoaded &&
+    dirty: Boolean(activeService) && (Boolean(newKeyValue || newKeyEngineId) || (keysLoaded && activeService?.fields.includes("baseUrl") &&
       normalizeBaseUrlForCompare(formValues?.[activeService!.key]?.baseUrl || "") !== normalizeBaseUrlForCompare(originalBaseUrlRef.current))),
     saving: addingKey || savingServiceConfig,
     discard: () => { setNewKeyValue(""); setNewKeyEngineId(""); },
@@ -997,7 +1014,7 @@ export default function ExternalServicesPage({
       }
 
       const hasSavedKeys = savedGroup?.has_api_key || Boolean(savedGroup?.keys?.length) || keyList.length > 0;
-      if (activeService.category !== "translation" && activeService.category !== "parsing" && savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+      if (activeService.category !== "translation" && activeService.category !== "parsing" && savedGroup && (hasSavedKeys || isKeylessSearch(activeService) || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
         await selectServiceProvider(activeService, savedGroup.id);
       }
 
@@ -1103,7 +1120,7 @@ export default function ExternalServicesPage({
   const activeServiceDisplayStatus =
     activeService?.status === "tbd"
       ? "tbd"
-      : activeService?.fields.includes("apiKey")
+      : activeService?.fields.includes("apiKey") && !isKeylessSearch(activeService)
         ? groupForActiveService?.has_api_key || keyList.length > 0
           ? "configured"
           : "missing"
@@ -1118,7 +1135,7 @@ export default function ExternalServicesPage({
           key={service.key}
           onOpen={openConfigModal}
           service={service}
-          statusLabel={variant === "default-models" && isKeylessTranslation(service) && service.status !== "configured"
+          statusLabel={isKeylessSearch(service) ? t("modelProvider.external.defaultEnabled") : variant === "default-models" && isKeylessTranslation(service) && service.status !== "configured"
             ? t("modelProvider.external.keylessTranslationStatus")
             : t(`modelProvider.external.status.${service.status}`)}
         />
@@ -1290,7 +1307,7 @@ export default function ExternalServicesPage({
             ? t("modelProvider.external.configModalTitle", { name: serviceDisplayName(activeService) })
             : t("modelProvider.external.configureAction")
         }
-        footer={activeService?.category === "translation" && !isKeylessTranslation(activeService) ? null : [
+        footer={isKeylessSearch(activeService) || (activeService?.category === "translation" && !isKeylessTranslation(activeService)) ? null : [
           <Button
             disabled={addingKey || !keysLoaded || keysError}
             key="save"
@@ -1298,7 +1315,9 @@ export default function ExternalServicesPage({
             onClick={isKeylessTranslation(activeService) ? handleEnableKeylessTranslation : handleSaveServiceConfig}
             type="primary"
           >
-            {t(isKeylessTranslation(activeService) ? "modelProvider.external.enableTranslationSource" : "modelProvider.external.saveConfig")}
+            {t(isKeylessTranslation(activeService)
+              ? "modelProvider.external.enableTranslationSource"
+              : "modelProvider.external.saveConfig")}
           </Button>,
         ]}
       >
@@ -1318,7 +1337,7 @@ export default function ExternalServicesPage({
                           : "default"
                     }
                   >
-                    {t(`modelProvider.external.status.${activeServiceDisplayStatus}`)}
+                    {isKeylessSearch(activeService) ? t("modelProvider.external.defaultEnabled") : t(`modelProvider.external.status.${activeServiceDisplayStatus}`)}
                   </Tag>
                 </div>
                 <p>{renderExternalServiceDescription(activeService.description)}</p>
@@ -1393,6 +1412,9 @@ export default function ExternalServicesPage({
               ) : null}
             </Form>
 
+            {isKeylessSearch(activeService) ? (
+              <Alert type="info" showIcon message={t("modelProvider.external.keylessSearchNote")} />
+            ) : null}
             {isKeylessTranslation(activeService) ? (
               <Alert type="info" showIcon message={t("modelProvider.external.keylessTranslationNote")} />
             ) : <div className="model-provider-key-list">
@@ -1476,7 +1498,7 @@ export default function ExternalServicesPage({
                       />
                     </div>
                   )}
-                  <div className="model-provider-key-extra">{t(activeService.category === "translation" ? "modelProvider.external.translationCredentialExtra" : "modelProvider.external.keyExtra")}</div>
+                  {!isKeylessSearch(activeService) && <div className="model-provider-key-extra">{t(activeService.category === "translation" ? "modelProvider.external.translationCredentialExtra" : "modelProvider.external.keyExtra")}</div>}
                   <Button
                     className="model-provider-key-add-button"
                     icon={<PlusOutlined />}

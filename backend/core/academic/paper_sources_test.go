@@ -171,13 +171,29 @@ func TestContentReadRequiresTaskAndBindsCursor(t *testing.T) {
 
 func TestOpenAlexSearchIdentityAbstractCacheAndSourceFailures(t *testing.T) {
 	db := paperFixture(t)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "academic-test-internal")
 	record := orm.AcademicExpansion{ID: "openalex-exp", UserID: "u", DatasetID: "papers", RequestOwner: "u", RequestKey: "openalex", Status: "preparing", DiscoveryMode: "external", PreparationRevision: 1, ResultJSON: marshal(ReviewWorkflowInput{Papers: []WorkflowPaper{}}), DiscoveryJSON: marshal([]paperDiscovery{})}
 	if err := db.Create(&record).Error; err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
+	webCalls := 0
 	previous := http.DefaultTransport
 	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/internal/academic/search" {
+			var body struct {
+				Source     string         `json:"source"`
+				ToolConfig map[string]any `json:"tool_config"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Source != "web" || body.ToolConfig["keenable"] != "public" {
+				t.Fatal("web search did not use the built-in public provider")
+			}
+			webCalls++
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"items":[]}`)), Header: make(http.Header), Request: r}, nil
+		}
 		if r.URL.Host != "api.openalex.org" {
 			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header), Request: r}, nil
 		}
@@ -227,8 +243,8 @@ func TestOpenAlexSearchIdentityAbstractCacheAndSourceFailures(t *testing.T) {
 		t.Fatal("private hosted content credential persisted")
 	}
 	sources := response["sources"].([]any)
-	if sources[1].(map[string]any)["status"] != "missing_configuration" || sources[2].(map[string]any)["status"] != "missing_configuration" {
-		t.Fatal("missing configuration confused with empty results")
+	if sources[1].(map[string]any)["status"] != "missing_configuration" || sources[2].(map[string]any)["status"] != "empty" || webCalls != 1 {
+		t.Fatal("unconfigured academic source must remain distinct from an empty built-in web search")
 	}
 	if search("rate")["sources"].([]any)[0].(map[string]any)["status"] != "rate_limited" {
 		t.Fatal("rate limit was lost")

@@ -322,3 +322,63 @@ func TestDoProviderGroupCheckRoutesDoubaoThroughAlgorithmModelCheck(t *testing.T
 		t.Fatalf("unexpected API key: %q", received.APIKey)
 	}
 }
+
+func TestDoKeenableSearchCloudServiceCheckUsesPublicEndpointWithoutKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/search/public" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("X-API-Key"); got != "" {
+			t.Fatalf("keyless check must not send X-API-Key, got %q", got)
+		}
+		if got := r.Header.Get("X-Keenable-Title"); got != "LazyMind" {
+			t.Fatalf("unexpected title header: %q", got)
+		}
+		var payload struct {
+			Query      string `json:"query"`
+			MaxResults int    `json:"max_results"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if payload.Query == "" || payload.MaxResults != 1 {
+			t.Fatalf("unexpected payload: %+v", payload)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer server.Close()
+
+	result, err := doKeenableSearchCloudServiceCheck(t.Context(), "Keenable", server.URL, "")
+	if err != nil {
+		t.Fatalf("doKeenableSearchCloudServiceCheck error: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected success, got %+v", result)
+	}
+}
+
+func TestDoKeenableSearchCloudServiceCheckUsesKeyedEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/search" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("X-API-Key"); got != "test-key" {
+			t.Fatalf("unexpected API key header: %q", got)
+		}
+		if got := r.Header.Get("X-Keenable-Title"); got != "LazyMind" {
+			t.Fatalf("unexpected title header: %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer server.Close()
+
+	result, err := doKeenableSearchCloudServiceCheck(t.Context(), "Keenable", server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("doKeenableSearchCloudServiceCheck error: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected success, got %+v", result)
+	}
+}

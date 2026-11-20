@@ -8402,6 +8402,8 @@ components:
                     type: array
                 next_page_token:
                     type: string
+                supports_page_number:
+                    type: boolean
                 total_size:
                     format: int64
                     type: integer
@@ -16527,6 +16529,8 @@ components:
                     type: boolean
                 created_at:
                     type: string
+                dataset_deleted:
+                    type: boolean
                 dataset_id:
                     type: string
                 display_state:
@@ -32818,6 +32822,13 @@ paths:
                   required: false
                   schema:
                     type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    description: One-based page number. Mutually exclusive with page_token.
+                    minimum: 1
+                    type: integer
             responses:
                 "200":
                     content:

@@ -19,7 +19,7 @@ func TestChatRuntimeDropsCloudConfigWhenNoConnectionsRemain(t *testing.T) {
 	if err := applyChatRuntimeConfigs(t.Context(), database.DB, "fixture-owner", body); err != nil {
 		t.Fatal(err)
 	}
-	if config, _ := body["tool_config"].(map[string]any); len(config) != 0 {
-		t.Fatalf("previous credentials survived an empty connection result: %v", config)
+	if config, _ := body["tool_config"].(map[string]any); len(config) != 1 || config["keenable"] != "public" {
+		t.Fatalf("only built-in public search should remain after disconnect: %v", config)
 	}
 }

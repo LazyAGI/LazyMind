@@ -18,8 +18,8 @@ for (const reload of [true, false]) test(`restart stops before starting, coalesc
     runSidecar: async () => { assert.equal(context.runtimeStopping, true); events.push('down'); await down; },
     detachRuntimeMonitor() { events.push('detach'); },
     startRuntime() { assert.equal(context.runtimeStopping, false); events.push('start'); },
-    waitForRuntimeReady: async () => { events.push('ready'); return { ok: true }; },
-    startAgentHost() { events.push('agent-start'); },
+    waitForRuntimeReady: async () => { events.push('ready'); return { config: { frontendPort: 8092 } }; },
+    startAgentHost(frontendPort) { assert.equal(frontendPort, 8092); events.push('agent-start'); },
   });
   vm.runInContext(fn('restartRuntimeAfterFolderAccessChange', 'function logStartupContext'), context);
   const first = context.restartRuntimeAfterFolderAccessChange(reload ? undefined : { reload: false });

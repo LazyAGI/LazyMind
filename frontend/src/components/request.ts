@@ -215,8 +215,38 @@ function extractRawErrorMessage(error: any): string | undefined {
   return undefined;
 }
 
+export function getLocalizedBuiltinSkillDownloadFailures(error: unknown): string[] {
+  if (extractErrorCode(error) !== "2003147") return [];
+  const failures = getErrorPayload(error)?.data?.source_failures;
+  if (!Array.isArray(failures)) return [];
+
+  const sources = new Map([
+    ["origin", i18n.t("admin.memoryBuiltinSkillDownloadOrigin")],
+    ["modelscope", "ModelScope"],
+    ["hugging_face", "Hugging Face"],
+  ]);
+  return failures.flatMap((failure) => {
+    const source = sources.get(failure?.source);
+    const reasonKey = `admin.memoryBuiltinSkillDownloadReason.${failure?.reason}`;
+    if (!source || !i18n.exists(reasonKey)) return [];
+    const status = failure.http_status;
+    if (failure.reason === "http_error" && (!Number.isInteger(status) || status < 100 || status > 599)) {
+      return [];
+    }
+    const reason = i18n.t(reasonKey, { status });
+    return [i18n.t("admin.memoryBuiltinSkillDownloadSourceFailure", { source, reason })];
+  });
+}
+
 export function getLocalizedErrorMessage(error: any): string {
   const errorCode = extractErrorCode(error);
+
+  if (errorCode === "2003147") {
+    const details = getLocalizedBuiltinSkillDownloadFailures(error);
+    if (details.length) {
+      return i18n.t("admin.memoryBuiltinSkillDownloadSummary", { details: details.join(" · ") });
+    }
+  }
 
   if (errorCode && i18n.exists(`errors.${errorCode}`)) {
     return i18n.t(`errors.${errorCode}`);

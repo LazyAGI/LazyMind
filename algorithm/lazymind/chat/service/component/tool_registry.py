@@ -22,6 +22,7 @@ from lazyllm.tools.tools.search import (
     TavilySearch,
     WikipediaSearch,
 )
+from lazymind.chat.engine.tools.keenable_search import KeenableSearch
 
 from lazymind.chat.engine.tools import (
     ExternalDatabaseToolkit,
@@ -352,7 +353,13 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'terms into one `query` with spaces, commas, punctuation, or list-like text.\n'
         'A search snippet may support a lightweight claim. For important facts or page details that the snippet '
         'does not contain, call `url_fetch` with that result URL and cite the returned ref. For Tavily image tasks, '
-        'use `include_images=True`; use `include_raw_content=True` only when the extra page text is needed.',
+        'use `include_images=True`; use `include_raw_content=True` only when the extra page text is needed. '
+        'Keenable is available without setup when no user search provider is configured. '
+        'If search returns partial/unavailable, preserve its reason, settings_url and limitations. '
+        'Wikipedia fallback is background evidence only, never verification of current facts or images. '
+        'Continue independent work after an individual search failure; disclose missing evidence. '
+        'For indispensable sources, offer configuration via settings_url and resume the same task '
+        'after configuration; never ask the user to paste API keys into chat.',
     ),
     'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
@@ -491,6 +498,7 @@ _WEB_SEARCH_ENGINE_INSTANCES: list = [
     BingSearch(),
     BochaSearch(),
     TavilySearch(),
+    KeenableSearch(),
 ]
 
 _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [

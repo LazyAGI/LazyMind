@@ -374,6 +374,19 @@ describe("useChatConversation regeneration recovery", () => {
     expect(onOpenSSE).toHaveBeenCalledOnce();
   });
 
+  it('keeps the renamed step visible while sending the ID-based rewind command', async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE, t: () => '请重新执行步骤 ' });
+    act(() => result.current.replaceMessageList('rewind-chat', []));
+    const text = '请重新执行步骤 整理验收清单';
+    const control = { session_id: 'workflow', kind: 'rewind' as const, step_id: 'step_4ee50e', expected_state_version: 4 };
+    await act(async () => { await result.current.sendMessage({ text, workflow_control: control }); });
+    expect(result.current.messageList[0]).toMatchObject({ delta: text, display_delta: text });
+    expect(onOpenSSE).toHaveBeenCalledWith([{ input_type: 'text', text: '请重新执行步骤 step_4ee50e' }],
+      expect.anything(), {}, expect.objectContaining({ display_query: text, workflow_control: control }));
+  });
+
   it('scopes pause to the displayed turn, not the latest workflow in the conversation', async () => {
     const { result } = renderConversation();
     act(() => result.current.replaceMessageList('scope-chat', [

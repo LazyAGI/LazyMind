@@ -543,6 +543,7 @@ tool_scripts:
       - ppt_collect_github_prs
       - ppt_read_pr_description
       - ppt_search_web_images
+      - ppt_request_search_configuration
       - ppt_search_assets
       - ppt_get_asset
       - ppt_inspect_material_images

@@ -90,6 +90,60 @@ func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
 	}
 }
 
+func TestLoadSearchToolConfigDefaultsToPublicThenUsesUserSelection(t *testing.T) {
+	db := toolConfigTestDB(t)
+	config, err := LoadToolConfigForCapabilities(t.Context(), db, "user-1", []string{"web_search"})
+	if err != nil || len(config) != 1 || config["keenable"] != "public" {
+		t.Fatalf("expected built-in public search, got %v, err=%v", config, err)
+	}
+	seedToolProvider(t, db, "user-1", "Tavily", "search", "user-key")
+	config, err = LoadToolConfigForCapabilities(t.Context(), db, "user-1", []string{"web_search"})
+	if err != nil || len(config) != 1 || config["tavily"] != "user-key" {
+		t.Fatalf("user selection must replace default, got %v, err=%v", config, err)
+	}
+}
+
+func TestLoadSearchToolConfigReturnsPublicKeenableWithoutAKey(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "Keenable", "search", "")
+
+	config, err := LoadSearchToolConfig(t.Context(), db, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config["keenable"] != "public" {
+		t.Fatalf("unexpected search tool config: %#v", config)
+	}
+}
+
+func TestLoadSearchToolConfigReturnsKeyedKeenable(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "KeenableSearch", "search", "secret-key")
+
+	config, err := LoadSearchToolConfig(t.Context(), db, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config["keenable"] != "secret-key" {
+		t.Fatalf("unexpected search tool config: %#v", config)
+	}
+}
+
+func TestLoadToolConfigForCapabilitiesIncludesPublicKeenable(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "Keenable", "search", "")
+
+	config, err := LoadToolConfigForCapabilities(
+		t.Context(), db, "user-1", []string{"web_search"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config["keenable"] != "public" {
+		t.Fatalf("unexpected capability config: %#v", config)
+	}
+}
+
 func TestLoadToolConfigForCapabilitiesUsesWorkflowAllowlist(t *testing.T) {
 	db := toolConfigTestDB(t)
 	seedToolProvider(t, db, "user-1", "Tavily", "search", "web-token")

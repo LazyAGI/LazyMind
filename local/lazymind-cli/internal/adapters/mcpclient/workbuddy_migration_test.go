@@ -51,7 +51,7 @@ func TestWorkBuddyRelocatesOnlySameHostManagedEntry(t *testing.T) {
 	if string(backup) != string(original) {
 		t.Fatal("original config backup lost")
 	}
-	if err := removeManagedConfig(WorkBuddy, path); err != nil {
+	if err := removeManagedConfig(WorkBuddy, path, home, "host-test"); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeManagedConfig(WorkBuddy, path, self, home, "host-test", false); err != nil {

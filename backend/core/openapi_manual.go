@@ -910,6 +910,7 @@ func manualSchemas() map[string]any {
 		),
 		"EpisodeMemoryListData": objReq(
 			[]string{"items", "total_size", "next_page_token"},
+			prop("supports_page_number", boolSchema()),
 			prop("items", array(refSchema("EpisodeMemory"))),
 			prop("total_size", int64Schema()),
 			prop("next_page_token", strSchema()),
@@ -1404,6 +1405,7 @@ func manualPaths() map[string]any {
 				"parameters": queryParams(
 					param("query", "page_size", false, intSchema()),
 					param("query", "page_token", false, strSchema()),
+					param("query", "page", false, map[string]any{"type": "integer", "minimum": 1, "description": "One-based page number. Mutually exclusive with page_token."}),
 				),
 				"responses": map[string]any{
 					"200": response(200, "Episode Memory page", refSchema("EpisodeMemoryListResponse")),

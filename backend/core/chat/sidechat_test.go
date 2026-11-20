@@ -1378,3 +1378,101 @@ func TestSidechatRetainAndDiscardRejectActiveRequestGuard(t *testing.T) {
 }
 
 func intPtr(value int) *int { return &value }
+
+func TestForkSidechatTrashRestoresOnlyCurrentFamily(t *testing.T) {
+	for _, operation := range []string{"single", "batch"} {
+		t.Run(operation, func(t *testing.T) {
+			db := newSidechatTestDB(t)
+			root := sidechatTestConversation(t, db, "root", "user-1", "Root")
+			branch := sidechatTestConversation(t, db, "branch", "user-1", "Branch")
+			sibling := sidechatTestConversation(t, db, "sibling", "user-1", "Sibling")
+			if err := db.Model(&orm.Conversation{}).Where("id IN ?", []string{branch.ID, sibling.ID}).
+				Updates(map[string]any{"parent_conversation_id": root.ID, "relation_type": conversationRelationFork}).Error; err != nil {
+				t.Fatal(err)
+			}
+			start := func(id string) (*orm.Conversation, error) {
+				child, _, err := createSidechatConversation(t.Context(), db, "user-1", "user-1", branch.ID, createSidechatRequest{SourceHistoryID: id})
+				return child, err
+			}
+			sidechatTestHistory(t, db, "foreign", sibling.ID, 1, "foreign", "answer", "completed")
+			if _, err := start("foreign"); !errors.Is(err, errSidechatSourceMissing) {
+				t.Fatalf("sibling history accepted: %v", err)
+			}
+			newChild := func(id string, seq int) string {
+				sidechatTestHistory(t, db, id, branch.ID, seq, id, "answer", "completed")
+				child, err := start(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if *child.ParentConversationID != branch.ID || *child.SourceHistoryID != id || !strings.Contains(string(child.SourceContext), id) {
+					t.Fatalf("wrong sidechat source: %s", child.SourceContext)
+				}
+				return child.ID
+			}
+			earlier := newChild("copied-message", 1)
+			live := newChild("branch-message", 2)
+			if err := archiveConversation(t.Context(), db, earlier, "user-1"); err != nil {
+				t.Fatal(err)
+			}
+			if operation == "single" {
+				if err := archiveConversation(t.Context(), db, branch.ID, "user-1"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				w := httptest.NewRecorder()
+				BatchDeleteConversations(w, sidechatRequest(http.MethodPost, "/", "user-1", `{"conversation_ids":["branch"]}`, nil))
+				if w.Code != http.StatusOK || strings.Contains(w.Body.String(), earlier) {
+					t.Fatalf("batch: %d %s", w.Code, w.Body.String())
+				}
+			}
+			check := func(id string, trashed bool) {
+				t.Helper()
+				var c orm.Conversation
+				if err := db.Where("id=?", id).Take(&c).Error; err != nil || (c.DeletedAt != nil) != trashed {
+					t.Fatalf("%s: deleted_at=%v err=%v", id, c.DeletedAt, err)
+				}
+			}
+			check(live, true)
+			check(root.ID, false)
+			check(sibling.ID, false)
+			w := httptest.NewRecorder()
+			RestoreConversation(w, sidechatRequest(http.MethodPost, "/", "user-1", "", map[string]string{"conversation_id": branch.ID}))
+			if w.Code != http.StatusOK {
+				t.Fatalf("restore: %d %s", w.Code, w.Body.String())
+			}
+			check(branch.ID, false)
+			check(live, false)
+			check(earlier, true)
+		})
+	}
+}
+
+func TestForkSidechatUsesCopiedHistoryIDs(t *testing.T) {
+	db, root, original, request := forkFixture(t, 1)
+	fork, err := createConversationFork(t.Context(), db, doc.DatasetCatalogCaller{UserID: "u1"}, root.ID, "with-sidechat", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := fork.Conversation["conversation_id"].(string)
+	var copied orm.ChatHistory
+	if err := db.Where("conversation_id=?", id).Take(&copied).Error; err != nil {
+		t.Fatal(err)
+	}
+	start := func(h string) (*orm.Conversation, error) {
+		child, _, err := createSidechatConversation(t.Context(), db, "u1", "u1", id, createSidechatRequest{SourceHistoryID: h})
+		return child, err
+	}
+	if _, err := start(original[0].ID); !errors.Is(err, errSidechatSourceMissing) {
+		t.Fatalf("original history was accepted: %v", err)
+	}
+	added := sidechatTestHistory(t, db, "after-fork", id, 2, "new", "answer", "completed")
+	for _, h := range []orm.ChatHistory{copied, added} {
+		child, err := start(h.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *child.ParentConversationID != id || *child.SourceHistoryID != h.ID || !strings.Contains(string(child.SourceContext), h.Content) {
+			t.Fatalf("unexpected source %s", child.SourceContext)
+		}
+	}
+}

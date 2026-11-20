@@ -386,12 +386,44 @@ func TestAcademicHTTPRetainsTenantPermissionAndRejectsInvalidTypes(t *testing.T)
 
 func TestAcademicMissingSourceConfigurationRemainsExplicit(t *testing.T) {
 	service := academicToolFixture(t)
-	result := requireAcademicSuccess(t, academicCall(t, service, "missing-web", "academic_search_papers", map[string]any{"query": "agents", "sources": []string{"web"}}))
+	result := requireAcademicSuccess(t, academicCall(t, service, "missing-sciverse", "academic_search_papers", map[string]any{"query": "agents", "sources": []string{"sciverse"}}))
 	if result["sources"].([]any)[0].(map[string]any)["status"] != "missing_configuration" || !strings.Contains(result["retry_guidance"].(string), "LazyMind") {
 		t.Fatalf("missing capability disguised as success: %+v", result)
 	}
 	if len(result["papers"].([]any)) != 0 {
 		t.Fatal("unconfigured source fabricated papers")
+	}
+}
+
+func TestAcademicWebSearchUsesBuiltInProviderWithoutUserConfiguration(t *testing.T) {
+	service := academicToolFixture(t)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "academic-test-internal")
+	previous := http.DefaultTransport
+	calls := 0
+	http.DefaultTransport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/internal/academic/search" {
+			return previous.RoundTrip(r)
+		}
+		var body struct {
+			Source     string         `json:"source"`
+			ToolConfig map[string]any `json:"tool_config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Source != "web" || body.ToolConfig["keenable"] != "public" {
+			t.Fatal("expected built-in web search, without changing the requested source")
+		}
+		calls++
+		return toolResponse(`{"items":[]}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	result := requireAcademicSuccess(t, academicCall(t, service, "default-web", "academic_search_papers", map[string]any{"query": "agents", "sources": []string{"web"}}))
+	if calls != 1 || result["sources"].([]any)[0].(map[string]any)["status"] != "empty" {
+		t.Fatalf("built-in web search was not attempted: %+v", result)
+	}
+	if len(result["papers"].([]any)) != 0 {
+		t.Fatal("empty web search fabricated papers")
 	}
 }
 

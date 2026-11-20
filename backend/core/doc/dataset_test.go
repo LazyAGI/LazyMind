@@ -275,6 +275,71 @@ func TestGetDatasetAllowsCoreOwnerDespiteScanSourcePolicy(t *testing.T) {
 	}
 }
 
+func TestGetDatasetLegacyDeletionReceipt(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "reused", "user-1")
+	for _, tc := range []struct{ id, ref, status string }{
+		{"purged", "purged", "deleted"},
+		{"reused", "reused", "deleted"},
+		{"failed", "failed", "failed"},
+		{"unrelated", "other", "deleted"},
+	} {
+		raw, err := json.Marshal(ResourceOperationResult{Items: []ResourceOperationItem{{
+			ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: tc.ref}, ResourceStatus: tc.status,
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.ResourceOperationReceipt{TenantID: "default", UserID: "user-1",
+			OperationKey: "dataset-delete:" + tc.id, Action: "knowledge.resource.delete", Result: raw}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		id, user, tenant string
+		status           int
+	}{
+		{"purged", "user-1", "default", 410}, {"purged", "user-2", "default", 404}, {"purged", "user-1", "other", 404},
+		{"missing", "user-1", "default", 404}, {"failed", "user-1", "default", 404}, {"unrelated", "user-1", "default", 404},
+		{"reused", "user-1", "default", 200},
+	} {
+		req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/core/datasets/"+tc.id, nil), map[string]string{"dataset": tc.id})
+		req.Header.Set("X-User-Id", tc.user)
+		req.Header.Set("X-Tenant-Id", tc.tenant)
+		rec := httptest.NewRecorder()
+		GetDataset(rec, req)
+		if rec.Code != tc.status {
+			t.Errorf("%+v: got %d %s", tc, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestGetDatasetGoneOnlyForOriginalOwner(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "deleted", "user-1")
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "deleted").Update("deleted_at", time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		user, tenant string
+		status       int
+	}{
+		{"user-1", "default", http.StatusGone},
+		{"user-2", "default", http.StatusNotFound},
+		{"user-1", "different-tenant", http.StatusNotFound},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/core/datasets/deleted", nil)
+		req = mux.SetURLVars(req, map[string]string{"dataset": "deleted"})
+		req.Header.Set("X-User-Id", tc.user)
+		req.Header.Set("X-Tenant-Id", tc.tenant)
+		rec := httptest.NewRecorder()
+		GetDataset(rec, req)
+		if rec.Code != tc.status {
+			t.Errorf("%s/%s: status=%d want=%d body=%s", tc.tenant, tc.user, rec.Code, tc.status, rec.Body.String())
+		}
+	}
+}
+
 func TestGetDatasetReturnsCreatedByDataSource(t *testing.T) {
 	db := newDocumentTestDB(t)
 	seedDocumentListDataset(t, db, "ds-source", "user-1")

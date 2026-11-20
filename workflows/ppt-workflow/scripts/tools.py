@@ -6091,6 +6091,19 @@ def _attach_material_images_to_deck(deck: Path) -> dict:
     }
 
 
+def ppt_request_search_configuration(reason: str) -> None:
+    """Show configuration and preserve this task when indispensable search evidence is unavailable.
+
+    Use only after trying search and its fallback, when a required source remains
+    missing. Optional search failures should be recorded and must not call this tool.
+
+    Args:
+        reason (str): Actual search failure and the required evidence still missing; no secrets.
+    """
+    from lazymind.chat.engine.tools.keenable_search import request_search_configuration
+    request_search_configuration(reason)
+
+
 def ppt_search_web_images(query: str, count: Union[int, str, None] = 3) -> dict:
     """Search the open web for candidate image URLs for PPT slides.
 
@@ -6098,8 +6111,8 @@ def ppt_search_web_images(query: str, count: Union[int, str, None] = 3) -> dict:
     from the internet. Returns candidate URLs for ppt_inspect_material_images.
     Select relevant candidates from the descriptions and register only those.
 
-    Tries Tavily (include_images) and Bocha image fields first, then a scoped
-    web search fallback.
+    Tries configured image fields first, then scoped web search. Default Keenable
+    can fall back to real Commons image files with source and attribution metadata.
 
     Args:
         query (str): Visual concept to search, e.g. 'solar panel farm aerial'.
@@ -6112,69 +6125,24 @@ def ppt_search_web_images(query: str, count: Union[int, str, None] = 3) -> dict:
     if not q:
         return _tool_error('ppt_search_web_images', 'query is required')
     n = _coerce_int(count, 3, lo=1, hi=6)
-    urls: list[str] = []
-    seen: set[str] = set()
-
-    try:
-        from lazyllm.tools.tools.search import BochaSearch, TavilySearch
-    except Exception as exc:
-        return _tool_error('ppt_search_web_images', f'search backends unavailable: {exc}')
-
-    from lazymind.chat.engine.tools.infra.image_workflow_support import require_image_search_configuration
-    require_image_search_configuration([TavilySearch(), BochaSearch()])
-
-    # Tavily with include_images
-    try:
-        tavily = TavilySearch()
-        if tavily.__key_source__():
-            results = tavily.search(q, include_images=True, max_results=n)
-            for item in results or []:
-                extra = item.get('extra') or {}
-                for img in extra.get('images') or []:
-                    if isinstance(img, str) and _is_image_url(img) and img not in seen:
-                        seen.add(img)
-                        urls.append(img)
-                    if len(urls) >= n:
-                        break
-                if len(urls) >= n:
-                    break
-    except Exception:
-        pass
-
-    # Bocha web-search payload often embeds image fields
-    if len(urls) < n:
-        try:
-            engine = BochaSearch()
-            if engine.__key_source__():
-                api = f'{engine._base_url}/v1/web-search'
-                resp = engine._request(
-                    'POST',
-                    api,
-                    headers={'Content-Type': 'application/json'},
-                    json={'query': q, 'count': min(max(n, 1), 20)},
-                    timeout=engine._timeout,
-                )
-                found: list[str] = []
-                _collect_image_urls(resp.json(), found, set())
-                for u in found:
-                    if u not in seen:
-                        seen.add(u)
-                        urls.append(u)
-                    if len(urls) >= n:
-                        break
-        except Exception:
-            pass
+    from lazymind.chat.engine.tools.infra.image_workflow_support import _search_image_candidates
+    diagnostics: dict = {}
+    urls = _search_image_candidates(q, n, diagnostics=diagnostics)
 
     if not urls:
-        return _tool_error(
-            'ppt_search_web_images',
-            f'No image URLs for "{q}". Configure Tavily/Bocha, or pass KB '
-            'local_path/image_url into ppt_inspect_material_images instead.',
-        )
+        return {
+            'status': 'unavailable' if diagnostics.get('status') == 'unavailable' else 'empty',
+            'query': q, 'urls': [], 'count': 0,
+            'reason': diagnostics.get('reason', 'no_direct_image_urls'),
+            'search_diagnostics': diagnostics,
+            'settings_url': '/settings?section=knowledge&tool=web-search',
+            'message': '未找到可用的真实图片。保留已有素材并标注缺失；必需素材可配置搜索服务后继续原任务。',
+        }
     return _tool_success('ppt_search_web_images', {
         'query': q,
         'urls': urls[:n],
         'count': min(len(urls), n),
+        'sources': diagnostics.get('image_sources', []),
         'next': (
             'When this step offers ppt_inspect_material_images, inspect candidate URLs first. '
             'Pass only the chosen images and their captions to ppt_register_material_images.'

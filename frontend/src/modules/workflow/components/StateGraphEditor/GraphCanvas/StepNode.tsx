@@ -201,7 +201,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
         />
 
         <div className="step-node-header">
-          {visibility.stepId !== false && <span className="step-node-id">{isHiddenId(id) ? '' : String(id)}</span>}
+          {visibility.label !== false && <span className="step-node-label">{String(label)}</span>}
           <div className="step-node-badges">
             {isChoice && visibility.conditionalRoute !== false && (
               <Tooltip title={t('selfEvolutionRun.stepNodeChoiceTooltip')}>
@@ -225,7 +225,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
             >{mode === 'auto' ? t('selfEvolutionRun.sgeNodeAutoContinue') : t('selfEvolutionRun.sgeNodeUserConfirm')}</Tag>}
           </div>
         </div>
-        {visibility.label !== false && <div className="step-node-label">{String(label)}</div>}
+        {visibility.stepId === true && !isHiddenId(id) && (visibility.label === false || id !== label) && <div className="step-node-id">{String(id)}</div>}
         {visibility.outputs !== false && (
           <div className="step-node-input-summary" title={nodeData.inputLabels?.join('、')}>
             {nodeData.inputLabels?.length

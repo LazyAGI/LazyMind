@@ -36,6 +36,9 @@ from lazyllm.tools.tools.search import (
     TavilySearch,
 )
 
+from lazymind.chat.engine.tools.keenable_search import KeenableSearch, search_result_items
+from lazymind.chat.engine.tools.infra.commons_image_search import search_commons_images
+
 from lazymind.chat.service.utils.static_file_url import (
     _upload_root,
     local_path_from_static_file_url,
@@ -52,6 +55,7 @@ _SEARCH_ENGINES = [
     BingSearch(),
     BochaSearch(),
     TavilySearch(),
+    KeenableSearch(),
 ]
 
 _PROBE_BYTES = 8192
@@ -312,7 +316,7 @@ def require_image_search_configuration(engines=None) -> None:
     missing = {
         'id': 'web_search', 'label': '网络图片搜索', 'available': False,
         'settings_url': '/settings?section=knowledge&tool=web-search',
-        'reason': '尚未配置可用的搜索引擎，请配置 Tavily 或 Bocha 后重试当前素材收集步骤。',
+        'reason': '尚未配置可用的搜索引擎，请配置 Tavily、Bocha 或 Keenable 后重试当前素材收集步骤。',
     }
     raise ToolExecutionError('MEDIA_CAPABILITY_DEPENDENCY_MISSING ' + json.dumps({
         'status': 'blocked', 'workflow': 'image_search', 'required': ['web_search'],
@@ -651,7 +655,7 @@ def _normalize_candidate_urls(candidate_urls: Any, limit: int) -> List[str]:
     return urls
 
 
-def _search_image_candidates(query: str, limit: int) -> List[str]:
+def _search_image_candidates(query: str, limit: int, *, diagnostics: dict | None = None) -> List[str]:
     require_image_search_configuration()
     urls: List[str] = []
     _append_unique_urls(urls, _tavily_image_urls(query, count=limit), limit)
@@ -663,10 +667,22 @@ def _search_image_candidates(query: str, limit: int) -> List[str]:
             try:
                 image_query = f'{query} reference image illustration'
                 results = engine.search(image_query)
-                fallback = [str(item.get('url') or '') for item in (results or [])]
+                if diagnostics is not None and isinstance(results, dict):
+                    diagnostics.update({key: value for key, value in results.items() if key != 'items'})
+                fallback = [str(item.get('url') or '') for item in search_result_items(results)]
                 _append_unique_urls(urls, fallback, limit, require_direct_path=True)
             except Exception as exc:
                 LOG.warning('Fallback image search failed: %s', type(exc).__name__)
+            if not urls and isinstance(engine, KeenableSearch):
+                commons = search_commons_images(query, min(limit, 10))
+                sources = commons['items']
+                _append_unique_urls(urls, [item['url'] for item in sources], limit, require_direct_path=True)
+                if diagnostics is not None:
+                    diagnostics['image_fallback'] = 'wikimedia_commons'
+                    diagnostics['image_fallback_status'] = commons['status']
+                    diagnostics['image_sources'] = sources
+                    if commons.get('reason'):
+                        diagnostics['image_fallback_reason'] = commons['reason']
     return urls[:limit]
 
 
@@ -730,8 +746,9 @@ def image_search_and_validate(
 
     urls = _normalize_candidate_urls(candidate_urls, limit)
     candidate_source = 'provided' if urls else 'local_search'
+    search_diagnostics: dict = {}
     if not urls:
-        urls = _search_image_candidates(normalized_query, limit)
+        urls = _search_image_candidates(normalized_query, limit, diagnostics=search_diagnostics)
     LOG.info('Image search candidates query=%r urls=%s', normalized_query, urls)
     if not urls:
         return {
@@ -746,6 +763,7 @@ def image_search_and_validate(
             'candidates': [],
             'reason': 'no direct image URLs found',
             'candidate_source': candidate_source,
+            'search_diagnostics': search_diagnostics,
         }
 
     validations: list[dict[str, Any] | None] = [None] * len(urls)
@@ -768,8 +786,12 @@ def image_search_and_validate(
                 }
 
     candidates = [item for item in validations if isinstance(item, dict)]
+    sources = {item['url']: item for item in search_diagnostics.get('image_sources', [])}
     for index, item in enumerate(candidates, start=1):
         item['search_rank'] = index
+        source = sources.get(item.get('original_url'))
+        if source:
+            item['source_metadata'] = source
     valid = [item for item in candidates if item.get('status') == 'ok']
     ranked = sorted(
         valid,
@@ -792,6 +814,7 @@ def image_search_and_validate(
         'selected_count': len(selected),
         'selected': selected,
         'candidates': candidates,
+        'search_diagnostics': search_diagnostics,
     }
     LOG.info('Image search validation result=%s', result)
     return result

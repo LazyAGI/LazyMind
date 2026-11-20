@@ -164,6 +164,7 @@ func TestSearchToolConfigEntryMapsBocha(t *testing.T) {
 		wantKey      string
 	}{
 		{name: "bocha", providerName: "Bocha", wantKey: "bocha"},
+		{name: "keenable", providerName: "Keenable", wantKey: "keenable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -191,6 +192,19 @@ func TestSearchToolConfigEntryFallsBackToSharedSelection(t *testing.T) {
 	}
 	if entry["tavily"] != "shared-key" {
 		t.Fatalf("unexpected shared tool config: %#v", entry)
+	}
+}
+
+func TestSearchToolConfigEntryDefaultsToPublicThenUsesUserSelection(t *testing.T) {
+	db := setupToolConfigTestDB(t)
+	entry, err := searchToolConfigEntry(t.Context(), db, "user-1")
+	if err != nil || len(entry) != 1 || entry["keenable"] != "public" {
+		t.Fatalf("expected built-in public search, got %v, err=%v", entry, err)
+	}
+	seedSelectedSearchTool(t, db, "user-1", "Tavily", "group-user", "user-key", false)
+	entry, err = searchToolConfigEntry(t.Context(), db, "user-1")
+	if err != nil || len(entry) != 1 || entry["tavily"] != "user-key" {
+		t.Fatalf("user selection must replace default, got %v, err=%v", entry, err)
 	}
 }
 
@@ -286,5 +300,18 @@ func TestAcademicSearchToolConfigEntrySplitsMultiKeyCredential(t *testing.T) {
 	want := []string{"key-1", "key-2"}
 	if !reflect.DeepEqual(entry["sciverse"], want) {
 		t.Fatalf("unexpected multi-key tool config: %#v", entry)
+	}
+}
+
+func TestSearchToolConfigEntryMapsKeylessKeenable(t *testing.T) {
+	db := setupToolConfigTestDB(t)
+	seedSelectedSearchTool(t, db, "user-1", "Keenable", "group-keenable", "", false)
+
+	entry, err := searchToolConfigEntry(t.Context(), db, "user-1")
+	if err != nil {
+		t.Fatalf("searchToolConfigEntry error: %v", err)
+	}
+	if entry["keenable"] != "public" {
+		t.Fatalf("expected keyless Keenable sentinel, got %#v", entry)
 	}
 }

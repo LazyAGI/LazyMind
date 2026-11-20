@@ -167,6 +167,11 @@ Path(os.environ['BUNDLER_CAPTURE']).write_text(json.dumps(sys.argv[1:]))
         self.write('skills/featured/demo/assets/cover.png', 'updated cover')
         self.assertEqual(self.mode(), 'local')
 
+    def test_runtime_acquisition_changes_use_frozen_catalog_verification(self):
+        for filename in ('acquire.go', 'acquire_test.go', 'mirrors.go', 'mirrors.json'):
+            self.write('backend/core/skillv2/builtin/' + filename, 'updated runtime downloader')
+        self.assertEqual(self.mode(), 'local')
+
     def test_featured_definitions_and_skill_code_require_full_verification(self):
         for path in ('skills/featured/demo/featured.yaml',
                      'skills/featured/demo/skill/scripts/tool.py'):
@@ -191,7 +196,8 @@ Path(os.environ['BUNDLER_CAPTURE']).write_text(json.dumps(sys.argv[1:]))
         self.assertEqual(self.mode(), 'full')
 
     def test_patches_and_bundler_changes_require_full_verification(self):
-        for path in ('skills/patches/catalog.yaml', 'backend/core/cmd/builtin-skill-bundle/main.go'):
+        for path in ('skills/patches/catalog.yaml', 'backend/core/cmd/builtin-skill-bundle/main.go',
+                     'backend/core/skillv2/builtin/catalog.go'):
             with self.subTest(path=path):
                 self.git('reset', '--hard', self.base)
                 self.write(path, 'changed')

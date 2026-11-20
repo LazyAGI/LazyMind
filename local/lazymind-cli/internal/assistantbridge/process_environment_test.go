@@ -11,8 +11,9 @@ func TestDetachedServiceDoesNotInheritForegroundLauncherJob(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
 	t.Setenv("LAZYMIND_KEEP_TEST_VALUE", "kept")
 	kept := false
-	for _, value := range detachedServiceEnvironment(t.TempDir()) {
-		if strings.HasPrefix(value, "LAZYMIND_CONNECTOR_LAUNCHER_JOB=") {
+	for _, value := range bridgeEnvironment(t.TempDir(), false) {
+		key, _, _ := strings.Cut(value, "=")
+		if strings.EqualFold(key, "LAZYMIND_CONNECTOR_LAUNCHER_JOB") {
 			t.Fatal("background service inherited foreground job ownership")
 		}
 		kept = kept || value == "LAZYMIND_KEEP_TEST_VALUE=kept"

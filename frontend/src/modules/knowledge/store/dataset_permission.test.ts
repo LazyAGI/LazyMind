@@ -26,6 +26,14 @@ describe('shared knowledge base details', () => {
     expect(useDatasetPermissionStore.getState().currentDataset?.display_name).toBe('Updated');
   });
 
+  it('clears cached permissions when revalidation reports a deleted library', async () => {
+    const store = useDatasetPermissionStore.getState();
+    store.setCurrentDataset({ ...dataset('removed'), acl: ['DATASET_WRITE'] });
+    api.getDataset.mockRejectedValueOnce({ response: { status: 410 } });
+    await expect(store.loadDataset('removed', true)).rejects.toBeDefined();
+    expect(useDatasetPermissionStore.getState()).toMatchObject({ currentDataset: null, datasetErrorStatus: 410 });
+  });
+
   it('does not replace the new knowledge base with a late response from the previous one', async () => {
     let finishOld!: (value: { data: Dataset }) => void;
     api.getDataset.mockReturnValueOnce(new Promise(resolve => { finishOld = resolve; })).mockResolvedValueOnce({ data: dataset('new') });

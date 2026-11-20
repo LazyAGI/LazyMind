@@ -13,7 +13,7 @@ interface ConversationPreviewProps {
   summary?: string;
   updateTime?: string;
   isTask?: boolean;
-  relation?: string;
+  relation?: ConversationRelation | null;
   groupName?: string;
   disabled?: boolean;
   children: ReactElement<HTMLAttributes<HTMLElement>>;
@@ -39,18 +39,28 @@ export default function ConversationPreview({
     canceled: "chat.conversationCanceled",
   };
   const updated = updateTime ? dayjs(updateTime) : null;
-  const sourceRelation = source?.id === conversationId && source.relation?.relationType === CONVERSATION_RELATION_FORK
-    ? t("chat.conversationForkedFrom", { parent: source.relation.parentDisplayName }) : "";
+  // Undefined while loading, null once the detail confirms this is a root.
+  const resolvedRelation = relation ?? (source?.id === conversationId ? source.relation : undefined);
+  let relationLabel = "";
+  if (resolvedRelation?.relationType === CONVERSATION_RELATION_FORK) {
+    relationLabel = resolvedRelation.parentDisplayName
+      ? t("chat.conversationForkedFrom", { parent: resolvedRelation.parentDisplayName })
+      : t("chat.fork.sourceUnavailable");
+  } else if (resolvedRelation && !groupName) {
+    relationLabel = t("chat.conversationSourceFrom", { parent: resolvedRelation.parentDisplayName });
+  } else if (resolvedRelation === null && !groupName) {
+    relationLabel = t("chat.conversationMainLabel");
+  }
 
   useEffect(() => {
-    if (!open || disabled || !groupName || source?.id === conversationId) return;
+    if (!open || disabled || relation || source?.id === conversationId) return;
     let disposed = false;
     const controller = new AbortController();
     void ChatServiceApi().conversationServiceGetConversationDetail({ conversation: conversationId }, { signal: controller.signal }).then(response => {
-      if (!disposed) setSource({ id: conversationId, relation: getConversationRelation(response.data.conversation) });
+      if (!disposed && response.data.conversation) setSource({ id: conversationId, relation: getConversationRelation(response.data.conversation) });
     }).catch(() => undefined);
     return () => { disposed = true; controller.abort(); };
-  }, [open, disabled, groupName, conversationId, source]);
+  }, [open, disabled, relation, conversationId, source]);
 
   useEffect(() => {
     if (!open) return;
@@ -96,9 +106,8 @@ export default function ConversationPreview({
         {isTask !== undefined && <span>{t(isTask ? "chat.conversationPreviewWork" : "chat.conversationPreviewChat")}</span>}
         {status && <span>{t(statusLabels[status])}</span>}
       </div>
-      {relation && <div className="record-preview-relation">{relation}</div>}
       {groupName && <div className="record-preview-relation">{t("chat.conversationGroupSource", { group: groupName, defaultValue: "所属分组：{{group}}" })}</div>}
-      {sourceRelation && <div className="record-preview-relation">{sourceRelation}</div>}
+      {relationLabel && <div className="record-preview-relation">{relationLabel}</div>}
       {updated?.isValid() && <time className="record-preview-time" dateTime={updateTime}>{t("chat.conversationPreviewUpdated", { time: updated.format("YYYY/MM/DD HH:mm") })}</time>}
     </section>}
   >{cloneElement(children, {

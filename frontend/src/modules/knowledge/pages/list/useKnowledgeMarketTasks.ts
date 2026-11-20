@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { KnowledgeMarketTaskListOpenAPIResponse } from "@/api/generated/core-client";
 import { listKnowledgeMarketTaskPage } from "@/modules/knowledge/api/knowledgeMarket";
 
@@ -6,7 +6,9 @@ import { listKnowledgeMarketTaskPage } from "@/modules/knowledge/api/knowledgeMa
 export function useKnowledgeMarketTasks(open: boolean, refreshKey: string) {
   const [page, setPage] = useState(1);
   const [revision, setRevision] = useState(0);
-  const [data, setData] = useState<KnowledgeMarketTaskListOpenAPIResponse>();
+  // A reopened dialog must validate its cached rows before enabling navigation.
+  const scope = useMemo(() => ({ open, page, refreshKey, revision }), [open, page, refreshKey, revision]);
+  const [snapshot, setSnapshot] = useState<{ scope: typeof scope; data: KnowledgeMarketTaskListOpenAPIResponse }>();
   const [loading, setLoading] = useState(false);
   const [queryFailed, setQueryFailed] = useState(false);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
@@ -30,13 +32,13 @@ export function useKnowledgeMarketTasks(open: boolean, refreshKey: string) {
       if (initial) setLoading(true);
       let failed = false;
       try {
-        const next = await listKnowledgeMarketTaskPage(open ? page : 1, {
+        const next = await listKnowledgeMarketTaskPage(scope.open ? scope.page : 1, {
           signal: controller.signal,
           silentError: true,
         });
         if (stopped || controller.signal.aborted) return;
         count = next.unfinished_count;
-        setData(next);
+        setSnapshot({ scope, data: next });
         setQueryFailed(false);
       } catch {
         if (stopped || controller.signal.aborted) return;
@@ -77,9 +79,9 @@ export function useKnowledgeMarketTasks(open: boolean, refreshKey: string) {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
     };
-  }, [open, page, refreshKey, revision]);
+  }, [scope]);
 
-  return { data, page, setPage, refresh, loading, queryFailed };
+  return { data: snapshot?.data, canOpenDataset: open && snapshot?.scope === scope && !queryFailed, page, setPage, refresh, loading, queryFailed };
 }
 
 export type KnowledgeMarketTasksQuery = ReturnType<typeof useKnowledgeMarketTasks>;

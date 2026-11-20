@@ -438,6 +438,7 @@ func init() {
 	registerAdditionalError("marshal review request", http.StatusInternalServerError, 2001778)
 	registerAdditionalError("marshal sciverse check body", http.StatusInternalServerError, 2001779)
 	registerAdditionalError("marshal tavily check body", http.StatusInternalServerError, 2001780)
+	registerAdditionalError("marshal keenable check body", http.StatusInternalServerError, 2002761)
 	registerAdditionalErrorPattern("mcp rpc error %d", "MCP RPC returned an error", http.StatusBadGateway, 2001781)
 	registerAdditionalErrorPattern("mcp rpc returned %d", "MCP RPC request failed", http.StatusBadGateway, 2001782)
 	registerAdditionalError("mcp sse endpoint event not found", http.StatusNotFound, 2001783)

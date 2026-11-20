@@ -249,7 +249,7 @@ func (s *Service) Prepare(ctx context.Context, req PrepareRequest) (PrepareRespo
 			if acquirer, ok := s.provider.(PackageAcquirer); ok {
 				complete, err := acquirer.Acquire(ctx, initialBinding.BuiltinSkillUID)
 				if err != nil {
-					return PrepareResponse{}, fmt.Errorf("%w: %v", ErrPackageUnavailable, err)
+					return PrepareResponse{}, fmt.Errorf("%w: %w", ErrPackageUnavailable, err)
 				}
 				if complete.UID != latest.UID || complete.ArchiveSHA256 != latest.ArchiveSHA256 || complete.TreeSHA256 != latest.TreeSHA256 {
 					return PrepareResponse{}, fmt.Errorf("%w: catalog changed while preparing upgrade", ErrPackageUnavailable)

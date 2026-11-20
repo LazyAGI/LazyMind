@@ -388,6 +388,10 @@ def search_registry(payload: dict) -> dict:
             if 'date_restrict' in parameters:
                 arguments['date_restrict'] = ''
             items = provider.search(**arguments)
+            if isinstance(items, dict):
+                if items.get('status') == 'unavailable' and items.get('reason') != 'no_results':
+                    raise ValueError(items.get('reason') or 'temporarily_unavailable')
+                return {**items, 'items': items.get('items', [])[:payload['limit']]}
         else:
             raise ValueError('unsupported academic source')
         return {'items': items[:payload['limit']]}
