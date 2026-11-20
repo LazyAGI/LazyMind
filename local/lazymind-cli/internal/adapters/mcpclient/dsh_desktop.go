@@ -526,7 +526,7 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 	if err = a.disconnectDSHWorkflow(); err != nil {
 		return err
 	}
-	return removeManagedConfig(DeepSeekHarness, a.dshConfigPath())
+	return removeManagedConfig(DeepSeekHarness, a.dshConfigPath(), a.home, a.hostID)
 }
 
 func (a *Adapter) connectDSHDesktop(ctx context.Context) agentintegration.Status {

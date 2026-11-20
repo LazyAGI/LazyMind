@@ -612,6 +612,9 @@ function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegr
   if (isDisconnectPending(status)) return t("agentIntegration.quitRequired.exitedDescription", { agent: status.display_name });
   if (status.inspection_unavailable && !status.issue) return t("agentIntegration.repairRequest.inspectionUnavailable");
   if (status.issue?.code === "configuration_unreadable") return t("agentIntegration.setupFeedback.readFailed");
+  if (agent === "workbuddy" && status.issue?.code === "environment_mismatch" && status.enabled === false) {
+    return t("agentIntegration.setupFeedback.workbuddyRegistrationOccupied");
+  }
   if (status.state === "conflict" || status.issue?.code === "environment_mismatch") return t("agentIntegration.setupFeedback.environmentMismatch");
   if (status.retry_action === "disconnect") return t("agentIntegration.setupFeedback.disableFailed");
   if (status.state === "error" && !status.issue) return t("agentIntegration.setupFeedback.enableFailed");

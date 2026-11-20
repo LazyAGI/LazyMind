@@ -33,7 +33,7 @@ console.log(process.env.WINDOWS_ROOT + input.slice(input.lastIndexOf('/local/'))
 `);
   writeProbe('powershell.exe', `
 const fs = require('node:fs');
-fs.writeFileSync(process.env.PROBE_LOG, JSON.stringify({args:process.argv.slice(2),script:process.env.LAZYMIND_WSL_BRIDGE_SCRIPT,source:process.env.LAZYMIND_WSL_BRIDGE_SOURCE,action:process.env.LAZYMIND_WSL_BRIDGE_ACTION,wslenv:process.env.WSLENV}));
+fs.writeFileSync(process.env.PROBE_LOG, JSON.stringify({args:process.argv.slice(2),script:process.env.LAZYMIND_WSL_BRIDGE_SCRIPT,source:process.env.LAZYMIND_WSL_BRIDGE_SOURCE,action:process.env.LAZYMIND_WSL_BRIDGE_ACTION,wslenv:process.env.WSLENV,deployment:process.env.LAZYMIND_WSL_BRIDGE_DEPLOYMENT,port:process.env.LAZYMIND_WSL_BRIDGE_PORT}));
 if(process.env.CASE_MODE === 'native-failure') process.exit(1);
 // Simulate a Windows failure whose low eight bits are zero. No success receipt.
 if(process.env.CASE_MODE === 'truncated-failure') {console.error('Windows launcher failed');process.exit(0);}
@@ -65,7 +65,8 @@ for (const shell of ['/bin/sh', '/bin/bash']) {
         assert.equal(called.script, f.env.WINDOWS_ROOT + '\\local\\scripts\\assistant-bridge-win.ps1');
         assert.equal(called.source, f.env.WINDOWS_ROOT + '\\local\\build\\bin\\lazymind.exe');
         assert.equal(called.action, action);
-        assert.equal(called.wslenv, 'EXISTING/p:LAZYMIND_WSL_BRIDGE_SCRIPT/w:LAZYMIND_WSL_BRIDGE_SOURCE/w:LAZYMIND_WSL_BRIDGE_ACTION/w');
+        assert.equal(called.wslenv, 'EXISTING/p:LAZYMIND_WSL_BRIDGE_SCRIPT/w:LAZYMIND_WSL_BRIDGE_SOURCE/w:LAZYMIND_WSL_BRIDGE_ACTION/w:LAZYMIND_WSL_BRIDGE_PORT/w:LAZYMIND_WSL_BRIDGE_DEPLOYMENT/w');
+        assert.equal(called.deployment, 'compose');
         assert.ok(called.args.includes('-Command'));
         assert.ok(!called.args.includes('-File'));
         assert.ok(!called.args.at(-1).includes(f.env.WINDOWS_ROOT), 'paths must not become PowerShell source');
@@ -77,6 +78,17 @@ for (const shell of ['/bin/sh', '/bin/bash']) {
     }
   }
 }
+
+test('Local startup retains its deployment identity across WSL', { skip: !posix }, t => {
+  const f = fixture(t);
+  f.env.LAZYMIND_ASSISTANT_DEPLOYMENT = 'local';
+  f.env.LAZYMIND_FRONTEND_PORT = '8097';
+  const result = runMake(f, 'start');
+  assert.equal(result.status, 0, result.stderr);
+  const called = JSON.parse(readFileSync(f.log, 'utf8'));
+  assert.equal(called.deployment, 'local');
+  assert.equal(called.port, '8097');
+});
 
 for (const mode of ['native-failure', 'truncated-failure', 'wrong-receipt', 'conversion-failure', 'empty-conversion']) {
   for (const action of ['start','stop']) {

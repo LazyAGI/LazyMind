@@ -895,6 +895,8 @@ test("Desktop opens the home page from the sidecar readiness event with status p
     source,
     /function waitForDesktopHomeReady\(\) \{[\s\S]*Promise\.race\(\[[\s\S]*waitForHomeReadySignal\(\),[\s\S]*waitForRuntimeReady\(\{ capability: "home" \}\)/,
   );
+  assert.match(source, /const status = await waitForDesktopHomeReady\(\);[\s\S]*?startAgentHost\(status\.config\.frontendPort\)/);
+  assert.match(source, /LAZYMIND_DESKTOP_OWNER_ORIGIN:[^\n]*desktopFrontendOrigin\(agentHostFrontendPort\)/);
 });
 
 test("Desktop always starts its local runtime with automatic port allocation", () => {

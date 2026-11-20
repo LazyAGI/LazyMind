@@ -29,6 +29,23 @@ type managedConfigState struct {
 
 type rawMCPFile map[string]json.RawMessage
 
+var errWorkBuddyRegistrationOccupied = errors.New("WorkBuddy is linked to another LazyMind deployment")
+
+func checkWorkBuddyRegistration(servers map[string]json.RawMessage, home, hostID string) error {
+	raw, exists := servers[serverName]
+	if !exists {
+		return nil
+	}
+	var entry stdioMCPDefinition
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return fmt.Errorf("decode WorkBuddy registration: %w", err)
+	}
+	if !ownedManagedStdio(entry, home, hostID, WorkBuddy, "") {
+		return errWorkBuddyRegistrationOccupied
+	}
+	return nil
+}
+
 func readManagedConfig(kind Kind, path, self, home, hostID string) (managedConfigState, error) {
 	if kind == DeepSeekHarness {
 		return readDSHConfig(path, self, home, hostID)
@@ -65,6 +82,11 @@ func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled b
 	if err != nil {
 		return err
 	}
+	if kind == WorkBuddy {
+		if err := checkWorkBuddyRegistration(servers, home, hostID); err != nil {
+			return err
+		}
+	}
 
 	if _, err := connectorconfig.Save(connectorconfig.Config{Home: home, Provider: string(kind), HostID: hostID, Controlled: kind == WorkBuddy}); err != nil {
 		return err
@@ -86,7 +108,7 @@ func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled b
 	return writeConfigFile(path, append(body, '\n'))
 }
 
-func removeManagedConfig(kind Kind, path string) error {
+func removeManagedConfig(kind Kind, path, home, hostID string) error {
 	if kind == DeepSeekHarness {
 		return removeDSHConfig(path)
 	}
@@ -104,6 +126,11 @@ func removeManagedConfig(kind Kind, path string) error {
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
 		return err
+	}
+	if kind == WorkBuddy {
+		if err := checkWorkBuddyRegistration(servers, home, hostID); err != nil {
+			return err
+		}
 	}
 	if _, exists := servers[serverName]; !exists {
 		return nil

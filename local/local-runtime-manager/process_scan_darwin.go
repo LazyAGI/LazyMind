@@ -11,8 +11,11 @@ package main
 
 static char* lazymind_process_args(pid_t pid, int* length) {
     int mib[3] = {CTL_KERN, KERN_PROCARGS2, pid};
-    size_t size = 0;
-    if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0 || size < sizeof(int)) return NULL;
+    int argmax = 0;
+    size_t argmax_size = sizeof(argmax);
+    int limit_mib[2] = {CTL_KERN, KERN_ARGMAX};
+    if (sysctl(limit_mib, 2, &argmax, &argmax_size, NULL, 0) != 0 || argmax < sizeof(int)) return NULL;
+    size_t size = (size_t)argmax;
     char* buffer = (char*)malloc(size);
     if (buffer == NULL) return NULL;
     if (sysctl(mib, 3, buffer, &size, NULL, 0) != 0) { free(buffer); return NULL; }

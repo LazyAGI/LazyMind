@@ -18,6 +18,7 @@ func (a *Adapter) inspectConfiguration(status *agentintegration.Status) []agenti
 		}
 	}
 	configured, unreadable, mismatch := false, false, false
+	foreignWorkBuddy := false
 	details := make([]agentintegration.Inspection, 0, len(paths))
 	for _, path := range paths {
 		state, err := readManagedConfig(a.kind, path, a.self, a.home, a.hostID)
@@ -36,6 +37,7 @@ func (a *Adapter) inspectConfiguration(status *agentintegration.Status) []agenti
 				item.Reason = "connection_mismatch"
 				if !state.owned {
 					item.Reason = "installation_mismatch"
+					foreignWorkBuddy = a.kind == WorkBuddy
 				}
 			}
 		}
@@ -55,6 +57,8 @@ func (a *Adapter) inspectConfiguration(status *agentintegration.Status) []agenti
 		status.State = agentintegration.Failed
 		status.Issue = &agentintegration.Issue{Code: "configuration_unreadable"}
 		status.Message = "Unable to read integration configuration."
+	} else if foreignWorkBuddy {
+		markWorkBuddyRegistrationConflict(status)
 	} else if mismatch && (status.State != agentintegration.Failed || status.RetryAction == "") && status.State != agentintegration.ActionRequired {
 		status.State = agentintegration.Conflict
 		status.Issue = &agentintegration.Issue{Code: "environment_mismatch"}

@@ -226,6 +226,7 @@ let sidecarStructuredFailure = "";
 let sidecarEventBuffer = "";
 let homeReadyStatus = null;
 let homeReadyWaiters = [];
+let agentHostFrontendPort;
 let guardProcess;
 let guardPID = 0;
 let guardReadyPromise;
@@ -412,6 +413,7 @@ function sidecarEnv() {
     LAZYMIND_CLOUD_BASE_URL: cloudBaseURL,
     LAZYMIND_DESKTOP_APP_VERSION: app.getVersion(),
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
+    LAZYMIND_DESKTOP_OWNER_ORIGIN: isExternalRuntimeDev ? "" : desktopFrontendOrigin(agentHostFrontendPort),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
     LAZYMIND_LOCAL_NETWORK_PROFILE: "localhost",
     LAZYMIND_LOCAL_PORTS_PINNED: "false",
@@ -1002,10 +1004,12 @@ function scheduleAgentHostRestart() {
   agentHostRestartTimer.unref?.();
 }
 
-function startAgentHost() {
+function startAgentHost(frontendPort = agentHostFrontendPort) {
+  agentHostFrontendPort = frontendPort;
   if (runtimeStopping || agentHostProcess || isQuitting || isInstallerWarmup || !fs.existsSync(agentConnectorPath)) {
     return;
   }
+  if (!isExternalRuntimeDev && !desktopFrontendOrigin(frontendPort)) return;
   clearTimeout(agentHostRestartTimer);
   agentRecovery.start();
   agentHostRestartTimer = undefined;
@@ -1478,7 +1482,7 @@ function restartRuntimeAfterFolderAccessChange({ reload = true } = {}) {
       const status = await waitForRuntimeReady();
       const window = activeWindow();
       if (reload && window && !window.isDestroyed()) window.webContents.reload();
-      startAgentHost();
+      startAgentHost(status.config.frontendPort);
       appendStartupLog("desktop", "runtime restart completed");
       return status;
     } catch (error) {
@@ -1513,6 +1517,8 @@ function startRuntime() {
   resetStartupLogsForRun();
   ensureDesktopLogDirs();
   runtimeProcessExit = null;
+  homeReadyStatus = null;
+  agentHostFrontendPort = undefined;
   sidecarStderrTail = "";
   sidecarStructuredFailure = "";
   sidecarEventBuffer = "";
@@ -2502,7 +2508,7 @@ async function createWindow() {
     if (isQuitting || windowHiddenByUser || nextStartupWindow.isDestroyed()) {
       return;
     }
-    startAgentHost();
+    startAgentHost(status.config.frontendPort);
     const runtimeReadyPromise = waitForRuntimeReady();
     const readyRendererAttempt = await waitForRendererWithRuntimeRecovery({
       startAttempt: async () => {

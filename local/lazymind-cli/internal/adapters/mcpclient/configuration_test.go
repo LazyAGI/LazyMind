@@ -10,10 +10,11 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/workbuddyhost"
 )
 
 func TestProductEntryCanBeReplacedAcrossLazyMindEnvironments(t *testing.T) {
-	for _, kind := range []Kind{Cursor, WorkBuddy, Raccoon, TRAEWork} {
+	for _, kind := range []Kind{Cursor, Raccoon, TRAEWork} {
 		t.Run(string(kind), func(t *testing.T) {
 			root := t.TempDir()
 			setTestHome(t, root)
@@ -25,7 +26,7 @@ func TestProductEntryCanBeReplacedAcrossLazyMindEnvironments(t *testing.T) {
 			adapter.home = home
 			adapter.self, _ = os.Executable()
 			adapter.bridge = dshTestProbe{}
-			targets := map[Kind]agentexec.BindingTarget{Cursor: agentexec.CursorDesktop, WorkBuddy: agentexec.WorkBuddyDesktop, Raccoon: agentexec.RaccoonDesktop, TRAEWork: agentexec.TRAEWorkDesktop}
+			targets := map[Kind]agentexec.BindingTarget{Cursor: agentexec.CursorDesktop, Raccoon: agentexec.RaccoonDesktop, TRAEWork: agentexec.TRAEWorkDesktop}
 			bindDesktopForTest(t, targets[kind])
 			path := configPath(kind)
 			writeTestFile(t, path, `{"mcpServers":{"unrelated":{"command":"keep"}}}`)
@@ -48,7 +49,7 @@ func TestProductEntryCanBeReplacedAcrossLazyMindEnvironments(t *testing.T) {
 					t.Fatalf("reconnect: %+v", status)
 				}
 			} else {
-				// Cursor's native approval and WorkBuddy's setup use this same publication step.
+				// Cursor's native approval uses the same publication step.
 				if err := writeManagedConfig(kind, path, adapter.self, home, adapter.hostID, false); err != nil {
 					t.Fatal(err)
 				}
@@ -69,6 +70,87 @@ func TestProductEntryCanBeReplacedAcrossLazyMindEnvironments(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestWorkBuddyBindingIsExclusiveToItsDeployment(t *testing.T) {
+	for _, action := range []string{"connect", "disconnect", "write"} {
+		t.Run(action, func(t *testing.T) {
+			root := t.TempDir()
+			setTestHome(t, root)
+			ownerHome := filepath.Join(root, "desktop")
+			other := testAdapter(WorkBuddy)
+			other.home = filepath.Join(root, "compose")
+			other.self, _ = os.Executable()
+			path := configPath(WorkBuddy)
+			if err := writeManagedConfig(WorkBuddy, path, other.self, ownerHome, "desktop-host", false); err != nil {
+				t.Fatal(err)
+			}
+			read := func() []byte {
+				t.Helper()
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return body
+			}
+			before := read()
+			if action == "write" {
+				err := writeManagedConfig(WorkBuddy, path, other.self, other.home, other.hostID, false)
+				if err == nil {
+					t.Fatal("WorkBuddy registration was writable by a second deployment")
+				}
+			} else {
+				var status agentintegration.Status
+				if action == "connect" {
+					status = other.Connect(t.Context())
+				} else {
+					status = other.Disconnect(t.Context())
+				}
+				if status.State != agentintegration.Conflict || status.Issue == nil ||
+					status.Issue.Code != "environment_mismatch" || status.CanConnect || status.CanDisconnect {
+					t.Fatalf("expected an ownership conflict, got %+v", status)
+				}
+				if status.Enabled == nil || *status.Enabled {
+					t.Fatal("WorkBuddy appears enabled in the wrong deployment")
+				}
+			}
+			if !bytes.Equal(before, read()) {
+				t.Fatal("second deployment changed the owner's WorkBuddy configuration")
+			}
+		})
+	}
+}
+
+func TestWorkBuddyKeepsRegistrationWhenDisconnectCleanupFails(t *testing.T) {
+	root := t.TempDir()
+	setTestHome(t, root)
+	owner := testAdapter(WorkBuddy)
+	owner.home = filepath.Join(root, "owner")
+	owner.self, _ = os.Executable()
+	path := configPath(WorkBuddy)
+	if err := writeManagedConfig(WorkBuddy, path, owner.self, owner.home, owner.hostID, false); err != nil {
+		t.Fatal(err)
+	}
+	localConfig := workbuddyhost.ConfigPath(owner.home)
+	writeTestFile(t, localConfig, "{invalid")
+	status := owner.Disconnect(t.Context())
+	if status.State != agentintegration.Failed {
+		t.Fatalf("expected cleanup to fail, got %+v", status)
+	}
+	state, err := readManagedConfig(WorkBuddy, path, owner.self, owner.home, owner.hostID)
+	if err != nil || !state.owned {
+		t.Fatalf("cleanup failure released WorkBuddy ownership: %+v, %v", state, err)
+	}
+	if err := os.Remove(localConfig); err != nil {
+		t.Fatal(err)
+	}
+	if status = owner.Disconnect(t.Context()); status.State == agentintegration.Failed {
+		t.Fatalf("owning deployment could not retry: %+v", status)
+	}
+	other := filepath.Join(root, "other")
+	if err := writeManagedConfig(WorkBuddy, path, owner.self, other, "other-host", false); err != nil {
+		t.Fatalf("WorkBuddy could not be configured after successful cleanup: %v", err)
 	}
 }
 

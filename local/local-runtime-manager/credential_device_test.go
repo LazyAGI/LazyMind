@@ -118,6 +118,7 @@ if (process.argv[3] === undefined) {
     ownerToken: 'fixture-owner', internalServiceToken: 'fixture-token', clientInstanceId: 'fixture-instance',
     cloudBaseURL: '', app: { getVersion: () => 'fixture-version' }, runtimeResourcesRoot: '',
     editablePptDependencyConfig: { windowsX64: {}, darwinArm64: {} }, explicitRuntimeRoot: '',
+    isExternalRuntimeDev: false, agentHostFrontendPort: undefined, desktopFrontendOrigin: () => '',
   });
   const envStart = source.indexOf('function sidecarEnv()');
   const envEnd = source.indexOf('function sidecarShutdownEnv()', envStart);
@@ -132,6 +133,9 @@ if (process.argv[3] === undefined) {
 	args := append([]string{"-e", script, identityPath, mainPath}, configured...)
 	output, err := exec.Command(node, args...).Output()
 	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("execute Desktop identity contract: %v\n%s", err, exit.Stderr)
+		}
 		t.Fatalf("execute Desktop identity contract: %v", err)
 	}
 	return string(output)
