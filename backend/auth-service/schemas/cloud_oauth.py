@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
 
@@ -65,6 +65,62 @@ class GitHubStarLocalResult(BaseModel):
 class GitHubStarLocalCapability(BaseModel):
     repository: str
     eligible: bool
+
+
+class GitHubStarDeferredBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    confirmed: StrictBool = Field(json_schema_extra={'const': True})
+    source: Literal['local', 'connection']
+    connection_id: str | None = Field(default=None, min_length=1, max_length=64)
+    expected_account_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r'^[0-9]+$')
+
+    @model_validator(mode='after')
+    def validate_confirmation(self):
+        if self.confirmed is not True:
+            raise PydanticCustomError('confirmation_required', 'Confirm the GitHub Star operation')
+        if self.source == 'connection' and (not self.connection_id or not self.expected_account_id):
+            raise PydanticCustomError('account_required', 'Select the GitHub connection and account')
+        if self.source == 'local' and self.model_fields_set & {'connection_id', 'expected_account_id'}:
+            raise PydanticCustomError('local_account_fixed', 'Local support uses the current local credential')
+        return self
+
+
+class GitHubStarIntent(BaseModel):
+    intent_id: str
+    status: Literal['pending', 'needs_attention', 'succeeded', 'cancelled', 'exhausted']
+    source: Literal['local', 'connection']
+    connection_id: str | None
+    account_id: str | None
+    created_at: str
+    expires_at: str
+    attempt_count: int
+    next_attempt_at: str | None
+    rate_limit_not_before: str | None
+    reason: str
+    remote_state: Literal['unknown', 'starred']
+
+
+class GitHubStarDeferredAccount(BaseModel):
+    connection_id: str
+    account_id: str
+    login: str
+
+
+class GitHubStarDeferredStatus(BaseModel):
+    repository: str
+    can_receive: bool
+    local_supported: bool
+    accounts: list[GitHubStarDeferredAccount]
+    intent: GitHubStarIntent | None
+
+
+class GitHubStarDeferredResult(BaseModel):
+    repository: str
+    intent: GitHubStarIntent
+
+
+class GitHubStarDeferredAccepted(GitHubStarDeferredResult):
+    accepted: Literal[True]
 
 
 class CloudOAuthAuthorizeURLBody(BaseModel):

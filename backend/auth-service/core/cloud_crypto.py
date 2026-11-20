@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import hmac
 import json
 import os
 
@@ -34,6 +35,14 @@ def _key_bytes(raw: str) -> bytes:
 
 def _resolve_secret_key() -> bytes:
     return _key_bytes((os.environ.get(_ENV_KEY) or '').strip())
+
+
+def github_star_binding_key() -> bytes:
+    """Derive a private purpose-specific key without the legacy decrypt fallback."""
+    raw = (os.environ.get(_ENV_KEY) or '').strip()
+    if not raw or raw == _LEGACY_DEFAULT_KEY:
+        raise RuntimeError('GitHub Star binding key is unavailable')
+    return hmac.new(_key_bytes(raw), b'lazymind/github-star-intent/key/v1', hashlib.sha256).digest()
 
 
 def _aesgcm() -> AESGCM:

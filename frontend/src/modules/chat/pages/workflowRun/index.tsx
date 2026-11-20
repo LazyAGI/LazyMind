@@ -14,6 +14,7 @@ import { loadWorkflowRunSnapshot, watchWorkflowRun, type WorkflowRunSnapshot } f
 import './index.scss';
 import { workflowHostOrigin } from './hostOrigin';
 import WorkflowRequestMessage from './WorkflowRequestMessage';
+import WorkflowStarInvite from './WorkflowStarInvite';
 
 /** Shared run workbench: user intent goes to Core, never to an interpreted chat prompt. */
 export default function WorkflowRunPage({ embedded = false, sessionId: suppliedSessionId, title, resultsOnly = false }: {
@@ -186,5 +187,7 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
         ]} />
       </aside>}
     </div>}
+    <WorkflowStarInvite userId={user?.userId || ''} session={snapshot?.session.session_id === sessionId ? snapshot.session : undefined}
+      control={control} resultsOnly={resultsOnly} />
   </main>;
 }

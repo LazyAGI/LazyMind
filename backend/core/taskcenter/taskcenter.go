@@ -694,7 +694,7 @@ func taskListResponse(ctx context.Context, db *gorm.DB, row taskListRow, task or
 }
 
 // ListTasks handles GET /task-center/tasks
-// Query params: status, task_type, keyword, page (1-based), page_size.
+// Query params: status, task_type, keyword, conversation_id, workflow_session_id, page (1-based), page_size.
 func ListTasks(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	if userID == "" {
@@ -716,6 +716,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	taskType := strings.TrimSpace(q.Get("task_type"))
 	keyword := strings.TrimSpace(q.Get("keyword"))
 	conversationID := strings.TrimSpace(q.Get("conversation_id"))
+	workflowSessionID := strings.TrimSpace(q.Get("workflow_session_id"))
 	page, _ := strconv.Atoi(q.Get("page"))
 	if page < 1 {
 		page = 1
@@ -758,6 +759,9 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if workflowSessionID != "" && (t.WorkflowSessionID == nil || *t.WorkflowSessionID != workflowSessionID) {
+			continue
 		}
 		statusCounts["all"]++
 		if _, tracked := statusCounts[t.Status]; tracked {

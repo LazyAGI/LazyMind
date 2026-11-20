@@ -1,5 +1,6 @@
 from .base import Base
 from .cloud_auth_connection import CloudAuthConnection
+from .github_star_intent import GitHubStarIntent
 from .group import Group, GroupPermission
 from .mcp_oauth import MCPOAuthGrant, MCPOAuthState
 from .permission import PermissionGroup
@@ -10,6 +11,7 @@ from .user_group import UserGroup
 __all__ = [
     'Base',
     'CloudAuthConnection',
+    'GitHubStarIntent',
     'Group',
     'GroupPermission',
     'MCPOAuthGrant',
