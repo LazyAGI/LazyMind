@@ -102,6 +102,9 @@ steps:
       a source path: publish_edit_contract reads the exact current input binding.
       When no upload exists and search was explicitly requested, search and
       validate one direct image URL and pass it as source_url.
+      Use image_search_and_validate directly for default keyless discovery and
+      real-image validation. Preserve any source_metadata attribution/license;
+      Wikipedia background text and ordinary web pages are not source images.
       Call publish_edit_contract with requested_edit, edit_scope, preserve and
       do_not. Use the smallest sufficient edit scope and preserve all unrequested
       content, identity, framing, lighting, style, geometry and text. The tool

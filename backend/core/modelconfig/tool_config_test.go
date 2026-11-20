@@ -90,6 +90,19 @@ func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
 	}
 }
 
+func TestLoadSearchToolConfigDefaultsToPublicThenUsesUserSelection(t *testing.T) {
+	db := toolConfigTestDB(t)
+	config, err := LoadToolConfigForCapabilities(t.Context(), db, "user-1", []string{"web_search"})
+	if err != nil || len(config) != 1 || config["keenable"] != "public" {
+		t.Fatalf("expected built-in public search, got %v, err=%v", config, err)
+	}
+	seedToolProvider(t, db, "user-1", "Tavily", "search", "user-key")
+	config, err = LoadToolConfigForCapabilities(t.Context(), db, "user-1", []string{"web_search"})
+	if err != nil || len(config) != 1 || config["tavily"] != "user-key" {
+		t.Fatalf("user selection must replace default, got %v, err=%v", config, err)
+	}
+}
+
 func TestLoadSearchToolConfigReturnsPublicKeenableWithoutAKey(t *testing.T) {
 	db := toolConfigTestDB(t)
 	seedToolProvider(t, db, "user-1", "Keenable", "search", "")

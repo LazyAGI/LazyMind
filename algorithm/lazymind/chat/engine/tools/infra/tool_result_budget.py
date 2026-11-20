@@ -13,7 +13,8 @@ _SOURCE_KEYS = {'url', 'source', 'ref', 'citation_index', 'doc_id', 'document_id
                 'doi', 'paperId', 'pageid', 'provider', 'target_url', 'link', 'id'}
 _EXTRA_KEYS = _SOURCE_KEYS | _PREVIEW_KEYS | {'truncated'}
 _PAGE_KEYS = {'items', 'total_count', 'total_pages', 'page', 'page_size', 'next_cursor',
-              'returned_count', 'truncated'}
+              'returned_count', 'truncated', 'status', 'provider', 'reason', 'fallback',
+              'limitations', 'settings_url', 'message'}
 
 
 def _size(value: Any) -> int:

@@ -2415,7 +2415,7 @@ def test_display_plan_preserves_current_step_contract_before_overall_request():
     assert len(steps) == 3
 
 
-def test_unconfigured_retrieval_is_not_exposed_by_subagent(monkeypatch):
+def test_default_search_is_exposed_without_exposing_unconfigured_kb(monkeypatch):
     import lazyllm
     original = lazyllm.globals.get('agentic_config')
     lazyllm.globals['agentic_config'] = {}
@@ -2424,8 +2424,14 @@ def test_unconfigured_retrieval_is_not_exposed_by_subagent(monkeypatch):
         lazyllm.globals.config['dynamic_tool_auth'] = {}
         try:
             monkeypatch.setattr(runner_mod, 'load_workflow_tools', lambda *_: {})
-            assert runner_mod._resolve_runtime_tools(['kb', 'web_search']) == []
+            resolved = runner_mod._resolve_runtime_tools(['kb', 'web_search'])
+            assert len(resolved) == 1
+            assert resolved[0]['name'] == 'WebSearchToolkit'
+            active = [provider.source_name for provider in resolved[0]['tools'] if provider.__key_source__()]
+            assert active == ['keenable']
             assert runner_mod.subagent_tools.list_knowledge_bases not in runner_mod._build_subagent_tools([])
+            lazyllm.globals['agentic_config'] = {'disabled_tools': ['web_search']}
+            assert runner_mod._resolve_runtime_tools(['kb', 'web_search']) == []
         finally:
             lazyllm.globals.config['dynamic_tool_auth'] = old_auth
     finally:

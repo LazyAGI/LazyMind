@@ -547,6 +547,11 @@ func LoadOCRConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 	return config, nil
 }
 
+// DefaultSearchToolConfig uses Keenable's public endpoint without storing a key.
+func DefaultSearchToolConfig() map[string]any {
+	return map[string]any{"keenable": "public"}
+}
+
 // LoadSearchToolConfig returns the selected web-search credential in the
 // dynamic tool-auth shape consumed by the algorithm service. Workflow attempts
 // use this alongside LoadLLMConfig because their durable/public Attempt context
@@ -563,20 +568,15 @@ func LoadSearchToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[
 		}
 	}
 	if row == nil {
-		return nil, nil
+		return DefaultSearchToolConfig(), nil
 	}
 	toolName := normalizeSearchToolName(row.ProviderName)
 	if toolName == "" {
-		return nil, nil
+		return DefaultSearchToolConfig(), nil
 	}
 	keys := splitOCRAuthKeys(row.APIKey)
 	if len(keys) == 0 {
-		// Selected keyless Keenable uses the public endpoint; other
-		// providers still require a key.
-		if toolName == "keenable" {
-			return map[string]any{"keenable": "public"}, nil
-		}
-		return nil, nil
+		return DefaultSearchToolConfig(), nil
 	}
 	var value any = keys[0]
 	if len(keys) > 1 {
