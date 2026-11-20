@@ -6,6 +6,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
+	"strings"
 )
 
 // ObservePDFStructures batches database reads for an already authorized library
@@ -48,4 +49,35 @@ func ObservePDFStructures(ctx context.Context, db *gorm.DB, dataset string, ids 
 		out[row.ID] = item
 	}
 	return out, nil
+}
+
+// PDFTextPage carries the one-based page number used in academic full-text citations.
+type PDFTextPage struct {
+	Page int    `json:"page"`
+	Text string `json:"text"`
+}
+
+// ReadPDFStructurePages reads the retained structure for an authorized document
+// and its verified PDF hash, including a previous result during a reparse.
+func ReadPDFStructurePages(ctx context.Context, row orm.Document, hash string) ([]PDFTextPage, error) {
+	if hash == "" {
+		return nil, nil
+	}
+	state, err := pdfIRStatus(ctx, row, hash)
+	if err != nil || state.Document == nil {
+		return nil, err
+	}
+	byPage := make(map[int][]string)
+	for _, block := range state.Document.Blocks {
+		if text := strings.TrimSpace(paperBlockText(block)); text != "" {
+			byPage[block.Page] = append(byPage[block.Page], text)
+		}
+	}
+	var pages []PDFTextPage
+	for _, page := range state.Document.Pages {
+		if lines := byPage[page.Index]; len(lines) > 0 {
+			pages = append(pages, PDFTextPage{Page: page.Index + 1, Text: strings.Join(lines, "\n")})
+		}
+	}
+	return pages, nil
 }
