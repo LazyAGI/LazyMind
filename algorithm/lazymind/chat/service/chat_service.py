@@ -649,12 +649,13 @@ def _build_chat_workspace_read_tools() -> list:
 def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list:
     """Conversation resources and downloadable artifacts remain available with a workspace."""
     from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
+    from lazymind.chat.engine.tools.resume import render_resume
     from lazyllm.tools.agent import FileSystemToolkit
 
     from lazymind.chat.engine.tools.file_resources.tools import (
         search_file_resource, read_file_resource, list_skill_files,
     )
-    tools = [save_chat_artifact, search_file_resource, read_file_resource, list_skill_files]
+    tools = [save_chat_artifact, render_resume, search_file_resource, read_file_resource, list_skill_files]
     if host_filesystem_enabled:
         tools.append(FileSystemToolkit())
         from lazymind.chat.engine.tools.native_search import native_search, native_search_available
