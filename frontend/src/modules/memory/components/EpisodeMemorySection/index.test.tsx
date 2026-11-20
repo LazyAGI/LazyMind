@@ -17,6 +17,7 @@ afterEach(cleanup);
 function episodePage(start: number): EpisodeListPage {
   return {
     totalSize: 10,
+    supportsPageNumber: true,
     nextPageToken: "",
     items: Array.from({ length: 5 }, (_, index) => ({
       id: String(start + index), summary: `Episode ${start + index}`,

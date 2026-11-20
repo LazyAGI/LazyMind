@@ -289,9 +289,10 @@ func ListEpisodes(w http.ResponseWriter, r *http.Request) {
 		publicItems = append(publicItems, publicEpisode(item))
 	}
 	common.ReplyOK(w, PublicPage{
-		Items:         publicItems,
-		TotalSize:     page.TotalSize,
-		NextPageToken: page.NextPageToken,
+		SupportsPageNumber: true,
+		Items:              publicItems,
+		TotalSize:          page.TotalSize,
+		NextPageToken:      page.NextPageToken,
 	})
 }
 

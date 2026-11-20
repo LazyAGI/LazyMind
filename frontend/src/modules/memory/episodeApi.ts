@@ -20,6 +20,7 @@ export interface EpisodeRecord extends EpisodeListItem {
 }
 
 export interface EpisodeListPage {
+  supportsPageNumber?: boolean;
   items: EpisodeRecord[];
   nextPageToken: string;
   totalSize: number;
@@ -83,6 +84,7 @@ const normalizeEpisodeList = (
 
   return {
     items,
+    supportsPageNumber: value?.supports_page_number,
     nextPageToken: toStringValue(value?.next_page_token).trim(),
     totalSize: toNumberValue(value?.total_size),
   };

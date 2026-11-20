@@ -16,11 +16,9 @@ export function createEpisodePager(pageSize: number) {
     async load(page: number): Promise<EpisodeListPage> {
       if (!cursorOnly || page === 1) {
         const result = await listEpisodes({ pageSize, page });
-        // Older Core versions ignore the page parameter and return page one's cursor again.
-        if (page === 1 || !result.nextPageToken || result.nextPageToken !== cursors.get(2)) {
-          return remember(page, result);
-        }
-        cursorOnly = true;
+        // Older Core may ignore page, so only trust numbered responses with explicit support.
+        cursorOnly = result.supportsPageNumber !== true;
+        if (page === 1 || !cursorOnly) return remember(page, result);
       }
 
       let current = 1;

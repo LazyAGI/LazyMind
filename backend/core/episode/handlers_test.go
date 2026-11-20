@@ -476,7 +476,7 @@ func TestPublicEpisodeHandlersAreGatewayUserScoped(t *testing.T) {
 	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listResponse); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if listResponse.Data.TotalSize != 3 ||
+	if !listResponse.Data.SupportsPageNumber || listResponse.Data.TotalSize != 3 ||
 		len(listResponse.Data.Items) != 2 ||
 		listResponse.Data.Items[0].Summary != "third" ||
 		listResponse.Data.NextPageToken == "" {

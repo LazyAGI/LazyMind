@@ -904,6 +904,7 @@ func manualSchemas() map[string]any {
 		),
 		"EpisodeMemoryListData": objReq(
 			[]string{"items", "total_size", "next_page_token"},
+			prop("supports_page_number", boolSchema()),
 			prop("items", array(refSchema("EpisodeMemory"))),
 			prop("total_size", int64Schema()),
 			prop("next_page_token", strSchema()),

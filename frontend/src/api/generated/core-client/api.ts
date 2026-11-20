@@ -5540,6 +5540,7 @@ export interface EpisodeMemoryDetailResponse {
 export interface EpisodeMemoryListData {
     'items': Array<EpisodeMemory>;
     'next_page_token': string;
+    'supports_page_number'?: boolean;
     'total_size': number;
 }
 export interface EpisodeMemoryListResponse {

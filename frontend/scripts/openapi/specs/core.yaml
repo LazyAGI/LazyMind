@@ -8402,6 +8402,8 @@ components:
                     type: array
                 next_page_token:
                     type: string
+                supports_page_number:
+                    type: boolean
                 total_size:
                     format: int64
                     type: integer
