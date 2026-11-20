@@ -16,6 +16,9 @@ vi.mock('@/modules/chat/components/ArtifactPreview/target', async original => ({
 }));
 vi.mock('@/modules/knowledge/components/FileViewer', () => ({ default: ({ data }: { data: ArrayBuffer }) => <RenderMarkdown fileData={data} /> }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
+  readDeferredGitHubStarIntent: vi.fn().mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  }),
   readGitHubStarAccounts: vi.fn(), claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(),
   findGitHubStarOpportunity: vi.fn(),
 }));
@@ -24,6 +27,9 @@ const opportunity: api.GitHubStarOpportunity = { task_id: 'final-root', conversa
 const target = { key: 'final', filename: '报告', content: 'Complete result' };
 const bytes = () => new TextEncoder().encode('Complete result').buffer;
 beforeEach(async () => {
+  vi.mocked(api.readDeferredGitHubStarIntent).mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  });
   vi.clearAllMocks();
   await i18n.changeLanguage('zh-CN');
   mocks.read.mockResolvedValue(bytes());

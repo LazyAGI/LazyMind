@@ -11,7 +11,11 @@ vi.mock('react-router-dom', async original => ({
 }));
 vi.mock('./api', async original => ({
   ...await original<typeof import('./api')>(),
+  readDeferredGitHubStarIntent: vi.fn().mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  }),
   readGitHubStarAccounts: vi.fn(), claimGitHubStarPrompt: vi.fn(),
+  acceptDeferredGitHubStarIntent: vi.fn(), cancelDeferredGitHubStarIntent: vi.fn(),
   writeGitHubStar: vi.fn(), writeLocalGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(), findGitHubStarOpportunity: vi.fn(),
 }));
 vi.mock('react-i18next', async original => ({
@@ -23,6 +27,7 @@ vi.mock('react-i18next', async original => ({
   'githubStar.localHint': '未找到可用的本机 GitHub 登录信息，请连接账号后继续。',
   'githubStar.continueAuth': '继续连接 GitHub', 'githubStar.success': '感谢支持，已点 Star',
   'githubStar.alreadyStarred': '你已为项目点过 Star，感谢支持',
+  'githubStar.thankYou': '感谢您的支持！',
   'githubStar.permissionDenied': 'GitHub 权限不足，请重新授权',
   'githubStar.unknownResult': '暂未确认是否成功，请稍后查询',
   'githubStar.failed': '未能点 Star，请重试', 'githubStar.accountChanged': 'GitHub 账号已变化，请重新确认',
@@ -40,9 +45,21 @@ const success: api.GitHubStarResult = {
   repository: 'LazyAGI/LazyMind', connection_id: account.connection_id, account_id: account.account_id,
   login: account.login, state: 'starred', write_performed: true,
 };
-const localSuccess = {
-  repository: 'LazyAGI/LazyMind', account_id: '30003', login: 'local-user', state: 'starred' as const, write_performed: true,
+const deferredIntent = {
+  intent_id: 'intent-owner-1', status: 'pending' as const, source: 'local' as const, connection_id: null, account_id: null,
+  created_at: '2026-11-17T00:00:00Z', expires_at: '2026-11-24T00:00:00Z', attempt_count: 0,
+  next_attempt_at: '2026-11-17T00:00:00Z', rate_limit_not_before: null, reason: '', remote_state: 'unknown' as const,
 };
+const acceptedSupport = { repository: 'LazyAGI/LazyMind', accepted: true as const, intent: deferredIntent };
+function useLocalSupport(status: 'pending' | 'needs_attention' = 'pending', reason = '') {
+  vi.mocked(api.readDeferredGitHubStarIntent).mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: true, local_supported: true, accounts: [], intent: null,
+  });
+  vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
+  vi.mocked(api.acceptDeferredGitHubStarIntent).mockResolvedValue({
+    ...acceptedSupport, intent: { ...deferredIntent, status, reason, next_attempt_at: status === 'pending' ? deferredIntent.next_attempt_at : null },
+  });
+}
 
 async function announce(value: api.GitHubStarOpportunity = opportunity) {
   await act(async () => {
@@ -69,7 +86,10 @@ async function offer() {
 beforeEach(() => {
   vi.clearAllMocks();
   route.state = null;
-  sessionStorage.clear();
+  sessionStorage.clear(); localStorage.clear();
+  vi.mocked(api.readDeferredGitHubStarIntent).mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  });
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [account] });
   vi.mocked(api.claimGitHubStarPrompt).mockResolvedValue({
@@ -156,21 +176,6 @@ describe('GitHub Star invitation', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('tries local credentials only on click when all saved accounts are unavailable', async () => {
-    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({
-      repository: 'LazyAGI/LazyMind', accounts: [{ ...account, state: 'unknown', eligible: false }],
-    });
-    vi.mocked(api.writeLocalGitHubStar).mockResolvedValue(localSuccess);
-    await offer();
-    expect(api.readGitHubStarAccounts).toHaveBeenCalled();
-    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
-    expect(api.writeLocalGitHubStar).toHaveBeenCalledWith({ confirmed: true });
-    expect(api.writeGitHubStar).not.toHaveBeenCalled();
-    expect(screen.getByText('感谢支持，已点 Star')).toBeInTheDocument();
-    expect(navigate).not.toHaveBeenCalled();
-  });
-
   it('a failed read-only check does not consume quota or launch authentication', async () => {
     vi.mocked(api.readGitHubStarAccounts).mockRejectedValue(new Error('fixture network failure'));
     mount();
@@ -190,6 +195,7 @@ describe('GitHub Star invitation', () => {
     expect(screen.getByText('感谢支持，已点 Star')).toBeInTheDocument();
     expect(api.markGitHubStarSupported).toHaveBeenCalledTimes(1);
     expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
+    expect(api.acceptDeferredGitHubStarIntent).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -221,75 +227,45 @@ describe('GitHub Star invitation', () => {
     expect(api.writeGitHubStar).toHaveBeenCalledWith({ connection_id: 'conn-bob', expected_account_id: '20002', confirmed: true });
   });
 
-  it('offers connection only after local credentials are confirmed unavailable', async () => {
-    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
-    await offer();
-    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
-    expect(api.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
-    expect(api.writeLocalGitHubStar).toHaveBeenCalledWith({ confirmed: true });
-    expect(screen.getByText(/未找到可用的本机 GitHub 登录信息/)).toBeInTheDocument();
-    expect(navigate).not.toHaveBeenCalled();
-    expect(api.writeGitHubStar).not.toHaveBeenCalled();
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续连接 GitHub' })));
-    expect(navigate).toHaveBeenCalledWith('/cloud-documents/github', {
-      state: { githubStarReturn: { userId: 'owner-1', returnTo: '/task-center', opportunity } },
-    });
-    expect(api.writeGitHubStar).not.toHaveBeenCalled();
-  });
-
-  it.each([true, false])('uses local credentials directly without connecting: write_performed=%s', async writePerformed => {
-    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
-    vi.mocked(api.writeLocalGitHubStar).mockResolvedValue({ ...localSuccess, write_performed: writePerformed });
-    await offer();
-    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
-    expect(api.writeLocalGitHubStar).toHaveBeenCalledWith({ confirmed: true });
-    expect(api.writeGitHubStar).not.toHaveBeenCalled();
-    expect(screen.getByText(writePerformed ? '感谢支持，已点 Star' : '你已为项目点过 Star，感谢支持')).toBeInTheDocument();
-    expect(api.markGitHubStarSupported).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('button', { name: '继续连接 GitHub' })).not.toBeInTheDocument();
-    expect(navigate).not.toHaveBeenCalled();
-  });
-
   it.each([
-    [503, 'unavailable', /重试/], [503, 'result_unknown', /暂未确认是否成功/],
-    [429, 'rate_limited', /请求过于频繁/], [403, 'permission_denied', /权限不足/],
-  ])('local failure %s/%s does not become a missing-credential result', async (status, reason, message) => {
-    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
-    vi.mocked(api.writeLocalGitHubStar).mockRejectedValue({ response: { status, data: { reason } } });
+    ['pending', ''], ['needs_attention', ''], ['needs_attention', 'binding_not_captured'],
+    ['pending', 'unavailable'], ['pending', 'result_unknown'],
+    ['pending', 'rate_limited'], ['needs_attention', 'permission_denied'],
+  ] as const)('accepted local support with %s/%s does not expose background failure or launch authentication', async (status, reason) => {
+    useLocalSupport(status, reason);
     await offer();
+    expect(api.acceptDeferredGitHubStarIntent).not.toHaveBeenCalled();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
-    expect(screen.getByRole('alert')).toHaveTextContent(message);
-    expect(api.markGitHubStarSupported).not.toHaveBeenCalled();
+    expect(api.acceptDeferredGitHubStarIntent).toHaveBeenCalledTimes(1);
+    expect(api.acceptDeferredGitHubStarIntent).toHaveBeenCalledWith({ confirmed: true, source: 'local' });
+    expect(screen.getByText('感谢您的支持！')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('感谢支持，已点 Star')).not.toBeInTheDocument();
+    expect(screen.queryByText('你已为项目点过 Star，感谢支持')).not.toBeInTheDocument();
+    expect(api.markGitHubStarSupported).toHaveBeenCalledTimes(1);
+    expect(api.writeGitHubStar).not.toHaveBeenCalled();
+    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '继续连接 GitHub' })).not.toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('does not replay a pending local write after double clicking', async () => {
-    let finish!: (result: typeof localSuccess) => void;
-    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
-    vi.mocked(api.writeLocalGitHubStar).mockReturnValue(new Promise(resolve => { finish = resolve; }));
-    await offer();
-    const button = screen.getByRole('button', { name: '为项目点 Star' });
-    fireEvent.click(button); fireEvent.click(button);
-    expect(api.writeLocalGitHubStar).toHaveBeenCalledTimes(1);
-    await act(async () => finish(localSuccess));
-    expect(screen.getByText('感谢支持，已点 Star')).toBeInTheDocument();
-  });
-
-  it.each(['identity change', 'closing'])('ignores a delayed successful local write after %s', async kind => {
-    let finish!: (result: typeof localSuccess) => void;
-    vi.mocked(api.readGitHubStarAccounts).mockResolvedValue({ repository: 'LazyAGI/LazyMind', accounts: [] });
-    vi.mocked(api.writeLocalGitHubStar).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  it.each(['identity change', 'closing'])('does not display a delayed local support acknowledgment after %s', async kind => {
+    let finish!: (result: typeof acceptedSupport) => void;
+    useLocalSupport();
+    vi.mocked(api.acceptDeferredGitHubStarIntent).mockReturnValue(new Promise(resolve => { finish = resolve; }));
     const view = mount();
     await announce();
     fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' }));
+    expect(api.acceptDeferredGitHubStarIntent).toHaveBeenCalledTimes(1);
     if (kind === 'identity change') view.rerender(host({ userId: 'owner-2' }));
     else fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-    await act(async () => finish(localSuccess));
+    await act(async () => finish(acceptedSupport));
+    expect(screen.queryByText('感谢您的支持！')).not.toBeInTheDocument();
     expect(screen.queryByText('感谢支持，已点 Star')).not.toBeInTheDocument();
-    expect(api.markGitHubStarSupported).not.toHaveBeenCalled();
+    if (kind === 'identity change') expect(api.markGitHubStarSupported).not.toHaveBeenCalled();
+    expect(api.cancelDeferredGitHubStarIntent).not.toHaveBeenCalled();
+    expect(api.writeLocalGitHubStar).not.toHaveBeenCalled();
+    expect(api.writeGitHubStar).not.toHaveBeenCalled();
   });
 
   it('a successful CLI return resumes the existing invitation, rechecks the account, and waits for a click', async () => {

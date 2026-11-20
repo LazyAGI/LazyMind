@@ -15,7 +15,11 @@ vi.mock('@/components/auth', () => ({
     getAuthHeaders: () => ({}) }, AUTH_USER_CHANGE_EVENT: 'fixture-user-change', AUTH_LOGOUT_EVENT: 'fixture-logout',
 }));
 vi.mock('@/modules/githubStar/api', async original => ({
-  ...await original<typeof import('@/modules/githubStar/api')>(), writeGitHubStar: vi.fn(),
+  ...await original<typeof import('@/modules/githubStar/api')>(),
+  readDeferredGitHubStarIntent: vi.fn().mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  }),
+  writeGitHubStar: vi.fn(),
 }));
 let vm: CloudDocumentProvidersVm;
 vi.mock('../hooks/useCloudDocumentProviders', () => ({ useCloudDocumentProviders: () => vm }));

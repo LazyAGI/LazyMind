@@ -1851,6 +1851,76 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - HTTPBearer: []
+  /api/authservice/v1/cloud/github/star/deferred:
+    get:
+      tags:
+      - cloud-oauth
+      summary: Github Star Deferred Status
+      operationId: github_star_deferred_status_api_authservice_v1_cloud_github_star_deferred_get
+      security:
+      - HTTPBearer: []
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubStarDeferredStatus'
+    post:
+      tags:
+      - cloud-oauth
+      summary: Github Star Deferred Receive
+      operationId: github_star_deferred_receive_api_authservice_v1_cloud_github_star_deferred_post
+      security:
+      - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubStarDeferredBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubStarDeferredAccepted'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - cloud-oauth
+      summary: Github Star Deferred Cancel
+      operationId: github_star_deferred_cancel_api_authservice_v1_cloud_github_star_deferred_delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: intent_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+          title: Intent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubStarDeferredResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AuthorizeBody:
@@ -3635,6 +3705,186 @@ components:
       - login
       - write_performed
       title: GitHubStarLocalResult
+    GitHubStarDeferredAccepted:
+      properties:
+        repository:
+          type: string
+          title: Repository
+        intent:
+          $ref: '#/components/schemas/GitHubStarIntent'
+        accepted:
+          type: boolean
+          const: true
+          title: Accepted
+      type: object
+      required:
+      - repository
+      - intent
+      - accepted
+      title: GitHubStarDeferredAccepted
+    GitHubStarDeferredAccount:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        account_id:
+          type: string
+          title: Account Id
+        login:
+          type: string
+          title: Login
+      type: object
+      required:
+      - connection_id
+      - account_id
+      - login
+      title: GitHubStarDeferredAccount
+    GitHubStarDeferredBody:
+      properties:
+        confirmed:
+          type: boolean
+          const: true
+          title: Confirmed
+        source:
+          type: string
+          enum:
+          - local
+          - connection
+          title: Source
+        connection_id:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Connection Id
+        expected_account_id:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+            pattern: ^[0-9]+$
+          - type: 'null'
+          title: Expected Account Id
+      additionalProperties: false
+      type: object
+      required:
+      - confirmed
+      - source
+      title: GitHubStarDeferredBody
+    GitHubStarDeferredResult:
+      properties:
+        repository:
+          type: string
+          title: Repository
+        intent:
+          $ref: '#/components/schemas/GitHubStarIntent'
+      type: object
+      required:
+      - repository
+      - intent
+      title: GitHubStarDeferredResult
+    GitHubStarDeferredStatus:
+      properties:
+        repository:
+          type: string
+          title: Repository
+        can_receive:
+          type: boolean
+          title: Can Receive
+        local_supported:
+          type: boolean
+          title: Local Supported
+        accounts:
+          items:
+            $ref: '#/components/schemas/GitHubStarDeferredAccount'
+          type: array
+          title: Accounts
+        intent:
+          anyOf:
+          - $ref: '#/components/schemas/GitHubStarIntent'
+          - type: 'null'
+      type: object
+      required:
+      - repository
+      - can_receive
+      - local_supported
+      - accounts
+      - intent
+      title: GitHubStarDeferredStatus
+    GitHubStarIntent:
+      properties:
+        intent_id:
+          type: string
+          title: Intent Id
+        status:
+          type: string
+          enum:
+          - pending
+          - needs_attention
+          - succeeded
+          - cancelled
+          - exhausted
+          title: Status
+        source:
+          type: string
+          enum:
+          - local
+          - connection
+          title: Source
+        connection_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Connection Id
+        account_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Account Id
+        created_at:
+          type: string
+          title: Created At
+        expires_at:
+          type: string
+          title: Expires At
+        attempt_count:
+          type: integer
+          title: Attempt Count
+        next_attempt_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Attempt At
+        rate_limit_not_before:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Rate Limit Not Before
+        reason:
+          type: string
+          title: Reason
+        remote_state:
+          type: string
+          enum:
+          - unknown
+          - starred
+          title: Remote State
+      type: object
+      required:
+      - intent_id
+      - status
+      - source
+      - connection_id
+      - account_id
+      - created_at
+      - expires_at
+      - attempt_count
+      - next_attempt_at
+      - rate_limit_not_before
+      - reason
+      - remote_state
+      title: GitHubStarIntent
   securitySchemes:
     HTTPBearer:
       type: http

@@ -340,6 +340,14 @@ const zhCN = {
 },
 
   githubStar: {
+    pluginTitle: '感谢使用 LazyMind', pluginStar: '去 GitHub 点 Star',
+    pluginMessage: '如果这次帮到了你，欢迎到 GitHub 为我们点个 Star。你的认可，是我们持续改进的动力。',
+    pluginRepository: '打开 GitHub 项目页面',
+    thankYou: '感谢您的支持！', supportProject: '支持项目', cancelSupportRequest: '取消本次支持请求',
+    localSupportHint: '使用本机当前 GitHub 登录为 LazyAGI/LazyMind 点 Star。',
+    connectionSupportHint: '使用所选 GitHub 账号为 LazyAGI/LazyMind 点 Star。',
+    supportFailed: '未能提交支持请求，请重试。',
+    supportCancelled: '已取消本次支持请求；已发出的 GitHub 请求可能已完成。',
     title: '支持 LazyMind', message: '觉得 LazyMind 对你有帮助吗？欢迎为我们的 GitHub 项目点个 Star，支持我们持续改进。',
     star: '为项目点 Star', close: '关闭', account: 'GitHub 账号', selectAccount: '选择 GitHub 账号',
     localHint: '未找到可用的本机 GitHub 登录信息，请连接账号后继续。',

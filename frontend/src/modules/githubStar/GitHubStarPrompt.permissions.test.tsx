@@ -7,11 +7,18 @@ import GitHubStarPrompt from './GitHubStarPrompt';
 import * as api from './api';
 
 vi.mock('./api', async original => ({
-  ...await original<typeof import('./api')>(), readGitHubStarAccounts: vi.fn(),
+  ...await original<typeof import('./api')>(),
+  readDeferredGitHubStarIntent: vi.fn().mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  }),
+  readGitHubStarAccounts: vi.fn(),
   claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(), writeLocalGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(),
   findGitHubStarOpportunity: vi.fn(),
 }));
 beforeEach(() => {
+  vi.mocked(api.readDeferredGitHubStarIntent).mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  });
   vi.mocked(api.findGitHubStarOpportunity).mockImplementation(async (conversationId, workflowSessionId, taskIds) => {
     if (conversationId !== 'work-1' || workflowSessionId !== undefined) return null;
     const taskId = taskIds?.find(id => ['root-3', 'duplicate-root', 'retry-root', 'limited-root'].includes(id));
