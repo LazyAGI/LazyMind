@@ -1,0 +1,72 @@
+[
+  {
+    "id": "linear-pricing",
+    "url": "https://linear.app/pricing",
+    "retrieved_at": "2026-10-27T03:34:28.562167+00:00",
+    "method": "unauthenticated HTTPS GET",
+    "status": 200,
+    "final_url": "https://linear.app/pricing",
+    "sha256": "9abac6e1f86697794102a9ad701e740bf24c3264a12e0e64023f7acf3a2dce66",
+    "bytes": 804769
+  },
+  {
+    "id": "linear-features",
+    "url": "https://linear.app/features",
+    "retrieved_at": "2026-10-27T03:34:30.270283+00:00",
+    "method": "unauthenticated HTTPS GET",
+    "status": 200,
+    "final_url": "https://linear.app/features",
+    "sha256": "82be870b799c9eeb8417bad80838a7cdb1ba3ce4273359a596cb4e00dee34cd2",
+    "bytes": 468794
+  },
+  {
+    "id": "linear-now",
+    "url": "https://linear.app/now",
+    "retrieved_at": "2026-10-27T03:34:31.430221+00:00",
+    "method": "unauthenticated HTTPS GET",
+    "status": 200,
+    "final_url": "https://linear.app/now",
+    "sha256": "7a0486ed92a40a1fe3f6f548b326a0ebeabc6a507f78f431b3649e2ab5bcd532",
+    "bytes": 774518
+  },
+  {
+    "id": "asana-pricing",
+    "url": "https://asana.com/pricing",
+    "retrieved_at": "2026-10-27T03:34:32.785286+00:00",
+    "method": "unauthenticated HTTPS GET",
+    "status": 200,
+    "final_url": "https://asana.com/pricing",
+    "sha256": "7be893fd39a96fbb420744e5a51b35da3327512ce386180ac8b1241e0f05afe7",
+    "bytes": 1221984
+  },
+  {
+    "id": "asana-product",
+    "url": "https://asana.com/product",
+    "retrieved_at": "2026-10-27T03:34:34.595309+00:00",
+    "method": "unauthenticated HTTPS GET",
+    "status": 200,
+    "final_url": "https://asana.com/product",
+    "sha256": "c3901462d5329c2861ea3394298a30df76dc7e324e8e9a319e7bf462d4dc0de8",
+    "bytes": 727382
+  },
+  {
+    "id": "asana-resources",
+    "url": "https://asana.com/resources",
+    "retrieved_at": "2026-10-27T03:34:36.598087+00:00",
+    "method": "unauthenticated HTTPS GET",
+    "status": 200,
+    "final_url": "https://asana.com/resources",
+    "sha256": "01b1f04724cd507ed4fc030144f9d9574ebd6e790562a491baa8df4423de9c03",
+    "bytes": 631142
+  },
+  {
+    "id": "asana-news",
+    "url": "https://asana.com/whats-new",
+    "retrieved_at": "2026-10-27T03:34:38.691828+00:00",
+    "method": "unauthenticated HTTPS GET",
+    "status": 200,
+    "final_url": "https://asana.com/whats-new",
+    "sha256": "c025b0f6877f63b6afd8f61c939c6197174b9369c5a9e97e1d7c98a35017f50e",
+    "bytes": 629038
+  }
+]

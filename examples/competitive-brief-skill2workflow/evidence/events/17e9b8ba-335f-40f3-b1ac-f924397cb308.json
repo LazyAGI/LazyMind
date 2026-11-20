@@ -1,0 +1,29 @@
+{
+  "task_id": "17e9b8ba-335f-40f3-b1ac-f924397cb308",
+  "note": "Only tool events/errors; internal reasoning and model text omitted. Arguments hashed; artifact contents recorded separately. Event counts are not model calls.",
+  "tool_calls": {
+    "save_artifacts": 1
+  },
+  "events": [
+    {
+      "event_index": 16,
+      "type": "tool_calls",
+      "id": "call_00_kim7otEu8lc5RFqCOlpV9738",
+      "name": "save_artifacts",
+      "arguments_sha256": "a481ec5e3e746655c47bf4ee7142de9aca47214bf7171010676f31eed734a02d",
+      "arguments_bytes": 2822
+    },
+    {
+      "event_index": 17,
+      "type": "tool_results",
+      "task_id": "17e9b8ba-335f-40f3-b1ac-f924397cb308",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"saved_count\": 1, \"results\": [{\"status\": \"ok\", \"key\": \"request_brief\", \"message\": \"Artifact 'request_brief' saved.\", \"path\": \"[LOCAL_PATH_REDACTED]\"}]}}",
+          "tool_call_id": "call_00_kim7otEu8lc5RFqCOlpV9738"
+        }
+      ]
+    }
+  ]
+}

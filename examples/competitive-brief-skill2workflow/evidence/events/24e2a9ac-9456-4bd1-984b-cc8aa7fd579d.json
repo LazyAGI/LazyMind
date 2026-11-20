@@ -1,0 +1,29 @@
+{
+  "task_id": "24e2a9ac-9456-4bd1-984b-cc8aa7fd579d",
+  "note": "Only tool events/errors; internal reasoning and model text omitted. Arguments hashed; artifact contents recorded separately. Event counts are not model calls.",
+  "tool_calls": {
+    "save_artifacts": 1
+  },
+  "events": [
+    {
+      "event_index": 85,
+      "type": "tool_calls",
+      "id": "call_00_3TWvDRDOevEo76U18Tcs4932",
+      "name": "save_artifacts",
+      "arguments_sha256": "4457ea5a4a3b700572d1a218568ac841d893fed5ab90f0b8842fa76feec9892c",
+      "arguments_bytes": 48710
+    },
+    {
+      "event_index": 86,
+      "type": "tool_results",
+      "task_id": "24e2a9ac-9456-4bd1-984b-cc8aa7fd579d",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"saved_count\": 1, \"results\": [{\"status\": \"ok\", \"key\": \"positioning_analysis\", \"message\": \"Artifact 'positioning_analysis' saved.\", \"path\": \"[LOCAL_PATH_REDACTED]\"}]}}",
+          "tool_call_id": "call_00_3TWvDRDOevEo76U18Tcs4932"
+        }
+      ]
+    }
+  ]
+}

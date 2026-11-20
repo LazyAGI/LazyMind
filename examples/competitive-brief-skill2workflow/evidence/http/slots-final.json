@@ -1,0 +1,151 @@
+{
+  "started_at": "2026-10-27T04:03:34.559736+00:00",
+  "elapsed_seconds": 0.016,
+  "method": "GET",
+  "path": "/workflow-sessions/ce3dbc32-0454-5928-aac0-e3a349666882/slots",
+  "http_status": 200,
+  "response": {
+    "code": 0,
+    "message": "ok",
+    "data": {
+      "slots": [
+        {
+          "artifact_id": "98ab581e-eb0c-490d-83b2-c1234c405022",
+          "slot_id": "battlecard",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "battlecard",
+          "created_at": "2026-10-27T03:56:31.681902Z",
+          "content_type": "text",
+          "artifact_value": {
+            "text": "**No battlecard was requested in this run.**\n\nrequest_brief.deliverables lists exactly one output — \"competitive brief\" — so no sales battlecard was produced, and the completed competitive_brief artifact is left unchanged (Human review: pending). Nothing here supersedes that brief or adds new findings.\n\nIf you want one, I can turn the same Linear/Asana research (research_date 2026-10-27) into a compact one-page battlecard per competitor — no new research required.",
+            "caption": "No battlecard requested: competitive brief was the only declared deliverable (2026-10-27; Human review: pending)"
+          },
+          "draft_version": 1,
+          "caption": "No battlecard requested: competitive brief was the only declared deliverable (2026-10-27; Human review: pending)",
+          "change_source": "host",
+          "step_id": "build_battlecard",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "0325ab17-89d3-4383-b100-e6ed3a7270ad",
+          "slot_id": "competitive_brief",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "competitive_brief",
+          "created_at": "2026-10-27T03:55:00.189227Z",
+          "content_type": "text",
+          "artifact_value": {
+            "type": "text",
+            "path": "[LOCAL_PATH_REDACTED]",
+            "size": 45563,
+            "caption": "Competitive brief: Linear vs Asana for a 20-person software team (offline replay of S1-S7, retrieved 2026-10-27; Human review: pending)"
+          },
+          "draft_version": 1,
+          "caption": "Competitive brief: Linear vs Asana for a 20-person software team (offline replay of S1-S7, retrieved 2026-10-27; Human review: pending)",
+          "change_source": "host",
+          "step_id": "synthesize_brief",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "5be6072d-ce64-48b9-b5a6-b343c61e938f",
+          "slot_id": "competitor_research",
+          "revision": 2,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "competitor_research",
+          "created_at": "2026-10-27T03:43:32.108722Z",
+          "content_type": "json",
+          "artifact_value": {
+            "type": "json",
+            "path": "[LOCAL_PATH_REDACTED]",
+            "size": 40387
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "research_competitors",
+          "revision_count": 2,
+          "version_number": 2
+        },
+        {
+          "artifact_id": "746e68fe-c3d4-4f8a-9443-1aee1b7f74bd",
+          "slot_id": "positioning_analysis",
+          "revision": 2,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "positioning_analysis",
+          "created_at": "2026-10-27T03:51:21.570065Z",
+          "content_type": "json",
+          "artifact_value": {
+            "type": "json",
+            "path": "[LOCAL_PATH_REDACTED]",
+            "size": 48445,
+            "caption": "Comparative positioning analysis: Linear vs Asana for a 20-person software team (built from competitor_research rev 2, S1-S7; independent review deliberately excluded)"
+          },
+          "draft_version": 1,
+          "caption": "Comparative positioning analysis: Linear vs Asana for a 20-person software team (built from competitor_research rev 2, S1-S7; independent review deliberately excluded)",
+          "change_source": "host",
+          "step_id": "analyze_positioning",
+          "revision_count": 2,
+          "version_number": 2
+        },
+        {
+          "artifact_id": "f500fa08-bc92-41e3-ad3b-449f3a5eee9b",
+          "slot_id": "request_brief",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "request_brief",
+          "created_at": "2026-10-27T03:38:44.783203Z",
+          "content_type": "json",
+          "artifact_value": {
+            "data": {
+              "competitors": [
+                "Linear",
+                "Asana"
+              ],
+              "company_context": null,
+              "focus_areas": [
+                "messaging and positioning",
+                "product and feature comparison",
+                "content and thought leadership",
+                "recent announcements",
+                "pricing and packaging",
+                "market presence"
+              ],
+              "deliverables": [
+                "competitive brief"
+              ],
+              "assumptions": [
+                "No company positioning or 'Your Company' input was supplied; the 'Your Company' column is omitted and company_context is null rather than invented.",
+                "Competitors are exactly the two named in the request, in first-mention order: Linear, then Asana. No additional vendors were added to the competitive set.",
+                "No explicit focus areas were stated, so all six default focus areas are applied: messaging and positioning; product and feature comparison; content and thought leadership; recent announcements; pricing and packaging; market presence.",
+                "The only requested output is the competitive brief (Markdown, PM-ready). No sales battlecard, messaging drafts or monitoring plan were requested; none will be produced.",
+                "Evidence mode is OFFLINE REPLAY of seven fixed official-source fact cards (S1-S7) collected 2026-10-27. No live web search, no third-party review sites, no SEO/traffic databases, no social listening, no hands-on product trial.",
+                "The 20-person software team is the buyer/use-case frame (product-development coordination plus cross-functional launch planning); no budget ceiling, current tooling, or procurement constraints were supplied.",
+                "No user attachments were available; the brief relies solely on the supplied fact cards.",
+                "Pricing scope is restricted to USD per user per month billed annually, with plan names and billing basis preserved, plus an arithmetic 20-seat annual subtotal per paid plan (taxes, discounts and usage charges excluded). Plan features are not treated as equivalent across vendors.",
+                "Unknown prices and allowances stay [UNKNOWN]: Linear Enterprise, Asana Enterprise, AI credits/overage charges and actual AI usage costs are not quantified in the corpus.",
+                "Unavailable metrics (independent reviews, analyst reports, traffic/SEO rankings, social engagement, win/loss data, market share, funding, headcount, sentiment, ROI) will be marked [UNKNOWN] and never estimated or inferred as zero.",
+                "External work is bounded: nothing will be sent, purchased, signed into, or drawn from private files; the brief will carry a visible 'Human review: pending' boundary and will not claim human approval.",
+                "No reliable system clock was available in this runtime; the corpus retrieval date 2026-10-27 is used as research_date and this is stated in the brief's source header."
+              ],
+              "research_date": "2026-10-27"
+            },
+            "caption": "Normalized research request: Linear vs Asana competitive brief (20-person software team)"
+          },
+          "draft_version": 1,
+          "caption": "Normalized research request: Linear vs Asana competitive brief (20-person software team)",
+          "change_source": "host",
+          "step_id": "collect_request",
+          "revision_count": 1,
+          "version_number": 1
+        }
+      ]
+    }
+  }
+}

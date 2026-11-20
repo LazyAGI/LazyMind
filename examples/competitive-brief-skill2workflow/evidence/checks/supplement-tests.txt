@@ -1,0 +1,21 @@
+2026-10-27; pinned public source files supplied offline; no model or live API runs.
+test_changed_connector_is_rejected (__main__.Packaging) ... ok
+test_escape_and_missing_reference_are_rejected (__main__.Packaging) ... ok
+test_only_declared_packaging_changes (__main__.Packaging) ... ok
+test_original_standalone_directory_reproduces_missing_dependency (__main__.Packaging) ... ok
+test_packaged_reference_resolves_without_plugin_root (__main__.Packaging) ... ok
+test_product_management_cannot_be_substituted_for_marketing (__main__.Packaging) ... ok
+test_zip_is_reproducible_and_self_contained (__main__.Packaging) ... ok
+test_accepted_retry_from_another_session_is_rejected (__main__.RecordedRecovery) ... ok
+test_different_input_revision_cannot_be_called_reuse (__main__.RecordedRecovery) ... ok
+test_edit_failure_requires_unchanged_report (__main__.RecordedRecovery) ... ok
+test_external_success_cannot_be_inferred_from_session_success (__main__.RecordedRecovery) ... ok
+test_failed_attempt_cannot_be_erased (__main__.RecordedRecovery) ... ok
+test_graph_change_cannot_be_hidden (__main__.RecordedRecovery) ... ok
+test_real_recordings_preserve_assisted_not_autonomous_outcome (__main__.RecordedRecovery) ... ok
+test_research_rerun_cannot_be_called_reuse (__main__.RecordedRecovery) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.016s
+
+OK

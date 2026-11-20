@@ -1,0 +1,18 @@
+{
+  "started_at": "2026-10-27T03:37:07.023565+00:00",
+  "elapsed_seconds": 146.286,
+  "exit_code": 0,
+  "raw_report_sha256": "882f69d633fba0e07daa615af2f4939c03778edf2b5a9614b134dab36db3dc42",
+  "published_report_normalization": "trailing whitespace stripped; text unchanged",
+  "skill_extra_trailing_newline": true,
+  "usage": {
+    "input_tokens": 58978,
+    "cached_input_tokens": 48896,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 4458,
+    "reasoning_output_tokens": 57
+  },
+  "tool_calls": 2,
+  "model_calls": null,
+  "cost_usd": null
+}

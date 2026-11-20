@@ -1,0 +1,129 @@
+description: Research one or more competitors named in the runtime request and produce a structured competitive brief covering positioning, messaging, content gaps, opportunities, threats, and recommended actions, plus an optional one-page sales battlecard. Executes from the caller's task text alone; no attachments required.
+id: competitive_brief
+name: Competitive Brief
+slots:
+    - cardinality: list
+      description: One or more competitors to analyze. May be supplied as structured values or inferred from the runtime request.
+      external: true
+      id: competitor_names
+      label: Competitor names
+      type: text
+    - cardinality: single
+      description: What you sell, to whom, your positioning and key differentiators. Optional; analysis degrades gracefully when empty.
+      external: true
+      id: company_context
+      label: Your company and positioning context (optional)
+      type: text
+    - cardinality: single
+      description: Optional narrowing such as messaging, feature comparison, content strategy, recent news, pricing, market presence. Defaults to full coverage when empty.
+      external: true
+      id: focus_areas
+      label: Focus areas (optional)
+      type: text
+    - cardinality: single
+      description: Internal hand-off containing the ordered competitor list, company context, focus areas, requested deliverables, assumptions, and research date.
+      external: false
+      id: request_brief
+      label: Normalized research request
+      type: json
+    - cardinality: single
+      description: Per-competitor evidence on overview, messaging, positioning, content strategy, strengths, weaknesses, recent developments, and sources, with research mode and confidence.
+      external: false
+      id: competitor_research
+      label: Competitor research findings
+      type: json
+    - cardinality: single
+      description: Messaging comparison matrix, value-proposition and narrative analysis, messaging scores, content gap tables, positioning axes, opportunities, threats, and recommended actions.
+      external: false
+      id: positioning_analysis
+      label: Positioning and content gap analysis
+      type: json
+    - cardinality: single
+      description: The seven-section user-facing competitive brief in Markdown with tables.
+      exposed: true
+      external: false
+      id: competitive_brief
+      label: Competitive brief
+      type: text
+    - cardinality: single
+      description: One-page sales reference per competitor, or a short note declaring that no battlecard was requested.
+      exposed: true
+      external: false
+      id: battlecard
+      label: Sales battlecard
+      type: text
+steps:
+    - description: Normalize the runtime request into an explicit research plan.
+      id: collect_request
+      label: Collect request
+    - description: Gather structured evidence for each named competitor across the requested focus areas.
+      id: research_competitors
+      label: Research competitors
+    - description: Convert research into comparative positioning, messaging, narrative, and content-gap analysis.
+      id: analyze_positioning
+      label: Analyze positioning
+    - description: Render the seven-section user-facing competitive brief.
+      id: synthesize_brief
+      label: Synthesize brief
+    - description: Produce the one-page sales reference, or a short note when none was requested.
+      id: build_battlecard
+      label: Build battlecard
+ui:
+    tabs:
+        - id: collect_request
+          label: Collect request
+          layout: vertical
+          slots:
+            - cardinality: single
+              description: Internal hand-off containing the ordered competitor list, company context, focus areas, requested deliverables, assumptions, and research date.
+              external: false
+              id: request_brief
+              label: Normalized research request
+              type: json
+          step_id: collect_request
+        - id: research_competitors
+          label: Research competitors
+          layout: vertical
+          slots:
+            - cardinality: single
+              description: Per-competitor evidence on overview, messaging, positioning, content strategy, strengths, weaknesses, recent developments, and sources, with research mode and confidence.
+              external: false
+              id: competitor_research
+              label: Competitor research findings
+              type: json
+          step_id: research_competitors
+        - id: analyze_positioning
+          label: Analyze positioning
+          layout: vertical
+          slots:
+            - cardinality: single
+              description: Messaging comparison matrix, value-proposition and narrative analysis, messaging scores, content gap tables, positioning axes, opportunities, threats, and recommended actions.
+              external: false
+              id: positioning_analysis
+              label: Positioning and content gap analysis
+              type: json
+          step_id: analyze_positioning
+        - id: synthesize_brief
+          label: Synthesize brief
+          layout: vertical
+          slots:
+            - cardinality: single
+              description: The seven-section user-facing competitive brief in Markdown with tables.
+              exposed: true
+              external: false
+              id: competitive_brief
+              label: Competitive brief
+              type: text
+          step_id: synthesize_brief
+        - id: build_battlecard
+          label: Build battlecard
+          layout: vertical
+          slots:
+            - cardinality: single
+              description: One-page sales reference per competitor, or a short note declaring that no battlecard was requested.
+              exposed: true
+              external: false
+              id: battlecard
+              label: Sales battlecard
+              type: text
+          step_id: build_battlecard

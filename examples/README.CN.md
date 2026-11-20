@@ -23,4 +23,5 @@
 
 ### 可运行实验
 
+- [Competitive Brief Skill2Workflow 兼容性实验](competitive-brief-skill2workflow/README.CN.md)：三次固定资料的原 Skill 基线、真实托管转换、自动执行失败与有干预恢复；保留报告质量和产物编辑限制。
 - [Superpowers 派发可靠性](superpowers-workflow-reliability/README.CN.md)：从 Codex 体验原生 Brief Gate 与 Panel 产物；保留 Advanced Git/Coverage、已验证的 CLI 恢复，并明确原生恢复限制。

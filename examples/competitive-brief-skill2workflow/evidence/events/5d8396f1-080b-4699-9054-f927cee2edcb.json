@@ -1,0 +1,512 @@
+{
+  "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+  "note": "Only tool events/errors; internal reasoning and model text omitted. Arguments hashed; artifact contents recorded separately. Event counts are not model calls.",
+  "tool_calls": {
+    "save_artifacts": 6,
+    "patch_artifact": 13,
+    "get_artifact": 5,
+    "search_file_resource": 1
+  },
+  "events": [
+    {
+      "event_index": 137,
+      "type": "tool_calls",
+      "id": "call_00_6UxNjp1dPYCwCIO6gvH25878",
+      "name": "save_artifacts",
+      "arguments_sha256": "c4b673cdfdea83f428f128e8dc82e358a94b146d81c8d3dc79ec3f5bed88fe64",
+      "arguments_bytes": 50580
+    },
+    {
+      "event_index": 138,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": false, \"value\": \"Invalid arguments: arguments must be valid JSON.\"}",
+          "tool_call_id": "call_00_6UxNjp1dPYCwCIO6gvH25878"
+        }
+      ]
+    },
+    {
+      "event_index": 173,
+      "type": "tool_calls",
+      "id": "call_00_aGqBHanzthujLLnQ1yn81203",
+      "name": "save_artifacts",
+      "arguments_sha256": "3b18c660fa382d471a92a39da9fffe5bb487cc1f78728e08bc30817aef2b57a6",
+      "arguments_bytes": 41190
+    },
+    {
+      "event_index": 174,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": false, \"value\": \"Invalid arguments: arguments must be valid JSON.\"}",
+          "tool_call_id": "call_00_aGqBHanzthujLLnQ1yn81203"
+        }
+      ]
+    },
+    {
+      "event_index": 190,
+      "type": "tool_calls",
+      "id": "call_00_tskp2ebozYFuAVAkBc2x5890",
+      "name": "save_artifacts",
+      "arguments_sha256": "de182875ccb5f5dff45257a821e5f33442a78de0dbd9584ad7dc6df24f7978a7",
+      "arguments_bytes": 14059
+    },
+    {
+      "event_index": 191,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": false, \"value\": \"Invalid arguments: artifacts: Field required; arguments: Extra inputs are not permitted\"}",
+          "tool_call_id": "call_00_tskp2ebozYFuAVAkBc2x5890"
+        }
+      ]
+    },
+    {
+      "event_index": 226,
+      "type": "tool_calls",
+      "id": "call_00_3rNILlQOjXbOaiDwCdJZ2279",
+      "name": "save_artifacts",
+      "arguments_sha256": "9c9c4f98eb1c957aa063358bb7c8b45e9cc1a7e100f6fb474815f2967d89c39a",
+      "arguments_bytes": 8803
+    },
+    {
+      "event_index": 227,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": false, \"value\": \"Invalid arguments: artifacts: Field required; arguments: Extra inputs are not permitted\"}",
+          "tool_call_id": "call_00_3rNILlQOjXbOaiDwCdJZ2279"
+        }
+      ]
+    },
+    {
+      "event_index": 247,
+      "type": "tool_calls",
+      "id": "call_00_IaFzOhok1uV5eAxlyJuI3287",
+      "name": "save_artifacts",
+      "arguments_sha256": "a6e3fd2e973a9457c14ab52102314b4f51b13aba0c72af57532a11d96f1b6207",
+      "arguments_bytes": 89
+    },
+    {
+      "event_index": 248,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": false, \"value\": \"Artifact 'competitor_research' is declared as a json slot and must be saved with content_type=\\\"json\\\".\"}",
+          "tool_call_id": "call_00_IaFzOhok1uV5eAxlyJuI3287"
+        }
+      ]
+    },
+    {
+      "event_index": 256,
+      "type": "tool_calls",
+      "id": "call_00_udEubDB8mmRcs0H8ZknQ2044",
+      "name": "save_artifacts",
+      "arguments_sha256": "6da7f93e99d1a9b1f688bf4a5908fba1c2566b3dc5ef51517b511753d73e79a9",
+      "arguments_bytes": 314
+    },
+    {
+      "event_index": 257,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"saved_count\": 1, \"results\": [{\"status\": \"ok\", \"key\": \"competitor_research\", \"message\": \"Artifact 'competitor_research' saved.\", \"path\": \"[LOCAL_PATH_REDACTED]\"}]}}",
+          "tool_call_id": "call_00_udEubDB8mmRcs0H8ZknQ2044"
+        }
+      ]
+    },
+    {
+      "event_index": 276,
+      "type": "tool_calls",
+      "id": "call_00_tao0gLs4Gr6oaQUtnxb31238",
+      "name": "patch_artifact",
+      "arguments_sha256": "7d0bf94519f19af396d5e10b43a33514fe3705d27a4295e2b082ace87a98cf73",
+      "arguments_bytes": 6353
+    },
+    {
+      "event_index": 277,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (113 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_tao0gLs4Gr6oaQUtnxb31238"
+        }
+      ]
+    },
+    {
+      "event_index": 279,
+      "type": "tool_calls",
+      "id": "call_00_WSNvibWPLeNt51Dbg4ta4227",
+      "name": "patch_artifact",
+      "arguments_sha256": "10419a4e3a96dc45b05fb78fae5160615cfe1330893ea952eb63152757f47884",
+      "arguments_bytes": 7487
+    },
+    {
+      "event_index": 280,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (111 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_WSNvibWPLeNt51Dbg4ta4227"
+        }
+      ]
+    },
+    {
+      "event_index": 309,
+      "type": "tool_calls",
+      "id": "call_00_vo4l38OY0ax0nKXIcgy45393",
+      "name": "patch_artifact",
+      "arguments_sha256": "e742d3d95505330bc31780a638b30fdd219dd83cb4f6cd224318171d5cdee8be",
+      "arguments_bytes": 2397
+    },
+    {
+      "event_index": 310,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (4 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_vo4l38OY0ax0nKXIcgy45393"
+        }
+      ]
+    },
+    {
+      "event_index": 313,
+      "type": "tool_calls",
+      "id": "call_00_PHcFChTf8ehgxMadN8Td0341",
+      "name": "get_artifact",
+      "arguments_sha256": "b72b137ae139ad2e7e64a7d2d1822eb9baf12a8fe43fa473df4871003bdac224",
+      "arguments_bytes": 63
+    },
+    {
+      "event_index": 314,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "get_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"content\": \"{\\n  \\\"research_date\\\": \\\"2026-10-27\\\",\\n  \\\"mode\\\": \\\"model_knowledge\\\",\\n  \\\"confidence\\\": \\\"medium\\\",\\n  \\\"freshness_caveat\\\": \\\"Offline replay of seven official-source cards (S1-S7) collected 2026-10-27; no live web access in this run.\\\",\\n  \\\"competitors\\\": [\\n    {\\n      \\\"name\\\": \\\"Linear\\\",\\n      \\\"overview\\\": {\\n        \\\"positioning_one_sentence\\\": \\\"[INFERENCE S2] A single system for modern product development, spanning roadmap to release, for software-building teams. Verbatim tagline [UNKNOWN].\\\",\\n        \\\"target_audience\\\": \\\"[INFERENCE S2] Software product and engineering teams doing planning, building and release.\\\",\\n        \\\"size_or_stage_signals\\\": \\\"[UNKNOWN] no headcount, funding, revenue or customer-count data collected.\\\",\\n        \\\"product_category\\\": \\\"[FACT S2] Product-development system: issue tracking, cycles and planning from roadmap to release.\\\",\\n        \\\"recurring_complaint_themes_public_reviews\\\": \\\"[UNKNOWN] not found; no review sources in corpus and none fetched by design.\\\",\\n        \\\"public_pricing_approach\\\": \\\"[FACT S1] Per-user per-month billed yearly: Free $0 (unlimited members, 2 teams, 250 issues); Basic $10 (5 teams, unlimited issues/uploads, admin roles, Loops); Business $16 (unlimited teams, private teams/guests, Triage Intelligence, Code Intelligence, Insights, Asks, Zendesk/Intercom); Enterprise custom annual (SAML/SCIM, controls/support). Coding sessions and Loops require AI credits; enterprise and AI usage pricing [UNKNOWN].\\\"\\n      },\\n      \\\"messaging\\\": {\\n        \\\"primary_tagline\\\": \\\"[UNKNOWN] not found; cards paraphrase rather than quote a tagline. Closest source language: a system for modern product development spanning roadmap to release [S2, paraphrase].\\\",\\n        \\\"core_value_proposition\\\": \\\"[INFERENCE S2] One coherent system where teams plan (projects, initiatives), build (issues, cycles) and release, with AI workflows and analytics inside the same tool rather than across point solutions.\\\",\\n        \\\"messaging_themes\\\": [\\n          \\\"Roadmap to release in one system [S2]\\\",\\n          \\\"Development-native craft: issues, cycles, triage, code intelligence [S1, S2]\\\",\\n          \\\"AI inside the workflow: agents, Loops triggers, coding-agent controls, reasoning levels [S2, S3]\\\",\\n          \\\"Rigour and visibility: analytics, Insights, admin roles [S1, S2]\\\",\\n          \\\"Broad intake: Asks, customer requests, Zendesk/Intercom [S1, S2]\\\"\\n        ],\\n        \\\"tone_and_voice\\\": \\\"[INFERENCE S3] Terse, changelog-driven, engineering-literate; concrete feature and infrastructure language over outcome marketing.\\\",\\n        \\\"problem_framed\\\": \\\"[INFERENCE S1, S2] Product-development work is fragmented across planning, building and release, and requests arrive from customers and other teams through scattered channels.\\\",\\n        \\\"claimed_differentiators\\\": [\\n          \\\"Unified roadmap-to-release scope [S2]\\\",\\n          \\\"Triage Intelligence, Code Intelligence and Insights bundled at Business [S1]\\\",\\n          \\\"AI embedded natively rather than added on [S2, S3]\\\"\\n        ],\\n        \\\"emphasised_features\\\": [\\n          \\\"Projects and initiatives [S2]\\\",\\n          \\\"Issue tracking and cycles [S2]\\\",\\n          \\\"AI workflows and agents [S2]\\\",\\n          \\\"Analytics and Insights [S1, S2]\\\",\\n          \\\"Mobile [S2]\\\",\\n          \\\"Asks intake, customer requests, Zendesk/Intercom [S1, S2]\\\",\\n\", \"start_line\": 1, \"end_line\": 40, \"total_lines\": 229, \"path\": \"[LOCAL_PATH_REDACTED]\", \"_from_draft\": true}}",
+          "tool_call_id": "call_00_PHcFChTf8ehgxMadN8Td0341"
+        }
+      ]
+    },
+    {
+      "event_index": 323,
+      "type": "tool_calls",
+      "id": "call_00_uhS1LnGU5NeMeLmYZLTc3143",
+      "name": "patch_artifact",
+      "arguments_sha256": "bcdabfd2dd8f3451dc9a5e8aae0fcb75d15af512a862cb22ef616c1287b593d0",
+      "arguments_bytes": 2420
+    },
+    {
+      "event_index": 324,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_uhS1LnGU5NeMeLmYZLTc3143"
+        }
+      ]
+    },
+    {
+      "event_index": 326,
+      "type": "tool_calls",
+      "id": "call_00_3xijVjaB5VgP6B6IUjxE5810",
+      "name": "patch_artifact",
+      "arguments_sha256": "83bb88a340bfe4b619b842d79c253bdc4e4ebabfbd3973da1f7b842c82c02b05",
+      "arguments_bytes": 5549
+    },
+    {
+      "event_index": 327,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_3xijVjaB5VgP6B6IUjxE5810"
+        }
+      ]
+    },
+    {
+      "event_index": 329,
+      "type": "tool_calls",
+      "id": "call_00_hzpqgNuWnIDFncxeKrhH1359",
+      "name": "patch_artifact",
+      "arguments_sha256": "f4a50b6d339b8347e076ea98e4504deb10a143059898ecff2d6fa897e296cf05",
+      "arguments_bytes": 2401
+    },
+    {
+      "event_index": 330,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_hzpqgNuWnIDFncxeKrhH1359"
+        }
+      ]
+    },
+    {
+      "event_index": 332,
+      "type": "tool_calls",
+      "id": "call_00_0kSvsNT2ETUbIHvDT4OL4289",
+      "name": "patch_artifact",
+      "arguments_sha256": "bcabd8acc03753cb0b1e763250fd763a1d37d772f67f100700d525465d8698e8",
+      "arguments_bytes": 2336
+    },
+    {
+      "event_index": 333,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_0kSvsNT2ETUbIHvDT4OL4289"
+        }
+      ]
+    },
+    {
+      "event_index": 335,
+      "type": "tool_calls",
+      "id": "call_00_9yRCC0CiFZMV6K5qX2MI9407",
+      "name": "patch_artifact",
+      "arguments_sha256": "eb4f74808a3916e4289bb28912d4dfa23dd685bdcae884c3db03db57799d8d08",
+      "arguments_bytes": 2573
+    },
+    {
+      "event_index": 336,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_9yRCC0CiFZMV6K5qX2MI9407"
+        }
+      ]
+    },
+    {
+      "event_index": 338,
+      "type": "tool_calls",
+      "id": "call_00_yI000hJCbFhSs3sauvfN3139",
+      "name": "patch_artifact",
+      "arguments_sha256": "9733e5fe88bfaf20704edb0bfa9e35377265f205c35393e29727a1c0718d17d5",
+      "arguments_bytes": 1837
+    },
+    {
+      "event_index": 339,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_yI000hJCbFhSs3sauvfN3139"
+        }
+      ]
+    },
+    {
+      "event_index": 341,
+      "type": "tool_calls",
+      "id": "call_00_hLhVP1CqVEZWtzrU17BZ0154",
+      "name": "patch_artifact",
+      "arguments_sha256": "e0850c57a0c3fa712f692e1f319792b8b8275df0d82a2b1aaf05e7c0dedfa95e",
+      "arguments_bytes": 2922
+    },
+    {
+      "event_index": 342,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_hLhVP1CqVEZWtzrU17BZ0154"
+        }
+      ]
+    },
+    {
+      "event_index": 344,
+      "type": "tool_calls",
+      "id": "call_00_iBkl9JYLYqPRpQpKN02v2203",
+      "name": "patch_artifact",
+      "arguments_sha256": "3bae17f5b47663992fc803e97418c4569abce5bc76dff4156634322027bbfc31",
+      "arguments_bytes": 3054
+    },
+    {
+      "event_index": 345,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_iBkl9JYLYqPRpQpKN02v2203"
+        }
+      ]
+    },
+    {
+      "event_index": 350,
+      "type": "tool_calls",
+      "id": "call_00_02IGwJckkORFaOOKKIm83388",
+      "name": "patch_artifact",
+      "arguments_sha256": "12912e715082fb172f250e470ae01f67ea06553b7f8ce61675260782cea2846f",
+      "arguments_bytes": 2183
+    },
+    {
+      "event_index": 351,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (1 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_02IGwJckkORFaOOKKIm83388"
+        }
+      ]
+    },
+    {
+      "event_index": 354,
+      "type": "tool_calls",
+      "id": "call_00_KwE3O5nomCXh07KI4oXp2296",
+      "name": "patch_artifact",
+      "arguments_sha256": "3df2c2156ebc67dd306c73548fdf48a4d7f866baa2fa476630bd230a5981e638",
+      "arguments_bytes": 1040
+    },
+    {
+      "event_index": 355,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "patch_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"path\": \"[LOCAL_PATH_REDACTED]\", \"message\": \"Draft for 'competitor_research' updated (0 line(s) changed). Keep patching, or call discard_draft to abandon the edits. The framework will commit them at the normal step boundary. Read the workspace path instead of copying the draft body.\"}}",
+          "tool_call_id": "call_00_KwE3O5nomCXh07KI4oXp2296"
+        }
+      ]
+    },
+    {
+      "event_index": 359,
+      "type": "tool_calls",
+      "id": "call_00_e3BLb9SXr8cw8TZQ4pLd5948",
+      "name": "get_artifact",
+      "arguments_sha256": "f12436ca11258a457f9b44d131fea8f9e2eac78204cfae32f0586a26304514ee",
+      "arguments_bytes": 62
+    },
+    {
+      "event_index": 360,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "get_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"content\": \"{\\n  \\\"research_date\\\": \\\"2026-10-27\\\",\\n  \\\"mode\\\": \\\"model_knowledge\\\",\\n  \\\"confidence\\\": \\\"medium\\\",\\n  \\\"freshness_caveat\\\": \\\"No live web search or page fetch occurred in this run. This is an OFFLINE REPLAY of seven researcher-selected official-source fact cards (S1-S7) collected by unauthenticated HTTPS on 2026-10-27, which is why mode is reported as model_knowledge rather than live. Prices are vendor-displayed USD list prices on the English pages at that date, may since have changed, and regional quotes differ. [UNKNOWN] throughout and never estimated or set to zero: third-party review and complaint themes, analyst reports, SEO/traffic/ranking data, social engagement, win-loss and market share, funding/headcount/company size, negotiated and enterprise pricing, hands-on UX testing, actual AI credit consumption. Content observations are a one-date sample of index pages, with no frequency, traffic or performance claims. Vendor claims are not independent proof, and silence in a sampled page is not evidence of an absent capability. Human review: pending.\\\",\\n  \\\"competitors\\\": [\\n\", \"start_line\": 1, \"end_line\": 6, \"total_lines\": 238, \"path\": \"[LOCAL_PATH_REDACTED]\", \"_from_draft\": true}}",
+          "tool_call_id": "call_00_e3BLb9SXr8cw8TZQ4pLd5948"
+        }
+      ]
+    },
+    {
+      "event_index": 362,
+      "type": "tool_calls",
+      "id": "call_00_LLPCzDgRFWFdNgRh9fHL1276",
+      "name": "get_artifact",
+      "arguments_sha256": "5b88d61e157e53476f54edccee0cded327498134ad6b9c0b91b1cbe1754a8359",
+      "arguments_bytes": 66
+    },
+    {
+      "event_index": 363,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "get_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"content\": \"  ],\\n  \\\"brief_note\\\": \\\"brief_markdown is an ordered array of Markdown sections; join with a blank line to render the full brief.\\\",\\n  \\\"brief_markdown\\\": [\\n    \\\"# Competitive Brief: Linear vs Asana for a 20-person software team\\\\n\\\\n**Source and retrieval date:** 2026-10-27 (corpus collection date; no system clock or live web access in this run).\\\\n**Evidence mode:** OFFLINE REPLAY of seven fixed official-source fact cards (S1-S7) collected by unauthenticated HTTPS on 2026-10-27. Cards are researcher-selected paraphrases, not full page snapshots. Collection was live at the time; this run did not search the web.\\\\n**Competitive set:** exactly two vendors, Linear then Asana. No other vendors added. No 'Your Company' column: no company positioning was supplied.\\\\n**Buyer frame:** a product manager coordinating product development and cross-functional launch planning for 20 people.\\\\n\\\\n**Human review: pending.** Not reviewed or approved by any human. Bounded desk research, not market intelligence, procurement advice, or a product test.\\\\n\\\\n## Scope, evidence rules, limitations\\\\n\\\\n- [FACT] = traceable to the named card and URL. [INFERENCE] = judgement derived from the cards. [UNKNOWN] = not established by this corpus.\\\\n- A vendor claim is not independent proof; entitlements are vendor-listed packaging, not tested behaviour [S1, S4].\\\\n- [UNKNOWN] throughout, never estimated or set to zero: third-party reviews and complaint themes, analyst reports, SEO/traffic/rankings, social engagement, win-loss and market share, funding/headcount/company size, negotiated and enterprise pricing, hands-on UX testing, actual AI credit consumption.\\\\n- Silence is not absence. A capability missing from a sampled page is not evidence the vendor lacks it; S5 explicitly warns against concluding Asana excludes software teams or Linear excludes cross-functional work.\\\\n- Content observations are a one-date sample of index pages; no frequency, traffic, ranking, sentiment or performance claim is made [S3, S6].\\\\n- Pricing basis: USD per user per month, billed annually, English pages as of 2026-10-27; taxes, discounts and usage/credit charges excluded; regional quotes differ. Plan features are not treated as equivalent.\\\\n- Nothing was sent, purchased, signed into, or drawn from private files; neither product was used.\\\",\\n    \\\"## 1. Executive Summary\\\\n\\\\n- Two centres of gravity, not two presences. [FACT S2] Linear presents a system for modern product development spanning roadmap to release. [FACT S5] Asana presents work management at organisational scale for humans and agents around shared plans and goals, addressing operations, marketing, IT and leaders. Neither excludes the other's territory: Asana lists a developer-team offering [FACT S5] and Linear sells broader intake via Asks and Zendesk/Intercom [FACT S1, S2].\\\\n- Entry-tier pricing is close; the second tier diverges. [FACT S1] Linear Basic $10 and Business $16 per user/month billed yearly. [FACT S4] Asana Starter $10.99 and Advanced $24.99 per user/month billed annually. At 20 seats over 12 months: $2,400 and $3,840 (Linear) versus $2,637.60 and $5,997.60 (Asana). The gap is $237.60 per year at entry (about 9.9%) and $2,157.60 per year at the second tier (about 56.2%). Plans are not feature-equivalent, so neither gap is a like-for-like premium.\\\\n- Both are shipping AI inside the six-month window. [FACT S3] Linear's 2026-10-22 changelog lets Loops be triggered by Slack and GitHub events, shared as templates and given reasoning levels, alongside stacked pull requests and coding-agent controls. [FACT S7] Asana's Q3 2026 release promotes prebuilt AI Teammates, cross-tool AI workflows, shared context and governance, assignment automation and planning pages. Both are vendor announcements; adoption and reliability [UNKNOWN].\\\\n- Content posture differs more than messaging. [FACT S3] Linear's index is launch, changelog, team/community, press and customer-story shaped, with engineering and AI-agent topics. [FACT S6] Asana's resource index is topic and function organised, with a demo video, research report, ebooks, calculator, templates and training, plus a release kit and webinar [FACT S7]. Cadence and performance [UNKNOWN] for both.\\\\n- Bottom line [INFERENCE]. At 20 seats the entry tiers are within about 10%, so seat price is unlikely to decide it. The choice turns on whether launches need Asana's goals, portfolios and resourcing layer [S4, S5] or Linear's development-native roadmap-to-release workflow [S2], and on which vendor's AI credit and enterprise terms are tolerable once priced. Human review: pending.\\\",\\n    \\\"## 2. Competitor Profiles\\\\n\\\\n### 2.1 Linear\\\\n\\\\n| Field | Finding |\\\\n|---|---|\\\\n| Positioning (one sentence) | [INFERENCE S2] The single system for modern product development, roadmap to release, for software-building teams. Tagline [UNKNOWN]. |\\\\n| Target audience | [INFERENCE S2] Product and engineering teams doing planning, building and release. |\\\\n| Size or stage signals | [UNKNOWN] no headcount, funding, revenue or customer-count data collected. |\\\\n| Product category | [FACT S2] Product-development system: issue tracking, cycles and planning. |\\\\n| Emphasised features | [FACT S2] Projects and initiatives, issue tracking and cycles, AI workflows and agents, analytics, mobile, customer requests, Asks. [FACT S1] Triage Intelligence, Code Intelligence, Insights, private teams and guests, Zendesk/Intercom at Business; SAML/SCIM at Enterprise. [FACT S3] Loops with Slack and GitHub triggers, shareable templates, reasoning levels. |\\\\n| Messaging themes | Roadmap to release in one system [S2]; development-native craft [S1, S2]; AI inside the workflow [S2, S3]; rigour and visibility [S1, S2]; broad intake [S1, S2]. |\\\\n| Tone and voice | [INFERENCE S3] Terse, changelog-driven, engineering-literate; concrete feature language over outcome marketing. |\\\\n| Problem framed | [INFERENCE S1, S2] Fragmented development work and requests scattered across customers and teams. |\\\\n| Claimed differentiators | Unified scope [S2]; intelligence features bundled at Business [S1]; AI native rather than bolted on [S2, S3]. Vendor claims only. |\\\\n| Public pricing approach | [FACT S1] Free $0 (unlimited members, 2 teams, 250 issues); Basic $10; Business $16; Enterprise custom annual. Coding sessions and Loops need AI credits; credit cost and enterprise price [UNKNOWN]. |\\\\n| Content formats and topics | [FACT S3] Launches, changelog, team/community, press, customer stories; engineering infrastructure and AI-agent topics. Cadence, SEO, engagement [UNKNOWN]. |\\\\n| Strengths | Coherent single-system story [S2]; open free tier and clear ladder [S1]; visible shipping in the last six months [S3]. |\\\\n| Weaknesses (evidence-bounded) | Cross-functional launch artefacts not evidenced in sampled cards, adequacy [UNKNOWN] not disproven; AI credit and enterprise cost unquantified [S1]; review themes [UNKNOWN]. |\\\\n| Recurring public review complaints | [UNKNOWN] not found; no review sources in corpus, none fetched by design. |\\\\n\\\\n### 2.2 Asana\\\\n\\\\n| Field | Finding |\\\\n|---|---|\\\\n| Positioning (one sentence) | [INFERENCE S5] Work management at organisational scale, where humans and agents coordinate critical cross-functional workflows around shared plans and goals. Tagline [UNKNOWN]. |\\\\n| Target audience | [FACT S5] Cross-functional functions (operations, marketing, IT) and leaders; a developer-team offering is also listed. |\\\\n| Size or stage signals | [UNKNOWN] no headcount, funding, revenue or customer-count data collected. |\\\\n| Product category | [FACT S5] Work management platform with multiple product families: agentic work management, service/client management, developer teams. |\\\\n| Emphasised features | [FACT S4] Starter: timeline/Gantt, dashboards, automations, forms, custom fields, free guests. Advanced adds portfolios, goals, portfolio resource management, approvals/proofing, time tracking. AI Teammates and Dash five requests per user/month capped at 50 per account; AI Studio 50K/75K credits per billing account/month. [FACT S7] Cross-tool AI workflows, shared context and governance, assignment automation, planning pages. |\\\\n| Messaging themes | Organisational scale and coordination [S5]; humans plus agents in shared plans [S5, S7]; shared context and goals [S4, S5]; governance for AI rollout [S7]; function-specific relevance [S5, S6]. |\\\\n| Tone and voice | [INFERENCE S5, S6, S7] Enterprise register: outcome, scale and governance language with multiple evaluation formats. |\\\\n| Problem framed | [INFERENCE S5, S7] Work sprawls across teams and tools so leaders lack visibility, and ungoverned AI adoption adds risk. |\\\\n| Claimed differentiators | Breadth across functions and product families [S5]; goals, portfolios and resourcing in a published tier [S4]; prebuilt AI Teammates with governance [S7]. Vendor claims only. |\\\\n| Public pricing approach | [FACT S4] Personal $0 (2 users); Starter $10.99; Advanced $24.99; Enterprise quote [UNKNOWN]. AI request caps and AI Studio credits published; overage and add-ons [UNKNOWN]. |\\\\n| Content formats and topics | [FACT S6] Topics: work management, project planning, workflow automation, AI at work, strategic planning, team growth/focus; organised for marketing, operations, IT. Formats: demo video, research report, ebooks, calculator, templates, training. [FACT S7] Release kit and webinar. Cadence, SEO, engagement [UNKNOWN]. |\\\\n| Strengths | Cross-functional reach [S5]; goals, portfolios, resourcing and proofing at Advanced [S4]; explicit AI governance narrative [S7]; multiple evaluation formats [S6, S7]. |\\\\n| Weaknesses (evidence-bounded) | Higher published prices than Linear at both paid tiers, plans not equivalent [S1, S4]; AI caps with unquantified overage [S4]; enterprise price opaque [S4]; engineering depth not evidenced [UNKNOWN]; review themes [UNKNOWN]. |\\\\n| Recurring public review complaints | [UNKNOWN] not found; no review sources in corpus, none fetched by design. |\\\",\\n    \\\"## 3. Messaging Comparison Matrix\\\\n\\\\nTwo vendors only; the 'Your Company' column is omitted because no company positioning was supplied.\\\\n\\\\n| Dimension | Linear | Asana | Evidence |\\\\n|---|---|---|---|\\\\n| One-line positioning | System for modern product development, roadmap to release | Work management at organisational scale for humans and agents | S2 / S5 (paraphrase) |\\\\n| Primary audience | Product and engineering teams | Ops, marketing, IT, leaders; also developer teams | INFERENCE S2 / FACT S5 |\\\\n| Category label | Product development system | Work management platform, multi-product | FACT S2 / FACT S5 |\\\\n| Core value proposition | One build-to-release system with AI in the workflow | One shared operating layer for cross-functional plans, goals and governed AI | INFERENCE S2 / S5, S7 |\\\\n| Verbatim tagline | [UNKNOWN] | [UNKNOWN] | Cards hold paraphrases only |\\\\n| Theme 1 | Roadmap-to-release integration | Organisational scale and coordination | S2 / S5 |\\\\n| Theme 2 | Development-native craft | Humans plus AI agents in shared plans | S1, S2 / S5, S7 |\\\\n| Theme 3 | AI inside the workflow | Shared context, plans and goals | S2, S3 / S4, S5 |\\\\n| Theme 4 | Insight and admin control | Governance for AI at scale | S1, S2 / S7 |\\\\n| Theme 5 | Broad intake via Asks and integrations | Function-specific relevance and product families | S1, S2 / S5, S6 |\\\\n| Tone | Terse, engineering-literate, changelog-led | Enterprise, outcome and governance oriented | INFERENCE S3 / S5-S7 |\\\\n| Problem framed | Fragmented development work, scattered requests | Sprawling cross-functional work, ungoverned AI | INFERENCE |\\\\n| Proof style | Entitlement lists, changelog, customer stories | Product families, research report, calculator, demo, webinar | S1, S3 / S5-S7 |\\\\n| AI narrative | Embedded in developer workflow; credits for coding sessions and Loops | AI Teammates with request caps, credits, governance | S1-S3 / S4, S7 |\\\\n| Pricing story | Ladder from $10 with an unlimited-member free tier | Ladder from $10.99 with a two-user free tier, goals at Advanced | S1 / S4 |\\\\n| Explicitly unstated | Cross-functional launch artefacts, enterprise price, credit cost | Engineering-native depth, overage cost, enterprise price | [UNKNOWN] |\\\",\\n    \\\"## 4. Product and Feature Comparison\\\\n\\\\nOnly what the cards support. 'Not evidenced in the sampled cards' means a gap in this corpus, not a missing capability.\\\\n\\\\n| Area | Linear | Asana | Evidence |\\\\n|---|---|---|---|\\\\n| Planning constructs | Projects and initiatives | Portfolios, goals, portfolio resource management (Advanced) | S2 / S4 |\\\\n| Execution | Issue tracking and cycles | Tasks/projects, timeline/Gantt, custom fields, forms | S2 / S4 |\\\\n| Intake and requests | Asks, customer requests, Zendesk/Intercom (Business) | Forms, free guests, service/client management family | S1, S2 / S4, S5 |\\\\n| AI capabilities | AI workflows and agents; Triage and Code Intelligence; Loops with Slack/GitHub triggers, templates, reasoning levels | AI Teammates and Dash (5 requests/user/month, 50/account); AI Studio 50K/75K credits; cross-tool AI workflows; shared context and governance | S1-S3 / S4, S7 |\\\\n| AI cost mechanics | Coding sessions and Loops need credits; rates [UNKNOWN] | Request caps and credit allowances published; overage [UNKNOWN] | S1 / S4 |\\\\n| Reporting | Analytics, Insights | Dashboards | S1, S2 / S4 |\\\\n| Approvals and proofing | Not evidenced in sampled cards [UNKNOWN] | Advanced | [UNKNOWN] / S4 |\\\\n| Time tracking | Not evidenced in sampled cards [UNKNOWN] | Advanced | [UNKNOWN] / S4 |\\\\n| Automation | Coding-agent controls, Loops triggers | Automations, assignment automation | S3 / S4, S7 |\\\\n| Mobile | Listed | Not evidenced in sampled cards [UNKNOWN] | S2 / [UNKNOWN] |\\\\n| Admin and security | Admin roles; SAML/SCIM and controls at Enterprise | Governance emphasis; SSO/SCIM specifics not in corpus | S1 / S7, [UNKNOWN] |\\\\n| Free tier limits | Unlimited members, 2 teams, 250 issues | 2 users, unlimited tasks/projects | S1 / S4 |\\\\n| Team constructs | Basic 5 teams; Business unlimited teams, private teams and guests | Free guests on Starter; seat-based pricing on all paid tiers | S1 / S4 |\\\\n\\\\nReading caution [INFERENCE]: the products do not map one-to-one. Linear gates on teams, issues and intelligence features [S1]; Asana on planning, resourcing constructs and AI allowances [S4]. Comparing 'the same tier' across vendors would mislead.\\\",\\n    \\\"## 5. Pricing and Packaging\\\\n\\\\nVendor-displayed USD per user per month, billed annually, English pages retrieved 2026-10-27; excludes taxes, discounts, usage charges and AI credit purchases.\\\\n\\\\n| Vendor | Plan | USD/user/month (annual) | 20 seats x 12 months | Arithmetic | Basis and notes |\\\\n|---|---|---|---|---|---|\\\\n| Linear | Basic | 10.00 | **$2,400.00** | 10.00 x 20 x 12 | 5 teams, unlimited issues and uploads, admin roles, Loops [S1] |\\\\n| Linear | Business | 16.00 | **$3,840.00** | 16.00 x 20 x 12 | Unlimited teams, private teams/guests, Triage and Code Intelligence, Insights, Asks, Zendesk/Intercom [S1] |\\\\n| Linear | Enterprise | [UNKNOWN] custom | [UNKNOWN] | n/a | Annual billing, SAML/SCIM and additional controls/support [S1] |\\\\n| Linear | Free (not a paid plan) | 0 | $0 | n/a | Unlimited members, 2 teams, 250 issues [S1] |\\\\n| Asana | Starter | 10.99 | **$2,637.60** | 10.99 x 20 x 12 | Timeline/Gantt, dashboards, automations, forms, custom fields, free guests [S4] |\\\\n| Asana | Advanced | 24.99 | **$5,997.60** | 24.99 x 20 x 12 | Adds portfolios, goals, portfolio resource management, approvals/proofing, time tracking [S4] |\\\\n| Asana | Enterprise | [UNKNOWN] quote | [UNKNOWN] | n/a | Requires a sales quote [S4] |\\\\n| Asana | Personal (not a paid plan) | 0 | $0 | n/a | 2 users, unlimited tasks/projects [S4] |\\\\n\\\\nDeltas at 20 seats per year [INFERENCE, arithmetic only]: entry tier $2,637.60 minus $2,400.00 = **$237.60** (about +9.9%); second tier $5,997.60 minus $3,840.00 = **$2,157.60** (about +56.2%).\\\\n\\\\nPackaging cautions:\\\\n\\\\n- Not feature-equivalent. Linear Business includes code and triage intelligence not listed on Asana tiers; Asana Advanced includes goals, portfolios, resourcing, proofing and time tracking not listed on Linear's page [S1, S4]. Neither list proves absence on the other side; the delta is a price difference, not a value judgement.\\\\n- AI consumption is a separate unpriced variable for both: Linear requires credits for coding sessions and Loops [S1]; Asana caps requests and publishes credit allowances [S4]. Overage, add-ons and actual consumption cost are [UNKNOWN] and must be obtained in writing before budgeting.\\\\n- Enterprise tiers are [UNKNOWN] for both [S1, S4]. No total cost of ownership is asserted.\\\\n- Assumption: 20 seats at full list price for 12 months. Part-year seats, guest users, mixed tiers and negotiated discounts are out of scope.\\\",\\n    \\\"## 6. Content Gap Analysis\\\\n\\\\nHypotheses about the sampled pages on 2026-10-27, not established absences across either vendor's content estate; no keyword or traffic evidence supports them.\\\\n\\\\n| # | Hypothesis | Basis | Validation needed |\\\\n|---|---|---|---|\\\\n| H1 | Neither sampled index is organised around a small software team's real job: one launch with engineering plus marketing and ops dependencies. Linear skews to engineering infrastructure and AI agents [S3]; Asana to functions and general work management [S6]. | FACT S3, S6 + INFERENCE | Page inventory and keyword research |\\\\n| H2 | Linear-side gap hypothesis: cross-functional launch artefacts appear in Asana's cards [S4, S5] but not in Linear's sampled cards [S1, S2]. | FACT S1, S2, S4, S5 | Check Linear docs and changelog for goals, resourcing, approvals |\\\\n| H3 | Asana-side gap hypothesis: engineering-native depth is absent from Asana's sampled cards even though a developer-team offering is listed [S5]. | FACT S1, S4, S5 | Review Asana developer-team pages |\\\\n| H4 | Cost predictability is under-explained on both sides: credits and caps stated, overage and consumption pricing not [S1, S4]. | FACT S1, S4 | Vendor AI pricing pages or written quotes |\\\\n| H5 | Evaluation-format asymmetry: Asana shows demo video, calculator, research report, templates, training and a webinar [S6, S7]; Linear's sample shows changelog, launch, community, press and customer stories [S3]. | FACT S3, S6, S7 + INFERENCE | Confirm whether Linear hosts demos or ROI tools elsewhere |\\\\n\\\\nNot claimed: keyword gaps, share of voice, content volume, publishing frequency, traffic, rankings, or that any vendor lacks a topic site-wide.\\\",\\n    \\\"## 7. Opportunities\\\\n\\\\nNo company positioning was supplied, so these are evaluation and decision opportunities for the PM's team, not market-entry opportunities for an unnamed vendor. A market-facing opportunity analysis would require company positioning, which is [UNKNOWN].\\\\n\\\\n1. Negotiate on workflow fit, not sticker price [INFERENCE]. The entry-tier gap is about 9.9% ($2,400 versus $2,637.60), small relative to the cost of a launch failing on handoffs [S1, S4].\\\\n2. Buy the cross-functional layer only where needed [INFERENCE]. If launches need goals, resourcing and proofing, Asana Advanced is the only plan in this corpus publishing them [S4], but it costs $2,157.60 more per year at 20 seats than Linear Business.\\\\n3. Use AI credit terms as an evaluation lever [INFERENCE]. Both vendors leave overage unquantified [S1, S4]; asking for written credit economics is a cheap way to expose total cost before commitment.\\\\n4. Use free tiers for low-risk familiarisation only [INFERENCE]. Linear Free allows unlimited members, 2 teams and 250 issues [S1]; Asana Personal allows 2 users [S4]. Neither supports a 20-person trial, so a paid or sales-supported pilot is needed.\\\\n5. A single-platform pilot is commercially feasible at 20 seats [INFERENCE]. Linear Basic covers five teams [S1] and Asana Starter covers 20 seats at list [S4], subject to validating entitlements not evidenced here.\\\\n\\\\n## 8. Threats\\\\n\\\\n1. Cost creep through AI consumption [FACT S1, S4]. AI is metered by credits or request caps whose overage is unquantified; budgets built on seat price alone risk understating spend.\\\\n2. Expansion-driven tier ladders [INFERENCE S1, S4]. Linear gates teams and intelligence by tier; Asana gates goals, portfolios, resourcing, proofing and time tracking to Advanced, so later needs are a step change not a marginal increase.\\\\n3. Roadmap volatility [FACT S3, S7]. Both shipped AI changes within six months; this comparison may age within a quarter.\\\\n4. Opaque enterprise tier [FACT S1, S4]. SAML/SCIM and additional controls sit behind Linear Enterprise; Asana Enterprise requires a quote, so published prices stop applying if procurement triggers them.\\\\n5. Change-management burden [INFERENCE S5]. An organisation-scale platform may impose admin overhead disproportionate to 20 people; hypothesis to test, not a measured finding.\\\\n6. Evidence risk in this brief itself. Seven paraphrased cards from one date, no independent reviews, no traffic or SEO data, no hands-on testing, no win-loss data. Decisions made solely on this brief carry documented information risk.\\\\n7. Mutual encroachment [INFERENCE S1, S5]. Asana lists a developer-team offering while Linear sells cross-functional intake via Asks and Zendesk/Intercom, so differentiation may narrow.\\\",\\n    \\\"## 9. Recommended Actions\\\\n\\\\nFive actions; the first three are quick wins, the last two longer-term.\\\\n\\\\nQuick wins (roughly one to two weeks each)\\\\n\\\\n1. Build a 20-seat cost model with unknowns explicit. Use the four published prices and the arithmetic in section 5, then open two lines for AI credit consumption and enterprise uplift. Send both vendors a written request for credit and overage terms and enterprise banding. Owner: PM with finance. Success: no unknown silently set to zero. Evidence S1, S4.\\\\n2. Score the team's real launch workflow before any demo. Write the actual cross-functional launch checklist (brief, dependencies, approvals, resourcing, reporting, intake) and mark each row evidenced-in-corpus versus must-be-demonstrated, so no marketing page is read as a capability. Evidence S1, S2, S4, S5.\\\\n3. Split the 20 seats by need rather than preference. Separate seats needing cross-functional views (goals, portfolios, resourcing, proofing) from those needing build views (issues, cycles, triage), map each subset to a published tier without assuming equivalence, and flag subsets with no evidenced home. Evidence S1, S4.\\\\n\\\\nLonger-term (roughly one to two quarters)\\\\n\\\\n4. Decide single-platform versus two-tool with integration cost priced. Weigh Linear-for-build plus Asana-for-launch against one platform, including the touchpoints the cards actually name (Slack and GitHub triggers [S3]; Zendesk/Intercom [S1]) plus admin overhead and duplicate-record risk.\\\\n5. Set an AI governance and budget policy before choosing a tier. Agree who may spend credits, which work agents may touch and what control evidence is required, then check it against what each vendor publishes (Linear admin roles and enterprise controls [S1]; Asana shared context and governance [S7]). Refresh this brief quarterly given the shipping pace [S3, S7].\\\\n\\\\n## 10. Optional follow-up choices (not executed)\\\\n\\\\nNone of the following was performed; offered for the reviewer to select.\\\\n\\\\n- A. Decision scorecard: turn sections 3 to 5 into a weighted matrix for the 20-seat evaluation, keeping must-be-demonstrated rows separate.\\\\n- B. Vendor question pack: written questions on AI credit consumption and overage, enterprise banding, SSO/SCIM, migration and data residency.\\\\n- C. Corroboration round: extend beyond official pages to third-party reviews, analyst commentary and community discussion, all [UNKNOWN] here, in a new dated collection run.\\\\n- D. Pilot design: a two-week structured trial of both products on one real launch, with rubric and exit criteria. This brief contains no product testing.\\\\n- E. Positioning draft: requires company positioning input, which is absent; without it any messaging recommendation would be invented.\\\\n- F. Monitoring brief: track both vendors' pricing and what's-new/changelog pages for changes to AI credit terms, entitlements and enterprise packaging.\\\",\\n    \\\"## Appendix A: Unknowns register\\\\n\\\\n| Unknown | Why | How to close |\\\\n|---|---|---|\\\\n| Linear and Asana Enterprise prices | Both require quotes [S1, S4] | Written quotes |\\\\n| AI credit, overage, add-on and consumption cost | Not quantified [S1, S4] | Vendor pages or quotes |\\\\n| Review themes, complaints, sentiment | No review sources; not fetched by design | Separate third-party collection |\\\\n| SEO rankings, traffic, share of voice | No SEO or traffic tools | Paid database, new run |\\\\n| Social engagement, community size | No social listening data | New collection run |\\\\n| Company size, funding, headcount, revenue | Not collected | Separate company research |\\\\n| Market share, win rates, ROI evidence | Not collected | Analyst or CRM data outside this brief |\\\\n| Verbatim taglines | Cards paraphrase | Direct page capture |\\\\n| Publishing frequency, content performance | Single-date index sample [S3, S6] | Longitudinal capture |\\\\n| Comparative usability, implementation quality | No hands-on testing performed | Structured pilot |\\\\n\\\\n## Appendix B: Sources actually used\\\\n\\\\n| Card | URL | Retrieved | Used for |\\\\n|---|---|---|---|\\\\n| S1 | https://linear.app/pricing | 2026-10-27 | Linear tiers, prices, entitlements, AI credits |\\\\n| S2 | https://linear.app/features | 2026-10-27 | Linear positioning and features |\\\\n| S3 | https://linear.app/now | 2026-10-27 | Linear content structure and recent developments |\\\\n| S4 | https://asana.com/pricing | 2026-10-27 | Asana tiers, prices, entitlements, AI caps and credits |\\\\n| S5 | https://asana.com/product | 2026-10-27 | Asana positioning, audience, product families |\\\\n| S6 | https://asana.com/resources | 2026-10-27 | Asana content topics and formats |\\\\n| S7 | https://asana.com/whats-new | 2026-10-27 | Asana recent developments |\\\\n\\\\nAll seven cards were used. No other URL was visited or inferred in this run.\\\\n\\\\n**Human review: pending.** No approval given or implied; nothing was sent to any vendor; no purchase, sign-in or private data use at any point.\\\"\\n  ]\\n}\", \"start_line\": 224, \"end_line\": 238, \"total_lines\": 238, \"path\": \"[LOCAL_PATH_REDACTED]\", \"_from_draft\": true}}",
+          "tool_call_id": "call_00_LLPCzDgRFWFdNgRh9fHL1276"
+        }
+      ]
+    },
+    {
+      "event_index": 370,
+      "type": "tool_calls",
+      "id": "call_00_DuGoRuMYvYg6tZNANGKa2153",
+      "name": "search_file_resource",
+      "arguments_sha256": "e1e6c5317fd11c84feef06bc626938ffd8a8a82aa3ee84fae637b86881925160",
+      "arguments_bytes": 246
+    },
+    {
+      "event_index": 371,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "search_file_resource",
+          "result": "{\"ok\": false, \"value\": \"unsupported attachment type: .draft\"}",
+          "tool_call_id": "call_00_DuGoRuMYvYg6tZNANGKa2153"
+        }
+      ]
+    },
+    {
+      "event_index": 374,
+      "type": "tool_calls",
+      "id": "call_00_5KX5DIGxcCaEfSVYmXFp9544",
+      "name": "get_artifact",
+      "arguments_sha256": "2392e07bc9f83a67bfc5e7a83815aeddb01ed32b2ad62e1514d7eb7f94f92c2a",
+      "arguments_bytes": 65
+    },
+    {
+      "event_index": 375,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "get_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"content\": \"          \\\"retrieved\\\": \\\"2026-10-27\\\",\\n          \\\"supports\\\": \\\"Tiers, annual per-user prices, entitlements, AI credit requirement, unquantified enterprise price\\\"\\n        },\\n        {\\n          \\\"card_id\\\": \\\"S2\\\",\\n          \\\"url\\\": \\\"https://linear.app/features\\\",\\n          \\\"retrieved\\\": \\\"2026-10-27\\\",\\n          \\\"supports\\\": \\\"Roadmap-to-release positioning and feature scope\\\"\\n        },\\n\", \"start_line\": 96, \"end_line\": 104, \"total_lines\": 238, \"path\": \"[LOCAL_PATH_REDACTED]\", \"_from_draft\": true}}",
+          "tool_call_id": "call_00_5KX5DIGxcCaEfSVYmXFp9544"
+        }
+      ]
+    },
+    {
+      "event_index": 376,
+      "type": "tool_calls",
+      "id": "call_00_ET_aChWrmWjsShXsymw7A9H4758",
+      "name": "get_artifact",
+      "arguments_sha256": "6a5160c0fbe742797ca764a08931c81787c17231138098f7ccfba9d83d5e0ba4",
+      "arguments_bytes": 66
+    },
+    {
+      "event_index": 377,
+      "type": "tool_results",
+      "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+      "tool_results": [
+        {
+          "name": "get_artifact",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"key\": \"competitor_research\", \"content\": \"          \\\"card_id\\\": \\\"S3\\\",\\n          \\\"url\\\": \\\"https://linear.app/now\\\",\\n          \\\"retrieved\\\": \\\"2026-10-27\\\",\\n          \\\"supports\\\": \\\"Content structure, topics, October 2026 developments\\\"\\n        }\\n      ]\\n    },\\n    {\\n      \\\"name\\\": \\\"Asana\\\",\\n      \\\"overview\\\": {\\n\", \"start_line\": 106, \"end_line\": 115, \"total_lines\": 238, \"path\": \"[LOCAL_PATH_REDACTED]\", \"_from_draft\": true}}",
+          "tool_call_id": "call_00_ET_aChWrmWjsShXsymw7A9H4758"
+        }
+      ]
+    }
+  ]
+}
