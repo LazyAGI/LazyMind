@@ -20,9 +20,9 @@ import { getLocalizedErrorMessage } from "@/components/request";
 import {
   deleteEpisode,
   getEpisode,
-  listEpisodes,
   type EpisodeRecord,
 } from "../../episodeApi";
+import { createEpisodePager } from "../../episodePagination";
 import { sortEpisodesByRecordedTime } from "../../episodeViewModel";
 import { getMemorySourceLabelKey } from "../../memorySourceLabels";
 
@@ -54,6 +54,8 @@ export default function EpisodeMemorySection() {
   const [episodes, setEpisodes] = useState<EpisodeRecord[]>([]);
   const [totalSize, setTotalSize] = useState(0);
   const [pageIndex, setPageIndex] = useState(0);
+  const [displayedPageIndex, setDisplayedPageIndex] = useState(0);
+  const [pager] = useState(() => createEpisodePager(PAGE_SIZE));
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -68,17 +70,20 @@ export default function EpisodeMemorySection() {
 
     setLoading(true);
     setLoadError("");
-    void listEpisodes({
-      pageSize: PAGE_SIZE,
-      page: pageIndex + 1,
-    })
+    void pager.load(pageIndex + 1)
       .then((page) => {
         if (ignore) {
           return;
         }
+        const lastPageIndex = Math.max(0, Math.ceil(page.totalSize / PAGE_SIZE) - 1);
+        if (pageIndex > lastPageIndex) {
+          setPageIndex(lastPageIndex);
+          return;
+        }
         setEpisodes(sortEpisodesByRecordedTime(page.items));
         setTotalSize(page.totalSize);
-        setPageIndex(current => Math.min(current, Math.max(0, Math.ceil(page.totalSize / PAGE_SIZE) - 1)));
+        setDisplayedPageIndex(pageIndex);
+        setLoading(false);
       })
       .catch((error) => {
         if (ignore) {
@@ -86,17 +91,13 @@ export default function EpisodeMemorySection() {
         }
         console.error("Load Episode memory failed:", error);
         setLoadError(getLocalizedErrorMessage(error));
-      })
-      .finally(() => {
-        if (!ignore) {
-          setLoading(false);
-        }
+        setLoading(false);
       });
 
     return () => {
       ignore = true;
     };
-  }, [pageIndex, reloadKey]);
+  }, [pageIndex, reloadKey, pager]);
 
   const formatDateTime = useCallback(
     (timestampMs: number) =>
@@ -171,12 +172,15 @@ export default function EpisodeMemorySection() {
     setDeletingIds((current) => new Set(current).add(episode.id));
     try {
       await deleteEpisode(episode.id);
+      pager.clearCursors();
       setEpisodes((current) =>
         current.filter((item) => item.id !== episode.id),
       );
       setTotalSize((current) => Math.max(0, current - 1));
       if (episodes.length === 1 && pageIndex > 0) {
         setPageIndex((current) => Math.max(0, current - 1));
+      } else {
+        setReloadKey((value) => value + 1);
       }
       if (detail?.id === episode.id) {
         setDetailOpen(false);
@@ -215,7 +219,7 @@ export default function EpisodeMemorySection() {
         </span>
       </div>
 
-      {loading ? (
+      {loading && !episodes.length ? (
         <div className="memory-episode-loading" aria-busy="true">
           <Skeleton active paragraph={{ rows: 3 }} />
         </div>
@@ -241,7 +245,7 @@ export default function EpisodeMemorySection() {
         />
       ) : (
         <>
-          <div className="memory-episode-list">
+          <div className="memory-episode-list" aria-busy={loading}>
             {episodes.map((episode) => {
               const tone = getEpisodeTypeTone(episode.episodeType);
               const deleting = deletingIds.has(episode.id);
@@ -297,7 +301,7 @@ export default function EpisodeMemorySection() {
                       aria-label={t("admin.memoryEpisodeDelete")}
                       className="memory-episode-delete"
                       danger
-                      disabled={deleting}
+                      disabled={loading || deleting}
                       icon={<DeleteOutlined />}
                       loading={deleting}
                       size="small"
@@ -310,10 +314,10 @@ export default function EpisodeMemorySection() {
           </div>
 
           <MemoryPagination
-            page={pageIndex + 1}
+            page={displayedPageIndex + 1}
             pageSize={PAGE_SIZE}
             total={totalSize}
-            disabled={loading}
+            disabled={loading || deletingIds.size > 0}
             label={t("admin.memoryEpisodeTitle")}
             onChange={page => setPageIndex(page - 1)}
           />
