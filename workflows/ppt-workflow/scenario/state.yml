@@ -179,6 +179,25 @@ steps:
       - Optional additional web/image research has a six-call budget. Required source
       pagination, full-text reads and PR-description reads are exempt. Stop optional
       research when the gap is filled. Never claim exhaustive coverage after truncation.
+      - Web search works without an API key through default Keenable; a configured
+      user provider takes priority. Do not ask new users to configure search before
+      trying the available tool. On partial/unavailable results or a single search
+      error, continue other research and retain the query, reason and missing evidence
+      in material_summary. Wikipedia fallback supplies background only; it cannot
+      verify current facts, quantitative updates or real photos. Do not invent them.
+      - If an indispensable source remains unavailable because search is unavailable,
+      first publish the collected evidence and missing queries in material_summary,
+      then call ppt_request_search_configuration when offered with the actual failure (rate limit,
+      exhausted quota, invalid key or network error) and missing required evidence.
+      Stop after its dependency error: the host shows configuration and resumes this
+      original task after setup. Preserve collected sources; after configuration retry
+      only missing searches. Never request API keys in chat. For a source that simply
+      has no matching results, ask for a replacement or omission in material_clarification.
+      In an external runtime without that configuration tool, put the failure and
+      /settings?section=knowledge&tool=web-search in material_clarification instead;
+      request configuration and continuation of this same task, preserving gathered evidence.
+      Optional missing materials must not stop the workflow: mark them in the summary,
+      relevant slide/notes and final delivery, with no fabricated claims or citations.
       - Templates are visual references unless the user also designated their content
       as evidence. Follow the template's page-specific collection plan. Do not use
       sample charts, sample metrics or placeholder achievements as source facts.
@@ -293,6 +312,7 @@ steps:
       - kb
       - knowledge_management
       - web_search
+      - ppt_request_search_configuration
       - wikipedia
       - ppt_search_web_images
       - ppt_search_assets

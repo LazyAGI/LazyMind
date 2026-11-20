@@ -767,101 +767,6 @@ _IMAGE_URL_KEYS = (
 )
 
 
-def _is_image_url(value: str) -> bool:
-    lower = value.lower()
-    if not lower.startswith(('http://', 'https://')):
-        return False
-    extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg')
-    return any(ext in lower for ext in extensions) or any(
-        token in lower for token in ('image', 'img', 'photo', 'pic')
-    )
-
-
-def _collect_image_urls(node: Any, urls: list[str], seen: set[str]) -> None:
-    if isinstance(node, dict):
-        for key in _IMAGE_URL_KEYS:
-            value = node.get(key)
-            if isinstance(value, str) and _is_image_url(value) and value not in seen:
-                seen.add(value)
-                urls.append(value)
-        for value in node.values():
-            _collect_image_urls(value, urls, seen)
-    elif isinstance(node, list):
-        for value in node:
-            _collect_image_urls(value, urls, seen)
-
-
-def _tavily_image_urls(query: str, count: int) -> list[str]:
-    engine = TavilySearch()
-    if not engine.__key_source__():
-        return []
-    try:
-        results = engine.search(query, include_images=True, max_results=count)
-    except Exception as exc:
-        LOG.warning('[Writer] Tavily image search failed: %s', type(exc).__name__)
-        return []
-    urls: list[str] = []
-    seen: set[str] = set()
-    for item in results or []:
-        for image in (item.get('extra') or {}).get('images') or []:
-            if isinstance(image, str) and _is_image_url(image) and image not in seen:
-                seen.add(image)
-                urls.append(image)
-    return urls[:count]
-
-
-def _bocha_image_urls(query: str, count: int) -> list[str]:
-    engine = BochaSearch()
-    if not engine.__key_source__():
-        return []
-    try:
-        response = engine._request(
-            'POST',
-            f'{engine._base_url}/v1/web-search',
-            headers={'Content-Type': 'application/json'},
-            json={'query': query, 'count': min(max(count, 1), 20)},
-            timeout=engine._timeout,
-        )
-        payload = response.json()
-    except Exception as exc:
-        LOG.warning('[Writer] Bocha image search failed: %s', type(exc).__name__)
-        return []
-    urls: list[str] = []
-    _collect_image_urls(payload, urls, set())
-    return urls[:count]
-
-
-def _pick_search_engine() -> Any | None:
-    for search_type in (GoogleSearch, BingSearch, BochaSearch, TavilySearch, KeenableSearch):
-        try:
-            engine = search_type()
-            if engine.__key_source__():
-                return engine
-        except Exception:
-            continue
-    return None
-
-
-def _fallback_image_urls(query: str, count: int) -> list[str]:
-    engine = _pick_search_engine()
-    if engine is None:
-        return []
-    try:
-        results = engine.search(f'{query} reference image illustration')
-    except Exception as exc:
-        LOG.warning(
-            '[Writer] %s image search failed: %s',
-            type(engine).__name__,
-            type(exc).__name__,
-        )
-        return []
-    return [
-        str(item.get('url') or '').strip()
-        for item in results or []
-        if _is_image_url(str(item.get('url') or '').strip())
-    ][:count]
-
-
 def acquire_web_search_resources(request: Mapping[str, Any]) -> list[dict]:
     purpose = str(request.get('purpose') or '').strip()
     query = ' '.join(
@@ -869,11 +774,10 @@ def acquire_web_search_resources(request: Mapping[str, Any]) -> list[dict]:
         for part in (str(request.get('visual_type') or '').strip(), purpose)
         if part
     )
-    urls = _tavily_image_urls(query, 5)
-    if not urls:
-        urls = _bocha_image_urls(query, 5)
-    if not urls:
-        urls = _fallback_image_urls(query, 5)
+    from lazymind.chat.engine.tools.infra.image_workflow_support import _search_image_candidates
+    diagnostics: dict = {}
+    urls = _search_image_candidates(query, 5, diagnostics=diagnostics)
+    sources = {item['url']: item for item in diagnostics.get('image_sources', [])}
     instruction_id = str(request.get('instruction_id') or uuid.uuid4().hex)
     return [
         {
@@ -882,7 +786,8 @@ def acquire_web_search_resources(request: Mapping[str, Any]) -> list[dict]:
             'uri': url,
             'title': purpose or url,
             'summary': purpose,
-            'meta': {'source_type': 'web_search', 'semantic_status': 'unverified'},
+            'meta': {'source_type': 'web_search', 'semantic_status': 'unverified',
+                     'source_metadata': sources.get(url, {})},
         }
         for index, url in enumerate(urls, start=1)
     ]

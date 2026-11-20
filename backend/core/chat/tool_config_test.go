@@ -195,6 +195,19 @@ func TestSearchToolConfigEntryFallsBackToSharedSelection(t *testing.T) {
 	}
 }
 
+func TestSearchToolConfigEntryDefaultsToPublicThenUsesUserSelection(t *testing.T) {
+	db := setupToolConfigTestDB(t)
+	entry, err := searchToolConfigEntry(t.Context(), db, "user-1")
+	if err != nil || len(entry) != 1 || entry["keenable"] != "public" {
+		t.Fatalf("expected built-in public search, got %v, err=%v", entry, err)
+	}
+	seedSelectedSearchTool(t, db, "user-1", "Tavily", "group-user", "user-key", false)
+	entry, err = searchToolConfigEntry(t.Context(), db, "user-1")
+	if err != nil || len(entry) != 1 || entry["tavily"] != "user-key" {
+		t.Fatalf("user selection must replace default, got %v, err=%v", entry, err)
+	}
+}
+
 func TestAcademicSearchToolConfigEntryUsesSelectedSciverseDatasource(t *testing.T) {
 	db := setupToolConfigTestDB(t)
 	seedSelectedToolProvider(t, db, "user-1", "Sciverse", "group-sciverse-datasource", "datasource-key", datasourceProviderCategory, datasourceProviderCategory, false)

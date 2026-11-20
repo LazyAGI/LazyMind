@@ -2249,7 +2249,7 @@ const enUS = {
       keylessTranslationNote: "This source needs no key. Enabling it sends text to the third-party service; web endpoints may be rate limited or change.",
       enableTranslationSource: "Enable this translation source",
       enableKeylessSearch: "Enable Keenable without an API key",
-      keylessSearchNote: "Keenable works without an API key on the public search endpoint. You can add a key later for higher limits. Existing Google, Bing, Bocha or Tavily selections are unchanged until you enable Keenable.",
+      keylessSearchNote: "Keenable public search is available by default without an API key. Your configured search service takes priority. Add a Keenable key for higher limits. If the default service fails, Wikipedia supplies background knowledge only.",
       saveTranslationCredential: "Save translation credentials",
       keyPlaceholder: "Enter a new API Key",
       googleSearchEngineId: "Search Engine ID",

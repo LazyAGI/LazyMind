@@ -2212,7 +2212,7 @@ const zhCN = {
       keylessTranslationNote: "该翻译源无需密钥。启用后，待翻译文本会发送到对应的第三方服务；网页接口可能限流或变更。",
       enableTranslationSource: "启用此翻译源",
       enableKeylessSearch: "无需 API Key 启用 Keenable",
-      keylessSearchNote: "Keenable 可不填写 API Key，直接使用公开检索接口。之后也可以补上 Key 以获得更高额度。启用前，已配置的 Google、Bing、博查或 Tavily 不会被替换。",
+      keylessSearchNote: "未配置搜索服务时，默认使用 Keenable 公开检索接口，无需 API Key。已配置的搜索服务优先使用；也可为 Keenable 添加 Key 以提高额度。默认服务不可用时仅用 Wikipedia 补充背景知识。",
       saveTranslationCredential: "保存翻译凭据",
       keyPlaceholder: "输入新的 API秘钥",
       googleSearchEngineId: "Search Engine ID",
