@@ -606,6 +606,21 @@ describe("RecordList conversation pinning", () => {
     else expect(onRemove).not.toHaveBeenCalled();
   });
 
+  it("shows the fork source in the recent list even when only the detail contains it", async () => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [olderConversation] } });
+    let resolveDetail!: (value: unknown) => void;
+    mocks.getConversationDetail.mockImplementationOnce(() => new Promise(resolve => { resolveDetail = resolve; }));
+    renderRecordList();
+    fireEvent.mouseOver(await screen.findByText(olderConversation.display_name));
+    const card = await screen.findByRole("region", { name: "chat.conversationPreview" });
+    expect(within(card).queryByText("主对话")).not.toBeInTheDocument();
+    await act(async () => resolveDetail({ data: { conversation: { fork_origin: {
+      source_conversation_id: "newer", source_title_snapshot: newerConversation.display_name,
+    } } } }));
+    await waitFor(() => expect(within(card).getByText(`分支来源：${newerConversation.display_name}`)).toBeVisible());
+    expect(within(card).queryByText("主对话")).not.toBeInTheDocument();
+  });
+
   it("allows an independent fork conversation to be archived", async () => {
     mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation,
       fork_origin: { source_conversation_id: "source", source_title_snapshot: "分支来源" },
@@ -1795,6 +1810,18 @@ describe("RecordList conversation pinning", () => {
     expect(mocks.listConversations).toHaveBeenLastCalledWith(
       expect.objectContaining({ pageToken: "" }), expect.anything(),
     );
+  });
+
+  it("reopens a side chat below a legacy fork in the history tree", async () => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [
+      newerConversation,
+      { ...olderConversation, conversation_id: "fork", display_name: "Branch", parent_conversation_id: newerConversation.conversation_id, relation_type: "fork" },
+      { ...olderConversation, conversation_id: "leaf", display_name: "Branch discussion", parent_conversation_id: "fork", relation_type: "sidechat" },
+    ], next_page_token: "" } });
+    renderRecordList("leaf");
+    const title = await screen.findByText("Branch discussion");
+    expect(title.closest(".record")).toHaveClass("selected");
+    expect(within(screen.getByRole("group", { name: "Branch的子会话" })).getByText("Branch discussion")).toBe(title);
   });
 
   it("nests retained children under their parent and keeps them collapsed by default", async () => {

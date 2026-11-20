@@ -2037,11 +2037,16 @@ export function useChatConversation({
     setMessageList(newMessageList);
 
     scroll.scrollToEnd();
+    // The runtime recognizes rewind commands by step ID. Keep the visible name in history.
+    const rewindStepId = params.workflow_control?.kind === 'rewind' && params.workflow_control.step_id;
     const opened = await openSSE(
-      inputs,
+      rewindStepId ? inputs.map(input => input.input_type === 'text'
+        ? { ...input, text: `${t('chat.workflowRollbackPrefix')}${rewindStepId}` }
+        : input) : inputs,
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
         ...(params.initial_model_selection ? { initial_model_selection: params.initial_model_selection } : {}),
+        ...(rewindStepId ? { display_query: normalizedText } : {}),
         ...(params.workflow_control ? { workflow_control: params.workflow_control } : {}),
         ...(params.run_in_background ? { run_in_background: true } : {}),
         ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name } : {}),

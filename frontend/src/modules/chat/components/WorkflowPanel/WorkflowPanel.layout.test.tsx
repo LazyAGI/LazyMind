@@ -687,7 +687,7 @@ describe('shared workflow compact layout', () => {
     expect(shortcuts).toBeVisible();
     expect(within(shortcuts).getByRole('button', { name: '写作准备' })).toBeVisible();
     fireEvent.click(within(shortcuts).getByRole('button', { name: '成稿' }));
-    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 write_document', {
+    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 成稿', {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     }));
     expect(fixture.flush).toHaveBeenCalledOnce();
@@ -1107,7 +1107,7 @@ describe('shared workflow compact layout', () => {
     const button = await waitForCompletedContinueButton();
     await act(async () => fireEvent.click(button));
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
-    expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}write_document`, {
+    expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}成稿`, {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     });
   });

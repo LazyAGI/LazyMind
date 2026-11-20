@@ -27,6 +27,7 @@ export interface EpisodeListPage {
 
 export interface ListEpisodesOptions {
   pageSize?: number;
+  page?: number;
   pageToken?: string;
 }
 
@@ -92,6 +93,7 @@ export async function listEpisodes(
 ): Promise<EpisodeListPage> {
   const response = await episodeApi.apiCoreMemoryEpisodesGet({
     pageSize: options.pageSize,
+    page: options.page,
     pageToken: options.pageToken || undefined,
   });
 

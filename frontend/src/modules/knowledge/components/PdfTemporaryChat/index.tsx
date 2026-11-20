@@ -7,6 +7,7 @@ import { AgentAppsAuth } from "@/components/auth";
 import ChatContainerComponent, {
   type ChatImperativeProps,
 } from "@/modules/chat/components/newChatContainer";
+import { toChatModelSelectionRequest, useModelSelectionStore } from "@/modules/chat/store/modelSelection";
 import { Method, SSE } from "@/modules/chat/utils/sse";
 import {
   CHAT_RESUME_STREAM_URL,
@@ -329,6 +330,8 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
     timeout: 1800000,
     payload: JSON.stringify({
       ...extras,
+      initial_model_selection: conversationCreated ? undefined :
+        extras?.initial_model_selection ?? toChatModelSelectionRequest(useModelSelectionStore.getState().selections[conversationId]),
       action,
       conversation_id: conversationId,
       conversation: {
@@ -539,9 +542,9 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           showSkillDeposit={false}
           showConversationConfig={false}
           vlmReady={vlmReady}
-          showModelSelector={isPaper}
+          showModelSelector
           composerVariant={isPaper ? "paper" : "default"}
-          modelSelectionDraft={isPaper && !conversationCreated}
+          modelSelectionDraft={!conversationCreated}
           allowLocalWorkspace={false}
           fixedThinkingDepth="low"
         />

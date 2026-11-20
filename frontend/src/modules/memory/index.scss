@@ -1120,25 +1120,51 @@
   }
 }
 
-.memory-preference-pagination {
+.memory-list-pagination {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   margin-top: 16px;
-  padding-top: 14px;
+  padding-top: 12px;
   border-top: 1px solid #edf1f5;
+  font-variant-numeric: tabular-nums;
 
-  > span {
-    color: #8a95a6;
+  .memory-list-range {
+    color: #66758c;
     font-size: 12px;
+    white-space: nowrap;
   }
-}
 
-.memory-preference-pagination-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+  .ant-pagination {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 0 0 auto;
+    gap: 2px;
+    flex-wrap: nowrap;
+  }
+
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next {
+    min-width: 26px;
+    height: 26px;
+    margin: 0;
+    line-height: 26px;
+    border-radius: 7px;
+  }
+
+  .ant-pagination-item-active {
+    border-color: transparent;
+    background: #eaf1ff;
+
+    a { color: #245bd4; }
+  }
+
+  .ant-pagination-simple-pager {
+    white-space: nowrap;
+  }
 }
 
 .memory-preference-detail {
@@ -1388,27 +1414,6 @@
     color: #d92d20;
     background: #fff1f0;
   }
-}
-
-.memory-episode-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid #edf1f5;
-
-  > span {
-    color: #8a95a6;
-    font-size: 12px;
-  }
-}
-
-.memory-episode-pagination-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
 }
 
 .memory-episode-detail {
@@ -5716,9 +5721,7 @@
     flex-direction: column;
   }
 
-  .memory-episode-heading,
-  .memory-episode-pagination,
-  .memory-preference-pagination {
+  .memory-episode-heading {
     align-items: stretch;
     flex-direction: column;
   }
@@ -5730,11 +5733,6 @@
   .memory-episode-card-main {
     grid-template-columns: 94px minmax(0, 1fr) 16px;
     gap: 8px;
-  }
-
-  .memory-episode-pagination-actions,
-  .memory-preference-pagination-actions {
-    align-self: flex-end;
   }
 
   .memory-page-header,

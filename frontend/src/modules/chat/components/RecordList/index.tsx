@@ -109,7 +109,6 @@ import ConversationGroups from "@/modules/chat/conversationOrganizer/Conversatio
 import type { GroupBatchSelection } from "@/modules/chat/conversationOrganizer/SidebarGroups";
 import { getRecoveryArchivePath } from "@/modules/settings/recoveryRoute";
 import {
-  CONVERSATION_RELATION_FORK,
   getConversationRelation,
   isChildConversation,
 } from "@/modules/chat/utils/conversationRelation";
@@ -390,7 +389,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }, []);
 
     const orderedHistory = useMemo(() => pendingOrder ? moveConversationItems(historyList, pendingOrder) : historyList, [historyList, pendingOrder]);
-    const conversationTree = useMemo(() => {
+    const { conversationTree, childrenByParent } = useMemo(() => {
       const visibleHistory = orderedHistory.filter(
         (item) => (showBatchExport && !(compact && groupSection)) || isConversationPinned(item) || !item.group_id,
       );
@@ -441,7 +440,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           isPlaceholderParent: true,
         });
       });
-      return nodes;
+      return { conversationTree: nodes, childrenByParent };
     }, [orderedHistory, showBatchExport, compact, groupSection]);
 
     useEffect(() => {
@@ -575,20 +574,15 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       const selected = historyList.find(
         (item) => item.conversation_id === currentSessionId,
       );
-      const relation = getConversationRelation(selected);
-      if (!relation || !historyList.some(
-        (item) => item.conversation_id === relation.parentConversationId,
-      )) {
-        return;
+      const parentIds = new Set<string>();
+      let parentId = selected?.parent_conversation_id;
+      while (parentId && !parentIds.has(parentId)) {
+        parentIds.add(parentId);
+        parentId = historyList.find(item => item.conversation_id === parentId)?.parent_conversation_id;
       }
-      setExpandedParentIds((previous) => {
-        if (previous.has(relation.parentConversationId)) {
-          return previous;
-        }
-        const next = new Set(previous);
-        next.add(relation.parentConversationId);
-        return next;
-      });
+      if (!parentIds.size) return;
+      setExpandedParentIds(previous => [...parentIds].every(id => previous.has(id))
+        ? previous : new Set([...previous, ...parentIds]));
     }, [currentSessionId, historyList]);
     useImperativeHandle(ref, () => ({
       refresh: () => {
@@ -1075,17 +1069,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       const conversationId = item.conversation_id || "";
       const childrenExpanded = expandedParentIds.has(conversationId);
       const relation = getConversationRelation(item);
-      const relationIsFork =
-        relation?.relationType === CONVERSATION_RELATION_FORK;
       const conversationTitle = item.display_name || conversationId;
-      const relationDescription = relation
-        ? t(
-            relationIsFork
-              ? "chat.conversationForkedFrom"
-              : "chat.conversationSourceFrom",
-            { parent: relation.parentDisplayName },
-          )
-        : t("chat.conversationMainLabel");
       const ownershipActionItems: MenuProps["items"] = relation
         ? []
         : [
@@ -1112,7 +1096,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         setNewMessage(false);
       };
       return (
-        <ConversationPreview conversationId={conversationId} title={conversationTitle} summary={item.summary} updateTime={item.update_time} isTask={Boolean(item.is_task_conv)} relation={relationDescription} disabled={showBatchExport || renamingId === conversationId || openMenuId === conversationId}>
+        <ConversationPreview conversationId={conversationId} title={conversationTitle} summary={item.summary} updateTime={item.update_time} isTask={Boolean(item.is_task_conv)} relation={relation} disabled={showBatchExport || renamingId === conversationId || openMenuId === conversationId}>
         <div
           aria-busy={item.metadata_pending || undefined}
           data-title-revision={item.title_revision}
@@ -1250,11 +1234,42 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }
 
     function renderItem(pinnedOnly?: boolean) {
+      function renderChild(child: SidebarConversation): React.ReactNode {
+        const children = childrenByParent.get(child.conversation_id || "") || [];
+        const row = renderItemText({ item: child, selected: child.conversation_id === currentSessionId, isChild: true, childCount: children.length });
+        if (!children.length || !expandedParentIds.has(child.conversation_id || "")) return row;
+        return <>{row}{renderChildren(child, children)}</>;
+      }
+
+      function renderChildren(item: SidebarConversation, children: SidebarConversation[]): React.ReactNode {
+        const conversationId = item.conversation_id || "";
+        return (
+          <div
+            id={`record-children-${conversationId}`}
+            className="record-children"
+            role="group"
+            aria-label={t("chat.childConversationsLabel", {
+              parent: item.display_name || conversationId,
+            })}
+          >
+            {showBatchExport ? children.map(child => <Checkbox key={child.conversation_id} className="export-checkbox-item record-child-checkbox" disabled>
+              {renderChild(child)}
+            </Checkbox>) : <ScopedConversationList items={children.filter((child): child is SidebarConversation & { conversation_id: string } => Boolean(child.conversation_id))}
+              scope={`${orderView}:children:${conversationId}`} disabled={Boolean(keyword || renamingId || pinningConversationId || reorderingConversationId || isHistoryLoading)}
+              isItemDisabled={child => Boolean(child.organizing_run_id)}
+              onSavingChange={saving => { if (saving) ++historyRequestRef.current; reorderingConversationRef.current = saving; setReorderingConversationId(saving ? conversationId : ""); }}
+              onCommitted={(_move, result) => setHistoryList(previous => applyConversationOrder(previous, result))}
+              onRefresh={() => getHistory({ isFirst: true, preserveWindow: true })}>
+              {renderChild}
+            </ScopedConversationList>}
+
+          </div>
+        );
+      }
       const renderNode = (node: SidebarConversationNode) => {
         const item = node.conversation;
         const conversationId = item.conversation_id || "";
         const selected = conversationId === currentSessionId;
-        const childrenExpanded = expandedParentIds.has(conversationId);
         const record = showBatchExport ? (
           <Checkbox
             className="export-checkbox-item"
@@ -1288,30 +1303,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             disabled={showBatchExport || Boolean(renamingId) || (isHistoryLoading && !activeDragId) || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
           >
             <Col span={24} draggable={item.group_kind !== "project" && renamingId !== conversationId && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id, Boolean(item.is_task_conv))}>{record}</Col>
-            {childrenExpanded && node.children.length > 0 ? (
-              <Col span={24}>
-                <div
-                  id={`record-children-${conversationId}`}
-                  className="record-children"
-                  role="group"
-                  aria-label={t("chat.childConversationsLabel", {
-                    parent: item.display_name || conversationId,
-                  })}
-                >
-                  {showBatchExport ? node.children.map(child => <Checkbox key={child.conversation_id} className="export-checkbox-item record-child-checkbox" disabled>
-                    {renderItemText({ item: child, selected: child.conversation_id === currentSessionId, isChild: true })}
-                  </Checkbox>) : <ScopedConversationList items={node.children.filter((child): child is SidebarConversation & { conversation_id: string } => Boolean(child.conversation_id))}
-                    scope={`${orderView}:children:${conversationId}`} disabled={Boolean(keyword || renamingId || pinningConversationId || reorderingConversationId || isHistoryLoading)}
-                    isItemDisabled={child => Boolean(child.organizing_run_id)}
-                    onSavingChange={saving => { if (saving) ++historyRequestRef.current; reorderingConversationRef.current = saving; setReorderingConversationId(saving ? conversationId : ""); }}
-                    onCommitted={(_move, result) => setHistoryList(previous => applyConversationOrder(previous, result))}
-                    onRefresh={() => getHistory({ isFirst: true, preserveWindow: true })}>
-                    {child => renderItemText({ item: child, selected: child.conversation_id === currentSessionId, isChild: true })}
-                  </ScopedConversationList>}
-
-                </div>
-              </Col>
-            ) : null}
+            {node.children.length > 0 && expandedParentIds.has(conversationId) && <Col span={24}>{renderChildren(item, node.children)}</Col>}
           </SortableConversationRow>
         );
       };

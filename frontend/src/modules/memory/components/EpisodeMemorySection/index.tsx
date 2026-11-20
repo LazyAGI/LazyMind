@@ -2,8 +2,6 @@ import {
   ClockCircleOutlined,
   DeleteOutlined,
   EyeOutlined,
-  LeftOutlined,
-  RightOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -27,6 +25,8 @@ import {
 } from "../../episodeApi";
 import { sortEpisodesByRecordedTime } from "../../episodeViewModel";
 import { getMemorySourceLabelKey } from "../../memorySourceLabels";
+
+import MemoryPagination from "../MemoryPagination";
 
 const PAGE_SIZE = 5;
 
@@ -53,9 +53,7 @@ export default function EpisodeMemorySection() {
   const detailRequestIdRef = useRef(0);
   const [episodes, setEpisodes] = useState<EpisodeRecord[]>([]);
   const [totalSize, setTotalSize] = useState(0);
-  const [nextPageToken, setNextPageToken] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
-  const [pageTokens, setPageTokens] = useState<string[]>([""]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -72,7 +70,7 @@ export default function EpisodeMemorySection() {
     setLoadError("");
     void listEpisodes({
       pageSize: PAGE_SIZE,
-      pageToken: pageTokens[pageIndex] || undefined,
+      page: pageIndex + 1,
     })
       .then((page) => {
         if (ignore) {
@@ -80,7 +78,7 @@ export default function EpisodeMemorySection() {
         }
         setEpisodes(sortEpisodesByRecordedTime(page.items));
         setTotalSize(page.totalSize);
-        setNextPageToken(page.nextPageToken);
+        setPageIndex(current => Math.min(current, Math.max(0, Math.ceil(page.totalSize / PAGE_SIZE) - 1)));
       })
       .catch((error) => {
         if (ignore) {
@@ -98,7 +96,7 @@ export default function EpisodeMemorySection() {
     return () => {
       ignore = true;
     };
-  }, [pageIndex, pageTokens, reloadKey]);
+  }, [pageIndex, reloadKey]);
 
   const formatDateTime = useCallback(
     (timestampMs: number) =>
@@ -143,26 +141,6 @@ export default function EpisodeMemorySection() {
     },
     [t],
   );
-
-  const handleNextPage = () => {
-    if (!nextPageToken || loading) {
-      return;
-    }
-
-    const nextIndex = pageIndex + 1;
-    setPageTokens((current) => [
-      ...current.slice(0, nextIndex),
-      nextPageToken,
-    ]);
-    setPageIndex(nextIndex);
-  };
-
-  const handlePreviousPage = () => {
-    if (pageIndex === 0 || loading) {
-      return;
-    }
-    setPageIndex((current) => Math.max(0, current - 1));
-  };
 
   const handleOpenDetail = async (episode: EpisodeRecord) => {
     const requestId = detailRequestIdRef.current + 1;
@@ -331,33 +309,14 @@ export default function EpisodeMemorySection() {
             })}
           </div>
 
-          <div className="memory-episode-pagination">
-            <span>
-              {t("admin.memoryEpisodePage", {
-                count: episodes.length,
-                page: pageIndex + 1,
-                total: totalSize,
-              })}
-            </span>
-            <div className="memory-episode-pagination-actions">
-              <Button
-                aria-label={t("common.previous")}
-                disabled={pageIndex === 0 || loading}
-                icon={<LeftOutlined />}
-                size="small"
-                onClick={handlePreviousPage}
-              />
-              <Button
-                aria-label={t("common.next")}
-                disabled={!nextPageToken || loading}
-                icon={<RightOutlined />}
-                size="small"
-                onClick={handleNextPage}
-              >
-                {t("common.next")}
-              </Button>
-            </div>
-          </div>
+          <MemoryPagination
+            page={pageIndex + 1}
+            pageSize={PAGE_SIZE}
+            total={totalSize}
+            disabled={loading}
+            label={t("admin.memoryEpisodeTitle")}
+            onChange={page => setPageIndex(page - 1)}
+          />
         </>
       )}
 

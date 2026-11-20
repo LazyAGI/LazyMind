@@ -2340,11 +2340,6 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	conversationIDs, familyErr := ownedConversationFamilyIDs(r.Context(), db, userID, convID)
-	if familyErr != nil {
-		conversationIDs = []string{convID}
-	}
-	notifySessionEnvClear(conversationIDs...)
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -2421,44 +2416,28 @@ func archiveConversation(
 	userID string,
 ) error {
 	now := time.Now().UTC()
-	expiresAt := now.Add(30 * 24 * time.Hour)
-	return conversationgroup.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
+	var conversationIDs []string
+	err := conversationgroup.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
 		var root orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where(
 			"id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID,
 		).Take(&root).Error; err != nil {
 			return err
 		}
-		conversationIDs, err := ownedConversationFamilyIDs(ctx, tx, userID, conversationID)
+		var err error
+		conversationIDs, err = expandOwnedConversationFamilyIDs(ctx, tx, userID, []string{root.ID})
 		if err != nil {
 			return err
 		}
 		if err := conversationgroup.RequireOrganizerUnlocked(ctx, tx, userID, conversationIDs, ""); err != nil {
 			return err
 		}
-		res := tx.Model(&orm.Conversation{}).
-			Where(
-				"id IN ? AND create_user_id = ? AND deleted_at IS NULL",
-				conversationIDs,
-				userID,
-			).
-			Updates(map[string]any{
-				"deleted_at": now, "trash_expires_at": expiresAt,
-				"archived_at": nil, "archive_folder_id": nil, "updated_at": now,
-			})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		if err := taskcenter.ArchiveTasksForConversations(
-			ctx, tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationTrash, now,
-		); err != nil {
-			return err
-		}
-		return nil
+		return trashConversationsTx(ctx, tx, userID, conversationIDs, now)
 	})
+	if err == nil {
+		notifySessionEnvClear(conversationIDs...)
+	}
+	return err
 }
 
 // BatchDeleteConversations text POST /api/v1/conversations:batchDelete

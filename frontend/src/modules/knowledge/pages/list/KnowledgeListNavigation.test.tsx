@@ -761,7 +761,7 @@ describe("library navigation and empty state actions", () => {
     const router = await mount("?source=official");
     fireEvent.click(await screen.findByRole("button", { name: /前往知识广场/ }));
     await waitFor(() => expect(router.state.location.search).toContain("view=square"));
-    fireEvent.click(screen.getByRole("button", { name: /返回资料库/ }));
+    fireEvent.click(screen.getByRole("button", { name: /返回知识库/ }));
     expect(screen.getByRole("tab", { name: "已安装的官方资料库" })).toHaveAttribute("aria-selected", "true");
   });
 });

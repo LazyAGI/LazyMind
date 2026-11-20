@@ -1398,6 +1398,7 @@ func manualPaths() map[string]any {
 				"parameters": queryParams(
 					param("query", "page_size", false, intSchema()),
 					param("query", "page_token", false, strSchema()),
+					param("query", "page", false, map[string]any{"type": "integer", "minimum": 1, "description": "One-based page number. Mutually exclusive with page_token."}),
 				),
 				"responses": map[string]any{
 					"200": response(200, "Episode Memory page", refSchema("EpisodeMemoryListResponse")),
