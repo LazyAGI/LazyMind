@@ -142,16 +142,14 @@ export default function DefaultServicesPage({
     const cloudParsing = parsingResult.status === "fulfilled"
       ? (unwrapModelProviderData<{ groups?: unknown[] }>(parsingResult.value.data).groups ?? []).length > 0 ? "ready" : "empty"
       : "error";
-    const searchEngine = searchResult.status === "fulfilled"
-      ? (unwrapModelProviderData<{ groups?: unknown[] }>(searchResult.value.data).groups ?? []).length > 0 ? "ready" : "empty"
-      : "error";
+    const searchEngine = searchResult.status === "fulfilled" ? "ready" : "error";
 
     setSetupAvailability((current) => ({ ...current, cloudParsing, searchEngine }));
     const serviceGroups: Partial<Record<ServiceCategory, { name?: string; provider_name?: string }[]>> = {};
     for (const [category, result] of [["parsing", parsingResult], ["search", searchResult], ["academic", academicResult], ["translation", translationResult]] as const) {
       if (result.status !== "fulfilled") continue;
       const groups = unwrapModelProviderData<{ groups?: { name?: string; provider_name?: string }[] }>(result.value.data).groups || [];
-      serviceGroups[category] = groups;
+      serviceGroups[category] = category === "search" && groups.length === 0 ? [{ name: "Keenable" }] : groups;
     }
     // Configured OCR credentials are alternatives, not concurrently active services.
     serviceGroups.parsing = [];

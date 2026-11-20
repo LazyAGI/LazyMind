@@ -124,7 +124,7 @@ describe("DefaultServicesPage", () => {
     const rendered = render(page());
     const translation = await screen.findByRole("group", { name: "Machine translation" });
     await waitFor(() => expect(translation).toHaveTextContent("1 translation source configured"));
-    expect(screen.getByRole("group", { name: "Search engine" })).toHaveTextContent("Not configured");
+    expect(screen.getByRole("group", { name: "Search engine" })).toHaveTextContent("Keenable");
     expect(screen.getByRole("group", { name: "Academic search" })).toBeVisible();
     expect(screen.getByRole("group", { name: "Document parsing (OCR)" })).toBeVisible();
     expect(rendered.container.textContent).not.toMatch(/modelProvider\./);
