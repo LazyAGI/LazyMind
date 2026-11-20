@@ -276,18 +276,29 @@ func authServicePythonPath(paths RuntimePaths) string {
 
 func pythonDependencyCacheEnv(paths RuntimePaths) []string {
 	hostCache := defaultHostCacheDir(hostHomeDir())
-	return append(hostToolEnv(paths),
-		"UV_CACHE_DIR="+cleanHostCacheEnv("UV_CACHE_DIR", paths, filepath.Join(hostCache, "uv")),
-		"PIP_CACHE_DIR="+cleanHostCacheEnv("PIP_CACHE_DIR", paths, filepath.Join(hostCache, "pip")),
+	uvCache := firstNonEmpty(paths.UVCacheDir, filepath.Join(hostCache, "uv"))
+	pipCache := firstNonEmpty(paths.PipCacheDir, filepath.Join(hostCache, "pip"))
+	selectedUVCache, selectedPipCache := uvCache, pipCache
+	if paths.TempDir == "" || paths.DesktopAppDir == "" {
+		selectedUVCache = cleanHostCacheEnv("UV_CACHE_DIR", paths, uvCache)
+		selectedPipCache = cleanHostCacheEnv("PIP_CACHE_DIR", paths, pipCache)
+	}
+	env := append(hostToolEnv(paths),
+		"UV_CACHE_DIR="+selectedUVCache,
+		"PIP_CACHE_DIR="+selectedPipCache,
 	)
+	if pathIsUnderRoot(uvCache, paths.RuntimeRoot) {
+		env = append(env, "XDG_CACHE_HOME="+firstNonEmpty(paths.XDGCacheDir, filepath.Dir(uvCache)))
+	}
+	return append(env, managedTempEnv(paths)...)
 }
 
 func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
-	cloudKey, err := cloudCredentialKey()
+	cloudKey, err := cloudCredentialKeyForPaths(paths)
 	if err != nil {
 		return nil, err
 	}
-	return []string{
+	return append([]string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_DATABASE_URL=" + cfg.AuthService.DatabaseURL,
 		"LAZYMIND_REDIS_URL=",
@@ -305,7 +316,7 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
 		"LAZYMIND_CHAT_UNLIKE_SWITCH=" + envText("LAZYMIND_CHAT_UNLIKE_SWITCH", "true"),
 		authServicePermissionsEnvVar + "=" + authServicePermissionsPath(paths),
 		authServiceOpenAPIExportEnvVar + "=0",
-	}, nil
+	}, managedTempEnv(paths)...), nil
 }
 
 func waitForAuthDatabase(ctx context.Context, databaseURL string) error {

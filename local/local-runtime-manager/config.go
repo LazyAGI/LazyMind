@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/storagepath"
 )
 
 const (
@@ -139,9 +141,11 @@ const installerWarmupSkipProcessorWorkerEnvVar = "LAZYMIND_SKIP_PROCESSOR_WORKER
 type RuntimePaths struct {
 	RepoRoot                 string
 	ResourcesRoot            string
+	DesktopAppDir            string
 	BuildRoot                string
 	RuntimeRoot              string
 	CacheDir                 string
+	TempDir                  string
 	DataDir                  string
 	DepsDir                  string
 	StateDir                 string
@@ -857,6 +861,35 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 	}
 	buildRoot := cleanOptionalPath(firstNonEmpty(opts.BuildRoot, os.Getenv(localBuildRootEnvVar), defaultBuildRoot))
 	pathLayout := defaultRuntimePathLayout()
+	currentApp := ""
+	if profile == "desktop" {
+		currentApp = filepath.Dir(filepath.Dir(resourcesRoot))
+	}
+	explicitRoot := cleanOptionalPath(firstNonEmpty(opts.RuntimeRoot, os.Getenv(runtimeRootEnvVar)))
+	installedRoot, newLayout := "", false
+	if profile != "local" || explicitRoot == "" {
+		installedRoot, newLayout, err = storagepath.Resolve(currentApp)
+		if err != nil {
+			return RuntimeConfig{}, RuntimePaths{}, err
+		}
+	}
+	if newLayout {
+		if profile == "desktop" {
+			if !strings.EqualFold(buildRoot, resourcesRoot) {
+				return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("desktop build root conflicts with the installed resources location")
+			}
+			buildRoot = resourcesRoot
+			for _, inherited := range []string{explicitRoot, os.Getenv("LAZYMIND_DESKTOP_DATA_ROOT")} {
+				if inherited != "" && !strings.EqualFold(filepath.Clean(inherited), installedRoot) {
+					return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("desktop runtime root conflicts with the installed data location")
+				}
+			}
+		}
+		pathLayout = RuntimePathLayout{
+			DataRoot: installedRoot, CacheRoot: filepath.Join(installedRoot, "Cache"),
+			LogsRoot: filepath.Join(installedRoot, "Logs"), LocalImportRoot: filepath.Join(installedRoot, "Inbox"),
+		}
+	}
 	runtimeRoot := cleanOptionalPath(firstNonEmpty(opts.RuntimeRoot, os.Getenv(runtimeRootEnvVar), pathLayout.DataRoot))
 	cacheRoot := cleanOptionalPath(pathLayout.CacheRoot)
 	dataRoot := filepath.Join(runtimeRoot, "data")
@@ -870,16 +903,31 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		pythonRuntimeDir = filepath.Join(pythonRuntimeDir, platform)
 		pythonStateDir = filepath.Join(pythonStateDir, platform)
 	}
-	sqliteRoot := envText(localSQLiteDirEnvVar, filepath.Join(dataRoot, "stores", "sqlite"))
+	defaultSQLiteRoot := filepath.Join(dataRoot, "stores", "sqlite")
+	sqliteRoot := envText(localSQLiteDirEnvVar, defaultSQLiteRoot)
+	if newLayout && profile == "desktop" {
+		if !strings.EqualFold(cleanOptionalPath(sqliteRoot), defaultSQLiteRoot) {
+			return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("desktop SQLite directory conflicts with the installed data location")
+		}
+		sqliteRoot = defaultSQLiteRoot
+	}
 	uploadRoot := filepath.Join(runtimeRoot, "data", "core", "uploads")
 	frontendNodeModules := filepath.Join(depsRoot, "node", "frontend")
 	logsRoot := cleanOptionalPath(pathLayout.LogsRoot)
+	dependencyCacheRoot := defaultHostCacheDir(hostHomeDir())
+	tempDir := ""
+	if newLayout {
+		dependencyCacheRoot = cacheRoot
+		tempDir = filepath.Join(installedRoot, "tmp")
+	}
 	p := RuntimePaths{
 		RepoRoot:                 root,
 		ResourcesRoot:            resourcesRoot,
+		DesktopAppDir:            currentApp,
 		BuildRoot:                buildRoot,
 		RuntimeRoot:              runtimeRoot,
 		CacheDir:                 cacheRoot,
+		TempDir:                  tempDir,
 		DataDir:                  dataRoot,
 		DepsDir:                  depsRoot,
 		StateDir:                 filepath.Join(runtimeRoot, "state"),
@@ -907,8 +955,8 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		PythonRuntimeDir:         pythonRuntimeDir,
 		NodeRuntimeDir:           filepath.Join(buildRoot, "runtimes", "node"),
 		PythonStateDir:           pythonStateDir,
-		UVCacheDir:               filepath.Join(defaultHostCacheDir(hostHomeDir()), "uv"),
-		PipCacheDir:              filepath.Join(defaultHostCacheDir(hostHomeDir()), "pip"),
+		UVCacheDir:               filepath.Join(dependencyCacheRoot, "uv"),
+		PipCacheDir:              filepath.Join(dependencyCacheRoot, "pip"),
 		XDGCacheDir:              filepath.Join(cacheRoot, "xdg"),
 		XDGStateDir:              filepath.Join(runtimeRoot, "state", "xdg"),
 		ProcessComposeHome:       filepath.Join(dataRoot, "homes", "process-compose"),
@@ -972,6 +1020,17 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		}
 	} else if err := applyLocalHistoryInjectionPaths(&p); err != nil {
 		return RuntimeConfig{}, RuntimePaths{}, err
+	}
+	authDatabaseURL := authServiceDatabaseURL(p.AuthServiceDBPath)
+	if newLayout && profile == "desktop" {
+		if !strings.EqualFold(authDatabaseURL, sqliteURL(p.AuthServiceDBPath)) {
+			return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("desktop authentication database conflicts with the installed data location")
+		}
+		authDatabaseURL = sqliteURL(p.AuthServiceDBPath)
+		if !strings.EqualFold(localSegmentStoreType(), "opensearch") &&
+			!strings.EqualFold(cleanOptionalPath(localSegmentStoreBackingPath(p)), localSegmentStorePath(p)) {
+			return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("desktop segment database conflicts with the installed data location")
+		}
 	}
 	ports := newLocalPortAllocator()
 	ports.skipPortChecks = skipPortChecks
@@ -1044,6 +1103,12 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		milvusDataDir = envText(localMilvusLiteDBPathEnvVar, p.MilvusLiteDBPath)
 	}
 	milvusLiteDBPath := filepath.Clean(milvusDataDir)
+	if newLayout && profile == "desktop" {
+		if !strings.EqualFold(cleanOptionalPath(milvusLiteDBPath), p.MilvusLiteDBPath) {
+			return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("desktop vector database conflicts with the installed data location")
+		}
+		milvusLiteDBPath = p.MilvusLiteDBPath
+	}
 	watchHostDir := defaultFileWatcherWatchHostDir(pathLayout.LocalImportRoot)
 	allowedRoots := fileWatcherAllowedRoots(watchHostDir)
 	componentCatalog, err := loadPythonComponentCatalog(p)
@@ -1101,7 +1166,7 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		AuthService: AuthServiceConfig{
 			Port:          authHostPort,
 			PythonVersion: envText(localPythonVersionEnvVar, defaultLocalPythonVersion),
-			DatabaseURL:   authServiceDatabaseURL(p.AuthServiceDBPath),
+			DatabaseURL:   authDatabaseURL,
 			InstallDeps:   envBool(authServiceInstallDepsEnvVar, true),
 		},
 		ChannelGateway: ChannelGatewayConfig{
@@ -1353,6 +1418,9 @@ func (p RuntimePaths) EnsureAllDirs() error {
 			p.NodeRuntimeDir,
 			p.FrontendNodeModules,
 		)
+	}
+	if p.TempDir != "" {
+		dirs = append(dirs, p.TempDir)
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {

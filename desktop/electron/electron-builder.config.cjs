@@ -332,6 +332,7 @@ async function signAndStageEmbeddedRuntime(context) {
 }
 
 async function restoreRuntimeAndFinalizeSignature(context) {
+  writeWindowsStorageMetadata(context);
   if (context.electronPlatformName !== "darwin" || macSigningMode !== "developer-id") {
     return;
   }
@@ -418,8 +419,50 @@ function installMacDesktopLauncher(context) {
   console.log(`Installed macOS startup launcher; Electron runtime: ${path.basename(electronExecutable)}`);
 }
 
+function writeWindowsStorageMetadata(context) {
+  if (context.electronPlatformName !== "win32" || !context.targets?.some((target) => target.name === "nsis")) return;
+  const metadataPath = path.join(process.env.LAZYMIND_DESKTOP_INSTALLER_RESOURCES || "", "lazymind-installer-metadata.nsh");
+  let metadata = fs.readFileSync(metadataPath, "utf8");
+  let shippedBytes = 0;
+  let longestPath = 0;
+  const files = [];
+  const buffer = Buffer.alloc(1024 * 1024);
+  const pending = [context.appOutDir];
+  while (pending.length) {
+    const directory = pending.pop();
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`Installer payload contains a directory link: ${file}`);
+      if (entry.isDirectory()) pending.push(file);
+      else if (entry.isFile()) {
+        const relativePath = path.relative(context.appOutDir, file);
+        const size = fs.statSync(file).size;
+        const hash = createHash("sha256");
+        const descriptor = fs.openSync(file, "r");
+        try {
+          let length;
+          while ((length = fs.readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
+            hash.update(buffer.subarray(0, length));
+          }
+        } finally {
+          fs.closeSync(descriptor);
+        }
+        files.push({ path: relativePath.split(path.sep).join("/"), size, sha256: hash.digest("hex") });
+        shippedBytes += size;
+        longestPath = Math.max(longestPath, relativePath.length);
+      }
+    }
+  }
+  const declaredPath = Number(metadata.match(/!define LAZYMIND_MAX_RELATIVE_PATH_LENGTH (\d+)/)?.[1] || 0);
+  metadata = metadata.replace(/!define LAZYMIND_MAX_RELATIVE_PATH_LENGTH \d+/, `!define LAZYMIND_MAX_RELATIVE_PATH_LENGTH ${Math.max(declaredPath, longestPath)}`);
+  metadata = metadata.replace(/^!define LAZYMIND_SHIPPED_APP_BYTES .*\r?\n?/m, "");
+  fs.writeFileSync(metadataPath, `${metadata.trimEnd()}\n!define LAZYMIND_SHIPPED_APP_BYTES ${shippedBytes}\n`);
+  fs.writeFileSync(path.join(path.dirname(metadataPath), "lazymind-payload.json"), JSON.stringify({ version: 1, files }));
+}
+
 async function preparePackagedDesktop(context) {
   installWindowsDesktopLauncher(context);
+  writeWindowsStorageMetadata(context);
   installMacDesktopLauncher(context);
   await signAndStageEmbeddedRuntime(context);
 }
@@ -480,12 +523,13 @@ module.exports = {
     perMachine: false,
     allowElevation: false,
     uninstallDisplayName: "LazyMind",
-    allowToChangeInstallationDirectory: false,
+    allowToChangeInstallationDirectory: true,
     installerLanguages: ["en_US", "zh_CN"],
     displayLanguageSelector: false,
     include: path.join(__dirname, "..", "installer", "installer.nsh"),
     artifactName: "LazyMind-windows-x64-installer.${ext}",
     differentialPackage: false,
+    preCompressedFileExtensions: [],
     runAfterFinish: true,
   },
   afterPack: preparePackagedDesktop,

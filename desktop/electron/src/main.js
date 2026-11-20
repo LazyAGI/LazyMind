@@ -16,7 +16,7 @@ const {
   utilityProcess,
   screen,
 } = require("electron");
-const { spawn, execFile } = require("node:child_process");
+const { spawn, execFile, execFileSync } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -98,6 +98,16 @@ const WebSocket = require("ws");
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
 const isInstallerWarmup = isWindows && process.argv.includes("--installer-warmup");
+const hasInstalledStorage = isWindows && fs.existsSync(path.join(path.dirname(process.execPath), ".lazymind-installed"));
+if (hasInstalledStorage) {
+  const root = String(process.env.LAZYMIND_DESKTOP_DATA_ROOT || "").trim();
+  const expectedRoot = path.resolve(path.dirname(process.execPath), "..", "Data");
+  if (!root || path.resolve(root).toLowerCase() !== expectedRoot.toLowerCase()) {
+    dialog.showErrorBox("LazyMind installation location unavailable", "The installation data location is missing or inconsistent. Start LazyMind.exe or repair this installation; no replacement user data will be created.");
+    app.exit(1);
+    throw new Error("LazyMind installation DataRoot is unavailable");
+  }
+}
 const windowsDesktopPaths = isWindows
   ? resolveWindowsDesktopPaths(process.env, app.getPath("home"))
   : null;
@@ -113,6 +123,12 @@ if (windowsDesktopPaths) {
   app.setPath("sessionData", windowsDesktopPaths.profileDir);
   app.setPath("crashDumps", windowsDesktopPaths.crashDumpsDir);
   app.setAppLogsPath(windowsDesktopPaths.logsDir);
+  if (hasInstalledStorage) {
+    const temporaryDir = path.join(windowsDesktopPaths.runtimeRoot, "tmp");
+    fs.mkdirSync(temporaryDir, { recursive: true });
+    app.setPath("temp", temporaryDir);
+    for (const name of ["TEMP", "TMP", "TMPDIR"]) process.env[name] = temporaryDir;
+  }
 }
 
 const isPackaged = app.isPackaged;
@@ -135,6 +151,9 @@ const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
   (isPackaged
     ? path.join(process.resourcesPath, "runtime")
     : path.resolve(__dirname, "..", "..", "build", desktopTarget, "runtime"));
+if (hasInstalledStorage && path.resolve(runtimeResourcesRoot).toLowerCase() !== path.resolve(process.resourcesPath, "runtime").toLowerCase()) {
+  throw new Error("LazyMind resources location conflicts with the installed storage layout");
+}
 const cloudConfiguration = loadDesktopCloudConfiguration({
   isPackaged,
   runtimeResourcesRoot,
@@ -144,7 +163,11 @@ const cloudBaseURL = cloudConfiguration.baseURL;
 const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
-const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
+const inheritedRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
+if (hasInstalledStorage && inheritedRuntimeRoot && path.resolve(inheritedRuntimeRoot).toLowerCase() !== path.resolve(windowsDesktopPaths.runtimeRoot).toLowerCase()) {
+  throw new Error("LazyMind runtime location conflicts with the installed DataRoot");
+}
+const explicitRuntimeRoot = hasInstalledStorage ? windowsDesktopPaths.runtimeRoot : inheritedRuntimeRoot;
 const desktopLogsDir = app.getPath("logs");
 const desktopCredentialIdentityPath = path.join(app.getPath("userData"), "credential-device.json");
 const localFolderAccessStatePath = path.join(app.getPath("userData"), "local-folder-access.json");
@@ -356,6 +379,21 @@ function loadEditablePptDependencyConfig() {
 }
 
 const editablePptDependencyConfig = loadEditablePptDependencyConfig();
+
+if (isWindows && !isExternalRuntimeDev && !fs.existsSync(desktopCredentialIdentityPath)) {
+  const args = ["internal", "preflight-identity", "--profile", "desktop", "--repo-root", repoRoot, "--resources-root", runtimeResourcesRoot];
+  if (explicitRuntimeRoot) args.push("--runtime-root", explicitRuntimeRoot);
+  try {
+    execFileSync(sidecarPath, args, {
+      env: process.env,
+      windowsHide: true,
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 15000,
+    });
+  } catch (error) {
+    throw new Error(`Desktop credential identity cannot be initialized: ${String(error.stderr || "repair the existing data before starting").trim()}`);
+  }
+}
 
 function loadOrCreateDesktopCredentialIdentity() {
   fs.mkdirSync(path.dirname(desktopCredentialIdentityPath), { recursive: true });
