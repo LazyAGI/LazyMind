@@ -16,6 +16,7 @@
 #   custom_base_url  — user may change base_url
 #   has_models       — group has a model list (seeded from default_models)
 #   api_key_required — api_key must not be empty
+#   keyless_search   — official search endpoint can be enabled without an API key
 #
 # model type values align with runtime_models.yaml role keys / lazyllm multimodal types:
 #   llm, evo_llm, vlm, embed_main, embed_image, reranker,
@@ -1674,3 +1675,29 @@ search_providers:
 
           2. Open Keys and Endpoint on the resource page and copy Key1 or Key2.
       base_url: "https://api.bing.microsoft.com/"
+    - name: Keenable
+      capabilities: [keyless_search]
+      description:
+        zh-CN: |
+          Keenable 是面向 Agent 的网页搜索 API，返回带标题、链接和摘录的结构化结果。不填写 API Key 也可先启用公开检索；填写 Key 后改走记账接口。
+
+          文档：
+          https://docs.keenable.ai/api-reference/search
+
+          申请教程：
+
+          1. 在外部服务中选择 Keenable，可以直接启用公开检索。
+
+          2. 如需更高额度，在 https://keenable.ai 注册并复制 API Key。
+        en-US: |
+          Keenable is a web search API for agents. It returns structured results with a title, URL and snippet. You can enable it without an API key for the public endpoint, or add a key for the authenticated endpoint.
+
+          Docs:
+          https://docs.keenable.ai/api-reference/search
+
+          Setup:
+
+          1. Select Keenable under External Services and enable public search, no key required.
+
+          2. For higher limits, register at https://keenable.ai and paste an API key.
+      base_url: "https://api.keenable.ai"

@@ -22,6 +22,7 @@ from lazyllm.tools.tools.search import (
     TavilySearch,
     WikipediaSearch,
 )
+from lazymind.chat.engine.tools.keenable_search import KeenableSearch
 
 from lazymind.chat.engine.tools import (
     ExternalDatabaseToolkit,
@@ -491,6 +492,7 @@ _WEB_SEARCH_ENGINE_INSTANCES: list = [
     BingSearch(),
     BochaSearch(),
     TavilySearch(),
+    KeenableSearch(),
 ]
 
 _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [

@@ -90,6 +90,47 @@ func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
 	}
 }
 
+func TestLoadSearchToolConfigReturnsPublicKeenableWithoutAKey(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "Keenable", "search", "")
+
+	config, err := LoadSearchToolConfig(t.Context(), db, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config["keenable"] != "public" {
+		t.Fatalf("unexpected search tool config: %#v", config)
+	}
+}
+
+func TestLoadSearchToolConfigReturnsKeyedKeenable(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "KeenableSearch", "search", "secret-key")
+
+	config, err := LoadSearchToolConfig(t.Context(), db, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config["keenable"] != "secret-key" {
+		t.Fatalf("unexpected search tool config: %#v", config)
+	}
+}
+
+func TestLoadToolConfigForCapabilitiesIncludesPublicKeenable(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "Keenable", "search", "")
+
+	config, err := LoadToolConfigForCapabilities(
+		t.Context(), db, "user-1", []string{"web_search"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config["keenable"] != "public" {
+		t.Fatalf("unexpected capability config: %#v", config)
+	}
+}
+
 func TestLoadToolConfigForCapabilitiesUsesWorkflowAllowlist(t *testing.T) {
 	db := toolConfigTestDB(t)
 	seedToolProvider(t, db, "user-1", "Tavily", "search", "web-token")

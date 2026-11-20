@@ -164,6 +164,7 @@ func TestSearchToolConfigEntryMapsBocha(t *testing.T) {
 		wantKey      string
 	}{
 		{name: "bocha", providerName: "Bocha", wantKey: "bocha"},
+		{name: "keenable", providerName: "Keenable", wantKey: "keenable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -286,5 +287,18 @@ func TestAcademicSearchToolConfigEntrySplitsMultiKeyCredential(t *testing.T) {
 	want := []string{"key-1", "key-2"}
 	if !reflect.DeepEqual(entry["sciverse"], want) {
 		t.Fatalf("unexpected multi-key tool config: %#v", entry)
+	}
+}
+
+func TestSearchToolConfigEntryMapsKeylessKeenable(t *testing.T) {
+	db := setupToolConfigTestDB(t)
+	seedSelectedSearchTool(t, db, "user-1", "Keenable", "group-keenable", "", false)
+
+	entry, err := searchToolConfigEntry(t.Context(), db, "user-1")
+	if err != nil {
+		t.Fatalf("searchToolConfigEntry error: %v", err)
+	}
+	if entry["keenable"] != "public" {
+		t.Fatalf("expected keyless Keenable sentinel, got %#v", entry)
 	}
 }

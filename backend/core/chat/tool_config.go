@@ -86,12 +86,20 @@ func scanSelectedSearchToolCredential(q *gorm.DB) (*selectedToolProviderCredenti
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(row.ProviderName) == "" || strings.TrimSpace(row.APIKey) == "" {
+	if strings.TrimSpace(row.ProviderName) == "" {
 		return nil, nil
+	}
+	apiKey := strings.TrimSpace(row.APIKey)
+	if apiKey == "" {
+		if searchToolConfigName(row.ProviderName) != "keenable" {
+			return nil, nil
+		}
+		// Selected keyless Keenable uses the public endpoint.
+		apiKey = "public"
 	}
 	return &selectedToolProviderCredential{
 		ProviderName: row.ProviderName,
-		APIKey:       row.APIKey,
+		APIKey:       apiKey,
 	}, nil
 }
 
@@ -107,6 +115,8 @@ func searchToolConfigName(providerName string) string {
 		return "bing"
 	case "tavily":
 		return "tavily"
+	case "keenable", "keenablesearch":
+		return "keenable"
 	default:
 		return ""
 	}

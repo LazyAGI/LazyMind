@@ -48,6 +48,7 @@ from lazyllm.tools.tools.search import (
     SciverseSearch,
     TavilySearch,
 )
+from lazymind.chat.engine.tools.keenable_search import KeenableSearch
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit
 from lazymind.provider_request import request_read_timeout
 from .artifacts import (
@@ -127,6 +128,7 @@ def _writer_retrieve(query: str) -> tuple[str, Any]:
         ('bing_search', BingSearch),
         ('bocha_search', BochaSearch),
         ('tavily_search', TavilySearch),
+        ('keenable_search', KeenableSearch),
     )
     for tool_name, search_type in candidates:
         try:
@@ -830,7 +832,7 @@ def _bocha_image_urls(query: str, count: int) -> list[str]:
 
 
 def _pick_search_engine() -> Any | None:
-    for search_type in (GoogleSearch, BingSearch, BochaSearch, TavilySearch):
+    for search_type in (GoogleSearch, BingSearch, BochaSearch, TavilySearch, KeenableSearch):
         try:
             engine = search_type()
             if engine.__key_source__():
