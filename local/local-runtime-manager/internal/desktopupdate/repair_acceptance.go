@@ -34,7 +34,8 @@ func CheckRepairAcceptance(ctx context.Context, envelope []byte, c Config, reque
 		return Decision{}, failure("request_invalid", nil)
 	}
 	blocked := Decision{Status: "blocked", Reason: "repair_target_not_accepted"}
-	if c.UpdaterProtocol != 2 || req.CurrentID != c.ReleaseID || req.SourceHadRAG != (len(req.Components) != 0) {
+	_, hadRAG := req.Components["rag"]
+	if c.UpdaterProtocol != 2 || req.CurrentID != c.ReleaseID || req.SourceHadRAG != hadRAG {
 		return blocked, nil
 	}
 	for _, id := range policy.Revoked {

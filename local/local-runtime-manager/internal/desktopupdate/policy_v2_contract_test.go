@@ -90,18 +90,73 @@ func changeV2Metadata(t *testing.T, f *policyFixture, change func(map[string]any
 	f.state = next
 }
 
-func TestV2OneSignedPolicyCoversLightweightAndInstalledRAG(t *testing.T) {
+func addV2ClusterState(f *policyFixture) {
+	revision := strings.Repeat("e", 64)
+	f.state.Components["cluster"] = revision
+	f.state.ComponentMetadata["cluster"] = ComponentDescriptor{
+		ID: "cluster", Revision: revision, SHA256: strings.Repeat("f", 64),
+		Tag: strings.Repeat("0", 64), PythonABI: "cp311",
+		Platform: f.config.Platform, Arch: f.config.Arch, BaseFingerprint: strings.Repeat("b", 64),
+		Packages: map[string]string{"umap-learn": "0.5.7"},
+	}
+}
+
+func TestV2OneSignedPolicyCoversComponentSelections(t *testing.T) {
 	f := newV2PolicyFixture(t, false)
 	envelope := f.envelope(t)
-	for _, installed := range []bool{false, true} {
-		setV2ComponentState(t, f, installed)
-		d, err := Check(t.Context(), envelope, f.config, f.state, t.TempDir(), false, policyTime)
-		if err != nil || d.Status != "direct" || d.Next == nil || d.Next.ID != "r2" {
-			t.Fatalf("one policy must cover installed=%v: decision=%+v err=%v", installed, d, err)
-		}
-		if d.Next.Components.SHA256 != fixtureArtifact("r2-components")["sha256"] {
-			t.Fatal("decision changed the fixed target component artifact")
-		}
+	for _, selection := range []struct {
+		name         string
+		rag, cluster bool
+	}{
+		{name: "lightweight"},
+		{name: "rag", rag: true},
+		{name: "cluster", cluster: true},
+		{name: "rag-and-cluster", rag: true, cluster: true},
+	} {
+		t.Run(selection.name, func(t *testing.T) {
+			setV2ComponentState(t, f, selection.rag)
+			if selection.cluster {
+				addV2ClusterState(f)
+			}
+			d, err := Check(t.Context(), envelope, f.config, f.state, t.TempDir(), false, policyTime)
+			if err != nil || d.Status != "direct" || d.Next == nil || d.Next.ID != "r2" {
+				t.Fatalf("one policy must cover this selection: decision=%+v err=%v", d, err)
+			}
+			if d.Next.Components.SHA256 != fixtureArtifact("r2-components")["sha256"] {
+				t.Fatal("decision changed the fixed target component artifact")
+			}
+		})
+	}
+}
+
+func TestV2RejectsInvalidClusterSelections(t *testing.T) {
+	for _, scenario := range []string{"unknown-component", "missing-cluster-metadata", "invalid-cluster-sha", "invalid-rag-class"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newV2PolicyFixture(t, true)
+			addV2ClusterState(f)
+			cluster := f.state.ComponentMetadata["cluster"]
+			switch scenario {
+			case "unknown-component":
+				delete(f.state.Components, "cluster")
+				delete(f.state.ComponentMetadata, "cluster")
+				cluster.ID = "unknown"
+				f.state.Components[cluster.ID] = cluster.Revision
+				f.state.ComponentMetadata[cluster.ID] = cluster
+			case "missing-cluster-metadata":
+				delete(f.state.ComponentMetadata, "cluster")
+			case "invalid-cluster-sha":
+				cluster.SHA256 = "invalid"
+				f.state.ComponentMetadata["cluster"] = cluster
+			case "invalid-rag-class":
+				rag := f.state.ComponentMetadata["rag"]
+				rag.PythonABI = "cp312"
+				f.state.ComponentMetadata["rag"] = rag
+			}
+			d, err := f.check(t)
+			if err != nil || d.Status != "blocked" || d.Reason != "component_update_incompatible" || d.Next != nil {
+				t.Fatalf("invalid installed component selection authorized: decision=%+v err=%v", d, err)
+			}
+		})
 	}
 }
 

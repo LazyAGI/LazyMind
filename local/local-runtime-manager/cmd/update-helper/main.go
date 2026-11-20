@@ -40,8 +40,15 @@ func main() {
 		}
 		os.Args[1] = "config"
 	}
-	base, err := resolveRecoveryBase()
-	root := filepath.Join(base, "LazyMindUpdater")
+	var root string
+	var err error
+	if desktopupdate.UnsignedTestBuild {
+		root, err = desktopupdate.UpdaterRoot()
+	} else {
+		var base string
+		base, err = resolveRecoveryBase()
+		root = filepath.Join(base, "LazyMindUpdater")
+	}
 	if err == nil {
 		err = run(ctx, os.Args[1:], os.Stdin, os.Stdout, embeddedConfig, root, time.Now().UTC())
 	}

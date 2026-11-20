@@ -1,4 +1,5 @@
 const { execFileSync } = require("node:child_process");
+const { targetComponentRevisions } = require("./update-runtime-client");
 
 function guardDesktopStartup({ isPackaged, sidecarPath, args, env, invoke = execFileSync }) {
   if (!isPackaged) return;
@@ -18,7 +19,7 @@ module.exports = { guardDesktopStartup };
 const startupFailure = code => Object.assign(new Error(code), { code });
 async function runUpdateBootstrap(parameters, adopt) {
   if (!parameters.isPackaged) return { allowed: true, runtimeStarted: false };
-  const { invoke, ownerToken } = parameters;
+  const { invoke, ownerToken, platform = process.platform } = parameters;
   const call = async (action, tx, timeout = 180_000) => {
     const raw = await invoke("update-bootstrap", ["--action", action, ...(tx ? ["--transaction-id", tx] : [])], { timeout });
     if (typeof raw !== "string" || Buffer.byteLength(raw) > 1024 * 1024) throw startupFailure("update_record_read");
@@ -39,10 +40,11 @@ async function runUpdateBootstrap(parameters, adopt) {
     await call("prepare-components", tx, 40 * 60_000);
   }
   const expectedRelease = parameters.currentReleaseId || record.currentReleaseId;
+  const expectedComponents = targetComponentRevisions(record);
   if (record.status !== "maintenance_required" || !expectedRelease || record.targetReleaseId !== expectedRelease
-    || record.targetVersion !== parameters.currentVersion || typeof record.sourceHadRAG !== "boolean"
-    || record.componentMode !== (record.sourceHadRAG ? "sync-target" : "absent")) throw startupFailure("update_incomplete");
-  const activated = await call("activate", tx, 180_000);
+    || record.targetVersion !== parameters.currentVersion || !expectedComponents) throw startupFailure("update_incomplete");
+  // Windows simple installation also expands and relocates target Python here.
+  const activated = await call("activate", tx, platform === "win32" ? 30 * 60_000 : 360_000);
   if (activated.status !== "activated" || activated.transactionId !== tx || activated.owner !== ownerToken) throw startupFailure("update_incomplete");
   const started = await call("up", tx, 180_000);
   if (started.status !== "ready" || started.transactionId !== tx || started.owner !== ownerToken || started.bootstrap !== true) throw startupFailure("update_startup_failed");
@@ -52,9 +54,9 @@ async function runUpdateBootstrap(parameters, adopt) {
     if (proof.status !== "ready" || proof.transactionId !== tx || proof.owner !== ownerToken
       || proof.releaseId !== expectedRelease || proof.version !== parameters.currentVersion
       || proof.dirty !== false || proof.dataProfile !== record.dataProfile
-      || !proof.components || (record.sourceHadRAG
-        ? proof.components.rag !== record.targetRAGRevision || Object.keys(proof.components).length !== 1
-        : Object.keys(proof.components).length !== 0)) throw startupFailure("update_startup_failed");
+      || !proof.components || typeof proof.components !== "object" || Array.isArray(proof.components)
+      || Object.keys(proof.components).length !== Object.keys(expectedComponents).length
+      || Object.entries(expectedComponents).some(([id, revision]) => proof.components[id] !== revision)) throw startupFailure("update_startup_failed");
     const peers = record.expectedPeers || ["core", "scan"];
     if (!Array.isArray(peers) || !peers.includes("core") || peers.some(name => !["core", "scan"].includes(name))) throw startupFailure("update_startup_failed");
     for (const name of peers) {

@@ -28,11 +28,12 @@ async function writeNativeUpdateMetadata(context, options = {}) {
     : path.join(context.appOutDir, "resources");
   const destination = path.join(resources, "app-update.yml");
   const { readUpdateBuildConfig } = await import("./prepare-update-build-config.mjs");
-  const configuration = Object.hasOwn(options, "configuration") ? options.configuration : readUpdateBuildConfig();
+  const unsigned = require("./unsigned-update-build.cjs").readUnsignedTestBuildConfig();
+  const configuration = unsigned ?? (Object.hasOwn(options, "configuration") ? options.configuration : readUpdateBuildConfig());
   const signingMode = options.signingMode ?? (platform === "darwin" ? process.env.LAZYMIND_DESKTOP_SIGNING_MODE || "adhoc"
     : process.env.WIN_CSC_LINK || process.env.CSC_LINK ? "authenticode" : "none");
   const metadata = await nativeUpdateMetadata({ configuration, packageVersion: context.packager.appInfo.version,
-    platform, arch: { 1: "amd64", 3: "arm64" }[context.arch], signingMode });
+    platform, arch: { 1: "amd64", 3: "arm64" }[context.arch], signingMode, isolatedTestBuild: Boolean(unsigned) });
   // Clear a stale local-test marker when repackaging an existing output.
   fs.rmSync(path.join(resources, "unsigned-test.json"), { force: true });
   if (!metadata) {

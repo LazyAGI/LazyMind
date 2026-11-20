@@ -6,6 +6,14 @@ import path from "node:path";
 import test from "node:test";
 const read = name => fs.readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), "utf8");
 
+function assertConjunctiveGate(job, expectedTerms) {
+  const gate = job.match(/^    if: (.+)$/m)?.[1].trim().replace(/^\$\{\{\s*|\s*\}\}$/g, "");
+  assert.ok(gate, "publication job must gate execution");
+  assert.doesNotMatch(gate, /\|\|/, "publication conditions cannot be alternatives");
+  const terms = new Set(gate.split(/\s*&&\s*/));
+  for (const term of expectedTerms) assert.ok(terms.has(term), `publication must require ${term}`);
+}
+
 test("macOS signing selection depends on explicit mode and tag, never repository name", { skip: process.platform === "win32" }, t => {
   const source = read("macos-installer");
   const begin = source.indexOf('          case "${SIGNING_MODE}" in');
@@ -36,16 +44,62 @@ test("update build inputs are opt-in, public and injected only into packaging", 
   assert.match(read("windows-installer"), /signature.Status -ne 'Valid'/);
 });
 
-test("publication is a separate manually triggered serialized job with key cleanup", () => {
+test("manual publication remains serialized and scoped to the release environment", () => {
   const source = read("desktop-update-publish");
   assert.match(source, /on:\s*\n\s*workflow_dispatch:/);
   assert.doesNotMatch(source, /pull_request_target:|\n  push:|sunjh2222/);
   assert.match(source, /group: desktop-update-publication\s*\n\s*cancel-in-progress: false/);
-  assert.match(source, /environment: desktop_updates/);
+  assert.match(source, /environment:[^\n]*\bdesktop_updates\b/);
   assert.match(source, /--json conclusion --jq .conclusion\)" = success/);
   assert.ok(source.indexOf('update-publisher" sign') < source.indexOf('python desktop/scripts/publish-desktop-update.py'));
   assert.match(source, /trap 'rm -f "\$\{key_path\}"' EXIT/);
   assert.match(source, /name: Remove signing material\s*\n\s*if: always\(\)/);
   const archive = source.slice(source.indexOf('name: Save public publication records'), source.indexOf('name: Remove signing material'));
   assert.doesNotMatch(archive, /private|pem|key_path/);
+});
+
+test("enabled Desktop Release reuses the publisher with this run's two verified build artifacts", () => {
+  const release = read("desktop-release");
+  const reusable = read("desktop-update-publish");
+  const publishJob = release.match(/^  publish_update:\n([\s\S]*?)(?=^  [a-z][a-z_-]*:|$(?![\s\S]))/m)?.[1];
+  assert.ok(publishJob, "Desktop Release needs an update publication job");
+  assertConjunctiveGate(publishJob, ["vars.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true'",
+    "vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'"]);
+  assert.match(publishJob, /needs:[\s\S]*?\bmacos\b[\s\S]*?\bwindows\b/);
+  assert.match(publishJob, /uses: \.\/\.github\/workflows\/desktop-update-publish\.yml/);
+  assert.match(reusable, /^  workflow_call:/m);
+  for (const platform of ["macos", "windows"]) {
+    assert.ok(reusable.includes(`desktop-update-${platform}-\${{ github.run_id }}`),
+      `publication must select the ${platform} artifact from this run`);
+  }
+  assert.match(reusable, /uses: actions\/download-artifact@/);
+  assert.match(reusable, /environment:[^\n]*\bdesktop_updates\b/);
+});
+
+test("the same macOS Installer exposes a separate opt-in unsigned update test", () => {
+  const installer = read("macos-installer");
+  const dispatch = installer.match(/^  workflow_dispatch:\n([\s\S]*?)(?=^[a-z])/m)?.[1];
+  assert.ok(dispatch, "testers need the existing manual Installer entry");
+  assert.match(dispatch, /enable_unsigned_update_test:\s*\n(?:\s+[a-z]+: [^\n]*\n)*\s+default: false/);
+  const reusableInputs = installer.slice(installer.indexOf("  workflow_call:"), installer.indexOf("  workflow_dispatch:"));
+  assert.doesNotMatch(reusableInputs, /enable_unsigned_update_test/,
+    "formal release callers cannot request the unsigned test build");
+  const testBuild = installer.match(/^  build_unsigned_update_test:\n([\s\S]*?)(?=^  [a-z][a-z_-]*:|$(?![\s\S]))/m)?.[1];
+  assert.ok(testBuild, "the isolated test app has an independent build job");
+  assert.match(testBuild, /LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION: \$\{\{ vars\.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_MINIMUM_SYSTEM_VERSION \}\}/);
+  const testPublication = installer.match(/^  publish_unsigned_update_test:\n([\s\S]*?)(?=^  [a-z][a-z_-]*:|$(?![\s\S]))/m)?.[1];
+  assert.ok(testPublication, "a successful explicitly selected test build must have a publication path");
+  assertConjunctiveGate(testPublication, ["github.event_name == 'workflow_dispatch'",
+    "inputs.enable_unsigned_update_test", "!inputs.enable_updates"]);
+  assert.match(testPublication, /uses: \.\/\.github\/workflows\/desktop-update-publish\.yml/);
+  assert.match(testPublication, /unsigned_update_test: true/);
+  assert.match(read("desktop-update-publish"),
+    /environment: \$\{\{\s*inputs\.unsigned_update_test\s*&&\s*'desktop_updates_test'\s*\|\|\s*'desktop_updates'\s*\}\}/,
+    "test calls must use the test environment, while ordinary calls use the official environment");
+  const taggedRelease = read("desktop-release");
+  assert.doesNotMatch(taggedRelease, /enable_unsigned_update_test|desktop_updates_test/);
+  const caller = taggedRelease.match(/^  macos:\n([\s\S]*?)(?=^  [a-z][a-z_-]*:|$(?![\s\S]))/m)?.[1];
+  assert.ok(caller, "the macOS Installer remains callable from the tag workflow");
+  assert.match(caller, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/,
+    "the nested release workflow must be allowed to read action artifacts");
 });

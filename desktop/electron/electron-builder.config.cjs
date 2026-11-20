@@ -4,7 +4,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const util = require("node:util");
 const { writeNativeUpdateMetadata } = require("../scripts/native-update-metadata.cjs");
-const productName = "LazyMind";
+const unsignedTest = require("../scripts/unsigned-update-build.cjs").readUnsignedTestBuildConfig();
+const productName = unsignedTest ? "LazyMind Test" : "LazyMind";
 
 const execFile = util.promisify(childProcess.execFile);
 const delay = (milliseconds) => new Promise((resolve) => {
@@ -33,7 +34,7 @@ const extraResources = [
   {
     from: runtimeStage,
     to: "runtime",
-    filter: ["**/*", "!bin/unsigned-update-helper"],
+    filter: ["**/*", ...(unsignedTest ? [] : ["!bin/unsigned-update-helper"])],
   },
 ];
 
@@ -461,8 +462,9 @@ module.exports = {
     if (!arch) throw new Error(`Unsupported macOS recording helper architecture: ${context.arch}`);
     require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch, identity });
   },
-  appId: "ai.lazymind.desktop",
+  appId: unsignedTest ? "ai.lazymind.desktop.test" : "ai.lazymind.desktop",
   productName,
+  ...(unsignedTest ? { extraMetadata: { lazymindUnsignedTest: true } } : {}),
   artifactName: "LazyMind-${os}-${arch}.${ext}",
   asar: true,
   asarUnpack: ["node_modules/uiohook-napi/**/*", "node_modules/node-gyp-build/**/*"],
@@ -472,7 +474,7 @@ module.exports = {
   },
   files: [
     "src/**/*",
-    "!src/unsigned-test-*.js",
+    ...(unsignedTest ? [] : ["!src/unsigned-test-*.js"]),
     "assets/**/*",
     "package.json",
   ],

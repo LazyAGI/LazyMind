@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 var (
@@ -212,6 +214,75 @@ func TestUpdateFormatV2OptionalRAGIsNotPartOfDataFormat(t *testing.T) {
 	setActualFixtureRAG(t, f, strings.Repeat("a", 64))
 	if got := f.measure(t); got.DataProfile != before || got.Components["rag"] != strings.Repeat("a", 64) {
 		t.Fatalf("RAG must be measured separately from format: %+v", got)
+	}
+}
+
+func TestUpdateFormatV2MeasuresExternalClusterSeparately(t *testing.T) {
+	f := actualUpdateFormatFixture(t, 2)
+	setActualFixtureRAG(t, f, strings.Repeat("a", 64))
+	before := f.measure(t)
+	filename := filepath.Join(f.paths.ResourcesRoot, "config", "python-components.json")
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalog pythonComponentCatalog
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	cluster := catalog.Components["rag"]
+	cluster.ID = "cluster"
+	cluster.Revision = strings.Repeat("d", 64)
+	cluster.SHA256 = strings.Repeat("e", 64)
+	cluster.Tag = strings.Repeat("f", 64)
+	cluster.Packages = map[string]string{"umap-learn": "0.5.7"}
+	cluster.CatalogURL = "https://fixture.invalid/cluster/components.json"
+	catalog.Components["cluster"] = cluster
+	writeJSON := func(filename string, value any) {
+		t.Helper()
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, state := range []string{"not-installed", "installed", "damaged"} {
+		t.Run(state, func(t *testing.T) {
+			writeJSON(filename, catalog)
+			if state != "not-installed" {
+				dir := filepath.Join(f.paths.RuntimeRoot, "deps", "python-components", cluster.ID, cluster.Revision)
+				if err := os.MkdirAll(filepath.Join(dir, "site-packages"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				writeJSON(filepath.Join(dir, "bundle-manifest.json"), cluster)
+				writeJSON(filepath.Join(filepath.Dir(dir), "catalog-"+cluster.Tag+".json"), cluster)
+				marker := cluster.SHA256
+				if state == "damaged" {
+					marker = "wrong hash"
+				}
+				if err := os.WriteFile(filepath.Join(dir, ".ready"), []byte(marker), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := measureDesktopUpdateState(t.Context(), f.cfg, f.paths)
+			if state == "damaged" {
+				if desktopupdate.ErrorCode(err) != "component_state_unknown" || got.DataProfile != "" {
+					t.Fatalf("damaged cluster authorized an update: %+v, %v", got, err)
+				}
+				return
+			}
+			if err != nil || got.DataProfile != before.DataProfile || got.Components["rag"] != before.Components["rag"] {
+				t.Fatalf("cluster changed or hid the existing valid format: %+v, %v", got, err)
+			}
+			if state == "not-installed" && (got.Components["cluster"] != "" || len(got.ComponentMetadata) != 1) {
+				t.Fatalf("cluster catalog entry was treated as an active installation: %+v", got)
+			}
+			if state == "installed" && (got.Components["cluster"] != cluster.Revision || got.ComponentMetadata["cluster"].SHA256 != cluster.SHA256) {
+				t.Fatalf("installed cluster identity was lost: %+v", got)
+			}
+		})
 	}
 }
 

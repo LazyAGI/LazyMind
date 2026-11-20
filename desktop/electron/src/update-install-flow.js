@@ -1,3 +1,4 @@
+const { targetComponentRevisions } = require("./update-runtime-client");
 const failure = code => Object.assign(new Error(code), { code });
 const reasonFor = error => /^[a-z_]{1,64}$/.test(error?.code || "") ? error.code : "update_failed";
 
@@ -41,9 +42,8 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
         const plan = await runtime.prepareComponents(selected.offer.next, selected.receipt);
         if (!alive(op)) return;
         if (plan?.status !== "prepared" || !/^[a-f0-9]{32}$/.test(plan.transactionId || "")
-          || typeof plan.sourceHadRAG !== "boolean" || !/^[A-Za-z0-9._-]{1,128}$/.test(plan.dataProfile || "")
-          || (plan.sourceHadRAG ? plan.componentMode !== "sync-target" || !/^[a-f0-9]{64}$/.test(plan.targetRAG?.revision || "")
-            : plan.componentMode !== "absent" || plan.targetRAG !== undefined)) throw failure("component_state_unknown");
+          || !/^[A-Za-z0-9._-]{1,128}$/.test(plan.dataProfile || "")
+          || !targetComponentRevisions(plan)) throw failure("component_state_unknown");
         write({ ...saved, ...plan, version: 2, phase: "pending" });
       } else {
         await verifyComponents(selected.offer.next, selected.receipt);

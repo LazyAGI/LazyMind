@@ -13,7 +13,62 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
+
+func TestUpdateV2TargetCatalogBindsExternalCluster(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"dual", ""},
+		{"invalid-cluster", "component_update_incompatible"},
+		{"unknown-component", "component_update_incompatible"},
+		{"modified-after-signing", "artifact_hash"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rag := desktopupdate.ComponentDescriptor{
+				ID: "rag", Platform: runtime.GOOS, Arch: runtime.GOARCH, PythonABI: "cp311",
+				Revision: strings.Repeat("a", 64), Tag: strings.Repeat("b", 64),
+				SHA256: strings.Repeat("c", 64), BaseFingerprint: strings.Repeat("d", 64),
+				SizeBytes: 10, UnpackedBytes: 100, Filename: "rag.zip", Packages: map[string]string{"pymilvus": "2.0"},
+				URL: "https://fixture.invalid/rag.zip",
+			}
+			cluster := rag
+			cluster.ID, cluster.Filename, cluster.URL = "cluster", "cluster.zip", "https://fixture.invalid/cluster.zip"
+			cluster.Revision, cluster.Tag, cluster.SHA256 = strings.Repeat("e", 64), strings.Repeat("f", 64), strings.Repeat("1", 64)
+			cluster.Packages = map[string]string{"umap-learn": "0.5.7"}
+			if tc.name == "invalid-cluster" {
+				cluster.PythonABI = ""
+			}
+			if tc.name == "unknown-component" {
+				cluster.ID = "unknown"
+			}
+			raw, err := json.Marshal(map[string]any{
+				"schemaVersion": 1, "platform": runtime.GOOS, "arch": runtime.GOARCH,
+				"components": map[string]desktopupdate.ComponentDescriptor{"rag": rag, cluster.ID: cluster},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash := sha256.Sum256(raw)
+			if tc.name == "modified-after-signing" {
+				raw = bytes.Replace(raw, []byte("0.5.7"), []byte("0.5.8"), 1)
+			}
+			filename := filepath.Join(t.TempDir(), "components.json")
+			if err := os.WriteFile(filename, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			artifact := desktopupdate.Artifact{Size: int64(len(raw)), SHA256: hex.EncodeToString(hash[:])}
+			got, _, err := readTargetCatalog(t.Context(), filename, artifact)
+			if tc.want == "" {
+				if err != nil || !bytes.Equal(got, raw) {
+					t.Fatalf("valid signed dual-component catalog rejected: %v", err)
+				}
+			} else if desktopupdate.ErrorCode(err) != tc.want {
+				t.Fatalf("target check error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
 
 func TestUpdateComponentPreflightCLI(t *testing.T) {
 	for _, scenario := range []string{"same", "same-tag-new-pin", "new-tag", "new-tag-installed", "changed-base", "changed-abi", "changed-packages", "changed-url", "missing-component", "never-installed", "bad-hash", "bad-size", "invalid-json", "directory", "dirty", "wrong-owner"} {

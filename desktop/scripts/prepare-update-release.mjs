@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import testBuild from "./unsigned-update-build.cjs";
 
 export async function fingerprint(filename) {
   const stat = fs.lstatSync(filename);
@@ -21,8 +22,16 @@ export async function prepareRelease({ resources, packagePath, baseURL, minimumS
   const runtime = path.join(resources, "runtime");
   const helper = path.join(runtime, "bin", `lazymind-update-helper${process.platform === "win32" ? ".exe" : ""}`);
   const status = JSON.parse(execFileSync(helper, ["config"], { encoding: "utf8", timeout: 35000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }));
-  if (status.status !== "enabled" || status.config?.mode !== "official") throw new Error("Update configuration must be enabled in the built helper");
+  const unsigned = testBuild.readUnsignedTestBuildConfig();
+  if (status.status !== "enabled" || status.config?.mode !== (unsigned ? "unsigned-test" : "official")) throw new Error("Update configuration must be enabled in the built helper");
   const config = status.config;
+  if (unsigned) {
+    testBuild.validateUnsignedTestConfig(config);
+    testBuild.unsignedTestBase(baseURL, config);
+    if (config.platform !== "darwin") throw new Error("Isolated update test must be a macOS package");
+    const { version, releaseId, platform, arch, ...publicConfig } = config;
+    if (!isDeepStrictEqual(publicConfig, unsigned)) throw new Error("Built test helper does not match the public test configuration");
+  }
   const native = JSON.parse(fs.readFileSync(path.join(resources, "app-update.yml"), "utf8"));
   const expected = { protocol: config.updaterProtocol, releaseId: config.releaseId, version: config.version, mode: config.mode,
     platform: config.platform, arch: config.arch, signingIdentity: config.signingIdentity };
@@ -42,10 +51,15 @@ export async function prepareRelease({ resources, packagePath, baseURL, minimumS
     const verified = inspectSignature("/usr/bin/codesign", ["--verify", "--deep", "--strict", app], { encoding: "utf8" });
     const signature = inspectSignature("/usr/bin/codesign", ["-dv", "--verbose=4", app], { encoding: "utf8" });
     const team = String(signature.stderr).match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim();
-    if (verified.status !== 0 || signature.status !== 0 || team !== config.signingIdentity || !String(signature.stderr).includes("Authority=Developer ID Application:")) throw new Error("App signature does not match update identity");
+    const signingMatches = unsigned
+      ? path.basename(app) === "LazyMind Test.app" && /^Signature=adhoc$/m.test(String(signature.stderr))
+        && /^Identifier=ai\.lazymind\.desktop\.test$/m.test(String(signature.stderr))
+      : team === config.signingIdentity && String(signature.stderr).includes("Authority=Developer ID Application:");
+    if (verified.status !== 0 || signature.status !== 0 || !signingMatches) throw new Error("App signature does not match update identity");
+    const archiveApp = unsigned ? "LazyMind Test.app" : "LazyMind.app";
     // Read only fixed members; do not extract an untrusted archive into the filesystem.
     for (const relative of ["runtime/manifest.json", "runtime/config/python-components.json", "app-update.yml"]) {
-      const archived = execFileSync("/usr/bin/unzip", ["-p", packagePath, `LazyMind.app/Contents/Resources/${relative}`], { maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+      const archived = execFileSync("/usr/bin/unzip", ["-p", packagePath, archiveApp + "/Contents/Resources/" + relative], { maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
       if (!archived.equals(fs.readFileSync(path.join(resources, relative)))) throw new Error("ZIP metadata does not match the built application");
     }
   }

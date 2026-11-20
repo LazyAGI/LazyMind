@@ -44,6 +44,18 @@ PNPM_BIN="${PNPM:-pnpm}"
 UV_BIN="${UV:-uv}"
 GO_BUILD_FLAGS=(-trimpath -buildvcs=false -ldflags="-s -w")
 GO_INSTALL_FLAGS=(-trimpath -ldflags="-s -w")
+UNSIGNED_TEST_GO_FLAGS=()
+CORE_LDFLAGS="-s -w"
+APP_NAME="LazyMind"
+if [[ -f "${ROOT}/desktop/scripts/.unsigned-update-test.local.json" ]]; then
+  if [[ "${SIGNING_MODE}" != "adhoc" || "${PACKAGE_KIND}" != "zip" || "${RELEASE_BUILD}" == "true" || -n "${LAZYMIND_CLOUD_BASE_URL:-}" ]]; then
+    echo "Invalid isolated unsigned update test build options" >&2
+    exit 2
+  fi
+  UNSIGNED_TEST_GO_FLAGS=(-tags=lazymind_unsigned_test)
+  CORE_LDFLAGS+=" -X lazymind/core/systemdeps.componentStateNamespace=LazyMindTestUpdater"
+  APP_NAME="LazyMind Test"
+fi
 
 : "${ELECTRON_CACHE:=${HOME}/Library/Caches/electron}"
 : "${ELECTRON_BUILDER_CACHE:=${HOME}/Library/Caches/electron-builder}"
@@ -283,13 +295,16 @@ echo "==> Building Go desktop runtime binaries"
 UPDATE_BUILD_CONFIG="$(node "${ROOT}/desktop/scripts/prepare-update-build-config.mjs" --platform darwin --arch "${GO_ARCH}" --signing-mode "${SIGNING_MODE}" --package "${ROOT}/desktop/electron/package.json")"
 (cd "${ROOT}/backend/feishu-credential-helper" && "${GO_BIN}" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -mod=readonly -o "${RUNTIME_ROOT}/bin/feishu-credential-helper" .)
 shasum -a 256 "${RUNTIME_ROOT}/bin/feishu-credential-helper" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/feishu-credential-helper.sha256"
-(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${DESKTOP_LAUNCHER}" ./cmd/desktop-launcher)
-(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
-(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -trimpath -buildvcs=false -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/lazymind-update-helper" ./cmd/update-helper)
+(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" ${UNSIGNED_TEST_GO_FLAGS[@]+"${UNSIGNED_TEST_GO_FLAGS[@]}"} -o "${DESKTOP_LAUNCHER}" ./cmd/desktop-launcher)
+(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" ${UNSIGNED_TEST_GO_FLAGS[@]+"${UNSIGNED_TEST_GO_FLAGS[@]}"} -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
+(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -trimpath -buildvcs=false ${UNSIGNED_TEST_GO_FLAGS[@]+"${UNSIGNED_TEST_GO_FLAGS[@]}"} -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/lazymind-update-helper" ./cmd/update-helper)
 "${RUNTIME_ROOT}/bin/lazymind-update-helper" config >/dev/null
+if [[ "${APP_NAME}" == "LazyMind Test" ]]; then
+  (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -trimpath -buildvcs=false -tags=lazymind_unsigned_test -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/unsigned-update-helper" ./cmd/unsigned-update-helper)
+fi
 (cd "${ROOT}/local/lazymind-cli" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/lazymind" ./cmd/lazymind)
 (cd "${ROOT}/local/local-proxy" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-proxy" ./cmd/local-proxy)
-(cd "${ROOT}/backend/core" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/core" .)
+(cd "${ROOT}/backend/core" && "${GO_BIN}" build -trimpath -buildvcs=false -ldflags="${CORE_LDFLAGS}" -o "${RUNTIME_ROOT}/bin/core" .)
 (cd "${ROOT}/backend/scan-control-plane" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/scan-control-plane" ./cmd/scan-control-plane)
 (cd "${ROOT}/backend/file-watcher" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/file-watcher" ./cmd/main.go)
 GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install "${GO_INSTALL_FLAGS[@]}" github.com/f1bonacc1/process-compose@v1.116.0
@@ -408,6 +423,7 @@ rsync -a --delete \
   --exclude ".pnpm-store" \
   --exclude ".cache" \
   --exclude "desktop/dist" \
+  --exclude "/desktop/scripts/.unsigned-update-test.local.json" \
   --exclude "/frontend/src" \
   --exclude "/frontend/public" \
   --exclude "/frontend/scripts" \
@@ -478,7 +494,7 @@ fi
 if ! (cd "${ROOT}/desktop/electron" && node -e 'require("electron")' >/dev/null 2>&1); then
   (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" rebuild electron)
 fi
-remove_generated_path "${DIST_ROOT}/${MAC_OUT}/LazyMind.app"
+remove_generated_path "${DIST_ROOT}/${MAC_OUT}/${APP_NAME}.app"
 export LAZYMIND_DESKTOP_RUNTIME_STAGE="${RUNTIME_ROOT}"
 export LAZYMIND_DESKTOP_OUTPUT_DIR="${DIST_ROOT}"
 export LAZYMIND_DESKTOP_MAC_LAUNCHER="${DESKTOP_LAUNCHER}"
@@ -490,12 +506,12 @@ else
   (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run "pack:mac:${ELECTRON_ARCH}")
 fi
 
-APP_PATH="${DIST_ROOT}/${MAC_OUT}/LazyMind.app"
+APP_PATH="${DIST_ROOT}/${MAC_OUT}/${APP_NAME}.app"
 ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-${TARGET_ARCH}.zip"
 DMG_PATH="${DIST_ROOT}/LazyMind-macos-${TARGET_ARCH}.dmg"
 if [[ ! -d "${APP_PATH}" ]]; then
   if [[ -d "${DIST_ROOT}/${MAC_OUT}" ]]; then
-    APP_PATH="$(find "${DIST_ROOT}/${MAC_OUT}" -maxdepth 3 -type d -name "LazyMind.app" -print -quit)"
+    APP_PATH="$(find "${DIST_ROOT}/${MAC_OUT}" -maxdepth 3 -type d -name "${APP_NAME}.app" -print -quit)"
   fi
 fi
 if [[ -d "${APP_PATH}" ]]; then

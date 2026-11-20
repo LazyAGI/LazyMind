@@ -111,6 +111,8 @@ const windowsDesktopPaths = isWindows
   : null;
 
 const isPackaged = app.isPackaged;
+const unsignedTestProfile = isPackaged && require("../package.json").lazymindUnsignedTest === true
+  ? require("./unsigned-test-profile").initializeTestProfile(app) : null;
 const currentVersion = app.getVersion();
 let currentReleaseId;
 let runtimePrestarted = false;
@@ -2705,8 +2707,11 @@ function assertBrowserIPC(event) {
   }
 }
 const invokeUpdateHelper = createUpdateHelperClient({ helperPath: path.join(runtimeResourcesRoot, "bin", isWindows ? "lazymind-update-helper.exe" : "lazymind-update-helper") });
-const nativeUpdateInstaller = createNativeUpdateInstaller({ currentVersion: app.getVersion(), isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath, setQuitting: (value) => { isQuitting = value; allowWindowClose = value; }, quit: () => app.quit() });
+const updateInstallerOptions = { currentVersion: app.getVersion(), isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath, setQuitting: (value) => { isQuitting = value; allowWindowClose = value; }, quit: () => app.quit() };
+const nativeUpdateInstaller = unsignedTestProfile
+  ? require("./unsigned-test-installer").createUnsignedTestInstaller({ ...updateInstallerOptions, profile: unsignedTestProfile })
+  : createNativeUpdateInstaller(updateInstallerOptions);
 const updateRuntime = createUpdateRuntimeClient({
   runSidecar,
   localWork: () => desktopUpdateWork + Number(Boolean(runtimeRestartPromise)) + Number(inputRecorder.isActive()) + Number(Boolean(nativeRecording?.isActive()))
@@ -2754,7 +2759,7 @@ app.on("will-quit", () => desktopUpdater.dispose());
 let nativeRecordingOwner = null;
 const nativeRecording = process.platform === "darwin" ? createRecordingHelper({
   source: app.isPackaged ? path.join(process.resourcesPath, "recording-helper", "LazyMind Recorder.app") : path.resolve(__dirname, "../../build/recording-helper/LazyMind Recorder.app"),
-  root: path.join(app.getPath("appData"), "LazyMind", "recording-helper"),
+  root: path.join(unsignedTestProfile?.runtime || path.join(app.getPath("appData"), "LazyMind"), "recording-helper"),
   onEvent: (message) => { if (nativeRecordingOwner && !nativeRecordingOwner.isDestroyed()) nativeRecordingOwner.send("lazymind:recordingNativeEvent", message); },
   log: (stage, message) => appendStartupLog("recording-helper", `${stage}: ${message}`),
 }) : null;

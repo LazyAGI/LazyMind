@@ -1,6 +1,26 @@
 package desktopupdate
 
-import "reflect"
+import (
+	"reflect"
+	"slices"
+)
+
+func UpdateComponentIDs() []string { return []string{"rag", "cluster"} }
+
+func IsUpdateComponent(id string) bool { return slices.Contains(UpdateComponentIDs(), id) }
+
+func validUpdateComponent(meta ComponentDescriptor) bool {
+	if !IsUpdateComponent(meta.ID) || !digestPattern.MatchString(meta.Revision) || !digestPattern.MatchString(meta.SHA256) ||
+		!digestPattern.MatchString(meta.Tag) || !digestPattern.MatchString(meta.BaseFingerprint) || meta.PythonABI == "" || len(meta.Packages) == 0 || len(meta.Packages) > 256 {
+		return false
+	}
+	for name, version := range meta.Packages {
+		if name == "" || version == "" {
+			return false
+		}
+	}
+	return true
+}
 
 func validateComponentTransitions(transitions map[string]ComponentTransition, targetSHA string) error {
 	if len(transitions) != 1 {
@@ -24,19 +44,18 @@ func validateComponentTransitions(transitions map[string]ComponentTransition, ta
 }
 
 func matchSourceComponents(transitions map[string]ComponentTransition, state LocalState, c Config) string {
-	if len(state.Components) == 0 {
-		if len(state.ComponentMetadata) != 0 {
+	if len(state.Components) != len(state.ComponentMetadata) {
+		return "component_state_unknown"
+	}
+	for id, revision := range state.Components {
+		meta, ok := state.ComponentMetadata[id]
+		if !ok || meta.ID != id || meta.Revision != revision || !validUpdateComponent(meta) || meta.Platform != c.Platform || meta.Arch != c.Arch {
 			return "component_state_unknown"
 		}
-		return ""
 	}
-	if len(state.Components) != 1 || len(state.ComponentMetadata) != 1 {
-		return "component_state_unknown"
-	}
-	revision := state.Components["rag"]
 	meta, ok := state.ComponentMetadata["rag"]
-	if !ok || meta.ID != "rag" || meta.Revision != revision || !digestPattern.MatchString(revision) || !digestPattern.MatchString(meta.SHA256) || meta.Platform != c.Platform || meta.Arch != c.Arch {
-		return "component_state_unknown"
+	if !ok {
+		return ""
 	}
 	for _, accepted := range transitions["rag"].SourceClasses {
 		if accepted.Tag == meta.Tag && accepted.PythonABI == meta.PythonABI && accepted.BaseFingerprint == meta.BaseFingerprint && reflect.DeepEqual(accepted.Packages, meta.Packages) {

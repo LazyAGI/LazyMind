@@ -15,6 +15,9 @@ concurrency:
 jobs:
   macos:
     name: Build and test macOS installer
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/macos-installer.yml
     with:
       git_ref: ${{ github.ref }}
@@ -28,6 +31,18 @@ jobs:
       git_ref: ${{ github.ref }}
       enable_updates: ${{ vars.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true' }}
     secrets: inherit
+
+  publish_update:
+    name: Publish signed desktop update
+    if: vars.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true' && vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'
+    needs: [macos, windows]
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/desktop-update-publish.yml
+    with:
+      use_current_run: true
+      source_build_run_id: ${{ vars.LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID }}
 
   release:
     name: Create draft desktop release

@@ -265,6 +265,56 @@ func TestPythonComponentOnlineReceiptSurvivesOfflineRestart(t *testing.T) {
 	}
 }
 
+func TestDesktopUpdateBootstrapPreservesExternalClusterSelections(t *testing.T) {
+	root := t.TempDir()
+	paths := RuntimePaths{ResourcesRoot: t.TempDir(), RuntimeRoot: root, StateDir: root}
+	rag := pythonComponent{ID: "rag", Revision: strings.Repeat("a", 64), SHA256: strings.Repeat("b", 64),
+		BaseFingerprint: strings.Repeat("c", 64), Platform: runtime.GOOS, Arch: runtime.GOARCH, PythonABI: "cp311"}
+	target := rag
+	target.ID, target.Revision = "cluster", strings.Repeat("d", 64)
+	catalog := pythonComponentCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH,
+		Components: map[string]pythonComponent{"rag": rag, "cluster": target}}
+	write := func(path string, data []byte) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"), raw)
+	cfg := RuntimeConfig{Profile: "desktop", UpdateBootstrap: &RuntimeUpdateBootstrap{}}
+	t.Run("unselected-cluster-defers-ordinary-download", func(t *testing.T) {
+		runner := &fakeRunner{t: t}
+		manager := NewRuntimeManager(runner, "fixture-manager")
+		manager.prepareDesktopCluster(t.Context(), cfg, paths)
+		if len(runner.calls) != 0 {
+			t.Fatal("sealed startup installed a cluster component outside the transaction")
+		}
+	})
+	var markers []string
+	for _, revision := range []string{strings.Repeat("e", 64), target.Revision} {
+		marker := filepath.Join(root, "deps", "python-components", "cluster", revision, ".ready")
+		write(marker, []byte(target.SHA256))
+		markers = append(markers, marker)
+	}
+	write(filepath.Join(root, "cluster-component-app-version"), []byte("0.5.0\n"))
+	t.Setenv(desktopAppVersionEnvVar, "0.5.1")
+	if err := prepareDesktopPythonComponents(t.Context(), cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range markers {
+		if contents, err := os.ReadFile(marker); err != nil || string(contents) != target.SHA256 {
+			t.Fatalf("bootstrap changed a cluster selection before update completion: %s: %v", marker, err)
+		}
+	}
+}
+
 func TestDesktopRAGUpgradeRequiresFreshInstallation(t *testing.T) {
 	root := t.TempDir()
 	paths := RuntimePaths{ResourcesRoot: t.TempDir(), RuntimeRoot: root, StateDir: root}

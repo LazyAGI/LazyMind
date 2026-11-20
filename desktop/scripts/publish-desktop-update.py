@@ -13,6 +13,9 @@ from urllib.parse import urlsplit, unquote
 from urllib.request import HTTPRedirectHandler, build_opener
 
 
+MAX_POLICY_BYTES = 1024 * 1024
+
+
 class PinnedRedirects(HTTPRedirectHandler):
     def __init__(self, origins):
         self.origins = {origin.rstrip('/') for origin in origins}
@@ -23,6 +26,30 @@ class PinnedRedirects(HTTPRedirectHandler):
                 or f'{parsed.scheme}://{parsed.netloc}' not in self.origins):
             raise ValueError('Untrusted update download redirect')
         return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def destination(url, base):
+    if not isinstance(url, str) or not url.startswith(base):
+        raise ValueError('Policy/artifact URL does not match upload repository')
+    parsed = urlsplit(url)
+    relative = url[len(base):]
+    if (parsed.query or parsed.fragment or unquote(relative) != relative or '\\' in relative
+            or any(part in ('', '.', '..') for part in relative.split('/'))):
+        raise ValueError('Unsafe publication path')
+    return relative
+
+
+def read_remote_policy(fetch, url):
+    try:
+        with fetch(url) as stream:
+            data = stream.read(MAX_POLICY_BYTES + 1)
+            if len(data) > MAX_POLICY_BYTES:
+                raise ValueError('Remote policy too large')
+            return data
+    except HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
 
 
 def digest(stream, expected):
@@ -36,11 +63,12 @@ def digest(stream, expected):
         raise ValueError('Artifact size/hash mismatch; immutable files cannot be replaced')
 
 
-def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, validate=None, validator=None):
+def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, validate=None, validator=None,
+            expected_policy_sha256=None):
     directory = Path(directory).resolve()
     config = json.loads(Path(config_path).read_text())
     envelope = Path(policy_path).read_bytes()
-    if len(envelope) > 1024 * 1024:
+    if len(envelope) > MAX_POLICY_BYTES:
         raise ValueError('Policy too large')
     if validate is None:
         if not validator:
@@ -65,30 +93,11 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*', repo):
         raise ValueError('Invalid ModelScope repository')
     base = f'https://modelscope.cn/datasets/{repo}/resolve/master/'
-    def destination(url):
-        if not isinstance(url, str) or not url.startswith(base):
-            raise ValueError('Policy/artifact URL does not match upload repository')
-        parsed = urlsplit(url)
-        relative = url[len(base):]
-        if (parsed.query or parsed.fragment or unquote(relative) != relative or '\\' in relative
-                or any(part in ('', '.', '..') for part in relative.split('/'))):
-            raise ValueError('Unsafe publication path')
-        return relative
-    policy_destination = destination(config['policyURL'])
+    policy_url = config['policyURL']
+    policy_destination = destination(policy_url, base)
     if fetch is None:
         opener = build_opener(PinnedRedirects(config['allowedOrigins']))
         fetch = lambda url: opener.open(url, timeout=60)
-    def read_policy():
-        try:
-            with fetch(config['policyURL']) as stream:
-                data = stream.read(1024 * 1024 + 1)
-            if len(data) > 1024 * 1024:
-                raise ValueError('Remote policy too large')
-            return data
-        except HTTPError as error:
-            if error.code == 404:
-                return None
-            raise
     def remote_exists(artifact):
         try:
             with fetch(artifact['url']) as stream:
@@ -98,7 +107,11 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
             if error.code == 404:
                 return False
             raise
-    old = read_policy()
+    old = read_remote_policy(fetch, policy_url)
+    if expected_policy_sha256 is not None:
+        actual = 'absent' if old is None else hashlib.sha256(old).hexdigest()
+        if expected_policy_sha256 != actual:
+            raise ValueError('Remote policy does not match the publication plan')
     if old is not None:
         previous = validate_history(old)
         if envelope != old and policy['policySequence'] <= previous['policySequence']:
@@ -112,7 +125,7 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
         for kind, filename in [('package', 'package.zip' if release['platform'] == 'darwin' else 'package.exe'),
                                ('feed', 'feed.json'), ('components', 'components.json')]:
             artifact = release[kind]
-            target = destination(artifact['url'])
+            target = destination(artifact['url'], base)
             if not target.endswith(f'/releases/{rid}/{filename}') or target in seen or target == policy_destination:
                 raise ValueError('Invalid or duplicate immutable destination')
             seen.add(target)
@@ -146,7 +159,7 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
         if not remote_exists(artifact):
             raise ValueError('Uploaded artifact is not publicly downloadable')
     # Workflows serialize this operation. Detect intervening external publishers too.
-    if read_policy() != old:
+    if read_remote_policy(fetch, policy_url) != old:
         raise ValueError('Remote policy changed during publication; retry with a new plan')
     if envelope == old:
         return
@@ -154,7 +167,7 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
         snapshot = Path(temp) / 'policy.json'
         snapshot.write_bytes(envelope)
         upload(snapshot, policy_destination)
-    if read_policy() != envelope:
+    if read_remote_policy(fetch, policy_url) != envelope:
         raise ValueError('Published policy readback mismatch')
 
 
@@ -165,9 +178,11 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--repo', required=True)
     parser.add_argument('--validator', type=Path, required=True)
+    parser.add_argument('--expected-policy-sha256', help="Required prior policy SHA-256, or 'absent' for the first release")
     args = parser.parse_args()
     try:
-        publish(args.directory, args.policy, args.config, args.repo, validator=args.validator.resolve())
+        publish(args.directory, args.policy, args.config, args.repo, validator=args.validator.resolve(),
+                expected_policy_sha256=args.expected_policy_sha256)
     except Exception:
         # SDK/network errors may contain temporary signed URLs or credentials.
         raise SystemExit('Desktop update publication failed; policy must not be assumed published. Reconcile remote state before retrying.') from None

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 const (
@@ -863,6 +865,17 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 	}
 	buildRoot := cleanOptionalPath(firstNonEmpty(opts.BuildRoot, os.Getenv(localBuildRootEnvVar), defaultBuildRoot))
 	pathLayout := defaultRuntimePathLayout()
+	if desktopupdate.UnsignedTestBuild {
+		testPaths, err := desktopupdate.UnsignedPaths()
+		if err != nil {
+			return RuntimeConfig{}, RuntimePaths{}, err
+		}
+		testResources := filepath.Join(testPaths.Application, "Contents", "Resources", "runtime")
+		if profile != "desktop" || resourcesRoot != testResources || buildRoot != testResources || root != filepath.Join(testResources, "app") {
+			return RuntimeConfig{}, RuntimePaths{}, updateStateFailure("unsigned_test_runtime_scope")
+		}
+		pathLayout = RuntimePathLayout{DataRoot: testPaths.Runtime, CacheRoot: testPaths.Cache, LogsRoot: testPaths.Logs, LocalImportRoot: testPaths.Documents}
+	}
 	runtimeRoot := cleanOptionalPath(firstNonEmpty(opts.RuntimeRoot, os.Getenv(runtimeRootEnvVar), pathLayout.DataRoot))
 	cacheRoot := cleanOptionalPath(pathLayout.CacheRoot)
 	dataRoot := filepath.Join(runtimeRoot, "data")
@@ -1129,7 +1142,31 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 	if err := inheritBootstrapRuntime(&cfg, &p); err != nil {
 		return RuntimeConfig{}, RuntimePaths{}, err
 	}
+	if desktopupdate.UnsignedTestBuild {
+		if err := validateUnsignedTestStorage(cfg, p, pathLayout); err != nil {
+			return RuntimeConfig{}, RuntimePaths{}, err
+		}
+	}
 	return cfg, p, nil
+}
+
+func validateUnsignedTestStorage(cfg RuntimeConfig, paths RuntimePaths, layout RuntimePathLayout) error {
+	if cfg.NetworkProfile != "localhost" || paths.RuntimeRoot != layout.DataRoot ||
+		cfg.UpdateStorage == nil || cfg.AuthService.DatabaseURL != sqliteURL(paths.AuthServiceDBPath) {
+		return updateStateFailure("unsigned_test_storage_scope")
+	}
+	scope, err := runtimeUpdateScope(cfg, paths)
+	if err != nil {
+		return err
+	}
+	roots := append(scope.DataRoots, cfg.FileWatcher.AllowedRoots...)
+	for _, file := range roots {
+		if (!pathIsUnderRoot(file, layout.DataRoot) && !pathIsUnderRoot(file, layout.LocalImportRoot)) ||
+			desktopupdate.NoUnsignedPathAliases(file) != nil {
+			return updateStateFailure("unsigned_test_storage_scope")
+		}
+	}
+	return nil
 }
 
 func applyDesktopManifestPaths(paths *RuntimePaths) error {

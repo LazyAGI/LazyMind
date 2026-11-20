@@ -55,6 +55,19 @@ on:
         description: "Branch, tag, or commit SHA to build; leave empty to build the selected workflow branch"
         required: false
         type: string
+      enable_unsigned_update_test:
+        description: "Build an isolated macOS ad-hoc app for v2 automatic update testing"
+        required: false
+        type: boolean
+        default: false
+      test_version:
+        description: "Version of the isolated test app, for example 0.5.210"
+        required: false
+        type: string
+      source_build_run_id:
+        description: "Successful test run for the published baseline A; leave empty only for the initial baseline"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -84,8 +97,82 @@ env:
   LAZYMIND_DESKTOP_PRUNE_PYTHON: "true"
 
 jobs:
+  build_unsigned_update_test:
+    name: Build isolated macOS v2 update test
+    if: github.event_name == 'workflow_dispatch' && inputs.enable_unsigned_update_test
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION: ${{ vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_MINIMUM_SYSTEM_VERSION }}
+    steps:
+      - name: Validate test build inputs
+        env:
+          ENABLE_OFFICIAL_UPDATES: ${{ inputs.enable_updates }}
+          TEST_VERSION: ${{ inputs.test_version }}
+          TEST_SOURCE_RUN: ${{ inputs.source_build_run_id }}
+          TEST_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
+          OFFICIAL_BASE_URL: ${{ vars.LAZYMIND_UPDATE_BASE_URL }}
+        run: |
+          set -euo pipefail
+          [[ "${ENABLE_OFFICIAL_UPDATES}" != true ]]
+          [[ "${TEST_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ -z "${TEST_SOURCE_RUN}" || "${TEST_SOURCE_RUN}" =~ ^[0-9]+$ ]]
+          [[ "${TEST_BASE_URL}" == https://modelscope.cn/datasets/*/resolve/master/* ]]
+          [[ "${TEST_BASE_URL%/}" != "${OFFICIAL_BASE_URL%/}" ]]
+          : "${LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION:?Set LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_MINIMUM_SYSTEM_VERSION}"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          package-manager-cache: false
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: local/local-runtime-manager/go.sum
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+      - name: Build and stage the isolated test app
+        env:
+          TEST_VERSION: ${{ inputs.test_version }}
+          LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON }}
+          LAZYMIND_UPDATE_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
+        run: |
+          set -euo pipefail
+          export LAZYMIND_PYTHON_COMPONENT_BASE_URL="${LAZYMIND_UPDATE_BASE_URL%/}/RAG/"
+          bash desktop/scripts/build-unsigned-update-test.sh "${TEST_VERSION}" "${RUNNER_TEMP}/unsigned-update-test"
+      - name: Upload isolated test update artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-update-macos-${{ github.run_id }}
+          path: ${{ runner.temp }}/unsigned-update-test
+          if-no-files-found: error
+          retention-days: 30
+
+  publish_unsigned_update_test:
+    name: Publish isolated macOS test update
+    if: github.event_name == 'workflow_dispatch' && inputs.enable_unsigned_update_test && !inputs.enable_updates
+    needs: build_unsigned_update_test
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/desktop-update-publish.yml
+    with:
+      use_current_run: true
+      unsigned_update_test: true
+      source_build_run_id: ${{ inputs.source_build_run_id }}
+
   build-macos-installer:
     name: Build macOS arm64 DMG
+    if: '!inputs.enable_unsigned_update_test'
     environment: mac_dev
     runs-on: macos-15
     timeout-minutes: 180

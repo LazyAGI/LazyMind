@@ -53,6 +53,19 @@ func TestRepairAcceptanceAuthorizesOnlyExplicitFixedForwardTarget(t *testing.T) 
 	}
 }
 
+func TestRepairAcceptanceKeepsRAGOptionalWithCluster(t *testing.T) {
+	f, request := repairPolicyFixture(t)
+	setV2ComponentState(t, f, false)
+	addV2ClusterState(f)
+	request["sourceHadRAG"] = false
+	request["components"] = f.state.Components
+	request["componentMetadata"] = f.state.ComponentMetadata
+	decision, err := CheckRepairAcceptance(t.Context(), f.envelope(t), f.config, nativeJSON(t, request), f.root, policyTime)
+	if err != nil || decision.Status != "accepted" || decision.Next == nil || decision.Next.ID != "r3" {
+		t.Fatalf("signed repair rejected a valid cluster-only source: %+v %v", decision, err)
+	}
+}
+
 func TestRepairAcceptanceRejectsUnboundSourceFormatAndCurrentBundle(t *testing.T) {
 	for _, scenario := range []string{"missing-contract", "wrong-source", "wrong-failed-target", "wrong-current", "wrong-format", "rag-lost", "wrong-abi"} {
 		t.Run(scenario, func(t *testing.T) {

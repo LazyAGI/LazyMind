@@ -55,7 +55,7 @@ func checkUpdateComponents(ctx context.Context, cfg RuntimeConfig, paths Runtime
 	}
 	// Missing optional components are valid for a lightweight installation.
 	// Exact comparison rejects removing or replacing anything already installed.
-	components, err := measuredComponentsFromCatalog(paths, true, target)
+	components, err := measuredComponentsFromCatalog(paths, true, false, target)
 	if err != nil || !reflect.DeepEqual(current.Components, components) {
 		return "", updateStateFailure("component_update_incompatible")
 	}

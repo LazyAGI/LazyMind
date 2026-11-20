@@ -144,9 +144,15 @@ def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False, defe
     # Include resolved versions and RECORD contents, binding components to the
     # exact base environment, including rebuilt wheels with the same version.
     records = {name: digest((d.read_text('RECORD') or '').encode()) for name, d in distributions.items()}
+    base_names = distributions.keys() - set.union(*groups.values())
+    runtime_base_fingerprint = digest(encoded({
+        'identity': identity,
+        'versions': {name: full_versions[name] for name in base_names},
+        'records': {name: records[name] for name in base_names},
+    }))
     identity['baseFingerprint'] = digest(encoded({'identity': identity, 'versions': full_versions, 'records': records}))
     output.mkdir(parents=True, exist_ok=True)
-    catalog = {**identity, 'components': {}}
+    catalog = {**identity, 'runtimeBaseFingerprint': runtime_base_fingerprint, 'components': {}}
     if slim_providers:
         catalog['desktopProfile'] = 'slim-providers-v1'
     build_time = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')

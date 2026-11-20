@@ -313,6 +313,145 @@ func (f *maintenanceFixture) run(t *testing.T, action, status, reason string, ta
 	return response
 }
 
+func TestMaintenanceSwapsBothExternalComponentsOnlyAfterTargetVerification(t *testing.T) {
+	for _, failedID := range []string{"", "rag", "cluster"} {
+		name := "verified-target"
+		if failedID != "" {
+			name = failedID + "-verification-failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newMaintenanceFixture(t, false)
+			oldCluster := f.source
+			oldCluster.ID, oldCluster.Revision, oldCluster.Tag = "cluster", strings.Repeat("2", 64), strings.Repeat("3", 64)
+			oldCluster.CatalogURL = "https://huggingface.co/fixture/resolve/main/cluster-catalog.json"
+			oldCluster.Packages = map[string]string{"umap-learn": "0.5.7"}
+			cluster := oldCluster
+			cluster.Revision, cluster.Filename = strings.Repeat("4", 64), "fixed-cluster.zip"
+			cluster.URL = "https://huggingface.co/fixture/resolve/main/fixed-cluster.zip"
+			var archive bytes.Buffer
+			writer := zip.NewWriter(&archive)
+			for entry, data := range map[string][]byte{"bundle-manifest.json": fixtureJSON(t, cluster), "site-packages/umap.py": []byte("VALUE = 1\n")} {
+				file, err := writer.Create(entry)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := file.Write(data); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			digest := sha256.Sum256(archive.Bytes())
+			cluster.SHA256, cluster.SizeBytes = hex.EncodeToString(digest[:]), int64(archive.Len())
+			cluster.UnpackedBytes = 64 * 1024
+			writeFixtureComponent(t, f.runtimeRoot, oldCluster)
+			if err := savePythonDescriptor(f.runtimeRoot, oldCluster); err != nil {
+				t.Fatal(err)
+			}
+			oldTransport := f.client.Transport
+			clusterDownloads := 0
+			f.client.Transport = maintenanceHTTP(func(request *http.Request) (*http.Response, error) {
+				if request.URL.String() != cluster.URL {
+					return oldTransport.RoundTrip(request)
+				}
+				clusterDownloads++
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(archive.Bytes())), Request: request}, nil
+			})
+			catalog := pythonCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH,
+				Components: map[string]PythonComponent{"rag": f.target, "cluster": cluster}}
+			raw := fixtureJSON(t, catalog)
+			writeMaintenanceFile(t, f.record["componentsPath"].(string), raw)
+			catalogHash := sha256.Sum256(raw)
+			f.record["componentsSHA256"], f.record["componentsSize"] = hex.EncodeToString(catalogHash[:]), len(raw)
+			delete(f.record, "sourceComponent")
+			delete(f.record, "targetComponent")
+			f.record["componentUpdates"] = map[string]any{
+				"rag":     map[string]PythonComponent{"source": f.source, "target": f.target},
+				"cluster": map[string]PythonComponent{"source": oldCluster, "target": cluster},
+			}
+			f.save(t)
+			checkOld := func() {
+				t.Helper()
+				for _, entry := range []PythonComponent{f.source, oldCluster} {
+					if err := readMaintenanceSelection(f.runtimeRoot, entry); err != nil {
+						t.Fatalf("old %s selection changed before verification: %v", entry.ID, err)
+					}
+				}
+			}
+			stage := f.run(t, "stage", "prepared", "", false)
+			if f.requests != 1 || clusterDownloads != 1 || pythonComponentInstalled(f.runtimeRoot, cluster) || pythonComponentInstalled(f.runtimeRoot, f.target) {
+				t.Fatal("stage must download both signed targets without making them active")
+			}
+			checkOld()
+			staged, _ := stage["components"].(map[string]any)
+			sites := map[string]string{}
+			for _, id := range []string{"rag", "cluster"} {
+				info, _ := staged[id].(map[string]any)
+				path, _ := info["stagePath"].(string)
+				if !filepath.IsLocal(path) {
+					t.Fatalf("missing verified %s stage: %+v", id, stage)
+				}
+				if _, err := os.Stat(filepath.Join(f.runtimeRoot, filepath.Dir(path), "component.zip")); !os.IsNotExist(err) {
+					t.Fatalf("validated %s staging retained its downloaded ZIP: %v", id, err)
+				}
+				sites[id] = filepath.Join(f.runtimeRoot, path, "site-packages")
+			}
+			f.record["phase"], f.record["componentStage"] = "installing", stage
+			f.save(t)
+			probe := buildMaintenanceProbe(t, f)
+			t.Setenv("LAZYMIND_FIXTURE_COMPONENT_PROBE_APPEND", "1")
+			checkProbes := func(ids ...string) {
+				t.Helper()
+				raw, err := os.ReadFile(f.probeLog)
+				if err != nil {
+					t.Fatal(err)
+				}
+				imports := map[string]string{"rag": "pymilvus", "cluster": "umap"}
+				verified := map[string]bool{}
+				decoder := json.NewDecoder(bytes.NewReader(raw))
+				for decoder.More() {
+					var result struct {
+						Executable string
+						Args       []string
+					}
+					if err := decoder.Decode(&result); err != nil || result.Executable != probe.Python {
+						t.Fatalf("did not verify with the target interpreter: %+v, %v", result, err)
+					}
+					args := strings.Join(result.Args, "\n")
+					for _, id := range ids {
+						if strings.Contains(args, sites[id]) && strings.Contains(args, imports[id]) {
+							verified[id] = true
+						}
+					}
+				}
+				for _, id := range ids {
+					if !verified[id] {
+						t.Fatalf("target interpreter did not verify staged %s", id)
+					}
+				}
+			}
+			if failedID != "" {
+				t.Setenv("LAZYMIND_FIXTURE_COMPONENT_PROBE_FAIL_PATH", sites[failedID])
+				f.run(t, "activate", "blocked", "component_target_verification_failed", true)
+				checkProbes(failedID)
+				checkOld()
+				if pythonComponentInstalled(f.runtimeRoot, cluster) || pythonComponentInstalled(f.runtimeRoot, f.target) {
+					t.Fatal("failed verification made a new selection ready")
+				}
+				return
+			}
+			f.run(t, "activate", "activated", "", true)
+			for _, entry := range []PythonComponent{f.target, cluster} {
+				if err := readMaintenanceSelection(f.runtimeRoot, entry); err != nil {
+					t.Fatalf("target %s was not activated: %v", entry.ID, err)
+				}
+			}
+			checkProbes("rag", "cluster")
+		})
+	}
+}
+
 func TestMaintenanceStageLeavesOldSelectionAndNeverMarksTargetReady(t *testing.T) {
 	f := newMaintenanceFixture(t, false)
 	before, _ := os.ReadFile(f.intent)

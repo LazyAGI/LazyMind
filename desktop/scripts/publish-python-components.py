@@ -13,8 +13,13 @@ verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
 
-def publish(directory, repo, python=None, api=None, host='ms', signing_mode='developer-id'):
+def publish(directory, repo, python=None, api=None, host='ms', signing_mode='developer-id', prefix='RAG'):
     verify.require(host in ('ms', 'hf'), 'Invalid publication host')
+    isolated_test = prefix != 'RAG'
+    if isolated_test:
+        verify.require(host == 'ms' and signing_mode == 'adhoc' and
+                       re.fullmatch(r'updates/unsigned-test(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*/RAG', prefix),
+                       'Test components require the isolated ad-hoc ModelScope prefix')
     catalog_path = directory / 'python-components.json'
     catalog = json.loads(catalog_path.read_text(encoding='utf-8'))
     entries = catalog['components']
@@ -28,9 +33,9 @@ def publish(directory, repo, python=None, api=None, host='ms', signing_mode='dev
             verify.require(entry.get('id') == component_id and re.fullmatch(r'[a-f0-9]{64}', tag),
                            'Invalid component ID or tag')
             verify.require(Path(entry['filename']).name == entry['filename'], 'Invalid ZIP filename')
-            prefix = f'RAG/tags/{tag}'
-            base = (f'https://modelscope.cn/datasets/{repo}/resolve/master/{prefix}/' if host == 'ms'
-                    else f'https://huggingface.co/datasets/{repo}/resolve/main/{prefix}/')
+            tag_path = f'{prefix}/tags/{tag}'
+            base = (f'https://modelscope.cn/datasets/{repo}/resolve/master/{tag_path}/' if host == 'ms'
+                    else f'https://huggingface.co/datasets/{repo}/resolve/main/{tag_path}/')
             verify.require(host == 'hf' or (entry['url'] == base + entry['filename'] and
                            entry['catalogUrl'] == base + 'python-components.json'),
                            'Catalog URLs do not match the ModelScope upload destination')
@@ -38,19 +43,22 @@ def publish(directory, repo, python=None, api=None, host='ms', signing_mode='dev
             verify.check_archive(archive, entry)
             overlay = verify.extract_bundle(archive, temp / component_id, entry)
             if entry['platform'] == 'darwin':
-                verify.require(python is not None, 'Mac publication requires the signed bundled Python')
+                verify.require(python is not None or isolated_test, 'Mac publication requires the signed bundled Python')
                 signature_options = ({'required_binary': verify.MACOS_CLUSTER_LIBRARY}
                                      if component_id == 'cluster' else {})
                 if signing_mode == 'adhoc':
                     verify.require(entry.get('signingMode') == 'adhoc' and '-adhoc-' in entry['filename'],
                                    'Ad-hoc publication requires a labelled ad-hoc bundle')
-                    verify.verify_macos_team_id(overlay, python, adhoc=True, **signature_options)
+                    if isolated_test:
+                        verify.verify_macos_overlay_identity(overlay, 'adhoc', adhoc=True, **signature_options)
+                    else:
+                        verify.verify_macos_team_id(overlay, python, adhoc=True, **signature_options)
                 else:
                     verify.verify_macos_team_id(overlay, python, **signature_options)
             if host == 'hf':
                 entry.update(url=base + entry['filename'], catalogUrl=base + 'python-components.json')
                 entry.pop('fallbackUrl', None)
-            archives[component_id] = (prefix, archive)
+            archives[component_id] = (tag_path, archive)
         if host == 'hf':
             catalog_path = temp / 'python-components.json'
             catalog_path.write_text(json.dumps(catalog), encoding='utf-8')
@@ -64,14 +72,14 @@ def publish(directory, repo, python=None, api=None, host='ms', signing_mode='dev
             else:
                 from huggingface_hub import HfApi
                 api = HfApi(token=token)
-        for component_id, (prefix, archive) in archives.items():
+        for component_id, (tag_path, archive) in archives.items():
             entry = entries[component_id]
             sums = temp / component_id / 'SHA256SUMS'
             sums.write_text(f'{entry["sha256"]}  {entry["filename"]}\n', encoding='utf-8')
             # Make the payload available before changing its channel pointer.
             for source in (archive, sums, catalog_path):
                 api.upload_file(repo_id=repo, repo_type='dataset', path_or_fileobj=str(source),
-                                path_in_repo=f'{prefix}/{source.name}', revision='master' if host == 'ms' else 'main',
+                                path_in_repo=f'{tag_path}/{source.name}', revision='master' if host == 'ms' else 'main',
                                 commit_message=f'Publish {component_id} {entry["tag"]}: {source.name}')
             published = verify.resolve_catalog_entry(entry)
             verify.require(published['sha256'] == entry['sha256'] and published['revision'] == entry['revision'],
@@ -87,5 +95,6 @@ if __name__ == '__main__':
     parser.add_argument('--python', type=Path)
     parser.add_argument('--host', choices=('ms', 'hf'), default='ms')
     parser.add_argument('--signing-mode', choices=('developer-id', 'adhoc'), default='developer-id')
+    parser.add_argument('--prefix', default='RAG')
     args = parser.parse_args()
-    publish(args.directory, args.repo, args.python, host=args.host, signing_mode=args.signing_mode)
+    publish(args.directory, args.repo, args.python, host=args.host, signing_mode=args.signing_mode, prefix=args.prefix)

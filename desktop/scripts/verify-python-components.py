@@ -61,6 +61,11 @@ def signed_team_id(binary, adhoc=False):
 def verify_macos_team_id(overlay, python=None, adhoc=False, required_binary=None):
     require(sys.platform == 'darwin', 'macOS signature verification requires native macOS')
     expected = signed_team_id(Path(python or sys.executable).resolve(), adhoc=adhoc)
+    verify_macos_overlay_identity(overlay, expected, adhoc=adhoc, required_binary=required_binary)
+
+
+def verify_macos_overlay_identity(overlay, expected, adhoc=False, required_binary=None):
+    require(sys.platform == 'darwin', 'macOS signature verification requires native macOS')
     magics = {bytes.fromhex(value) for value in (
         'feedface', 'feedfacf', 'cefaedfe', 'cffaedfe',
         'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca')}

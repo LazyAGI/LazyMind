@@ -6,6 +6,10 @@ import "path/filepath"
 var StateNamespace = "LazyMindUpdater"
 
 func UpdaterRoot() (string, error) {
+	if UnsignedTestBuild {
+		paths, err := UnsignedPaths()
+		return paths.Updater, err
+	}
 	base, err := RecoveryBase()
 	if err != nil {
 		return "", err

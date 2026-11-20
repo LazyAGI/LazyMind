@@ -98,6 +98,8 @@ Both installer workflows have an `enable_updates` input (default `false`). Confi
 | `LAZYMIND_UPDATE_BASE_URL` | HTTPS dataset prefix, e.g. `https://modelscope.cn/datasets/OWNER/REPO/resolve/master/updates/` |
 | `LAZYMIND_MAC_UPDATE_MINIMUM_SYSTEM_VERSION` / `LAZYMIND_WINDOWS_UPDATE_MINIMUM_SYSTEM_VERSION` | Supported OS minimum as `major.minor.patch` |
 | `LAZYMIND_DESKTOP_UPDATES_ENABLED` | Optional `true` to enable update artifact generation in the tag release workflow |
+| `LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED` | Explicit `true` to enable automatic policy publication after the tag builds |
+| `LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID` | Successful run ID holding the currently published A artifacts. Leave empty for the first publication at a new policy URL. |
 
 macOS `signing_mode` accepts `auto`, `developer-id`, or `adhoc`. `auto` signs/notarizes
 requested tags and uses ad-hoc signing for branches, irrespective of repository name.
@@ -105,8 +107,9 @@ A fork tag therefore needs the same signing secrets or an explicit manual `adhoc
 missing credentials never silently downgrade a requested signed build. Existing `mac_dev`
 environment protections still apply. Windows uses `WIN_CSC_LINK` and
 `WIN_CSC_KEY_PASSWORD`; enabled update builds require a valid Authenticode installer.
-Official automatic updates require these native signatures. The external local lab
-continues to own ad-hoc update installation; no unsigned production mode is added.
+Official automatic updates require these native signatures. The manual macOS
+Installer also offers `enable_unsigned_update_test` for an isolated v2 ad-hoc
+test. See [the fork test setup](#isolated-macos-ad-hoc-update-test).
 
 Enabled builds export `desktop-update-macos-<run-id>` or
 `desktop-update-windows-<run-id>` containing one directory per release: the actual ZIP/EXE,
@@ -116,9 +119,11 @@ This creates GitHub artifacts only; the existing installer/RAG mirror jobs retai
 own destinations and behavior. Release-specific Python components must also be published
 through the existing RAG workflow before users install those components.
 
-Use the separate **Publish desktop update policy** manual workflow after the selected
-build runs succeed. It downloads the update artifacts from those runs in the current
-repository, assembles/signs an explicit plan, and publishes to ModelScope. Configure its
+With automatic publication enabled and `updaterProtocol` set to `2`, `Desktop Release`
+uses its current signed artifacts and the configured source build to verify native
+A-to-B compatibility, extend the previous signed history, and publish the new policy.
+The separate **Publish desktop update policy** manual workflow also accepts an explicit
+plan with successful build run IDs from the current repository. Configure its
 `desktop_updates` environment with approval/branch protection appropriate to the publisher:
 
 | Setting | Kind |
@@ -129,7 +134,7 @@ repository, assembles/signs an explicit plan, and publishes to ModelScope. Confi
 | `LAZYMIND_UPDATE_MODELSCOPE_REPO` (`OWNER/REPO`) | Variable |
 
 Pass comma-separated build run IDs and a JSON plan. The first publication can contain
-only A with no edges; subsequent plans retain the supported history. Example plan shape:
+only A with no edges. Subsequent plans retain the supported history. Example v1 manual plan:
 
 ```json
 {
@@ -182,6 +187,26 @@ go test ./internal/desktopupdate ./cmd/update-publisher -run 'TestPublication|Te
 
 Real signing/notarization, ModelScope download redirects and A→B installation are release
 acceptance checks, not established by these unit tests.
+
+### Isolated macOS ad-hoc update test
+
+Configure the `desktop_updates_test` environment with its own `MODELSCOPE_UPDATE_TOKEN`,
+`LAZYMIND_UPDATE_POLICY_PRIVATE_KEY`, and `LAZYMIND_UPDATE_POLICY_KEY_ID`. The test App
+uses the corresponding public key. Set `LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON`
+to a public v2 configuration with `mode` set to `unsigned-test`, a non-official audience,
+`channel` set to `personal-test`, and `signingIdentity` set to `adhoc`. Omit the version,
+release ID, platform and architecture. Pin the HTTPS ModelScope and CDN origins used
+by the test policy, installer and components. Set `LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL`
+under the dataset's `/resolve/master/updates/unsigned-test/` and set
+`LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_MINIMUM_SYSTEM_VERSION` to the minimum macOS version
+for this test, using `major.minor.patch`.
+
+Use **macOS Desktop Installer** with `enable_unsigned_update_test` and a `test_version`.
+For an initial build, leave `source_build_run_id` empty and use a fresh test policy URL.
+Download `package.zip` from the first build and install `LazyMind Test.app` in
+`~/Applications`. Run the same workflow with a higher `test_version` and the successful
+A run as `source_build_run_id`. When publication finishes, check for updates from A.
+The test bundle has its own app identity, data, components and update policy.
 
 ### Component compatibility during updates
 
@@ -274,16 +299,16 @@ preserves unchanged signed artifacts; it cannot preserve identity after an ad-ho
 helper changes. Validate authorization continuity on a native Mac with two
 successive certificate-signed builds before shipping signing-related changes.
 
-Official tag builds in `LazyAGI/LazyMind` require CI signing and notarization
+Official tag builds require CI signing and notarization
 credentials. `.github/workflows/macos-installer.yml` maps them from
 `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
 `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` environment secrets. They
 submit a ZIP first, staple the accepted app ticket, then package, submit, and
 staple the DMG. Either notarization stage fails after its bounded timeout.
 
-Tag builds in forks do not read these secrets or use a Developer ID identity.
-They apply only the ad-hoc signature required by the packaged arm64 application,
-skip Apple notarization, and publish an explicitly unnotarized DMG for testing.
+When `signing_mode` is `auto`, tag builds use Developer ID in both the upstream
+repository and forks. Manual development builds can select `adhoc` to produce an
+unnotarized DMG. The explicit isolated update test option enables v2 testing.
 
 Desktop release tags containing a prerelease suffix, such as `v0.3.0-a0` or
 `v0.3.0-rc.1`, run the complete platform build and installer test workflows but

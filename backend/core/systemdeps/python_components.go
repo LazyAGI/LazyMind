@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,8 +64,37 @@ type PythonComponentStatus struct {
 	InstallMethod    string `json:"installMethod,omitempty"`
 }
 
-var pythonComponentIDs = []string{"rag", "cluster"}
-var pythonComponentLocks = map[string]*sync.Mutex{"rag": {}, "cluster": {}}
+type pythonComponentRule struct {
+	id          string
+	modules     []string
+	fromOverlay bool
+	timeout     time.Duration
+	install     sync.Mutex
+}
+
+var pythonComponentRules = []pythonComponentRule{
+	{id: "rag", modules: []string{"lazyllm.tools.rag", "pymilvus", "milvus_lite", "spacy"}, timeout: 2 * time.Minute},
+	// The first UMAP import initializes Numba's cache on the local machine.
+	{id: "cluster", modules: []string{"llvmlite", "numba", "pynndescent", "umap"}, fromOverlay: true, timeout: 4 * time.Minute},
+}
+
+var pythonComponentIDs = func() []string {
+	ids := make([]string, len(pythonComponentRules))
+	for i := range pythonComponentRules {
+		ids[i] = pythonComponentRules[i].id
+	}
+	return ids
+}()
+
+func pythonComponentRuleFor(id string) *pythonComponentRule {
+	for i := range pythonComponentRules {
+		if pythonComponentRules[i].id == id {
+			return &pythonComponentRules[i]
+		}
+	}
+	return nil
+}
+
 var pythonComponentDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 func loadPythonCatalog() (*pythonCatalog, error) {
@@ -165,7 +195,7 @@ func pythonComponentStatus(root string, catalog *pythonCatalog, id string) Pytho
 	status.Installed = pythonComponentInstalled(root, entry)
 	status.Active = status.Installed && PythonComponentActive(id)
 	status.RestartRequired = status.Installed && !status.Active
-	if lock := pythonComponentLocks[id]; lock.TryLock() {
+	if lock := &pythonComponentRuleFor(id).install; lock.TryLock() {
 		lock.Unlock()
 	} else {
 		status.Installing = true
@@ -241,28 +271,29 @@ func verifyPythonComponent(ctx context.Context, dir string, entry PythonComponen
 	if python == "" {
 		return errors.New("bundled Python is unavailable")
 	}
-	code := `import os, site, sys
+	rule := pythonComponentRuleFor(entry.ID)
+	if rule == nil {
+		return errors.New("unknown Python dependency")
+	}
+	modules, err := json.Marshal(rule.modules)
+	if err != nil {
+		return err
+	}
+	code := `import importlib, json, os, site, sys
 source = os.path.join(sys.argv[3], "lazyllm")
 if os.path.isdir(os.path.join(source, "lazyllm")):
     sys.path.insert(0, source)
 site.addsitedir(sys.argv[1])
-if sys.argv[2] == "cluster":
-    import llvmlite, numba, pynndescent, umap
-    root = os.path.realpath(sys.argv[1])
-    for module in (llvmlite, numba, pynndescent, umap):
+root = os.path.realpath(sys.argv[1])
+for name in json.loads(sys.argv[2]):
+    module = importlib.import_module(name)
+    if sys.argv[4] == "true":
         if os.path.commonpath((root, os.path.realpath(module.__file__))) != root:
-            raise ImportError(f"{module.__name__} was not loaded from the clustering bundle")
-else:
-    import lazyllm.tools.rag, pymilvus, milvus_lite, spacy
+            raise ImportError(f"{name} was not loaded from the component bundle")
 `
-	verifyTimeout := 2 * time.Minute
-	if entry.ID == "cluster" {
-		// The first UMAP import initializes Numba's cache on the local machine.
-		verifyTimeout = 4 * time.Minute
-	}
-	checkCtx, cancel := context.WithTimeout(ctx, verifyTimeout)
+	checkCtx, cancel := context.WithTimeout(ctx, rule.timeout)
 	defer cancel()
-	command := exec.CommandContext(checkCtx, python, "-I", "-B", "-c", code, filepath.Join(dir, "site-packages"), entry.ID, os.Getenv("LAZYMIND_ALGORITHM_SOURCE"))
+	command := exec.CommandContext(checkCtx, python, "-I", "-B", "-c", code, filepath.Join(dir, "site-packages"), string(modules), os.Getenv("LAZYMIND_ALGORITHM_SOURCE"), strconv.FormatBool(rule.fromOverlay))
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("dependency import verification failed: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
@@ -395,11 +426,12 @@ func InstallPythonComponent(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid dependency install request", http.StatusBadRequest)
 		return
 	}
-	lock, ok := pythonComponentLocks[request.ID]
-	if !ok {
+	rule := pythonComponentRuleFor(request.ID)
+	if rule == nil {
 		common.ReplyErr(w, "unknown Python dependency", http.StatusBadRequest)
 		return
 	}
+	lock := &rule.install
 	if !lock.TryLock() {
 		common.ReplyErr(w, "dependency installation is already running", http.StatusConflict)
 		return

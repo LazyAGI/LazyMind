@@ -68,7 +68,11 @@ func ValidateConfig(c Config) error {
 	if !(c.Platform == "darwin" && (c.Arch == "arm64" || c.Arch == "amd64") || c.Platform == "windows" && c.Arch == "amd64") {
 		return failure("configuration_invalid", nil)
 	}
-	if c.Mode == "official" {
+	if UnsignedTestBuild {
+		if !validUnsignedTestConfig(c) {
+			return failure("configuration_invalid", nil)
+		}
+	} else if c.Mode == "official" {
 		if c.Audience != "official" || !(c.Channel == "stable" || c.Channel == "beta" || c.Channel == "canary") {
 			return failure("configuration_invalid", nil)
 		}

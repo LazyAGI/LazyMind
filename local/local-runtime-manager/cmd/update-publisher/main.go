@@ -15,10 +15,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
 	update "github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/releaseversion"
 )
 
 type record struct {
@@ -151,14 +153,136 @@ func assemble(p plan, records map[string]record) (update.Policy, update.Config, 
 	}
 	return policy, config, nil
 }
+
+func readPublication(name string, config update.Config, now time.Time, historical bool) (update.Policy, error) {
+	var empty update.Policy
+	info, err := os.Stat(name)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > update.MaxEnvelopeBytes {
+		return empty, errors.New("invalid envelope file")
+	}
+	file, err := os.Open(name)
+	if err != nil {
+		return empty, errors.New("cannot open signed envelope")
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return empty, errors.New("invalid envelope file")
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, update.MaxEnvelopeBytes+1))
+	if err != nil || len(raw) > update.MaxEnvelopeBytes {
+		return empty, errors.New("invalid envelope file")
+	}
+	if historical {
+		var envelope struct {
+			Payload string `json:"payload"`
+		}
+		if json.Unmarshal(raw, &envelope) != nil {
+			return empty, errors.New("invalid historical envelope")
+		}
+		payload, err := base64.StdEncoding.DecodeString(envelope.Payload)
+		if err != nil {
+			return empty, errors.New("invalid historical payload")
+		}
+		var value struct {
+			IssuedAt string `json:"issuedAt"`
+		}
+		if json.Unmarshal(payload, &value) != nil {
+			return empty, errors.New("invalid historical payload")
+		}
+		now, err = time.Parse(time.RFC3339, value.IssuedAt)
+		if err != nil {
+			return empty, err
+		}
+		// This time is trusted only after the original policy signature passes validation.
+	}
+	return update.ValidatePublication(raw, config, now)
+}
+
+func selectPublishedSource(policy update.Policy, target update.Config) (update.Release, error) {
+	var best update.Release
+	if policy.MinUpdaterProtocol > target.UpdaterProtocol {
+		return best, errors.New("published channel requires a newer updater protocol")
+	}
+	for _, release := range policy.Releases {
+		if release.Platform != target.Platform || release.Arch != target.Arch || release.SigningIdentity != target.SigningIdentity ||
+			release.UpdaterProtocol != target.UpdaterProtocol || slices.Contains(policy.Revoked, release.ID) {
+			continue
+		}
+		if best.ID == "" {
+			best = release
+			continue
+		}
+		cmp, err := releaseversion.Compare(best.Version, release.Version)
+		if err != nil || cmp == 0 {
+			return best, errors.New("published source version is ambiguous")
+		}
+		if cmp < 0 {
+			best = release
+		}
+	}
+	if best.ID == "" {
+		return best, errors.New("no published source matches the target platform and signing identity")
+	}
+	cmp, err := releaseversion.Compare(best.Version, target.Version)
+	if err != nil || cmp >= 0 || best.ID == target.ReleaseID {
+		return best, errors.New("target version must be newer than the active published source")
+	}
+	return best, nil
+}
+
+func extendPublication(previous, next update.Policy) (update.Policy, error) {
+	if next.SchemaVersion != 2 || previous.SchemaVersion != next.SchemaVersion || next.Sequence <= previous.Sequence {
+		return next, errors.New("extension requires a newer sequence in the same v2 channel")
+	}
+	if len(next.Revoked) != 0 || len(next.RepairAcceptances) != 0 {
+		return next, errors.New("extension cannot change revocations or repair acceptances")
+	}
+
+	published := make(map[string]update.Release, len(previous.Releases))
+	for _, release := range previous.Releases {
+		published[release.ID] = release
+	}
+	added := make(map[string]bool, len(next.Releases))
+	releases := slices.Clone(previous.Releases)
+	for _, release := range next.Releases {
+		if existing, found := published[release.ID]; found {
+			if release != existing {
+				return next, errors.New("source release record does not match published policy")
+			}
+			continue
+		}
+		added[release.ID] = true
+		releases = append(releases, release)
+	}
+	linked := make(map[string]bool, len(added))
+	for _, edge := range next.Edges {
+		if _, found := published[edge.SourceID]; !found || slices.Contains(previous.Revoked, edge.SourceID) || !added[edge.TargetID] {
+			return next, errors.New("extension edges must connect an active published source to a new release")
+		}
+		linked[edge.TargetID] = true
+	}
+	if len(added) == 0 || len(linked) != len(added) {
+		return next, errors.New("each new release requires a verified upgrade edge")
+	}
+	next.Releases = releases
+	next.Edges = append(slices.Clone(previous.Edges), next.Edges...)
+	next.Revoked = previous.Revoked
+	next.RepairAcceptances = previous.RepairAcceptances
+	next.MinUpdaterProtocol = max(next.MinUpdaterProtocol, previous.MinUpdaterProtocol)
+	return next, nil
+}
+
 func run(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: update-publisher sign|verify")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	historical := flags.Bool("historical", false, "verify an existing policy at its issue time for sequence comparison only")
+	selectSource := flags.Bool("select-source", false, "return the latest matching source from the verified historical policy")
 	configPath := flags.String("config", "", "public configuration (verify)")
 	envelopePath := flags.String("envelope", "", "signed policy (verify)")
+	previousPath := flags.String("previous-envelope", "", "extend an already published signed v2 policy (sign)")
 	planPath := flags.String("plan", "", "explicit release/compatibility plan")
 	recordsPath := flags.String("records", "", "directory containing release.json records")
 	keyPath := flags.String("key-file", "", "PKCS8 Ed25519 PEM private key")
@@ -177,40 +301,16 @@ func run(args []string) error {
 		if err := readJSON(*configPath, &config); err != nil {
 			return err
 		}
-		info, err := os.Stat(*envelopePath)
-		if err != nil || info.Size() > update.MaxEnvelopeBytes {
-			return errors.New("invalid envelope file")
-		}
-		raw, err := os.ReadFile(*envelopePath)
+		policy, err := readPublication(*envelopePath, config, now, *historical)
 		if err != nil {
 			return err
 		}
-		if *historical {
-			var envelope struct {
-				Payload string `json:"payload"`
-			}
-			if json.Unmarshal(raw, &envelope) != nil {
-				return errors.New("invalid historical envelope")
-			}
-			payload, err := base64.StdEncoding.DecodeString(envelope.Payload)
-			if err != nil {
-				return errors.New("invalid historical payload")
-			}
-			var value struct {
-				IssuedAt string `json:"issuedAt"`
-			}
-			if json.Unmarshal(payload, &value) != nil {
-				return errors.New("invalid historical payload")
-			}
-			now, err = time.Parse(time.RFC3339, value.IssuedAt)
+		if *selectSource {
+			source, err := selectPublishedSource(policy, config)
 			if err != nil {
 				return err
 			}
-			// This timestamp is not trusted until the original signature and contract pass below.
-		}
-		policy, err := update.ValidatePublication(raw, config, now)
-		if err != nil {
-			return err
+			return json.NewEncoder(os.Stdout).Encode(source)
 		}
 		return json.NewEncoder(os.Stdout).Encode(policy)
 	}
@@ -244,6 +344,16 @@ func run(args []string) error {
 	policy, config, err := assemble(p, records)
 	if err != nil {
 		return err
+	}
+	if *previousPath != "" {
+		previous, err := readPublication(*previousPath, config, now, true)
+		if err != nil {
+			return err
+		}
+		policy, err = extendPublication(previous, policy)
+		if err != nil {
+			return err
+		}
 	}
 	keyRaw, err := os.ReadFile(*keyPath)
 	if err != nil {

@@ -106,6 +106,34 @@ class PublicationTests(unittest.TestCase):
                 publish.publish(root, 'test/repo', python=Path('/python'), api=api, signing_mode='adhoc')
             self.assertEqual(signatures.call_args.kwargs, {'adhoc': True})
 
+    def test_isolated_adhoc_components_are_confined_to_the_test_prefix(self):
+        prefix = 'updates/unsigned-test/fork/RAG'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entry = self.fixture(root, 'darwin')
+            old = entry['filename']
+            entry.update(filename='rag-adhoc-test.zip', signingMode='adhoc')
+            entry['url'] = entry['url'].replace('/RAG/', f'/{prefix}/').replace(old, entry['filename'])
+            entry['catalogUrl'] = entry['catalogUrl'].replace('/RAG/', f'/{prefix}/')
+            (root / old).rename(root / entry['filename'])
+            (root / 'python-components.json').write_text(json.dumps(catalog_for(entry)))
+            api = Mock()
+            for invalid in ('updates/official/RAG', 'updates/unsigned-test/../RAG'):
+                with self.subTest(prefix=invalid), self.assertRaisesRegex(RuntimeError, 'isolated'):
+                    publish.publish(root, 'test/repo', api=api, signing_mode='adhoc', prefix=invalid)
+            with self.assertRaisesRegex(RuntimeError, 'isolated'):
+                publish.publish(root, 'test/repo', api=api, prefix=prefix)
+            api.upload_file.assert_not_called()
+            with patch.object(verify, 'verify_macos_overlay_identity') as signatures, \
+                    patch.object(verify, 'resolve_catalog_entry', return_value=entry), \
+                    patch.object(verify, 'acquire_bundle'):
+                publish.publish(root, 'test/repo', api=api, signing_mode='adhoc', prefix=prefix)
+            self.assertEqual(signatures.call_args.args[1], 'adhoc')
+            self.assertEqual([call.kwargs['path_in_repo'] for call in api.upload_file.call_args_list], [
+                f'{prefix}/tags/{entry["tag"]}/{name}'
+                for name in (entry['filename'], 'SHA256SUMS', 'python-components.json')
+            ])
+
     def fixture(self, directory, platform='windows', component='rag'):
         entry = entry_fixture()
         entry['platform'] = platform

@@ -1,5 +1,24 @@
 const path = require("node:path");
 const failure = code => Object.assign(new Error(code), { code });
+
+function targetComponentRevisions(plan) {
+  if (typeof plan?.sourceHadRAG !== "boolean" || plan.componentMode !== (plan.sourceHadRAG ? "sync-target" : "absent")) return null;
+  const validRevision = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+  const ragRevision = plan.targetRAG?.revision ?? plan.targetRAGRevision;
+  if (plan.targetComponents === undefined) {
+    if (plan.sourceHadRAG) return validRevision(ragRevision) ? { rag: ragRevision } : null;
+    return plan.targetRAG === undefined && !ragRevision ? {} : null;
+  }
+  const targets = plan.targetComponents;
+  if (!targets || typeof targets !== "object" || Array.isArray(targets)) return null;
+  const entries = Object.entries(targets);
+  if (!entries.length || entries.length > 32 || entries.some(([id, target]) => !/^[a-z][a-z0-9-]{0,63}$/.test(id)
+    || target?.id !== id || !validRevision(target.revision))) return null;
+  const revisions = Object.fromEntries(entries.map(([id, target]) => [id, target.revision]));
+  if (Object.hasOwn(revisions, "rag") !== plan.sourceHadRAG || (ragRevision && revisions.rag !== ragRevision)) return null;
+  return revisions;
+}
+
 function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAuxiliary, verifyStartup }) {
   let epoch, transactionId, preparation;
   async function bootstrap(action, extra = [], timeout = 180_000) {
@@ -76,4 +95,4 @@ function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAu
     verifyStartup,
   };
 }
-module.exports = { createUpdateRuntimeClient };
+module.exports = { createUpdateRuntimeClient, targetComponentRevisions };

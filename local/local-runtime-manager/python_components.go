@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winfile"
 )
 
@@ -36,7 +37,7 @@ type pythonComponentCatalog struct {
 }
 
 var componentDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
-var pythonComponentIDs = []string{"rag", "cluster"}
+var pythonComponentIDs = desktopupdate.UpdateComponentIDs()
 
 // Run with the startup lock held after stopping the previous runtime.
 func prepareDesktopPythonComponents(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
@@ -52,8 +53,8 @@ func prepareDesktopPythonComponents(ctx context.Context, cfg RuntimeConfig, path
 		if _, deferred := catalog.Components[id]; !deferred {
 			continue
 		}
-		// The native update already selected and verified the target RAG bundle.
-		preserveInstallation := id == "rag" && cfg.UpdateBootstrap != nil
+		// Native maintenance verifies the selection and retains the source for recovery.
+		preserveInstallation := cfg.UpdateBootstrap != nil
 		if err := prepareDesktopPythonComponentVersion(ctx, paths, id, version, preserveInstallation); err != nil {
 			return fmt.Errorf("prepare Python component %s for app version %s: %w", id, version, err)
 		}
@@ -101,9 +102,11 @@ func loadPythonComponentCatalogWithInstallationCheck(paths RuntimePaths, strictI
 	data, err := os.ReadFile(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"))
 	if os.IsNotExist(err) {
 		if strictInstallation {
-			installed, evidenceErr := otherPythonComponentInstallation(paths, "rag", "")
-			if evidenceErr != nil || installed {
-				return nil, fmt.Errorf("component installation evidence has no catalog")
+			for _, id := range pythonComponentIDs {
+				installed, evidenceErr := otherPythonComponentInstallation(paths, id, "")
+				if evidenceErr != nil || installed {
+					return nil, fmt.Errorf("component installation evidence has no catalog")
+				}
 			}
 		}
 		return nil, nil // Older full bundles and source development.
@@ -197,7 +200,7 @@ func installedPythonComponentPath(paths RuntimePaths, entry pythonComponent) str
 }
 
 func (m *RuntimeManager) prepareDesktopCluster(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) {
-	if cfg.Profile != "desktop" {
+	if cfg.Profile != "desktop" || cfg.UpdateBootstrap != nil {
 		return
 	}
 	catalog, err := loadPythonComponentCatalog(paths)

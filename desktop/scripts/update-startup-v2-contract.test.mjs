@@ -137,6 +137,26 @@ test("absent source cannot become enabled RAG during target verification", async
   assert.ok(!f.calls.some(call => call.action === "complete"));
 });
 
+test("startup compares the exact component plan supplied by the runtime", async t => {
+  const otherRevision = "e".repeat(64);
+  for (const [id, absent] of [["cluster", false], ["cluster", true], ["future-component", false]]) {
+    for (const missing of [false, true]) {
+      await t.test(`${id}, rag=${!absent}, missing=${missing}`, async () => {
+        const f = fixture({ absent });
+        f.record.targetComponents = { ...(absent ? {} : { rag: { id: "rag", revision } }), [id]: { id, revision: otherRevision } };
+        if (!missing) f.verified.components[id] = otherRevision;
+        if (missing) {
+          await assert.rejects(prepare(f), { code: "update_startup_failed" });
+          assert.equal(f.calls.at(-1).action, "down");
+        } else {
+          assert.equal((await prepare(f)).allowed, true);
+          assert.equal(f.calls.at(-1).action, "complete");
+        }
+      });
+    }
+  }
+});
+
 test("cold target import can exceed fifteen seconds without starting business", async t => {
   let release;
   const delayed = new Promise(resolve => { release = resolve; });
@@ -155,9 +175,17 @@ test("cold target import can exceed fifteen seconds without starting business", 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(settled, false);
   assert.ok(!f.calls.some(call => call.action === "up"));
-  assert.equal(f.calls.find(call => call.action === "activate").limits.timeout, 180_000);
+  assert.equal(f.calls.find(call => call.action === "activate").limits.timeout, 360_000);
   release();
   assert.equal((await attempt).allowed, true);
+});
+
+test("Windows simple installation allows target Python preparation before services start", async () => {
+  const f = fixture();
+  f.parameters.platform = "win32";
+  await prepare(f);
+  assert.deepEqual(f.calls.map(call => call.action), ["inspect", "activate", "up", "verify", "complete"]);
+  assert.equal(f.calls[1].limits.timeout, 30 * 60_000);
 });
 
 test("ordinary allowed startup does not invoke activation or service startup", async () => {

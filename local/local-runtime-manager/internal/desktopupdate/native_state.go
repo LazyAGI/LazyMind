@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,6 +23,17 @@ type NativeStorage struct {
 	LayoutSource   string            `json:"layoutSource"`
 	OptionalAbsent []string          `json:"optionalAbsent"`
 }
+type NativeComponentUpdate struct {
+	Source ComponentDescriptor `json:"source"`
+	Target ComponentDescriptor `json:"target"`
+}
+
+type NativeComponentStageItem struct {
+	StagePath string `json:"stagePath"`
+	Revision  string `json:"revision"`
+	SHA256    string `json:"sha256"`
+}
+
 type NativeComponentStage struct {
 	Status        string `json:"status"`
 	StagePath     string `json:"stagePath,omitempty"`
@@ -29,6 +41,8 @@ type NativeComponentStage struct {
 	SHA256        string `json:"sha256,omitempty"`
 	TransactionID string `json:"transactionId,omitempty"`
 	ComponentMode string `json:"componentMode,omitempty"`
+
+	Components map[string]NativeComponentStageItem `json:"components,omitempty"`
 }
 type NativeRepairTarget struct {
 	ReleaseID        string               `json:"releaseId"`
@@ -40,6 +54,8 @@ type NativeRepairTarget struct {
 	ComponentsSize   int64                `json:"componentsSize,omitempty"`
 	TargetComponent  *ComponentDescriptor `json:"targetComponent,omitempty"`
 	AcceptanceDigest string               `json:"acceptanceDigest,omitempty"`
+
+	TargetComponents map[string]ComponentDescriptor `json:"targetComponents,omitempty"`
 }
 type NativeRecord struct {
 	Version              int                   `json:"version"`
@@ -85,13 +101,63 @@ type NativeRecord struct {
 	Reason               string                `json:"reason,omitempty"`
 	Activation           json.RawMessage       `json:"activation,omitempty"`
 	Owner                string                `json:"owner,omitempty"`
+
+	ComponentUpdates map[string]NativeComponentUpdate `json:"componentUpdates,omitempty"`
 }
 
 func (r *NativeRecord) EffectiveTarget() (string, string, string, *ComponentDescriptor) {
-	if r.RepairTarget != nil {
-		return r.RepairTarget.ReleaseID, r.RepairTarget.Version, r.RepairTarget.DataProfile, r.RepairTarget.TargetComponent
+	var rag *ComponentDescriptor
+	if component, ok := r.EffectiveComponents()["rag"]; ok {
+		rag = &component
 	}
-	return r.TargetReleaseID, r.TargetVersion, r.TargetDataProfile, r.TargetComponent
+	if r.RepairTarget != nil {
+		return r.RepairTarget.ReleaseID, r.RepairTarget.Version, r.RepairTarget.DataProfile, rag
+	}
+	return r.TargetReleaseID, r.TargetVersion, r.TargetDataProfile, rag
+}
+
+// A v2 transaction created before multiple components used single RAG fields.
+func legacyRAGComponent(component *ComponentDescriptor) map[string]ComponentDescriptor {
+	if component == nil {
+		return nil
+	}
+	return map[string]ComponentDescriptor{"rag": *component}
+}
+
+func (r *NativeRecord) SourceComponents() map[string]ComponentDescriptor {
+	if len(r.ComponentUpdates) == 0 {
+		return legacyRAGComponent(r.SourceComponent)
+	}
+	components := make(map[string]ComponentDescriptor, len(r.ComponentUpdates))
+	for id, update := range r.ComponentUpdates {
+		components[id] = update.Source
+	}
+	return components
+}
+
+func (r *NativeRecord) EffectiveComponents() map[string]ComponentDescriptor {
+	if r.RepairTarget != nil {
+		return r.RepairTarget.components()
+	}
+	return r.targetComponents()
+}
+
+func (r *NativeRecord) targetComponents() map[string]ComponentDescriptor {
+	if len(r.ComponentUpdates) == 0 {
+		return legacyRAGComponent(r.TargetComponent)
+	}
+	components := make(map[string]ComponentDescriptor, len(r.ComponentUpdates))
+	for id, update := range r.ComponentUpdates {
+		components[id] = update.Target
+	}
+	return components
+}
+
+func (r *NativeRepairTarget) components() map[string]ComponentDescriptor {
+	if len(r.TargetComponents) != 0 {
+		return r.TargetComponents
+	}
+	return legacyRAGComponent(r.TargetComponent)
 }
 func NativeRecordPath(root string) string { return filepath.Join(root, "native-v2", "active.json") }
 
@@ -160,17 +226,62 @@ func validateNativeRecord(r *NativeRecord) error {
 	if !peers["core"] {
 		return bad()
 	}
-	if r.SourceHadRAG {
-		if r.ComponentMode != "sync-target" || r.SourceComponent == nil || r.TargetComponent == nil || !validNativeComponent(r.SourceComponent) || !validNativeComponent(r.TargetComponent) {
-			return bad()
-		}
-	} else if r.ComponentMode != "absent" || r.SourceComponent != nil || r.TargetComponent != nil {
+	if len(r.ComponentUpdates) != 0 && (r.SourceComponent != nil || r.TargetComponent != nil) {
+		return bad()
+	}
+	source := r.SourceComponents()
+	_, hadRAG := source["rag"]
+	if r.SourceHadRAG != hadRAG || (hadRAG && r.ComponentMode != "sync-target") || (!hadRAG && r.ComponentMode != "absent") ||
+		!validNativeComponentUpdates(source, r.targetComponents(), r.Platform, r.Arch) {
+		return bad()
+	}
+	if r.RepairTarget != nil && !validNativeRepairComponents(r, r.RepairTarget) {
+		return bad()
+	}
+	if r.ComponentStage != nil && !validNativePreparedStage(r, r.EffectiveComponents(), r.ComponentStage) {
 		return bad()
 	}
 	return nil
 }
-func validNativeComponent(c *ComponentDescriptor) bool {
-	return c.ID == "rag" && digestPattern.MatchString(c.Revision) && digestPattern.MatchString(c.SHA256) && digestPattern.MatchString(c.Tag) && digestPattern.MatchString(c.BaseFingerprint) && c.PythonABI != "" && len(c.Packages) != 0
+
+func validNativeComponentUpdates(source, target map[string]ComponentDescriptor, platform, arch string) bool {
+	if len(source) != len(target) {
+		return false
+	}
+	for id, before := range source {
+		after, ok := target[id]
+		if !ok || before.ID != id || after.ID != id || !validUpdateComponent(before) || !validUpdateComponent(after) ||
+			before.Platform != platform || after.Platform != platform || before.Arch != arch || after.Arch != arch || before.PythonABI != after.PythonABI {
+			return false
+		}
+	}
+	return true
+}
+
+func validNativeRepairComponents(r *NativeRecord, target *NativeRepairTarget) bool {
+	return (len(target.TargetComponents) == 0 || target.TargetComponent == nil) &&
+		validNativeComponentUpdates(r.SourceComponents(), target.components(), r.Platform, r.Arch)
+}
+
+func validNativePreparedStage(r *NativeRecord, targets map[string]ComponentDescriptor, stage *NativeComponentStage) bool {
+	if stage.Status != "prepared" {
+		return false
+	}
+	if len(r.ComponentUpdates) == 0 && (r.RepairTarget == nil || len(r.RepairTarget.TargetComponents) == 0) {
+		rag, ok := targets["rag"]
+		return len(stage.Components) == 0 && (!ok || filepath.IsLocal(stage.StagePath) && stage.Revision == rag.Revision && stage.SHA256 == rag.SHA256)
+	}
+	if len(stage.Components) != len(targets) || stage.TransactionID != r.TransactionID || stage.ComponentMode != r.ComponentMode ||
+		stage.StagePath != "" || stage.Revision != "" || stage.SHA256 != "" {
+		return false
+	}
+	for id, target := range targets {
+		item, ok := stage.Components[id]
+		if !ok || !filepath.IsLocal(item.StagePath) || item.Revision != target.Revision || item.SHA256 != target.SHA256 {
+			return false
+		}
+	}
+	return true
 }
 
 func ReadNativeRecord(root string) (*NativeRecord, error) {
@@ -330,12 +441,18 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		return blocked("update_transaction_busy")
 	}
 	defer releaseLock(component)
-	effective, _, profile, target := r.EffectiveTarget()
+	effective, _, profile, _ := r.EffectiveTarget()
+	targets := r.EffectiveComponents()
 	matchesComponents := func() bool {
-		if !r.SourceHadRAG {
-			return len(req.Components) == 0
+		if len(req.Components) != len(targets) {
+			return false
 		}
-		return target != nil && len(req.Components) == 1 && req.Components["rag"] == target.Revision
+		for id, target := range targets {
+			if req.Components[id] != target.Revision {
+				return false
+			}
+		}
+		return true
 	}
 	status := ""
 	switch action {
@@ -346,18 +463,19 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		if os.Remove(NativeRecordPath(root)) != nil || syncDirectory(filepath.Dir(NativeRecordPath(root))) != nil {
 			return blocked("update_record_write")
 		}
+		releaseNativeComponentFiles(r, nil)
 		return result("cancelled", "")
 	case "prepared":
 		if (r.Phase != "pending" && r.Phase != "repair") || req.Stage == nil || req.Stage.Status != "prepared" {
 			return blocked("update_transaction_conflict")
 		}
-		if r.SourceHadRAG && (!filepath.IsLocal(req.Stage.StagePath) || req.Stage.Revision != target.Revision || req.Stage.SHA256 != target.SHA256) {
+		if !validNativePreparedStage(r, targets, req.Stage) {
 			return blocked("component_state_unknown")
 		}
 		r.ComponentStage = req.Stage
 		status = "prepared"
 	case "installing":
-		if r.Phase != "pending" || req.DataProfile != r.SourceDataProfile || req.ComponentMode != r.ComponentMode || !req.SourcePaused || req.SourceActive != 0 || r.SourceHadRAG && r.ComponentStage == nil {
+		if r.Phase != "pending" || req.DataProfile != r.SourceDataProfile || req.ComponentMode != r.ComponentMode || !req.SourcePaused || req.SourceActive != 0 || len(targets) != 0 && r.ComponentStage == nil {
 			return blocked("update_transaction_conflict")
 		}
 		r.Phase = "installing"
@@ -367,7 +485,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		if r.Phase == "pending" || req.ReleaseID != effective || req.DataProfile != profile || req.ComponentMode != r.ComponentMode || !matchesComponents() {
 			return blocked("update_transaction_conflict")
 		}
-		if r.SourceHadRAG && verifyNativeTargetSelection(r.RuntimeRoot, target) != nil {
+		if verifyNativeTargetSelections(r.RuntimeRoot, targets) != nil {
 			return blocked("component_state_unknown")
 		}
 		r.Phase = "activated"
@@ -386,10 +504,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		if !identifier.MatchString(req.RepairTarget.ReleaseID) || !digestPattern.MatchString(req.RepairTarget.PackageSHA256) || !digestPattern.MatchString(req.RepairTarget.ComponentsSHA256) {
 			return blocked("repair_target_not_accepted")
 		}
-		if r.SourceHadRAG && (req.RepairTarget.TargetComponent == nil || !validNativeComponent(req.RepairTarget.TargetComponent)) {
-			return blocked("repair_target_not_accepted")
-		}
-		if !r.SourceHadRAG && req.RepairTarget.TargetComponent != nil {
+		if !validNativeRepairComponents(r, req.RepairTarget) {
 			return blocked("repair_target_not_accepted")
 		}
 		_, currentVersion, _, _ := r.EffectiveTarget()
@@ -415,7 +530,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		if r.Phase != "activated" || req.ReleaseID != effective || req.DataProfile != profile || req.Dirty || !matchesComponents() {
 			return blocked("update_startup_failed")
 		}
-		if r.SourceHadRAG && verifyNativeTargetSelection(r.RuntimeRoot, target) != nil {
+		if verifyNativeTargetSelections(r.RuntimeRoot, targets) != nil {
 			return blocked("component_state_unknown")
 		}
 		owner := req.Owner
@@ -434,6 +549,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		if os.Remove(NativeRecordPath(root)) != nil || syncDirectory(filepath.Dir(NativeRecordPath(root))) != nil {
 			return blocked("update_record_write")
 		}
+		releaseNativeComponentFiles(r, targets)
 		return result("completed", "")
 	default:
 		return blocked("update_request_invalid")
@@ -476,21 +592,38 @@ func NativeStartupPermission(ctx context.Context, root string, scope UpdateScope
 		return nil, err
 	}
 	defer releaseLock(component)
-	_, _, _, target := r.EffectiveTarget()
-	if r.SourceHadRAG {
-		if err := verifyNativeTargetSelection(r.RuntimeRoot, target); err != nil {
-			return nil, err
-		}
+	if err := verifyNativeTargetSelections(r.RuntimeRoot, r.EffectiveComponents()); err != nil {
+		return nil, err
 	}
 	return r, nil
 }
 
-func verifyNativeTargetSelection(root string, target *ComponentDescriptor) error {
+func verifyNativeTargetSelections(root string, targets map[string]ComponentDescriptor) error {
+	for _, target := range targets {
+		if err := verifyNativeTargetSelection(root, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyNativeTargetSelection(root string, target ComponentDescriptor) error {
+	componentRoot := filepath.Join(root, "deps", "python-components", target.ID)
+	if err := verifyNativeComponentPayload(root, filepath.Join(componentRoot, target.Revision), target); err != nil {
+		return err
+	}
+	var selected ComponentDescriptor
+	if readMetadata(filepath.Join(componentRoot, "catalog-"+target.Tag+".json"), &selected) != nil || !reflect.DeepEqual(selected, target) {
+		return failure("component_state_unknown", nil)
+	}
+	return nil
+}
+
+func verifyNativeComponentPayload(root, dir string, target ComponentDescriptor) error {
 	bad := func() error { return failure("component_state_unknown", nil) }
-	if target == nil || !validNativeComponent(target) {
+	if !validUpdateComponent(target) {
 		return bad()
 	}
-	dir := filepath.Join(root, "deps", "python-components", "rag", target.Revision)
 	base, err := canonicalPath(root)
 	canonical, err2 := canonicalPath(dir)
 	if err != nil || err2 != nil || !within(base, canonical) {
@@ -512,13 +645,82 @@ func verifyNativeTargetSelection(root string, target *ComponentDescriptor) error
 		manifest.PythonABI != target.PythonABI || manifest.BaseFingerprint != target.BaseFingerprint || !reflect.DeepEqual(manifest.Packages, target.Packages) {
 		return bad()
 	}
-	var selected ComponentDescriptor
-	if readMetadata(filepath.Join(root, "deps", "python-components", "rag", "catalog-"+target.Tag+".json"), &selected) != nil || !reflect.DeepEqual(selected, *target) {
-		return bad()
-	}
 	return nil
 }
 func stringTrim(raw []byte) string { return strings.TrimSpace(string(raw)) }
+
+// Run only after the intent has been durably removed, while both locks are held.
+// Cleanup failures leave unused files behind without changing the outcome.
+func releaseNativeComponentFiles(record *NativeRecord, targets map[string]ComponentDescriptor) {
+	runtime, err := os.OpenRoot(record.RuntimeRoot)
+	if err != nil {
+		return
+	}
+	defer runtime.Close()
+	componentPath := filepath.Join("deps", "python-components")
+	for _, path := range []string{"deps", componentPath} {
+		if info, err := runtime.Lstat(path); err != nil || !info.IsDir() {
+			return
+		}
+	}
+	components, err := runtime.OpenRoot(componentPath)
+	if err != nil {
+		return
+	}
+	defer components.Close()
+	if info, err := components.Lstat(".native-stages"); err == nil && info.IsDir() {
+		_ = components.RemoveAll(filepath.Join(".native-stages", record.TransactionID))
+	}
+	for id, source := range record.SourceComponents() {
+		if target, ok := targets[id]; ok && source.Revision != target.Revision {
+			releaseNativeSourceComponent(components, source, target)
+		}
+	}
+}
+
+func releaseNativeSourceComponent(components *os.Root, source, target ComponentDescriptor) {
+	if info, err := components.Lstat(source.ID); err != nil || !info.IsDir() {
+		return
+	}
+	dir := filepath.Join(source.ID, source.Revision)
+	if info, err := components.Lstat(dir); err != nil || !info.IsDir() ||
+		verifyNativeComponentPayload(components.Name(), filepath.Join(components.Name(), dir), source) != nil {
+		return
+	}
+	receiptName := "catalog-" + source.Tag + ".json"
+	entries, err := fs.ReadDir(components.FS(), source.ID)
+	if err != nil {
+		return
+	}
+	sourceReceiptFound := false
+	for _, entry := range entries {
+		tagPart, ok := strings.CutPrefix(entry.Name(), "catalog-")
+		tag, jsonFile := strings.CutSuffix(tagPart, ".json")
+		if !ok || !jsonFile {
+			continue
+		}
+		var selected ComponentDescriptor
+		if readMetadata(filepath.Join(components.Name(), source.ID, entry.Name()), &selected) != nil ||
+			!validUpdateComponent(selected) || selected.ID != source.ID || selected.Tag != tag {
+			return
+		}
+		if entry.Name() == receiptName {
+			expected := source
+			if source.Tag == target.Tag {
+				expected = target
+			}
+			if !reflect.DeepEqual(selected, expected) {
+				return
+			}
+			sourceReceiptFound = true
+		} else if selected.Revision == source.Revision {
+			return
+		}
+	}
+	if sourceReceiptFound && components.RemoveAll(dir) == nil && source.Tag != target.Tag {
+		_ = components.Remove(filepath.Join(source.ID, receiptName))
+	}
+}
 
 // Independent source installation owns its actual long write, while OTA create
 // uses the same mutex. The legacy admission lock is never held over this work.

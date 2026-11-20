@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
+import testBuild from "./unsigned-update-build.cjs";
 
 const fields = new Set(["trustDomain", "audience", "channel", "mode", "releaseId", "version", "platform", "arch", "signingIdentity", "updaterProtocol", "policyURL", "allowedOrigins", "publicKeys"]);
 
@@ -16,7 +17,7 @@ export function readUpdateBuildConfig(environment = process.env) {
   } catch { throw new Error("Unable to read public update configuration"); }
 }
 
-export function prepareUpdateBuildConfig({ configuration, packageVersion, platform, arch, signingMode }) {
+export function prepareUpdateBuildConfig({ configuration, packageVersion, platform, arch, signingMode, isolatedTestBuild = false }) {
   if (configuration === undefined) return "";
   if (!configuration || Array.isArray(configuration) || typeof configuration !== "object") throw new Error("Invalid public update configuration");
   for (const key of Object.keys(configuration)) if (!fields.has(key)) throw new Error(`Unknown public update configuration field: ${key}`);
@@ -24,7 +25,10 @@ export function prepareUpdateBuildConfig({ configuration, packageVersion, platfo
     if (configuration[field] !== undefined && configuration[field] !== value) throw new Error(`Update ${field} mismatch with the actual package`);
   }
   if (!packageVersion || !["darwin/arm64", "darwin/amd64", "windows/amd64"].includes(`${platform}/${arch}`)) throw new Error("Invalid update build target");
-  if (configuration.mode === "official") {
+  if (isolatedTestBuild) {
+    if (platform !== "darwin" || signingMode !== "adhoc") throw new Error("Invalid isolated update test signing mode");
+    testBuild.validateUnsignedTestConfig(configuration);
+  } else if (configuration.mode === "official") {
     if (configuration.audience !== "official") throw new Error("Official update audience must be official");
     const required = platform === "darwin" ? "developer-id" : "authenticode";
     if (signingMode !== required) throw new Error(`Official updates require ${required} signing`);
@@ -60,8 +64,9 @@ function main(args) {
     packageJson = JSON.parse(fs.readFileSync(options["--package"], "utf8"));
     configuration = readUpdateBuildConfig();
   } catch { throw new Error("Unable to read package or public update configuration"); }
-  const encoded = prepareUpdateBuildConfig({ configuration, packageVersion: packageJson.version,
-    platform: options["--platform"], arch: options["--arch"], signingMode: options["--signing-mode"] });
+  const unsigned = testBuild.readUnsignedTestBuildConfig();
+  const encoded = prepareUpdateBuildConfig({ configuration: unsigned ?? configuration, packageVersion: packageJson.version,
+    platform: options["--platform"], arch: options["--arch"], signingMode: options["--signing-mode"], isolatedTestBuild: Boolean(unsigned) });
   if (options["--verify-helper"]) {
     let staged;
     try {
