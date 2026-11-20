@@ -22,9 +22,7 @@ from lazymind.model_config import inject_model_config
 @pytest.mark.parametrize('source', ['openai', 'openai_responses'])
 @pytest.mark.parametrize('dynamic', [False, True])
 def test_workflow_agent_cancels_model_wait_and_can_run_again(monkeypatch, tmp_path, phase, source, dynamic):
-    wait_timeout = 20  # CI watchdog for startup, cancellation, and retry.
     entered_read, reached_server, release, finished = (threading.Event() for _ in range(4))
-    retry_allowed = threading.Event()
     requests, outcomes, results = [], [], []
     sid = 'workflow-model-cancel-' + uuid.uuid4().hex
     for method in (['_read_status'] if phase == 'headers' else ['read', 'read1']):
@@ -53,14 +51,14 @@ def test_workflow_agent_cancels_model_wait_and_can_run_again(monkeypatch, tmp_pa
             first = len(requests) == 1
             reached_server.set()
             if phase == 'headers' and first:
-                release.wait()
+                release.wait(5)
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.flush()
             if phase == 'body' and first:
-                release.wait()
+                release.wait(5)
             try:
                 self.wfile.write(body)
             except OSError:
@@ -106,9 +104,7 @@ def test_workflow_agent_cancels_model_wait_and_can_run_again(monkeypatch, tmp_pa
                 outcomes.append(exc)
             finally:
                 finished.set()
-            release.wait()
-            if not retry_allowed.is_set():
-                return
+            release.wait(5)
             # Use the same session and original model after the first run exits.
             try:
                 asyncio.run(drive())
@@ -118,16 +114,14 @@ def test_workflow_agent_cancels_model_wait_and_can_run_again(monkeypatch, tmp_pa
     worker = threading.Thread(target=execute, daemon=True)
     worker.start()
     try:
-        assert reached_server.wait(wait_timeout), outcomes
-        assert entered_read.wait(wait_timeout), 'model client did not enter the response read'
+        assert reached_server.wait(5), outcomes
+        assert entered_read.wait(2)
         request_cancel(sid)
-        # The first response stays blocked until cancellation finishes.
-        assert finished.wait(wait_timeout), 'workflow still waited for model output before cancelling'
+        assert finished.wait(1), 'workflow still waited for model output before cancelling'
         assert len(outcomes) == 1 and isinstance(outcomes[0], UserCancelledError), outcomes
         assert len(requests) == 1, 'cancelled model requests must not retry'
-        retry_allowed.set()
         release.set()
-        worker.join(wait_timeout)
+        worker.join(5)
         assert not worker.is_alive()
         assert len(outcomes) == 1, outcomes
         assert results == ['Ready']
@@ -135,7 +129,7 @@ def test_workflow_agent_cancels_model_wait_and_can_run_again(monkeypatch, tmp_pa
         assert all('call_control' not in payload for payload in requests)
     finally:
         release.set()
-        worker.join(wait_timeout)
+        worker.join(6)
         server.shutdown()
         server.server_close()
         serving.join(2)
