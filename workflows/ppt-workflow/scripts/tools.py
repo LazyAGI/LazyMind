@@ -306,10 +306,12 @@ class _PPTGenerationBudget:
     """One batch budget shared by initial requests, repairs and page retries."""
     def __init__(self, pages: int):
         self.started = time.monotonic()
-        self.seconds = _coerce_int(os.environ.get('LAZYMIND_PPT_BATCH_TIMEOUT'), 1800, lo=1, hi=7200)
-        self.page_seconds = _coerce_int(os.environ.get('LAZYMIND_PPT_PAGE_TIMEOUT'), 360, lo=1, hi=1800)
+        # Zero disables optional wall-clock limits; streaming inactivity is
+        # enforced by the model transport, even while waiting for first output.
+        self.seconds = _coerce_int(os.environ.get('LAZYMIND_PPT_BATCH_TIMEOUT'), 0, lo=0, hi=7200)
+        self.page_seconds = _coerce_int(os.environ.get('LAZYMIND_PPT_PAGE_TIMEOUT'), 0, lo=0, hi=1800)
         self.max_calls = _coerce_int(os.environ.get('LAZYMIND_PPT_MAX_MODEL_CALLS'), pages + 3, lo=1, hi=500)
-        self.max_failures = _coerce_int(os.environ.get('LAZYMIND_PPT_MAX_CONSECUTIVE_FAILURES'), 3, lo=1, hi=20)
+        self.max_failures = _coerce_int(os.environ.get('LAZYMIND_PPT_MAX_CONSECUTIVE_FAILURES'), 0, lo=0, hi=20)
         self.calls = 0
         self.failures = 0
         self.stopped: str | None = None
@@ -320,7 +322,7 @@ class _PPTGenerationBudget:
         if self.stopped:
             raise _PPTGenerationLimit(self.stopped)
         now = time.monotonic()
-        if now >= self.started + self.seconds:
+        if self.seconds > 0 and now >= self.started + self.seconds:
             self.stopped = 'batch_deadline_exceeded'
             raise _PPTGenerationLimit(self.stopped)
         if page_deadline is not None and now >= page_deadline:
@@ -332,7 +334,7 @@ class _PPTGenerationBudget:
             self.stopped = 'model_call_budget_exhausted'
             raise _PPTGenerationLimit(self.stopped)
 
-    def admit(self, _request: Any, page_deadline: float) -> None:
+    def admit(self, _request: Any, page_deadline: float | None) -> None:
         self.check_model_call(page_deadline)
         self.calls += 1
 
@@ -344,7 +346,7 @@ class _PPTGenerationBudget:
         if code in {'authentication_failed', 'permission_denied', 'quota_exhausted',
                     'balance_exhausted', 'usage_limit_exceeded'}:
             self.stopped = code
-        elif self.failures >= self.max_failures:
+        elif self.max_failures > 0 and self.failures >= self.max_failures:
             self.stopped = 'consecutive_failure_limit'
 
 
@@ -5137,7 +5139,7 @@ def _batch_page_html_publish_progressive(
         if _page_checkpoint_matches(deck, pno, brief):
             return 0, {'status': 'ok', 'page_no': pno, 'reused': True}
         budget.check()
-        page_deadline = time.monotonic() + budget.page_seconds
+        page_deadline = time.monotonic() + budget.page_seconds if budget.page_seconds > 0 else None
         llm_call = partial(_agent_llm_call, _budget=budget, _page_deadline=page_deadline)
         if brief:
             result = _capture_page_html(
@@ -5383,11 +5385,10 @@ def _agent_llm_call(
 
     instruction = _sanitize_prompt(system_prompt or '')
     prompt_input = user_prompt or ''
-    effective_timeout = float(
-        timeout
-        if timeout is not None
-        else os.environ.get('LAZYMIND_PPT_LLM_TIMEOUT', '90')
-    )
+    idle_timeout = float(os.environ.get('LAZYMIND_PPT_LLM_TIMEOUT', '120'))
+    # A caller may tighten the inactivity limit, but an old per-request budget
+    # must not silently extend the configured stream silence timeout.
+    effective_timeout = min(float(timeout), idle_timeout) if timeout is not None else idle_timeout
     llm = AutoModel(model='llm').share(
         prompt=ChatPrompter(instruction=instruction),
         format=_model_response_text,
@@ -5396,19 +5397,20 @@ def _agent_llm_call(
         # AutoModel still merges the chunks and returns one final string here.
         stream=True,
     )
-    # model_client deliberately forwards its per-request timeout to this
-    # adapter. The adapter previously discarded it, so AutoModel fell back to
-    # the provider configuration's 120-second timeout. Page HTML commonly
-    # needs longer than that; pass the effective timeout into the actual call.
     from lazyllm.module.llms.onlinemodule.base import ModelCallControl
     call_options: dict[str, Any] = {
         'call_control': ModelCallControl(cancel_check=_ppt_cancel_check()),
     }
     if _budget is not None:
-        deadline = min(_page_deadline or time.monotonic() + _budget.page_seconds,
-                       _budget.started + _budget.seconds)
+        deadline = _page_deadline
+        if deadline is None and _budget.page_seconds > 0:
+            deadline = time.monotonic() + _budget.page_seconds
+        if _budget.seconds > 0:
+            batch_deadline = _budget.started + _budget.seconds
+            deadline = min(deadline, batch_deadline) if deadline is not None else batch_deadline
         _budget.check(deadline)
-        effective_timeout = min(effective_timeout, max(0.1, deadline - time.monotonic()))
+        if deadline is not None:
+            effective_timeout = min(effective_timeout, max(0.1, deadline - time.monotonic()))
         call_options = {
             'call_control': ModelCallControl(
                 cancel_check=lambda: _budget.check(deadline),
