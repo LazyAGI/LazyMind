@@ -101,8 +101,11 @@ func HasAutomatic(p Policy) bool {
 	}
 	return false
 }
-func Eligible(p Policy, created time.Time) bool {
-	return HasAutomatic(p) && p.AutomaticEligibleAfter != nil && created.After(*p.AutomaticEligibleAfter)
+
+// Eligible depends on policy only: historical documents and policies without a
+// legacy epoch are included. Keep the timestamp argument for existing callers.
+func Eligible(p Policy, _ time.Time) bool {
+	return HasAutomatic(p)
 }
 func Save(ctx context.Context, db *gorm.DB, user string, p Policy) (Policy, error) {
 	p, e := Normalize(p)
