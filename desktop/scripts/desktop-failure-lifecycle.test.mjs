@@ -36,20 +36,25 @@ test("main supplies its Windows icon when installing popup navigation", () => {
   assert.deepEqual(recoveryAttachments, [[owner, frontendURL], [child, frontendURL]]);
 });
 
-for (const completed of [false, true]) test(`macOS confirms a loaded cleanup guard before warmup (previously completed=${completed})`, async () => {
+for (const { completed, runtimePrestarted } of [
+  { completed: false, runtimePrestarted: false },
+  { completed: true, runtimePrestarted: false },
+  { completed: false, runtimePrestarted: true },
+]) test(`macOS waits for the cleanup guard (warmup completed=${completed}, runtime prestarted=${runtimePrestarted})`, async () => {
   const events = [];
   let acknowledge;
   const ready = new Promise(resolve => { acknowledge = resolve; });
   const context = vm.createContext({
     isMac: true, isPackaged: true, isExternalRuntimeDev: false,
+    runtimePrestarted,
     app: { getVersion: () => "fixture-version" },
     macInstallationWarmupMarker: "/fixture/warmup.json",
     macWarmupCompleted: () => completed,
     startGuard() { events.push("guard-start"); return ready; },
     appendStartupLog() {}, startupMetricsRecorder: { mark() {} },
-    createInstallationWarmupWindow: async () => ({}),
+    createInstallationWarmupWindow: async () => { events.push("warmup-window"); return {}; },
     runInstallerWarmup: async () => { events.push("services"); },
-    markMacWarmupCompleted() {}, disposeInstallationWarmupWindow() {},
+    markMacWarmupCompleted() { events.push("marker-write"); }, disposeInstallationWarmupWindow() {},
   });
   vm.runInContext(declaration("runMacInstallationWarmupIfNeeded", "startGuard"), context);
   const pending = context.runMacInstallationWarmupIfNeeded();
@@ -57,7 +62,8 @@ for (const completed of [false, true]) test(`macOS confirms a loaded cleanup gua
   assert.deepEqual(events, ["guard-start"], "services must not start until the cleanup guard has parsed its configuration");
   acknowledge();
   await pending;
-  assert.deepEqual(events, completed ? ["guard-start"] : ["guard-start", "services"]);
+  assert.deepEqual(events, completed || runtimePrestarted
+    ? ["guard-start"] : ["guard-start", "warmup-window", "services", "marker-write"]);
 });
 
 for (const exitsEarly of [false, true]) test(`guard startup requires configuration acknowledgement (exits early=${exitsEarly})`, { timeout: 1000 }, async () => {
