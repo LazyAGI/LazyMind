@@ -1176,7 +1176,8 @@ async function runMacInstallationWarmupIfNeeded() {
     return;
   }
   await startGuard();
-  if (macWarmupCompleted(macInstallationWarmupMarker, version)) {
+  // Installer warmup would stop the runtime already verified by update startup.
+  if (runtimePrestarted || macWarmupCompleted(macInstallationWarmupMarker, version)) {
     return;
   }
   startupMetricsRecorder.mark("macWarmupStarted");
