@@ -23,6 +23,11 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      LAZYMIND_UPDATE_POLICY_PRIVATE_KEY:
+        required: false
+      MODELSCOPE_UPDATE_TOKEN:
+        required: false
 
 permissions:
   contents: read
