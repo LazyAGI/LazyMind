@@ -24,6 +24,10 @@ on:
       MODELSCOPE_API_TOKEN:
         description: "ModelScope dataset write token for RAG publication"
         required: false
+      LAZYMIND_UPDATE_POLICY_PRIVATE_KEY:
+        required: false
+      MODELSCOPE_UPDATE_TOKEN:
+        required: false
       MAC_CSC_LINK:
         required: false
       MAC_CSC_KEY_PASSWORD:
@@ -169,6 +173,9 @@ jobs:
       use_current_run: true
       unsigned_update_test: true
       source_build_run_id: ${{ inputs.source_build_run_id }}
+    secrets:
+      LAZYMIND_UPDATE_POLICY_PRIVATE_KEY: ${{ secrets.LAZYMIND_UPDATE_POLICY_PRIVATE_KEY }}
+      MODELSCOPE_UPDATE_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}
 
   build-macos-installer:
     name: Build macOS arm64 DMG
