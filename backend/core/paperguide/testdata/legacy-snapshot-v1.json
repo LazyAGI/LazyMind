@@ -1,0 +1,261 @@
+{
+  "identity": {
+    "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "dataset_id": "ds",
+    "document_id": "doc",
+    "owner_id": "owner"
+  },
+  "ir_digest": "899bde199c5d8830350f6af61ad9d4c2e0a00076dd596ee1c38c3bbcab3670f9",
+  "parser": {
+    "name": "fixture",
+    "model": "v1"
+  },
+  "ir_version": 1,
+  "projection_version": 3,
+  "coordinate_space": "normalized_top_left",
+  "pages": [
+    {
+      "index": 0
+    },
+    {
+      "index": 1
+    }
+  ],
+  "coverage": {
+    "body": false,
+    "conclusion": false,
+    "limitations": false,
+    "references": false,
+    "appendix": false,
+    "abstract_only": false,
+    "page_warnings": [
+      0,
+      1
+    ],
+    "warnings": []
+  },
+  "blocks": [
+    {
+      "id": "one",
+      "type": "text",
+      "page": 0,
+      "text": "Every sample was re-\nweighed at −2 °C. Repeat. Repeat."
+    },
+    {
+      "id": "two",
+      "type": "text",
+      "page": 1,
+      "bbox": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "text": "Every sample was re-\nweighed at −2 °C."
+    },
+    {
+      "image": {
+        "captions": [
+          "Fig. 1. Synthetic sample"
+        ],
+        "footnotes": null,
+        "related_blocks": [
+          {
+            "block_id": "cap",
+            "relation": "caption"
+          }
+        ]
+      },
+      "id": "fig",
+      "type": "image",
+      "page": 1
+    },
+    {
+      "id": "cap",
+      "type": "image_caption",
+      "page": 1,
+      "text": "Fig. 1. Synthetic sample"
+    },
+    {
+      "id": "eq",
+      "type": "formula",
+      "page": 1,
+      "latex": "x \\leq -2"
+    },
+    {
+      "table": {
+        "rows": [
+          {
+            "cells": [
+              {
+                "text": "Temperature (°C)",
+                "row_span": 1,
+                "col_span": 2,
+                "header": true
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "text": "−2",
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "text": "4",
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          }
+        ],
+        "captions": null,
+        "footnotes": null,
+        "related_blocks": null
+      },
+      "id": "table",
+      "type": "table",
+      "page": 1
+    }
+  ],
+  "assets": [
+    {
+      "id": "ev_7e74286f99848e72ed4b99d7496bc61868a825af1664c5138c7c0b5ec24dab42",
+      "block_id": "fig",
+      "kind": "figure",
+      "locator": {
+        "kind": "page",
+        "page": 1
+      },
+      "related_blocks": [
+        {
+          "block_id": "cap",
+          "relation": "caption"
+        }
+      ],
+      "warnings": null
+    },
+    {
+      "id": "ev_9e31fe1785fc74cecfdd307969ca16cc3ce7f75a336e558f2f08df3034482941",
+      "block_id": "eq",
+      "kind": "formula",
+      "locator": {
+        "kind": "formula",
+        "page": 1,
+        "latex": "x \\leq -2"
+      },
+      "related_blocks": null,
+      "warnings": null
+    },
+    {
+      "id": "ev_d268a71838bfed02a0cb80e3158fa085d9892dd14764bd2a8cf40efe481cbc9e",
+      "block_id": "table",
+      "kind": "table",
+      "locator": {
+        "kind": "page",
+        "page": 1
+      },
+      "related_blocks": null,
+      "warnings": null
+    }
+  ],
+  "sections": [
+    {
+      "id": "ev_b6c6627279756c13187ac2191540c58708ced793903d4cc8e80abd9a6d68d02c",
+      "title": "Page 1",
+      "kind": "page_group",
+      "pages": [
+        0
+      ],
+      "evidence_ids": [
+        "ev_17ccf6a7c20cca5d37300a344c1c2db078a4067d13c67e01ccae9b8fec552920"
+      ]
+    },
+    {
+      "id": "ev_1ca1dc79dc1adeeecbcafcce4caae588d2a3a1493f2f03176cb8e4302f339cc2",
+      "title": "Page 2",
+      "kind": "page_group",
+      "pages": [
+        1
+      ],
+      "evidence_ids": [
+        "ev_d975ee1232bece9f61be82eb8001807b7345e778d7ff27106bd759d24eb607ef",
+        "ev_7e74286f99848e72ed4b99d7496bc61868a825af1664c5138c7c0b5ec24dab42",
+        "ev_fdc4418f91f5f4dc85027b825a042863d926d384533314721b2ed1a5273a2ba6",
+        "ev_9e31fe1785fc74cecfdd307969ca16cc3ce7f75a336e558f2f08df3034482941",
+        "ev_d268a71838bfed02a0cb80e3158fa085d9892dd14764bd2a8cf40efe481cbc9e"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev_17ccf6a7c20cca5d37300a344c1c2db078a4067d13c67e01ccae9b8fec552920",
+      "source_block_id": "one",
+      "source_type": "text",
+      "text": "Every sample was re-\nweighed at −2 °C. Repeat. Repeat.",
+      "locator": {
+        "kind": "page",
+        "page": 0
+      }
+    },
+    {
+      "id": "ev_d975ee1232bece9f61be82eb8001807b7345e778d7ff27106bd759d24eb607ef",
+      "source_block_id": "two",
+      "source_type": "text",
+      "text": "Every sample was re-\nweighed at −2 °C.",
+      "locator": {
+        "kind": "text_span",
+        "page": 1,
+        "bbox": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "end": 38
+      }
+    },
+    {
+      "id": "ev_7e74286f99848e72ed4b99d7496bc61868a825af1664c5138c7c0b5ec24dab42",
+      "source_block_id": "fig",
+      "source_type": "image",
+      "text": "Fig. 1. Synthetic sample",
+      "locator": {
+        "kind": "page",
+        "page": 1
+      }
+    },
+    {
+      "id": "ev_fdc4418f91f5f4dc85027b825a042863d926d384533314721b2ed1a5273a2ba6",
+      "source_block_id": "cap",
+      "source_type": "image_caption",
+      "text": "Fig. 1. Synthetic sample",
+      "locator": {
+        "kind": "page",
+        "page": 1
+      }
+    },
+    {
+      "id": "ev_9e31fe1785fc74cecfdd307969ca16cc3ce7f75a336e558f2f08df3034482941",
+      "source_block_id": "eq",
+      "source_type": "formula",
+      "text": "x \\leq -2",
+      "locator": {
+        "kind": "formula",
+        "page": 1,
+        "latex": "x \\leq -2"
+      }
+    },
+    {
+      "id": "ev_d268a71838bfed02a0cb80e3158fa085d9892dd14764bd2a8cf40efe481cbc9e",
+      "source_block_id": "table",
+      "source_type": "table",
+      "text": "Temperature (°C)\n−2 | 4",
+      "locator": {
+        "kind": "page",
+        "page": 1
+      }
+    }
+  ]
+}

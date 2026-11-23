@@ -1,0 +1,45 @@
+.is-flashpapers {
+  .paper-guide-article { max-width: 920px; padding: 44px 48px 100px; font-size: 17px; line-height: 1.95; }
+  .paper-guide-article h1 { font-size: clamp(28px, 2.8vw, 40px); font-weight: 650; letter-spacing: -.035em; line-height: 1.3; margin-bottom: 20px; }
+  .flashpapers-subtitle { color: var(--paper-muted); font-size: 19px; line-height: 1.7; margin-bottom: 48px; }
+  .paper-guide-article section { margin: 0 0 48px; }
+  .paper-guide-article h2 { font-size: 26px; letter-spacing: -.02em; padding-top: 24px; border-top: 1px solid var(--paper-border); margin-bottom: 22px; }
+  .paper-guide-article h3 { font-size: 20px; margin: 28px 0 12px; }
+  .paper-guide-block { margin-bottom: 22px; }
+  .paper-guide-block p { white-space: pre-line; margin: 0; }
+  .paper-guide-outline { flex-basis: 216px; }
+  .paper-guide-outline button { line-height: 1.5; border-radius: 6px; margin: 4px 0; }
+  .paper-guide-outline small { display: block; font-size: 11px; opacity: .7; }
+  .paper-guide-block-tools { min-height: 24px; margin-top: 4px; font-size: 12px; gap: 12px; color: var(--paper-muted); }
+  .flashpapers-sources summary { cursor: pointer; }
+  .flashpapers-sources > div { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 6px; }
+  .flashpapers-sources button { color: var(--paper-accent); background: none; border: 1px solid var(--paper-border); border-radius: 4px; padding: 4px 8px; }
+  .flashpapers-pending { color: var(--paper-muted); border-left: 3px solid var(--paper-border); padding: 12px 18px; font-size: 15px; }
+  .flashpapers-materials { font-size: 13px; background: none; color: var(--paper-muted); border-top: 1px solid var(--paper-border); padding-top: 18px; }
+}
+.guide-playground { margin-top: 20px; border: 1px solid var(--paper-border); border-radius: 10px; overflow: hidden; background: var(--paper-surface); }
+.guide-playground-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--paper-border); font-size: 13px; color: var(--paper-muted); }
+.guide-playground-toolbar button { color: inherit; background: transparent; border: 0; padding: 6px 10px; cursor: pointer; }
+.guide-playground iframe { display: block; width: 100%; border: 0; background: var(--paper-surface); }
+.guide-playground > p { padding: 12px 18px; font-size: 14px; }
+@media(max-width:1100px) { .is-flashpapers .paper-guide-outline { flex-basis: auto; } }
+@media(max-width:600px) { .is-flashpapers .paper-guide-article { padding: 24px 20px 80px; font-size: 16px; }.is-flashpapers .flashpapers-subtitle { font-size: 17px; } }
+
+.is-flashpapers .guide-glossary-entry {
+  border: 1px solid var(--paper-border);
+  border-radius: 12px;
+  background: var(--paper-surface);
+  overflow: hidden;
+  summary {
+    display: flex; align-items: center; gap: 12px; list-style: none;
+    min-height: 56px; padding: 16px 20px; cursor: pointer;
+    font-size: 17px; font-weight: 600; line-height: 1.5;
+    &::-webkit-details-marker { display: none; }
+    &:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: -3px; }
+    &:hover { background: color-mix(in srgb, var(--paper-accent) 5%, transparent); }
+  }
+  .guide-glossary-chevron { flex: 0 0 16px; margin-left: auto; transition: transform .15s ease; }
+  &[open] .guide-glossary-chevron { transform: rotate(180deg); }
+  > p { padding: 0 20px 20px; font-size: 18px; line-height: 1.85; }
+}
+@media (prefers-reduced-motion: reduce) { .is-flashpapers .guide-glossary-chevron { transition: none; } }

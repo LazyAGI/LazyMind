@@ -1,0 +1,225 @@
+package pdfir
+
+import (
+	"reflect"
+	"strings"
+)
+
+// OriginalFigureProof belongs to the paper guide catalog. It records each
+// proved producer body component rather than reusing an evidence locator.
+type OriginalFigureProof struct {
+	BlockID string      `json:"block_id"`
+	Type    string      `json:"type"`
+	Page    int         `json:"page"`
+	Parts   [][]float64 `json:"parts,omitempty"`
+	Caption string      `json:"caption,omitempty"`
+	// An isolated top figure owns the page-wide strip above its caption, including
+	// panel labels or legends that the producer may have left outside image_body.
+	CaptionTop float64 `json:"isolated_caption_top,omitempty"`
+}
+
+func proveOriginalFigure(block Block, item contentItem, parent precisionBlock, page precisionPage) OriginalFigureProof {
+	size := page.Size
+	proof := OriginalFigureProof{BlockID: block.ID, Type: block.Type, Page: block.Page}
+	// v3 has already matched all of this canonical item's caption content
+	// against the direct children of this parent, independently of projectImages.
+	if item.Type == "image" && len(item.ImageCaptions) == 1 {
+		proof.Caption = plainTableText(item.ImageCaptions[0])
+	}
+	if parent.Angle != 0 || len(parent.Lines) != 0 {
+		return proof
+	}
+	group, err := precisionBox(parent.BBox, size)
+	if err != nil {
+		return proof
+	}
+	var parts [][]float64
+	var ancillary, captions [][]float64
+	var captionLineHeight, captionTop float64
+	captionCount := 0
+	for _, child := range parent.Blocks {
+		box, err := precisionBox(child.BBox, size)
+		if err != nil || child.Angle != 0 || len(child.Blocks) != 0 {
+			return proof
+		}
+		if child.Type == item.Type+"_caption" || child.Type == item.Type+"_footnote" {
+			if child.Type == item.Type+"_caption" {
+				captionCount++
+				captionTop = box[1]
+			}
+			ancillary = append(ancillary, box)
+			for _, line := range child.Lines {
+				for _, span := range line.Spans {
+					bounds, err := precisionBox(span.BBox, size)
+					if err != nil || span.CrossPage || !originalBoxContains(box, bounds) {
+						return proof
+					}
+					ancillary = append(ancillary, bounds)
+					if child.Type == item.Type+"_caption" {
+						captions = append(captions, bounds)
+						// Compare in native page units because the normalization
+						// scales horizontal and vertical distances differently.
+						captionLineHeight = max(captionLineHeight, (bounds[3]-bounds[1])*size[1])
+					}
+				}
+			}
+			continue
+		}
+		if child.Type != item.Type+"_body" || !originalBoxContains(group, box) || !precisionContains(block.BBox, box) {
+			return proof
+		}
+		var spans [][]float64
+		for _, line := range child.Lines {
+			for _, span := range line.Spans {
+				bounds, err := precisionBox(span.BBox, size)
+				if err != nil || span.CrossPage || span.Type != item.Type || !originalBoxContains(box, bounds) {
+					return proof
+				}
+				spans = append(spans, bounds)
+			}
+		}
+		if !originalBoxContains(originalEnvelope(spans), box) {
+			return proof
+		}
+		parts = append(parts, box)
+	}
+	crop := originalEnvelope(parts)
+	if len(crop) == 0 {
+		return proof
+	}
+	for _, box := range ancillary {
+		if crop[0] < box[2] && box[0] < crop[2] && crop[1] < box[3] && box[1] < crop[3] {
+			return proof
+		}
+	}
+	// A caption extending a text height beyond both sides leaves room for
+	// detached labels outside the media box. Retain the complete isolated
+	// strip when established, otherwise leave the figure page-only.
+	if text := originalEnvelope(captions); len(text) == 4 &&
+		(crop[0]-text[0])*size[0] >= captionLineHeight && (text[2]-crop[2])*size[0] >= captionLineHeight {
+		if proof.Caption == "" || captionCount != 1 || len(parent.Blocks) != len(parts)+1 ||
+			crop[3] > captionTop || !isolatedAboveCaption(page, parent, captionTop) {
+			return proof
+		}
+		proof.CaptionTop = captionTop
+	}
+	proof.Parts = parts
+	return proof
+}
+
+// Both retained layout passes must account for the same sole figure in this
+// strip. Running heads, neighboring columns and discarded text also disqualify it.
+func isolatedAboveCaption(page precisionPage, parent precisionBlock, bottom float64) bool {
+	for passIndex, pass := range [][]precisionBlock{page.Paras, page.Preproc, page.Discarded} {
+		owners := 0
+		for _, block := range pass {
+			if passIndex < 2 && reflect.DeepEqual(block, parent) {
+				owners++
+				continue
+			}
+			if !originalBlockBelow(block, page.Size, bottom, passIndex == 0) {
+				return false
+			}
+		}
+		if passIndex < 2 && owners != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func originalBlockBelow(block precisionBlock, size []float64, bottom float64, merged bool) bool {
+	box, err := precisionBox(block.BBox, size)
+	if err != nil || box[1] < bottom {
+		return false
+	}
+	for _, line := range block.Lines {
+		for _, span := range line.Spans {
+			// Merged paragraph continuations use the next physical page’s coordinates.
+			// The preprocessed and discarded passes below still check all local ink.
+			if merged && span.CrossPage {
+				continue
+			}
+			b, err := precisionBox(span.BBox, size)
+			if err != nil || b[1] < bottom || span.CrossPage {
+				return false
+			}
+		}
+	}
+	for _, child := range block.Blocks {
+		if !originalBlockBelow(child, size, bottom, merged) {
+			return false
+		}
+	}
+	return true
+}
+
+func originalBoxContains(parent, child []float64) bool {
+	return len(parent) == 4 && len(child) == 4 &&
+		parent[0] <= child[0] && parent[1] <= child[1] && parent[2] >= child[2] && parent[3] >= child[3]
+}
+
+func originalEnvelope(parts [][]float64) []float64 {
+	if len(parts) == 0 {
+		return nil
+	}
+	box := append([]float64(nil), parts[0]...)
+	for _, part := range parts[1:] {
+		box[0], box[1] = min(box[0], part[0]), min(box[1], part[1])
+		box[2], box[3] = max(box[2], part[2]), max(box[3], part[3])
+	}
+	return box
+}
+
+func uniqueOriginalFigureProofs(proofs []OriginalFigureProof, blocks []Block) []OriginalFigureProof {
+	type figureBox struct {
+		page int
+		box  [4]float64
+	}
+	key := func(page int, box []float64) figureBox {
+		return figureBox{page, [4]float64{box[0], box[1], box[2], box[3]}}
+	}
+	// A canonical layout parent or media component cannot prove two originals.
+	groups, components := map[figureBox]int{}, map[figureBox]int{}
+	blocksByID := map[string]Block{}
+	for _, block := range blocks {
+		blocksByID[block.ID] = block
+		if (block.Type == "image" || block.Type == "chart") && len(block.BBox) == 4 {
+			groups[key(block.Page, block.BBox)]++
+		}
+	}
+	captions := map[string]int{}
+	for _, proof := range proofs {
+		if proof.Caption != "" {
+			captions[strings.Join(strings.Fields(proof.Caption), " ")]++
+		}
+		for _, part := range proof.Parts {
+			components[key(proof.Page, part)]++
+		}
+	}
+	var out []OriginalFigureProof
+	for _, proof := range proofs {
+		box := blocksByID[proof.BlockID].BBox
+		if len(box) != 4 || groups[key(proof.Page, box)] != 1 {
+			continue
+		}
+		for _, part := range proof.Parts {
+			if components[key(proof.Page, part)] != 1 {
+				proof.Parts = nil
+				proof.CaptionTop = 0
+				break
+			}
+		}
+		if proof.Caption != "" && captions[strings.Join(strings.Fields(proof.Caption), " ")] != 1 {
+			proof.Caption = ""
+			if proof.CaptionTop != 0 {
+				proof.Parts = nil
+				proof.CaptionTop = 0
+			}
+		}
+		if len(proof.Parts) != 0 || proof.Caption != "" {
+			out = append(out, proof)
+		}
+	}
+	return out
+}

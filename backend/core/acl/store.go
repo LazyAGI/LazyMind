@@ -301,20 +301,24 @@ func (s *Store) ACLsForUserWithGroups(resourceType, resourceID string, userID st
 }
 
 func (s *Store) loadUserGroupIDs(userID string) []string {
+	return s.loadUserGroupIDsContext(context.Background(), userID)
+}
+
+func (s *Store) loadUserGroupIDsContext(ctx context.Context, userID string) []string {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil
 	}
 	seen := map[string]struct{}{}
 	var localGroupIDs []string
-	_ = s.db.Model(&orm.UserGroupModel{}).Where("user_id = ?", userID).Pluck("group_id", &localGroupIDs).Error
+	_ = s.db.WithContext(ctx).Model(&orm.UserGroupModel{}).Where("user_id = ?", userID).Pluck("group_id", &localGroupIDs).Error
 	for _, groupID := range localGroupIDs {
 		groupID = strings.TrimSpace(groupID)
 		if groupID != "" {
 			seen[groupID] = struct{}{}
 		}
 	}
-	remoteGroupIDs := fetchUserGroupIDsFromAuthService(context.Background(), userID)
+	remoteGroupIDs := fetchUserGroupIDsFromAuthService(ctx, userID)
 	for _, groupID := range remoteGroupIDs {
 		groupID = strings.TrimSpace(groupID)
 		if groupID == "" {
@@ -322,7 +326,7 @@ func (s *Store) loadUserGroupIDs(userID string) []string {
 		}
 		seen[groupID] = struct{}{}
 		s.EnsureGroup(groupID, "")
-		s.db.FirstOrCreate(&orm.UserGroupModel{}, &orm.UserGroupModel{UserID: userID, GroupID: groupID})
+		s.db.WithContext(ctx).FirstOrCreate(&orm.UserGroupModel{}, &orm.UserGroupModel{UserID: userID, GroupID: groupID})
 	}
 	out := make([]string, 0, len(seen))
 	for groupID := range seen {

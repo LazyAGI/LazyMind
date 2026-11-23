@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 from core import current_identity as identity
+from core.errors import AppException, ErrorCodes
 
 
 class CurrentIdentityTest(unittest.TestCase):
@@ -9,8 +10,9 @@ class CurrentIdentityTest(unittest.TestCase):
         for user in (None, SimpleNamespace(disabled=True)):
             with self.subTest(user=user), patch.object(identity, 'SessionLocal'), patch.object(
                 identity.UserRepository, 'get_by_id', return_value=user
-            ), self.assertRaises(Exception):
+            ), self.assertRaises(AppException) as caught:
                 identity.current_identity('owner')
+            self.assertEqual(caught.exception.code, ErrorCodes.UNAUTHORIZED[1])
 
     def test_permissions_come_from_live_user_role_and_groups(self):
         user = SimpleNamespace(

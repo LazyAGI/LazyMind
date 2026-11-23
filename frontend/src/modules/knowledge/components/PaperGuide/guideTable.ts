@@ -1,0 +1,138 @@
+import { guideTextSegments } from "./PaperGuideText";
+type Alignment = "left" | "center" | "right";
+export interface GuideTable {
+  start: number;
+  end: number;
+  prefix: string;
+  suffix: string;
+  headers: string[];
+  rows: string[][];
+  align: Alignment[];
+}
+/** A deliberately bounded table grammar, not a Markdown/HTML interpreter. */
+function cells(line: string): string[] | undefined {
+  // Preserve Markdown code indentation before normalizing table-cell whitespace.
+  if (/^(?: {4}| {0,3}\t)/.test(line)) return;
+  const value = line.trim();
+  if (
+    !value.includes("|") ||
+    value.includes("`") ||
+    guideTextSegments(value).some((s) => s.latex?.includes("|"))
+  )
+    return;
+  const parts: string[] = [];
+  let part = "",
+    slashes = 0,
+    lastWasSeparator = false;
+  for (const char of value) {
+    if (char === "|" && slashes % 2 === 0) {
+      parts.push(part);
+      part = "";
+      lastWasSeparator = true;
+    } else {
+      part = char === "|" ? part.slice(0, -1) + "|" : part + char;
+      lastWasSeparator = false;
+    }
+    slashes = char === "\\" ? slashes + 1 : 0;
+  }
+  parts.push(part);
+  if (value.startsWith("|")) parts.shift();
+  if (lastWasSeparator) parts.pop();
+  return parts.map((p) => p.trim());
+}
+export function parseGuideTable(text: string): GuideTable | undefined {
+  if (text.length > 16000 || /```|~~~/.test(text)) return;
+  let runeOffset = 0;
+  const lines = Array.from(text.matchAll(/[^\r\n]*(?:\r\n|\n|\r|$)/g))
+    .filter((m) => m[0])
+    .map((m) => {
+      const content = m[0].replace(/(?:\r\n|\n|\r)$/, "");
+      const runeStart = runeOffset;
+      const runeEnd = runeStart + Array.from(content).length;
+      // The remainder is CR, LF, or both, each one code point.
+      runeOffset = runeEnd + m[0].length - content.length;
+      return {
+        text: content,
+        start: m.index!,
+        end: m.index! + content.length,
+        runeStart,
+        runeEnd,
+      };
+    });
+  const separators = lines
+    .map((line, index) => ({ index, columns: cells(line.text) }))
+    .filter(
+      (x) => x.columns?.length && x.columns.every((c) => /^:?-{3,}:?$/.test(c)),
+    );
+  if (separators.length !== 1) return;
+  const { index, columns } = separators[0];
+  if (index === 0 || !columns || columns.length > 16) return;
+  const headers = cells(lines[index - 1].text);
+  if (!headers || headers.length !== columns.length || !headers.some(Boolean))
+    return;
+  const math = guideTextSegments(text).filter(
+    (segment) => segment.latex !== undefined,
+  );
+  const hasPipeOutsideMath = (line: (typeof lines)[number]) => {
+    if (!line.text.includes("|")) return false;
+    return Array.from(line.text).some(
+      (char, offset) =>
+        char === "|" &&
+        !math.some(
+          (segment) =>
+            segment.start <= line.runeStart + offset &&
+            segment.end > line.runeStart + offset,
+        ),
+    );
+  };
+  const rows: string[][] = [];
+  let last = index;
+  for (let i = index + 1; i < lines.length; i++) {
+    if (!lines[i].text.trim()) break;
+    if (!lines[i].text.includes("|")) {
+      // A non-pipe line is prose only when the same uninterrupted paragraph
+      // does not resume table-shaped rows. Never silently publish a prefix.
+      for (let j = i + 1; j < lines.length && lines[j].text.trim(); j++) {
+        // Complete formulas in the suffix are independent prose, not resumed
+        // table rows; only pipes outside their immutable intervals are ambiguous.
+        if (hasPipeOutsideMath(lines[j])) return;
+      }
+      break;
+    }
+    const row = cells(lines[i].text);
+    if (!row || row.length !== headers.length || rows.length >= 100) return;
+    rows.push(row);
+    last = i;
+  }
+  if (!rows.length) return;
+  const begin = lines[index - 1].start,
+    end = lines[last].end;
+  const sourceStart = lines[index - 1].runeStart,
+    sourceEnd = lines[last].runeEnd;
+  // Per-line parsing cannot detect a table-shaped passage inside a multiline
+  // formula. Check the complete immutable block before separating prose.
+  if (
+    math.some(
+      (segment) =>
+        /[\r\n]/.test(segment.latex!) &&
+        segment.start < sourceEnd &&
+        segment.end > sourceStart,
+    )
+  )
+    return;
+  return {
+    start: sourceStart,
+    end: sourceEnd,
+    prefix: text.slice(0, begin),
+    suffix: text.slice(end),
+    headers,
+    rows,
+    align: columns.map((c) =>
+      c.startsWith(":") && c.endsWith(":")
+        ? "center"
+        : c.endsWith(":")
+          ? "right"
+          : "left",
+    ),
+  };
+}
