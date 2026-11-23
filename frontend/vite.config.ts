@@ -1,27 +1,9 @@
 import { createRequire } from "node:module";
-import { defineConfig, loadEnv, Plugin } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import svgr from "vite-plugin-svgr";
 import path from "node:path";
 import { pdfCmapsPlugin } from "./scripts/vite/pdfCmaps";
-
-// Expose the globally loaded Excel preview library as an ES module.
-function jsPreviewExcelShimPlugin(): Plugin {
-  const RESOLVED_ID = "\0virtual:js-preview-excel-shim";
-
-  return {
-    name: "js-preview-excel-shim",
-    enforce: "pre",
-    resolveId(id) {
-      if (id === "@js-preview/excel") return RESOLVED_ID;
-    },
-    load(id) {
-      if (id === RESOLVED_ID) {
-        return `const jsPreviewExcel = window.jsPreviewExcel;\nexport default jsPreviewExcel;\n`;
-      }
-    },
-  };
-}
 
 export default defineConfig(({ mode }) => {
   const require = createRequire(import.meta.url);
@@ -33,7 +15,7 @@ export default defineConfig(({ mode }) => {
   const isDesktopBuild = env.VITE_LAZYMIND_MODE === "desktop";
 
   return {
-    plugins: [jsPreviewExcelShimPlugin(), pdfCmapsPlugin(pdfjsRoot), react(), svgr()],
+    plugins: [pdfCmapsPlugin(pdfjsRoot), react(), svgr()],
     base: "/",
     optimizeDeps: {
       // The PDF worker is loaded as an asset URL, not as a prebundled module.
@@ -101,6 +83,10 @@ export default defineConfig(({ mode }) => {
         },
         output: {
           manualChunks(id) {
+            // Keep Vite's shared preload helper out of the lazy Monaco chunk.
+            if (id.includes('vite/preload-helper')) {
+              return 'preload-helper';
+            }
             // Split monaco-editor into its own chunk to avoid bundling it with the main app.
             // This also prevents Node.js OOM during Vite build by keeping chunk sizes manageable.
             if (id.includes('monaco-editor')) {

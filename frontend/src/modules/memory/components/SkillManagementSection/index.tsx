@@ -163,7 +163,7 @@ export default function SkillManagementSection() {
   } = useMemoryManagementOutletContext();
 
   useEffect(() => {
-    if (skillLoading || draftReviewOpen) return;
+    if (skillView === "workflows" || skillLoading || draftReviewOpen) return;
     let current = true;
     void listPendingSkillDrafts().then((rows) => {
       if (current) setPendingDraftCount(rows.length);
@@ -171,7 +171,7 @@ export default function SkillManagementSection() {
       // Keep the review entry available; its full page reports load errors and retry.
     });
     return () => { current = false; };
-  }, [skillLoading, skillAssets, organizeStatus, draftReviewOpen]);
+  }, [skillView, skillLoading, skillAssets, organizeStatus, draftReviewOpen]);
 
   useEffect(() => {
     const latest = new Map<string, StructuredAsset>(skillAssets.map((skill: StructuredAsset) => [skill.id, skill]));

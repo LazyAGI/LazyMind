@@ -921,13 +921,13 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   );
 
   useEffect(() => {
-    if (activeTab !== "skills") {
+    if (activeTab !== "skills" || skillView === "workflows") {
       return;
     }
     const silent = manualSkillReviewSummaryLoadedRef.current;
     manualSkillReviewSummaryLoadedRef.current = true;
     void refreshManualSkillReviewSummary({ silent });
-  }, [activeTab, refreshManualSkillReviewSummary]);
+  }, [activeTab, skillView, refreshManualSkillReviewSummary]);
 
   useEffect(() => {
     if (activeTab !== "skills") {
@@ -1330,9 +1330,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     const shouldRefreshSkillAssets =
       Boolean(skillRouteItemId) ||
       reviewRouteTab === "skills" ||
-      routeMemoryTab === "skills";
+      (routeMemoryTab === "skills" && skillView !== "workflows");
 
     if (!shouldRefreshSkillAssets) {
+      skillListRefreshKeyRef.current = "";
       return;
     }
 
@@ -1398,7 +1399,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     const shouldLoadSkillTags =
       Boolean(skillRouteItemId) ||
       reviewRouteTab === "skills" ||
-      routeMemoryTab === "skills";
+      (routeMemoryTab === "skills" && skillView !== "workflows");
 
     if (!shouldLoadSkillTags) {
       return undefined;
@@ -1431,13 +1432,13 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     return () => {
       ignore = true;
     };
-  }, [reviewRouteTab, routeMemoryTab, skillRouteItemId, skillTagsRefreshKey]);
+  }, [reviewRouteTab, routeMemoryTab, skillRouteItemId, skillTagsRefreshKey, skillView]);
 
   useEffect(() => {
     const shouldLoadSkillCategories =
       Boolean(skillRouteItemId) ||
       reviewRouteTab === "skills" ||
-      routeMemoryTab === "skills";
+      (routeMemoryTab === "skills" && skillView !== "workflows");
 
     if (!shouldLoadSkillCategories) {
       return undefined;
@@ -1449,6 +1450,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     reviewRouteTab,
     routeMemoryTab,
     skillRouteItemId,
+    skillView,
   ]);
 
   useEffect(() => {

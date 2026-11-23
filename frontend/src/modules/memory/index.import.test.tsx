@@ -24,12 +24,14 @@ function Controls() {
   return <>
     <button onClick={() => context.openSkillCreateModal('url')}>Import URL</button>
     <button onClick={() => context.setCategory('current')}>Change category</button>
+    <button onClick={() => context.setSkillView('installed')}>Show skills</button>
+    <button onClick={() => context.setSkillView('workflows')}>Show workflows</button>
     <p aria-label='Loaded rows'>{context.skillAssets.map((item: { name: string }) => item.name).join(',')}</p>
     <p aria-label='Available tags'>{context.availableTags.join(',')}</p>
   </>;
 }
-function mount(controls = <Controls />, destination = <div>Chat home</div>) {
-  return render(<MemoryRouter initialEntries={['/memory-management/skills']}><Routes>
+function mount(controls = <Controls />, destination = <div>Chat home</div>, url = '/memory-management/skills') {
+  return render(<MemoryRouter initialEntries={[url]}><Routes>
     <Route path='/memory-management' element={<MemoryManagement />}><Route path='skills' element={controls} /></Route>
     <Route path='/agent/chat/home' element={destination} />
   </Routes></MemoryRouter>);
@@ -45,6 +47,25 @@ beforeEach(() => {
 });
 
 describe('personal skill import', () => {
+  it('loads skill data on entering skills, not on the workflow tab, and refreshes on return', async () => {
+    mount(<Controls />, undefined, '/memory-management/skills?skillView=workflows');
+    await act(async () => {});
+    expect(api.listSkillAssetsPage).not.toHaveBeenCalled();
+    expect(api.listSkillTags).not.toHaveBeenCalled();
+    expect(api.listSkillCategories).not.toHaveBeenCalled();
+    expect(api.getSkillReviewSummary).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Show skills' }));
+    await waitFor(() => expect(screen.getByLabelText('Loaded rows')).toHaveTextContent('initial'));
+    expect(api.listSkillTags).toHaveBeenCalled();
+    expect(api.listSkillCategories).toHaveBeenCalled();
+    expect(api.getSkillReviewSummary).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Show workflows' }));
+    api.listSkillAssetsPage.mockClear();
+    api.listSkillAssetsPage.mockResolvedValue({ records: [{ id: 'new', name: 'new', tags: [] }], total: 1, page: 1, pageSize: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'Show skills' }));
+    await waitFor(() => expect(screen.getByLabelText('Loaded rows')).toHaveTextContent('new'));
+    expect(api.listSkillAssetsPage).toHaveBeenCalled();
+  });
   it.each([
     { logo: false, metadata: { category: 'external' }, icon: 'package-open' },
     { logo: true, metadata: { category: 'external' }, icon: 'package-open' },

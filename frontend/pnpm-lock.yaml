@@ -28,9 +28,6 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@18.3.1)
-      '@js-preview/docx':
-        specifier: ^1.6.4
-        version: 1.6.4(core-js@3.48.0)
       '@js-preview/excel':
         specifier: ^1.7.14
         version: 1.7.14
@@ -834,11 +831,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@js-preview/docx@1.6.4':
-    resolution: {integrity: sha512-F6Yzac5NWnXp7cKzcUYGSLQHdp5ELgpdgTzrj5i4QZkZHv4ASGHhVY0MZF4YRjpY/MwirD8C1W14CIRUcdvL7g==}
-    peerDependencies:
-      core-js: ^3.0.0
 
   '@js-preview/excel@1.7.14':
     resolution: {integrity: sha512-7QHtuRalWQzWIKARc/IRN8+kj1S5eWV4+cAQipzZngE3mVxMPL1RHXKJt/ONmpcKZ410egYkaBuOOs9+LctBkA==}
@@ -6177,10 +6169,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@js-preview/docx@1.6.4(core-js@3.48.0)':
-    dependencies:
-      core-js: 3.48.0
 
   '@js-preview/excel@1.7.14': {}
 

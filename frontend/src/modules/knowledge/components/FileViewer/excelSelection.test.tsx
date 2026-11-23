@@ -11,6 +11,10 @@ vi.mock("react-i18next", async (importOriginal) => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
+// jsdom does not fetch script tags; use the same library for the real grid test.
+vi.mock("./renderers/loadExcelPreview", () => ({
+  loadExcelPreview: async () => (await import("@js-preview/excel")).default,
+}));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getAuthHeaders: () => ({}) } }));
 vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code }));
 vi.mock("@/modules/knowledge/utils/request", () => ({ normalizeProxyableUrl: (url: string) => url }));

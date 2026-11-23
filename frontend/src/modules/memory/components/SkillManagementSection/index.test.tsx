@@ -74,6 +74,7 @@ vi.mock("@/modules/workflow/components/NewWorkflowModal", () => ({
 }));
 
 import SkillManagementSection from ".";
+import { listPendingSkillDrafts } from "./skillDraftReview";
 
 const refreshSkillAssets = vi.fn();
 
@@ -120,6 +121,17 @@ describe("SkillManagementSection organize task recovery", () => {
       manualSkillReviewRunning: false,
       handleRunManualSkillReview: vi.fn(),
     });
+  });
+
+  it("loads pending skill drafts only after leaving the workflow view", async () => {
+    const context = contextMocks.useMemoryManagementOutletContext();
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({ ...context, skillView: "workflows" });
+    const view = render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await act(async () => {});
+    expect(listPendingSkillDrafts).not.toHaveBeenCalled();
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue(context);
+    view.rerender(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(listPendingSkillDrafts).toHaveBeenCalledTimes(1));
   });
 
   it("sorts builtin and admin skills together before paging and scopes pages to the selected major category", async () => {

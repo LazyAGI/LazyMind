@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import jsPreviewExcel, { JsExcelPreview } from "@js-preview/excel";
+import type { JsExcelPreview } from "@js-preview/excel";
+import { loadExcelPreview } from "./loadExcelPreview";
+import "@js-preview/excel/lib/index.css";
 import { Segment } from "@/api/generated/knowledge-client";
 import i18n from "@/i18n";
 
@@ -156,7 +158,7 @@ function requiresTableRenderer(fileData: ArrayBuffer): boolean {
   }
 }
 
-interface RenderOfficeProps {
+interface RenderExcelProps {
   fileData: ArrayBuffer;
   onPreviewError?: () => void;
   fileType: "excel";
@@ -165,11 +167,12 @@ interface RenderOfficeProps {
   onSelection?: (selection: ExcelSelection | null, point: Pick<MouseEvent, "clientX" | "clientY">) => void;
 }
 
-const RenderExcel = (props: RenderOfficeProps) => {
+const RenderExcel = (props: RenderExcelProps) => {
   const { fileData, fileType, content, metadata } = props;
   const errorCallback = useRef(props.onPreviewError);
   errorCallback.current = props.onPreviewError;
   const reader = useRef<JsPreviewType | null>(null);
+  const previewRequest = useRef(0);
   const showFile = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const sheets = useRef<ExcelSheet[]>([]);
@@ -205,10 +208,6 @@ const RenderExcel = (props: RenderOfficeProps) => {
     () => (metadata?.title as string) || "",
     [metadata],
   );
-
-  const getReaderType = useCallback(() => {
-    return jsPreviewExcel;
-  }, [fileType]);
 
   const highlightKeyword = useCallback(
     (container: HTMLDivElement, keyword: string, title = "") => {
@@ -256,6 +255,7 @@ const RenderExcel = (props: RenderOfficeProps) => {
   }, []);
 
   const previewFile = useCallback(async () => {
+    const request = ++previewRequest.current;
     if (!fileData) {
       return;
     }
@@ -268,8 +268,8 @@ const RenderExcel = (props: RenderOfficeProps) => {
     try {
       setLoading(true);
 
-      const readerType = getReaderType();
-      if (!readerType || !showFile.current) {
+      const readerType = await loadExcelPreview();
+      if (request !== previewRequest.current || !showFile.current) {
         return;
       }
 
@@ -401,6 +401,7 @@ const RenderExcel = (props: RenderOfficeProps) => {
       reader.current = initReader();
       if (reader.current?.preview) {
         await reader.current.preview(fileData);
+        if (request !== previewRequest.current || !showFile.current) return;
 
         // Some valid XLSX producers emit workbook metadata that the pinned
         // preview library accepts without throwing but renders as an empty
@@ -415,6 +416,7 @@ const RenderExcel = (props: RenderOfficeProps) => {
             selectedRange.current = null;
             reader.current = initReader();
             await reader.current.preview(normalized);
+            if (request !== previewRequest.current || !showFile.current) return;
             if (!previewMatchesWorkbook(fileData, sheets.current)) {
               reader.current.destroy?.();
               reader.current = null;
@@ -428,17 +430,19 @@ const RenderExcel = (props: RenderOfficeProps) => {
         }
       }
     } catch (err) {
+      if (request !== previewRequest.current) return;
       if (showFile.current) errorCallback.current?.();
       console.error("Office preview error:", err);
     } finally {
-      setLoading(false);
+      if (request === previewRequest.current) setLoading(false);
     }
-  }, [fileData, fileType, getReaderType]);
+  }, [fileData, fileType]);
 
   useEffect(() => {
     if (fileData) {
       previewFile();
     }
+    return () => { previewRequest.current++; };
   }, [fileData, previewFile]);
 
   useEffect(() => {
