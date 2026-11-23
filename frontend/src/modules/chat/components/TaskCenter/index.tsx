@@ -9,16 +9,17 @@ import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import { reconcileWorkflowTasks, workflowTaskDisplayStatus, taskBelongsToWorkflow } from "@/modules/chat/utils/workflowTaskStatus";
 import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
-import { useMemo, useState, useRef, useCallback, useEffect } from "react";
+import { useId, useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { Image, Progress, Tooltip } from "antd";
+import { Button, Image, Progress, Tooltip } from "antd";
 import {
   CheckCircleFilled,
   CloseCircleFilled,
   LoadingOutlined,
   FileTextOutlined,
   DownOutlined,
+  UpOutlined,
   RightOutlined,
   ApiOutlined,
   CheckOutlined,
@@ -331,6 +332,8 @@ function WritingSubtaskList({ subtasks }: { subtasks?: WritingSubtask[] }) {
 
 function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sources?: ChatSource[] }) {
   const { t } = useTranslation();
+  const listId = useId();
+  const [showAll, setShowAll] = useState(false);
   if (!artifacts || artifacts.length === 0) {
     return null;
   }
@@ -376,13 +379,16 @@ function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sourc
   const total =
     previewImages.length + fileListFiles.length + files.length + texts.length;
 
+  const visible = <T,>(items: T[], offset: number) =>
+    showAll ? items : items.slice(0, Math.max(0, 3 - offset));
+
   return (
     <CollapsibleSection title={`${t("taskCenter.artifacts")} (${total})`}>
-      <div className="task-artifacts-inner">
+      <div className="task-artifacts-inner" id={listId}>
         {previewImages.length > 0 && (
           <div className="task-artifacts-grid">
             <Image.PreviewGroup>
-              {previewImages.map((img) => (
+              {visible(previewImages, 0).map((img) => (
                 <div className="task-artifact-preview" key={img.key}>
                   <Image
                     src={img.src}
@@ -404,7 +410,7 @@ function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sourc
             </Image.PreviewGroup>
           </div>
         )}
-        {fileListFiles.map((file) => (
+        {visible(fileListFiles, previewImages.length).map((file) => (
           <div className="task-artifact-file" key={file.key}>
             <FileTextOutlined />
             <a
@@ -418,7 +424,7 @@ function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sourc
             </a>
           </div>
         ))}
-        {files.map((a) => {
+        {visible(files, previewImages.length + fileListFiles.length).map((a) => {
           const downloadUrl = resolveCoreAssetUrl(a.value?.url || "");
           const fileName: string =
             a.value?.filename || a.slot || "download";
@@ -447,7 +453,7 @@ function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sourc
             </div>
           );
         })}
-        {texts.map((a) => {
+        {visible(texts, previewImages.length + fileListFiles.length + files.length).map((a) => {
           const textContent = extractTextContent(a);
           const textFileName =
             a.slot && a.slot.includes(".")
@@ -483,12 +489,20 @@ function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sourc
           );
         })}
       </div>
+      {total > 3 && (
+        <Button type="link" size="small" className="task-artifacts-toggle"
+          aria-controls={listId} aria-expanded={showAll}
+          icon={showAll ? <UpOutlined /> : <DownOutlined />}
+          onClick={() => setShowAll(value => !value)}>
+          {showAll ? t("taskCenter.collapseStageArtifacts") : t("taskCenter.showRemainingArtifacts", { count: total - 3 })}
+        </Button>
+      )}
     </CollapsibleSection>
   );
 }
 
 function ReferenceSources({ sources }: { sources: ChatSource[] }) {
-  return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /></div>;
+  return <ReferenceSourcesButton sources={sources} inline />;
 }
 
 function StatusBadge({ status: rawStatus, workflowPaused }: { status: TaskStatus; workflowPaused: boolean }) {
@@ -698,6 +712,32 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
         onClick={() => void reload(collection, view.pages[collection]?.next_cursor ?? undefined).catch(() => undefined)}>
         {t("taskCenter.ordinaryLoadMore")}
       </button> : null;
+  const loadStageArtifacts = async (active: () => boolean) => {
+    if (!view) return;
+    const conversationId = view.conversation_id ?? item.task?.conversation_id ?? "";
+    const taskKey = view.session_id ? view.display_key : view.task_id ?? view.display_key;
+    let page = view.pages.stage_artifacts;
+    let restarted = false;
+    const seen = new Set<string>();
+    while (active() && page.next_cursor) {
+      const cursor = page.next_cursor;
+      if (seen.has(cursor)) throw new Error("Repeated stage artifact cursor");
+      seen.add(cursor);
+      await loadOrdinaryTask(conversationId, taskKey, "stage_artifacts", cursor);
+      if (!active()) return;
+      const latest = view.session_id
+        ? useWorkflowStore.getState().sessionByConversation[conversationId]?.ordinary_tasks?.find(task => task.display_key === view.display_key && task.session_id === view.session_id)
+        : useTaskCenterStore.getState().getTasks(conversationId).find(task => task.task_id === taskKey)?.ordinary;
+      if (!latest) throw new Error("Task unavailable");
+      const next = latest.pages.stage_artifacts;
+      if (next.revision !== page.revision) {
+        if (restarted) throw new Error("Stage artifacts changed again");
+        seen.clear();
+        restarted = true;
+      }
+      page = next;
+    }
+  };
   const sourceContext = artifactSourceContext(item);
   const { sources, context } = sourceContext;
   return <SourceImportProvider context={context} sources={sources}><div className="ordinary-task-details" aria-busy={loadingCollection !== null}>
@@ -723,9 +763,8 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
     </div>
     <ReferenceSources sources={sources} />
     {more("sources")}
-    <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()}
+    <TaskArtifactList key={view?.display_key ?? item.task?.task_id} total={view?.pages.stage_artifacts.total} loadAll={loadStageArtifacts} artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()}
       workflow={view?.session_id ? { sessionId: view.session_id, stepId: view.workflow_step_id || item.step?.step_id || '' } : undefined} />
-    {more("stage_artifacts")}
     {loadError && <div role="alert" className="ordinary-stale-warning">{t("taskCenter.ordinaryLoadError")}<button type="button" onClick={() => void reload().catch(() => undefined)}>{t("taskCenter.ordinaryReload")}</button></div>}
   </div></SourceImportProvider>;
 }

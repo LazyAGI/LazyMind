@@ -328,24 +328,24 @@ export default function GitHubStarPrompt({ userId, blocked, returnTo, conversati
   }
 
   return <Modal rootClassName={`github-star-prompt${plugin ? ' github-star-prompt--plugin' : ''}`} width={plugin ? 480 : undefined}
-    open={Boolean(invitation && invitation.scope === viewScope)} title={<Space><GithubOutlined aria-hidden />{label(plugin ? 'pluginTitle' : 'title')}</Space>}
+    open={Boolean(invitation && invitation.scope === viewScope)} title={<Space><GithubOutlined aria-hidden />{label(plugin ? 'immediateTitle' : 'title')}</Space>}
     onCancel={close} destroyOnHidden footer={<Space wrap>
       <Button aria-label={label('close')} onClick={close}>{label('close')}</Button>
       {phase === 'star' && <Button type='primary' loading={working} icon={plugin ? <StarFilled aria-hidden /> : undefined}
-        disabled={Boolean(invitation?.accounts.length && !selected)} onClick={() => void confirm()}>{label(plugin ? 'pluginStar' : 'star')}</Button>}
+        disabled={Boolean(invitation?.accounts.length && !selected)} onClick={() => void confirm()}>{label(plugin ? 'immediateStar' : 'star')}</Button>}
       {!plugin && phase === 'connect' && <Button type='primary' onClick={connect}>{label('continueAuth')}</Button>}
       {!plugin && ['permissionDenied', 'accountChanged', 'reauthorize'].includes(notice) && <Button onClick={connect}>{label('manageAccount')}</Button>}
       {phase === 'retry' && <Button type='primary' onClick={() => {
         if (invitation) setPending({ opportunity: invitation.opportunity, connectionId: invitation.connectionId, userId, identity: AgentAppsAuth.getSessionIdentity(), scope: viewScope });
       }}>{t('common.retry')}</Button>}
     </Space>}>
-    <Typography.Paragraph>{label(plugin ? 'pluginMessage' : 'message')}</Typography.Paragraph>
+    <Typography.Paragraph>{label(plugin ? 'immediateMessage' : 'message')}</Typography.Paragraph>
     <Typography.Paragraph type='secondary'>LazyAGI/LazyMind</Typography.Paragraph>
     {phase === 'star' && invitation?.deferred && <Typography.Paragraph>{label(invitation.accounts.length ? 'connectionSupportHint' : 'localSupportHint')}</Typography.Paragraph>}
     {!plugin && phase === 'connect' && <Typography.Paragraph>{label('localHint')}</Typography.Paragraph>}
     {plugin && phase === 'connect' && <>
       <Typography.Paragraph>{label('thankYou')}</Typography.Paragraph>
-      <Typography.Paragraph><a href={repositoryURL} target='_blank' rel='noopener noreferrer'>{label('pluginRepository')}</a></Typography.Paragraph>
+      <Typography.Paragraph><a href={repositoryURL} target='_blank' rel='noopener noreferrer'>{label('immediateRepository')}</a></Typography.Paragraph>
     </>}
     {phase === 'star' && Boolean(invitation?.accounts.length) && <Select style={{ width: '100%', marginBottom: 16 }}
       aria-label={label('account')} placeholder={label('selectAccount')} value={selected}

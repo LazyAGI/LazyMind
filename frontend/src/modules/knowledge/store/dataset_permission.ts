@@ -8,6 +8,7 @@ interface DatasetPermissionState {
   requestedDatasetId: string | null;
   datasetLoading: boolean;
   datasetError: string;
+  datasetErrorStatus?: number;
 
   loadDataset: (datasetId: string, refresh?: boolean) => Promise<Dataset>;
 
@@ -32,23 +33,27 @@ export const useDatasetPermissionStore = create<DatasetPermissionState>()(
       currentDataset: null,
       requestedDatasetId: null,
       datasetLoading: false,
-      datasetError: "",
+      datasetErrorStatus: undefined, datasetError: "",
 
       loadDataset: (datasetId, refresh = false) => {
         if (pending?.id === datasetId) return pending.promise;
         const current = get().currentDataset;
         if (!refresh && current?.dataset_id === datasetId) return Promise.resolve(current);
         const request = ++generation;
-        set({ currentDataset: current?.dataset_id === datasetId ? current : null, requestedDatasetId: datasetId, datasetLoading: true, datasetError: "" });
+        set({ currentDataset: current?.dataset_id === datasetId ? current : null, requestedDatasetId: datasetId, datasetLoading: true, datasetErrorStatus: undefined, datasetError: "" });
         const promise: Promise<Dataset> = KnowledgeBaseServiceApi().datasetServiceGetDataset({ dataset: datasetId })
           .then(response => {
             const dataset = response.data as Dataset;
             if (dataset.dataset_id !== datasetId) throw new Error("知识库详情与当前页面不匹配，请重试");
-            if (request === generation) set({ currentDataset: dataset, datasetLoading: false, datasetError: "" });
+            if (request === generation) set({ currentDataset: dataset, datasetLoading: false, datasetErrorStatus: undefined, datasetError: "" });
             return dataset;
           })
           .catch(error => {
-            if (request === generation) set({ datasetLoading: false, datasetError: error instanceof Error ? error.message : "知识库加载失败，请重试" });
+            if (request === generation) set({
+              currentDataset: null, datasetLoading: false,
+              datasetErrorStatus: error?.response?.status,
+              datasetError: error instanceof Error ? error.message : "知识库加载失败，请重试",
+            });
             throw error;
           })
           .finally(() => { if (pending?.promise === promise) pending = undefined; });
@@ -59,7 +64,7 @@ export const useDatasetPermissionStore = create<DatasetPermissionState>()(
       setCurrentDataset: (dataset: Dataset | null) => {
         generation++;
         pending = undefined;
-        set({ currentDataset: dataset, requestedDatasetId: dataset?.dataset_id || null, datasetLoading: false, datasetError: "" });
+        set({ currentDataset: dataset, requestedDatasetId: dataset?.dataset_id || null, datasetLoading: false, datasetErrorStatus: undefined, datasetError: "" });
       },
 
       hasWritePermission: () => {
@@ -91,7 +96,7 @@ export const useDatasetPermissionStore = create<DatasetPermissionState>()(
       clearDataset: () => {
         generation++;
         pending = undefined;
-        set({ currentDataset: null, requestedDatasetId: null, datasetLoading: false, datasetError: "" });
+        set({ currentDataset: null, requestedDatasetId: null, datasetLoading: false, datasetErrorStatus: undefined, datasetError: "" });
       },
 
       getDatasetDetail: () => {

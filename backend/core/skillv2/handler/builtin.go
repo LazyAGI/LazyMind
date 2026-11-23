@@ -14,6 +14,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	skillbuiltin "lazymind/core/skillv2/builtin"
+	skillhttperr "lazymind/core/skillv2/httperr"
 	skillservice "lazymind/core/skillv2/service"
 )
 
@@ -152,7 +153,7 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	pkg, err := skillbuiltin.AcquirePackageByUID(r.Context(), uid)
 	if err != nil {
-		replyError(w, "builtin skill package download failed: "+err.Error(), http.StatusBadGateway)
+		replyBuiltinPackageError(w, err)
 		return
 	}
 	if found {
@@ -166,7 +167,7 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 
 	source, cleanup, err := sourceForBuiltinPackage(*pkg)
 	if err != nil {
-		replyError(w, "builtin skill package download failed: "+err.Error(), http.StatusBadGateway)
+		replyBuiltinPackageError(w, err)
 		return
 	}
 	defer cleanup()
@@ -205,6 +206,19 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	replyBuiltinSkillDetail(w, r, service, resp.SkillID, userID)
+}
+
+func replyBuiltinPackageError(w http.ResponseWriter, err error) {
+	const message = "builtin skill package download failed"
+	var download *skillbuiltin.PackageDownloadError
+	if errors.As(err, &download) {
+		common.ReplyErrWithData(w, message, map[string]any{
+			"code":            skillhttperr.CodeInternal,
+			"source_failures": download.Failures,
+		}, http.StatusBadGateway)
+		return
+	}
+	replyError(w, message+": "+err.Error(), http.StatusBadGateway)
 }
 
 func builtinSkillIdentity(category, name string) string {

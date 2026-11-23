@@ -157,9 +157,18 @@ func TestEnableBuiltinSkillDownloadFailureDoesNotCreateSkill(t *testing.T) {
 	}
 	var response struct {
 		Code int `json:"code"`
+		Data struct {
+			Failures []skillbuiltin.SourceFailure `json:"source_failures"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil || response.Code != 2003147 {
 		t.Fatalf("download error code=%d decode err=%v", response.Code, err)
+	}
+	failures := response.Data.Failures
+	if len(failures) != 3 || failures[0] != (skillbuiltin.SourceFailure{Source: "origin", Reason: "invalid_source"}) ||
+		failures[1] != (skillbuiltin.SourceFailure{Source: "modelscope", Reason: "not_published"}) ||
+		failures[2] != (skillbuiltin.SourceFailure{Source: "hugging_face", Reason: "not_published"}) {
+		t.Fatalf("unexpected failure details: %+v", failures)
 	}
 	if count := testutil.CountRows(t, db, "skills", "origin_builtin_skill_uid = ?", uid); count != 0 {
 		t.Fatalf("failed install created %d skills", count)

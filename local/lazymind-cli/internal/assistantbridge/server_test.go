@@ -147,6 +147,10 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 }
 
 func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T) {
+	type actionResult struct {
+		status agentintegration.Status
+		err    error
+	}
 	for _, agent := range []string{"cursor", "workbuddy"} {
 		t.Run(agent, func(t *testing.T) {
 			server := newTestServer(t, t.TempDir())
@@ -160,15 +164,25 @@ func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T)
 				return nil
 			}
 
-			start := time.Now()
-			status, err := server.agentAction(context.Background(), agent, "login")
-			if err != nil {
-				t.Fatal(err)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			results := make(chan actionResult, 1)
+			go func() {
+				status, err := server.agentAction(ctx, agent, "login")
+				results <- actionResult{status: status, err: err}
+			}()
+			// Status discovery can take several seconds on Windows. Assert the
+			// action returns while the external login is held at the release gate.
+			var result actionResult
+			select {
+			case result = <-results:
+			case <-ctx.Done():
+				t.Fatal("login action did not return while external login was blocked")
 			}
-			if elapsed := time.Since(start); elapsed > time.Second {
-				t.Fatalf("login action blocked for %s", elapsed)
+			if result.err != nil {
+				t.Fatal(result.err)
 			}
-			body, err := json.Marshal(status)
+			body, err := json.Marshal(result.status)
 			if err != nil {
 				t.Fatal(err)
 			}

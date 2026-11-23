@@ -40,9 +40,17 @@ def verification_mode(base):
         'backend/core/skillv2/skillpackage', 'backend/core/skillv2/skillpatch',
         'backend/core/skillv2/sourceurl',
     ]
+    # Runtime acquisition consumes the frozen catalog and does not build it.
+    runtime_acquisition = [
+        'backend/core/skillv2/builtin/acquire.go',
+        'backend/core/skillv2/builtin/acquire_test.go',
+        'backend/core/skillv2/builtin/mirrors.go',
+        'backend/core/skillv2/builtin/mirrors.json',
+    ]
     changed = subprocess.run([
         'git', 'diff', '--quiet', base, 'HEAD', '--',
         *(f':(top){path}' for path in protected),
+        *(f':(top,exclude){path}' for path in runtime_acquisition),
         # Presentation assets are validated by the frozen catalog build.
         ':(top,glob,exclude)skills/featured/*/assets/**',
     ])

@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -117,6 +118,121 @@ func TestAcquirePackageRejectsChangedLockedVersionAndDoesNotCache(t *testing.T) 
 	}
 	if _, err := os.Stat(cachePathForEntry(cacheRoot, entry)); !os.IsNotExist(err) {
 		t.Fatalf("mismatched archive was cached: %v", err)
+	}
+}
+
+func TestAcquireLockedPackageSourceFallback(t *testing.T) {
+	files := map[string]string{
+		"SKILL.md":        "---\nname: demo\ndescription: demo\n---\n# Demo\n",
+		"references/x.md": "verified content",
+	}
+	archivePath := filepath.Join(t.TempDir(), "source.zip")
+	writeCatalogZip(t, archivePath, files)
+	archive, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := append(append([]byte(nil), archive...), 'x')
+	const corrupt = -1
+	const stall = -2
+	for _, tc := range []struct {
+		name     string
+		results  []int
+		want     []string
+		failures []SourceFailure
+	}{
+		{name: "origin succeeds", results: []int{http.StatusOK}, want: []string{"/origin"}},
+		{name: "origin missing", results: []int{http.StatusNotFound, http.StatusOK}, want: []string{"/origin", "/ms"}},
+		{name: "origin times out", results: []int{stall, http.StatusOK}, want: []string{"/origin", "/ms"}},
+		{name: "origin changed and ModelScope missing", results: []int{corrupt, http.StatusGone, http.StatusOK}, want: []string{"/origin", "/ms", "/hf"}},
+		{name: "ModelScope invalid", results: []int{http.StatusNotFound, corrupt, http.StatusOK}, want: []string{"/origin", "/ms", "/hf"}},
+		{
+			name:    "all fail",
+			results: []int{stall, http.StatusNotFound, corrupt},
+			want:    []string{"/origin", "/ms", "/hf"},
+			failures: []SourceFailure{
+				{Source: originSource, Reason: "timeout"},
+				{Source: modelScopeSource, Reason: "missing"},
+				{Source: huggingFaceSource, Reason: "invalid_package"},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var requested []string
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				index := len(requested)
+				requested = append(requested, r.URL.Path)
+				mu.Unlock()
+				if index >= len(tc.results) {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				switch status := tc.results[index]; status {
+				case stall:
+					<-r.Context().Done()
+				case corrupt:
+					_, _ = w.Write(invalid)
+				case http.StatusOK:
+					_, _ = w.Write(archive)
+				default:
+					w.WriteHeader(status)
+				}
+			}))
+			defer server.Close()
+			cache := t.TempDir()
+			entry := testRemoteEntry(server.URL+"/origin", archive, files)
+			sources := []packageSource{
+				{name: originSource},
+				{name: modelScopeSource, url: server.URL + "/ms"},
+				{name: huggingFaceSource, url: server.URL + "/hf"},
+			}
+			pkg, err := acquireFromSources(context.Background(), "", entry, cache, server.Client(), sources, 500*time.Millisecond)
+			mu.Lock()
+			got := slices.Clone(requested)
+			mu.Unlock()
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("requests = %v, want %v", got, tc.want)
+			}
+			if tc.failures != nil {
+				var download *PackageDownloadError
+				if !errors.As(err, &download) || !slices.Equal(download.Failures, tc.failures) {
+					t.Fatalf("failure = %#v (%v), want %v", download, err, tc.failures)
+				}
+				if cached, err := os.ReadDir(cache); err != nil || len(cached) != 0 {
+					t.Fatalf("failed sources left cache entries: %v, err=%v", cached, err)
+				}
+				return
+			}
+			if err != nil || pkg.SHA256 != entry.ArchiveSHA256 || string(pkg.Files["references/x.md"]) != files["references/x.md"] {
+				t.Fatalf("incomplete package: %+v, err=%v", pkg, err)
+			}
+			if _, err := verifiedPackage(entry, cachePathForEntry(cache, entry)); err != nil {
+				t.Fatalf("cache did not contain verified final package: %v", err)
+			}
+		})
+	}
+}
+
+func TestPackageSourcesRequireMatchingLockedArtifact(t *testing.T) {
+	snapshot, err := loadMirrorSnapshot()
+	if err != nil || len(snapshot.Packages) == 0 {
+		t.Fatalf("mirror snapshot missing: %v", err)
+	}
+	const uid = "bsk_CB52793C6701B3920A4A73357411"
+	entry := CatalogSkill{UID: uid, ArchiveSHA256: snapshot.Packages[uid].ArchiveSHA256}
+	const filename = "/Skills/project-tender-lead-discovery__" + uid + ".zip"
+	sources, timeout := packageSources(entry)
+	if timeout != mirroredSourceTimeout || sources[0].name != originSource ||
+		sources[1].url != modelScopeMirrorBase+snapshot.ModelScopeRevision+filename ||
+		sources[2].url != huggingFaceMirrorBase+snapshot.HuggingFaceRevision+filename {
+		t.Fatalf("unexpected pinned sources: %+v", sources)
+	}
+	entry.ArchiveSHA256 = strings.Repeat("0", 64)
+	sources, timeout = packageSources(entry)
+	if timeout != originDownloadTimeout || sources[1].url != "" || sources[2].url != "" {
+		t.Fatalf("a changed locked artifact must not use stale mirror paths: %+v", sources)
 	}
 }
 

@@ -26,7 +26,7 @@ func newTaskTestRouter(t *testing.T) *mux.Router {
 	// migrated and queried on the same SQLite test database.
 	t.Setenv("LAZYMIND_READONLY_SCHEMA", "")
 	db := newTestDB(t)
-	if err := db.AutoMigrate(&orm.AsyncJob{}, &orm.KnowledgeMarketInstall{}, &orm.Dataset{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{}); err != nil {
+	if err := db.AutoMigrate(&orm.AsyncJob{}, &orm.KnowledgeMarketInstall{}, &orm.Dataset{}, &orm.ResourceOperationReceipt{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{}); err != nil {
 		t.Fatalf("auto migrate task models: %v", err)
 	}
 	if err := SeedCatalog(context.Background(), db, writeCatalog(t, handlerTestCatalog)); err != nil {
@@ -189,6 +189,11 @@ func TestMarketListInstallTasks(t *testing.T) {
 	// sorts first in the descending list.
 	insertInstallJob(t, db, "job_a1", "user-a", "law-cn", "succeeded", base, 2, 2, `{"dataset_id":"ds_1","submitted":2}`)
 	insertInstall(t, db, "law-cn", "user-a", "done", "ds_1", base.Add(time.Minute))
+	if err := db.Create(&orm.Dataset{
+		ID: "ds_1", BaseModel: orm.BaseModel{CreateUserID: "user-a", DeletedAt: &base},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	insertInstallJob(t, db, "job_a2", "user-a", "finance", "running", base.Add(time.Hour), 1, 2, "")
 	insertInstall(t, db, "finance", "user-a", "importing", "", base.Add(time.Hour+time.Minute))
 	// Another user's job must never leak into the response.
@@ -222,6 +227,9 @@ func TestMarketListInstallTasks(t *testing.T) {
 	}
 
 	second := items[1].(map[string]any)
+	if second["dataset_deleted"] != true || first["dataset_deleted"] != nil {
+		t.Fatalf("incorrect historical deletion flags: first=%v second=%v", first["dataset_deleted"], second["dataset_deleted"])
+	}
 	if second["job_id"] != "job_a1" {
 		t.Fatalf("second job_id=%v, want job_a1", second["job_id"])
 	}

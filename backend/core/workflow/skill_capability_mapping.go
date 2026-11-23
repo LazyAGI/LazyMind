@@ -1225,7 +1225,7 @@ func requirementsIncludeModelConfig(requirements []skillCapabilityRequirement) b
 func workflowCapabilityToolConfigPresent(capability string, toolConfig map[string]any) bool {
 	switch strings.TrimSpace(capability) {
 	case "web_search":
-		return anyConfigKeyPresent(toolConfig, "google", "bocha", "bing", "tavily")
+		return anyConfigKeyPresent(toolConfig, "google", "bocha", "bing", "tavily", "keenable")
 	case "academic_search":
 		return anyConfigKeyPresent(toolConfig, "sciverse")
 	case "cloud_files":

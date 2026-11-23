@@ -1679,25 +1679,21 @@ search_providers:
       capabilities: [keyless_search]
       description:
         zh-CN: |
-          Keenable 是面向 Agent 的网页搜索 API，返回带标题、链接和摘录的结构化结果。不填写 API Key 也可先启用公开检索；填写 Key 后改走记账接口。
+          Keenable 是面向 Agent 的网页搜索 API，返回带标题、链接和摘录的结构化结果。公开检索默认启用，无需 API Key；填写 Key 后改走记账接口。
 
           文档：
           https://docs.keenable.ai/api-reference/search
 
           申请教程：
 
-          1. 在外部服务中选择 Keenable，可以直接启用公开检索。
-
-          2. 如需更高额度，在 https://keenable.ai 注册并复制 API Key。
+          如需更高额度，在 https://keenable.ai 注册并复制 API Key。
         en-US: |
-          Keenable is a web search API for agents. It returns structured results with a title, URL and snippet. You can enable it without an API key for the public endpoint, or add a key for the authenticated endpoint.
+          Keenable is a web search API for agents. It returns structured results with a title, URL and snippet. Public search is enabled by default. Add an optional API key to use the authenticated endpoint.
 
           Docs:
           https://docs.keenable.ai/api-reference/search
 
           Setup:
 
-          1. Select Keenable under External Services and enable public search, no key required.
-
-          2. For higher limits, register at https://keenable.ai and paste an API key.
+          For higher limits, register at https://keenable.ai and paste an API key.
       base_url: "https://api.keenable.ai"

@@ -83,7 +83,8 @@ type Page struct {
 }
 
 type PublicPage struct {
-	Items         []PublicEpisode `json:"items"`
-	TotalSize     int64           `json:"total_size"`
-	NextPageToken string          `json:"next_page_token"`
+	SupportsPageNumber bool            `json:"supports_page_number"`
+	Items              []PublicEpisode `json:"items"`
+	TotalSize          int64           `json:"total_size"`
+	NextPageToken      string          `json:"next_page_token"`
 }

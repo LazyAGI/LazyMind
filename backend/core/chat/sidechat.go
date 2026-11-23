@@ -463,7 +463,7 @@ func createSidechatConversation(
 		).Take(&parent).Error; err != nil {
 			return err
 		}
-		if parent.ParentConversationID != nil || strings.TrimSpace(parent.RelationType) != "" {
+		if !canParentSidechat(parent) {
 			return errSidechatNestingLimit
 		}
 		if parent.IsEphemeral {
@@ -811,6 +811,12 @@ func validChildConversation(c orm.Conversation) bool {
 	}
 	relation := strings.TrimSpace(c.RelationType)
 	return relation == conversationRelationSidechat || relation == conversationRelationFork
+}
+
+func canParentSidechat(c orm.Conversation) bool {
+	relation := strings.TrimSpace(c.RelationType)
+	return (c.ParentConversationID == nil && relation == "") ||
+		(c.ParentConversationID != nil && relation == conversationRelationFork)
 }
 
 func isSidechatConversation(c orm.Conversation) bool {
@@ -1203,22 +1209,12 @@ func touchConversationParent(ctx context.Context, db *gorm.DB, conversationID st
 
 func ownedConversationFamilyIDs(ctx context.Context, db *gorm.DB, userID, conversationID string) ([]string, error) {
 	var conversation orm.Conversation
-	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "parent_conversation_id").Where(
+	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where(
 		"id = ? AND create_user_id = ?", conversationID, userID,
 	).Take(&conversation).Error; err != nil {
 		return nil, err
 	}
-	ids := []string{conversation.ID}
-	if conversation.ParentConversationID != nil {
-		return ids, nil
-	}
-	var children []string
-	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
-		Where("parent_conversation_id = ? AND create_user_id = ? AND relation_type = ?", conversation.ID, userID, conversationRelationSidechat).
-		Pluck("id", &children).Error; err != nil {
-		return nil, err
-	}
-	return append(ids, children...), nil
+	return expandOwnedConversationFamilyIDs(ctx, db, userID, []string{conversation.ID})
 }
 
 func expandOwnedConversationFamilyIDs(ctx context.Context, db *gorm.DB, userID string, ids []string) ([]string, error) {
@@ -1235,7 +1231,7 @@ func expandOwnedConversationFamilyIDs(ctx context.Context, db *gorm.DB, userID s
 	}
 	var children []string
 	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
-		Where("parent_conversation_id IN ? AND create_user_id = ? AND relation_type = ?", ids, userID, conversationRelationSidechat).
+		Where("parent_conversation_id IN ? AND create_user_id = ? AND relation_type = ? AND deleted_at IS NULL", ids, userID, conversationRelationSidechat).
 		Pluck("id", &children).Error; err != nil {
 		return nil, err
 	}

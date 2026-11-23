@@ -44,6 +44,22 @@ describe("ordinary stage artifacts", () => {
     expect(await screen.findByRole("button", { name: /加入(?:知识库|资料库)/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开原文" })).toBeInTheDocument();
   });
+  it("limits unique stage files and invalidates the paging request on collapse", () => {
+    const artifacts = ["a", "b", "b", "c", "d"].map(id => file({ artifact_id: id, name: id }));
+    let active!: () => boolean;
+    const loadAll = vi.fn(async (isActive: () => boolean) => { active = isActive; });
+    const { rerender } = render(<TaskArtifactList artifacts={artifacts} loadAll={loadAll} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "taskCenter.expandStageArtifacts" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(active()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "taskCenter.collapseStageArtifacts" }));
+    expect(active()).toBe(false);
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    rerender(<TaskArtifactList final artifacts={artifacts} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+  });
+
   it("passes the producing workflow step with the exact artifact revision", () => {
     const preview = { target: null, open: vi.fn(), close: vi.fn(), onVersions: undefined };
     render(<ArtifactPreviewContext.Provider value={preview}>

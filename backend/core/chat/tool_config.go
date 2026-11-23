@@ -200,7 +200,11 @@ func splitToolConfigKeys(raw string) []string {
 
 func searchToolConfigEntry(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
 	credential, err := loadSelectedSearchToolCredential(ctx, db, userID)
-	return toolConfigEntryFromCredential(credential, err)
+	entry, err := toolConfigEntryFromCredential(credential, err)
+	if err == nil && len(entry) == 0 {
+		return modelconfig.DefaultSearchToolConfig(), nil
+	}
+	return entry, err
 }
 
 func academicSearchToolConfigEntry(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {

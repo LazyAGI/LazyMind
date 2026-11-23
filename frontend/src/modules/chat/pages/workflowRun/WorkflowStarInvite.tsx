@@ -6,7 +6,7 @@ import { isStarOpportunity } from '@/modules/githubStar/intent';
 import type { WorkflowSession } from '@/modules/chat/store/workflowPanel';
 import type { WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 
-/** Plugin workbenches share the invitation policy, but always use immediate Star. */
+/** External agent workbenches share the invitation policy and always use immediate Star. */
 export default function WorkflowStarInvite({ userId, session, control, resultsOnly }: {
   userId: string;
   session?: WorkflowSession;

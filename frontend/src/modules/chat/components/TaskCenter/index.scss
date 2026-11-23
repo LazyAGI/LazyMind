@@ -483,6 +483,11 @@
 }
 
 // ── Artifacts ─────────────────────────────────────────────────────────────────
+.task-artifacts-toggle.ant-btn {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
 .task-artifacts-inner {
   .task-artifacts-grid {
     display: flex;
@@ -1635,4 +1640,22 @@
     &::-webkit-progress-value { background: status.$paused-accent; }
     &::-moz-progress-bar { background: status.$paused-accent; }
   }
+}
+
+.task-reference-sources .chat-source-panel {
+  width: 100%;
+  height: auto;
+  max-height: min(420px, 60vh);
+  overflow: auto;
+  border: 0;
+}
+
+.task-reference-sources .chat-source-list .chat-source-item {
+  height: auto;
+  min-height: 72px;
+}
+.task-reference-sources .chat-source-item-content {
+  display: -webkit-box;
+  height: 32px;
+  -webkit-line-clamp: 2;
 }

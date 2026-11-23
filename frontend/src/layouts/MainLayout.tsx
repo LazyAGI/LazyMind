@@ -215,7 +215,7 @@ export default function MainLayout() {
   );
   const knowledgeDatasetId = matchPath("/lib/knowledge/detail/:id", pathname)?.params.id
     || matchPath("/lib/knowledge/knowledge/:knowledgeBaseId/:knowledgeId", pathname)?.params.knowledgeBaseId;
-  const { currentDataset: currentKnowledgeDataset, requestedDatasetId, datasetLoading, datasetError, loadDataset, clearDataset } = useDatasetPermissionStore();
+  const { currentDataset: currentKnowledgeDataset, requestedDatasetId, datasetLoading, datasetError, datasetErrorStatus, loadDataset, clearDataset } = useDatasetPermissionStore();
   const datasetOwner = useRef(datasetUserKey);
   const knowledgeDatasetReady = datasetOwner.current === datasetUserKey && currentKnowledgeDataset?.dataset_id === knowledgeDatasetId;
   const isPaperPage = Boolean(
@@ -385,7 +385,7 @@ export default function MainLayout() {
       return;
     }
     if (localSessionGate.loading || localSessionGate.error || agreementLoading || agreementCheckFailed) return;
-    void loadDataset(knowledgeDatasetId).catch(() => {});
+    void loadDataset(knowledgeDatasetId, true).catch(() => {});
   }, [knowledgeDatasetId, datasetUserKey, isLoggedIn, localSessionGate.loading, localSessionGate.error, agreementLoading, agreementCheckFailed, loadDataset, clearDataset]);
 
   useEffect(() => {
@@ -950,11 +950,14 @@ export default function MainLayout() {
 
   if (knowledgeDatasetId && !knowledgeDatasetReady) {
     const error = requestedDatasetId === knowledgeDatasetId ? datasetError : '';
+    const deleted = Boolean(error) && datasetErrorStatus === 410;
+    const forbidden = Boolean(error) && datasetErrorStatus === 403;
     return <div className="local-session-gate" role="status">
       <div className="local-session-panel">
         {(datasetLoading || !error) && <Spin />}
-        <div className="local-session-message">{error ? t('layout.knowledgeLoadFailed') : t('layout.loadingKnowledge')}</div>
-        {error && <Button type="primary" onClick={() => void loadDataset(knowledgeDatasetId, true).catch(() => {})}>{t('common.retry')}</Button>}
+        <div className="local-session-message">{deleted ? t('knowledge.deletedDataset') : forbidden ? t('common.accessDenied') : error ? t('layout.knowledgeLoadFailed') : t('layout.loadingKnowledge')}</div>
+        {(deleted || forbidden) && <Button type="primary" onClick={() => navigate("/lib/knowledge/list")}>{t("knowledge.backToLibrary")}</Button>}
+        {error && !deleted && !forbidden && <Button type="primary" onClick={() => void loadDataset(knowledgeDatasetId, true).catch(() => {})}>{t('common.retry')}</Button>}
       </div>
     </div>;
   }

@@ -1,4 +1,7 @@
+import { ConfigProvider } from "antd";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { SettingsNavigationGuard } from "@/modules/settings/SettingsNavigationGuard";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -72,6 +75,29 @@ beforeEach(() => {
 });
 
 describe("default-model service configuration", () => {
+  it("lists public Keenable first and closes its editor without changing the search selection", async () => {
+    mocks.listProviders.mockResolvedValue({ data: { providers: [...providers, {
+      id: "keen", name: "Keenable", category: "search", capabilities: ["keyless_search"], is_configured: false,
+    }] } });
+    mocks.listGroups.mockResolvedValue({ data: { groups: [{ id: "public", base_url: "https://api.keenable.ai", keys: [] }] } });
+    const router = createMemoryRouter([{ path: "/settings", element: <SettingsNavigationGuard>
+      <ExternalServicesPage focusCategory="search" variant="default-models" />
+    </SettingsNavigationGuard> }], { initialEntries: ["/settings?section=model_defaults"] });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><RouterProvider router={router} /></ConfigProvider>);
+    const [first] = await screen.findAllByRole("button", { name: /^配置 / });
+    expect(first).toHaveAccessibleName("配置 Keenable");
+    expect(within(first).getByText("modelProvider.external.defaultEnabled")).toBeVisible();
+    fireEvent.click(first);
+    const dialog = await screen.findByRole("dialog", { name: "配置 Keenable" });
+    await within(dialog).findByText("modelProvider.external.noKeysConfigured");
+    expect(within(dialog).getByText("modelProvider.external.defaultEnabled")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /close/i }));
+    await waitFor(() => expect(router.state.location.search).toBe("?section=model_defaults"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(mocks.createGroup).not.toHaveBeenCalled();
+    expect(mocks.selectProvider).not.toHaveBeenCalled();
+  });
+
   it("keeps the document parsing switch visible when no OCR provider is available", async () => {
     mocks.listProviders.mockResolvedValue({ data: { providers: providers.filter((item) => item.category !== "ocr") } });
     render(<ExternalServicesPage
