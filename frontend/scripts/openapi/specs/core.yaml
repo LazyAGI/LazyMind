@@ -37459,6 +37459,11 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - in: query
+                  name: workflow_session_id
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:

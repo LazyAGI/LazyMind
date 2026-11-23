@@ -340,6 +340,14 @@ const enUS = {
 },
 
   githubStar: {
+    immediateTitle: 'Thank you for using LazyMind', immediateStar: 'Star on GitHub',
+    immediateMessage: 'If this helped you, give us a Star on GitHub. Your support helps us keep improving.',
+    immediateRepository: 'Open the GitHub project',
+    thankYou: 'Thank you for your support!', supportProject: 'Support this project', cancelSupportRequest: 'Cancel this support request',
+    localSupportHint: 'Use your current local GitHub sign-in to star LazyAGI/LazyMind.',
+    connectionSupportHint: 'Use the selected GitHub account to star LazyAGI/LazyMind.',
+    supportFailed: 'Could not submit your support request. Please try again.',
+    supportCancelled: 'This support request was cancelled. GitHub requests already sent may have completed.',
     title: 'Support LazyMind', message: 'Has LazyMind been helpful? Star our GitHub project to support continued improvements.',
     star: 'Star the project', close: 'Close', account: 'GitHub account', selectAccount: 'Choose a GitHub account',
     localHint: 'No usable local GitHub sign-in was found. Connect an account to continue.',

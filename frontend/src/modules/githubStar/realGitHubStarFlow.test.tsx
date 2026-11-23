@@ -43,6 +43,7 @@ vi.mock('@/modules/chat/utils/request', async original => ({
 }));
 vi.mock('./api', async original => ({
   ...await original<typeof import('./api')>(), readGitHubStarAccounts: vi.fn(),
+  readDeferredGitHubStarIntent: vi.fn(), acceptDeferredGitHubStarIntent: vi.fn(),
   claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(), writeLocalGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(), findGitHubStarOpportunity: vi.fn(),
 }));
 
@@ -58,6 +59,14 @@ const opportunity: starAPI.GitHubStarOpportunity = { task_id: 'root-3', conversa
   status: 'succeeded', result_ready: true, source: 'final_result' };
 let connections: CloudConnectionResponse[];
 let completionRefresh: boolean;
+let localSupportEnabled: boolean;
+const deferredIntent = {
+  intent_id: 'intent-owner-1', status: 'pending' as const, source: 'connection' as const,
+  connection_id: target.connection_id, account_id: target.provider_account_id!,
+  created_at: '2026-11-17T00:00:00Z', expires_at: '2026-11-24T00:00:00Z', attempt_count: 0,
+  next_attempt_at: '2026-11-17T00:00:00Z', rate_limit_not_before: null, reason: '', remote_state: 'unknown' as const,
+};
+let supportHistory: typeof deferredIntent | null;
 function session(status: string, extra: Partial<GitHubCLISessionResponse> = {}) {
   return { data: { session_id: 'cli-session', status, expires_at: new Date(Date.now() + 900_000).toISOString(), ...extra } };
 }
@@ -77,6 +86,18 @@ beforeEach(async () => {
   await i18n.changeLanguage('zh-CN');
   connections = [];
   completionRefresh = false;
+  // The existing web round trips model a nonlocal service with CLI web auth;
+  // its host probe is disabled and star_local returns connection_required.
+  localSupportEnabled = false; supportHistory = null;
+  vi.mocked(starAPI.readDeferredGitHubStarIntent).mockImplementation(async () => ({
+    repository: 'LazyAGI/LazyMind', can_receive: localSupportEnabled, local_supported: localSupportEnabled,
+    accounts: connections.map(item => ({ connection_id: item.connection_id, account_id: item.provider_account_id!, login: item.display_name! })),
+    intent: supportHistory,
+  }));
+  vi.mocked(starAPI.acceptDeferredGitHubStarIntent).mockImplementation(async () => {
+    supportHistory = deferredIntent;
+    return { repository: 'LazyAGI/LazyMind', accepted: true, intent: supportHistory };
+  });
   mocks.list.mockImplementation(async ({ provider }: { provider: string }) => {
     if (provider === 'github' && connections.length) completionRefresh = true;
     return { data: { items: provider === 'github' ? connections : [] } };
@@ -147,7 +168,8 @@ function realPage() {
   </ConfigProvider>);
 }
 
-it.each(['local', 'web'] as const)('real %s completion returns the intended account, rechecks and waits for Star confirmation', async kind => {
+it.each(['local', 'web'] as const)('real %s completion returns the intended account and waits for explicit support confirmation', async kind => {
+  localSupportEnabled = kind === 'local';
   if (kind === 'web') mocks.start.mockResolvedValue(session('WAITING_USER', { user_code: CODE, verification_uri: DEVICE_URL }));
   realPage();
   const add = await screen.findByRole('button', { name: '添加账号' });
@@ -169,13 +191,25 @@ it.each(['local', 'web'] as const)('real %s completion returns the intended acco
   expect(JSON.parse(returned.textContent!)).toMatchObject({ githubStarResume: {
     userId: 'owner-1', opportunity, connectionId: target.connection_id,
   } });
-  expect(starAPI.readGitHubStarAccounts).toHaveBeenCalled();
+  if (kind === 'local') expect(starAPI.readDeferredGitHubStarIntent).toHaveBeenCalled();
+  else expect(starAPI.readGitHubStarAccounts).toHaveBeenCalled();
   expect(mocks.start.mock.calls[0][0].gitHubCLISessionCreateBody).toMatchObject({ force_web: false });
   expect(starAPI.claimGitHubStarPrompt).not.toHaveBeenCalled();
   expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  expect(starAPI.acceptDeferredGitHubStarIntent).not.toHaveBeenCalled();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: '为项目点 Star' })));
-  expect(starAPI.writeGitHubStar).toHaveBeenCalledTimes(1);
-  expect(starAPI.writeGitHubStar).toHaveBeenCalledWith({ connection_id: target.connection_id, expected_account_id: '10001', confirmed: true });
+  if (kind === 'local') {
+    expect(starAPI.acceptDeferredGitHubStarIntent).toHaveBeenCalledTimes(1);
+    expect(starAPI.acceptDeferredGitHubStarIntent).toHaveBeenCalledWith({ source: 'connection',
+      connection_id: target.connection_id, expected_account_id: '10001', confirmed: true });
+    expect(screen.getByText('感谢您的支持！')).toBeInTheDocument();
+    expect(screen.queryByText('感谢支持，已点 Star')).not.toBeInTheDocument();
+    expect(starAPI.writeGitHubStar).not.toHaveBeenCalled();
+  } else {
+    expect(starAPI.writeGitHubStar).toHaveBeenCalledTimes(1);
+    expect(starAPI.writeGitHubStar).toHaveBeenCalledWith({ connection_id: target.connection_id, expected_account_id: '10001', confirmed: true });
+    expect(starAPI.acceptDeferredGitHubStarIntent).not.toHaveBeenCalled();
+  }
   expect(starAPI.writeLocalGitHubStar).not.toHaveBeenCalled();
 });
 

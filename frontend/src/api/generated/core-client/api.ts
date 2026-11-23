@@ -31302,10 +31302,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @param {string} [keyword]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {string} [workflowSessionId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksGet: async (conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterTasksGet: async (conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, workflowSessionId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/task-center/tasks`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -31340,6 +31341,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (pageSize !== undefined) {
                 localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (workflowSessionId !== undefined) {
+                localVarQueryParameter['workflow_session_id'] = workflowSessionId;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -40221,11 +40226,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {string} [keyword]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {string} [workflowSessionId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterTasksGet(conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksGet(conversationId, status, taskType, keyword, page, pageSize, options);
+        async apiCoreTaskCenterTasksGet(conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, workflowSessionId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksGet(conversationId, status, taskType, keyword, page, pageSize, workflowSessionId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -45123,7 +45129,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreTaskCenterTasksGet(requestParameters: DefaultApiApiCoreTaskCenterTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterTaskListResponse> {
-            return localVarFp.apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, requestParameters.workflowSessionId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -48360,6 +48366,8 @@ export interface DefaultApiApiCoreTaskCenterTasksGetRequest {
     readonly page?: number
 
     readonly pageSize?: number
+
+    readonly workflowSessionId?: string
 }
 
 /**
@@ -52482,7 +52490,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreTaskCenterTasksGet(requestParameters: DefaultApiApiCoreTaskCenterTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, requestParameters.workflowSessionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

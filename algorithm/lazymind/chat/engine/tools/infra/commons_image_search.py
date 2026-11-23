@@ -36,7 +36,7 @@ def search_commons_images(query: str, limit: int = 5) -> dict:
                 continue
             metadata = info.get('extmetadata') or {}
 
-            def plain(key):
+            def plain(key, metadata=metadata):
                 value = str((metadata.get(key) or {}).get('value') or '')
                 return unescape(re.sub(r'<[^>]+>', '', value))[:1000]
 

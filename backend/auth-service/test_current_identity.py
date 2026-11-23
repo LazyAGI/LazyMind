@@ -10,9 +10,10 @@ class CurrentIdentityTest(unittest.TestCase):
         for user in (None, SimpleNamespace(disabled=True)):
             with self.subTest(user=user), patch.object(identity, 'SessionLocal'), patch.object(
                 identity.UserRepository, 'get_by_id', return_value=user
-            ), self.assertRaises(AppException) as caught:
-                identity.current_identity('owner')
-            self.assertEqual(caught.exception.code, ErrorCodes.UNAUTHORIZED[1])
+            ):
+                with self.assertRaises(AppException) as denied:
+                    identity.current_identity('owner')
+                self.assertEqual((denied.exception.http_code, denied.exception.code), ErrorCodes.UNAUTHORIZED[:2])
 
     def test_permissions_come_from_live_user_role_and_groups(self):
         user = SimpleNamespace(

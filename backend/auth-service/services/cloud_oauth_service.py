@@ -2250,6 +2250,7 @@ class CloudOAuthService:
         *,
         user_id: str | None = None,
         tenant_id: str | None = None,
+        allow_refresh: bool = True,
     ) -> dict[str, Any]:
         connection_id = (connection_id or '').strip()
         if not connection_id:
@@ -2260,6 +2261,18 @@ class CloudOAuthService:
             if row is None:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
             self._ensure_connection_owner(row, tenant_id=tenant_id, user_id=user_id)
+            if not allow_refresh:
+                self._ensure_connection_active(row)
+                state = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+                access_token = (state.get('access_token') or '').strip()
+                expires_at = _parse_dt(state.get('access_expires_at'))
+                if not self._is_token_valid(access_token, expires_at):
+                    raise_error(ErrorCodes.CLOUD_CONNECTION_REAUTH_REQUIRED)
+                return {
+                    'connection_id': connection_id, 'provider': row.provider, 'auth_mode': row.auth_mode,
+                    'access_token': access_token, 'token_type': state.get('token_type') or 'Bearer',
+                    'expires_at': expires_at, 'status': 'ACTIVE',
+                }
             if self._is_github_cli_connection(row):
                 self._ensure_connection_active(row)
                 state = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
