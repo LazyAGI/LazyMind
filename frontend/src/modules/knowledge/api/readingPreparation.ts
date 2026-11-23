@@ -1,6 +1,6 @@
 import { axiosInstance, BASE_URL } from '@/components/request';
 export type ReadingScope = 'pdf_parse' | 'ai_study';
-export type ReadingCapabilityId = ReadingScope;
+export type ReadingCapabilityId = ReadingScope | 'paper_guide';
 type ReadingResultScope = ReadingScope | 'formula' | 'figure' | 'table' | 'chat_prepare';
 export type ReadingMode = 'on_demand' | 'automatic' | 'disabled';
 export type ReadingPreset = 'demand' | 'advance' | 'full' | 'custom';
@@ -45,7 +45,7 @@ export async function prepareReading(dataset: string, document: string, scopes: 
 }
 export function presetModes(preset: Exclude<ReadingPreset, 'custom'>): ReadingPolicy['modes'] {
   return { pdf_parse: preset === 'demand' ? 'on_demand' : 'automatic',
-    ai_study: preset === 'full' ? 'automatic' : 'on_demand' };
+    paper_guide: 'on_demand', ai_study: preset === 'full' ? 'automatic' : 'on_demand' };
 }
 export function readingScopeLabels(scopes: ReadingResultScope[] = []): string[] {
   return [...new Set(scopes.map(scope => {

@@ -242,8 +242,12 @@ type tableCaption struct {
 	text string
 }
 
-func layoutCaptions(raw []byte) []tableCaption { return layoutCaptionsOfType(raw, "table_caption") }
-func layoutCaptionsOfType(raw []byte, kind string) []tableCaption {
+type layoutCaptionGroups struct {
+	tables []tableCaption
+	images []tableCaption
+}
+
+func layoutCaptions(raw []byte) layoutCaptionGroups {
 	var layout struct {
 		Pages []struct {
 			Index  *int          `json:"page_idx"`
@@ -251,20 +255,27 @@ func layoutCaptionsOfType(raw []byte, kind string) []tableCaption {
 			Blocks []layoutBlock `json:"para_blocks"`
 		} `json:"pdf_info"`
 	}
+	var out layoutCaptionGroups
 	if len(raw) == 0 || json.Unmarshal(raw, &layout) != nil {
-		return nil
+		return out
 	}
-	var out []tableCaption
 	for _, p := range layout.Pages {
 		if p.Index == nil || *p.Index < 0 || *p.Index > 100000 || len(p.Size) != 2 || p.Size[0] <= 0 || p.Size[1] <= 0 {
 			continue
 		}
 		var walk func(layoutBlock, int)
 		walk = func(b layoutBlock, depth int) {
-			if depth > 32 || len(out) > 10000 {
+			if depth > 32 {
 				return
 			}
-			if b.Type == kind && len(b.BBox) == 4 {
+			var group *[]tableCaption
+			switch b.Type {
+			case "table_caption":
+				group = &out.tables
+			case "image_caption":
+				group = &out.images
+			}
+			if group != nil && len(*group) <= 10000 && len(b.BBox) == 4 {
 				box := make([]float64, 4)
 				valid := true
 				for i, v := range b.BBox {
@@ -282,7 +293,7 @@ func layoutCaptionsOfType(raw []byte, kind string) []tableCaption {
 					}
 					text := plainTableText(strings.Join(lines, " "))
 					if text != "" {
-						out = append(out, tableCaption{*p.Index, box, text})
+						*group = append(*group, tableCaption{*p.Index, box, text})
 					}
 				}
 			}
@@ -323,7 +334,7 @@ func captionCandidatesOfType(d *Document, c tableCaption, side int, kind string)
 	}
 	return out
 }
-func projectTables(d *Document, items []contentItem, layout []byte) {
+func projectTables(d *Document, items []contentItem, captions []tableCaption) {
 	d.ProjectionVersion = ProjectionVersion
 	for i, v := range items {
 		if v.Type != "table" {
@@ -335,7 +346,6 @@ func projectTables(d *Document, items []contentItem, layout []byte) {
 			t.Footnotes = append(t.Footnotes, plainTableText(s))
 		}
 	}
-	captions := layoutCaptions(layout)
 	direction := 0
 	conflict := false
 	for _, c := range captions {
@@ -396,8 +406,11 @@ func projectTables(d *Document, items []contentItem, layout []byte) {
 			numbers[b.Table.Number]++
 		}
 	}
-	for i := 0; i < originalCount; i++ {
-		t := d.Blocks[i].Table
+	// Index unique table labels once so resolving mentions scans each paragraph once.
+	byNumber := map[string]*Table{}
+	byCaption := map[string]*Table{}
+	for _, b := range d.Blocks[:originalCount] {
+		t := b.Table
 		if t == nil || t.Number == "" {
 			continue
 		}
@@ -405,19 +418,27 @@ func projectTables(d *Document, items []contentItem, layout []byte) {
 			tableWarning(t, "Table number is not unique; paragraph links omitted")
 			continue
 		}
-		for _, b := range d.Blocks[:originalCount] {
-			if b.Table != nil || b.Type == "formula" || b.Type == "table_caption" {
-				continue
-			}
-			if len(t.Captions) == 1 && plainTableText(b.Text) == t.Captions[0] {
-				t.RelatedBlocks = append(t.RelatedBlocks, TableRelation{b.ID, "caption"})
-				continue
-			}
-			for _, m := range tableLabel.FindAllStringSubmatch(b.Text, -1) {
-				if strings.ToUpper(m[1]) == t.Number {
-					t.RelatedBlocks = append(t.RelatedBlocks, TableRelation{b.ID, "mention"})
-					break
-				}
+		byNumber[t.Number] = t
+		if len(t.Captions) == 1 {
+			byCaption[t.Captions[0]] = t
+		}
+	}
+	if len(byNumber) == 0 {
+		return
+	}
+	for _, b := range d.Blocks[:originalCount] {
+		if b.Table != nil || b.Type == "formula" || b.Type == "table_caption" {
+			continue
+		}
+		linked := map[*Table]bool{}
+		if t := byCaption[plainTableText(b.Text)]; t != nil {
+			t.RelatedBlocks = append(t.RelatedBlocks, TableRelation{b.ID, "caption"})
+			linked[t] = true
+		}
+		for _, m := range tableLabel.FindAllStringSubmatch(b.Text, -1) {
+			if t := byNumber[strings.ToUpper(m[1])]; t != nil && !linked[t] {
+				t.RelatedBlocks = append(t.RelatedBlocks, TableRelation{b.ID, "mention"})
+				linked[t] = true
 			}
 		}
 	}

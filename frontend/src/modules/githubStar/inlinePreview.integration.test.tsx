@@ -17,6 +17,9 @@ vi.mock('@/modules/chat/components/ArtifactPreview/target', async original => ({
 }));
 vi.mock('@/modules/knowledge/components/FileViewer', () => ({ default: () => <div>Loaded image result</div> }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
+  readDeferredGitHubStarIntent: vi.fn().mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  }),
   readGitHubStarAccounts: vi.fn(), claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(),
   markGitHubStarSupported: vi.fn(), findGitHubStarOpportunity: vi.fn(),
 }));
@@ -26,6 +29,9 @@ const opportunity: api.GitHubStarOpportunity = {
 };
 
 beforeEach(async () => {
+  vi.mocked(api.readDeferredGitHubStarIntent).mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  });
   vi.clearAllMocks();
   await i18n.changeLanguage('zh-CN');
   mocks.read.mockResolvedValue(new TextEncoder().encode('<main>Published result</main>').buffer);

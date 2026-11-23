@@ -18,7 +18,7 @@ it('saves only editable policy fields and sends both automatic categories', asyn
   const policy = { preset: 'full' as const, modes: presetModes('full'), limits: { daily_pdf_documents: 9, daily_study_documents: 5, automatic_concurrency: 1 } };
   await saveReadingPreferences({ ...policy, capabilities: [] } as typeof policy);
   expect(http.put).toHaveBeenCalledWith('/api/core/user/reading-preferences', policy);
-  expect(policy.modes).toEqual({ pdf_parse: 'automatic', ai_study: 'automatic' });
+  expect(policy.modes).toEqual({ pdf_parse: 'automatic', ai_study: 'automatic', paper_guide: 'on_demand' });
 });
 it('persists source-scoped provider references and clears them to inherit', async () => {
   const policy = { preset: 'demand' as const, modes: presetModes('demand'), limits: { daily_pdf_documents: 9, daily_study_documents: 5, automatic_concurrency: 1 }, parser_ref: 'own:parser', study_model_ref: 'shared:study' };
@@ -27,3 +27,4 @@ it('persists source-scoped provider references and clears them to inherit', asyn
   await saveReadingPreferences({ ...policy, parser_ref: '', study_model_ref: '' });
   expect(http.put).toHaveBeenLastCalledWith('/api/core/user/reading-preferences', { ...policy, parser_ref: '', study_model_ref: '' });
 });
+it('never automatically generates paper guides, including full preparation',()=>{expect(presetModes('full').paper_guide).toBe('on_demand');});

@@ -63,6 +63,7 @@ interface RenderPdfProps {
   paperMode?: boolean;
   pdfToolbarMode?: "full" | "navigation" | "none";
   pdfSelectableText?: boolean;
+  pdfHeaderCenter?: React.ReactNode;
   pdfHeaderStart?: React.ReactNode;
   pdfHeaderEnd?: React.ReactNode | ((tools: React.ReactNode) => React.ReactNode);
   onStudyOpenChange?: (open: boolean) => void;
@@ -70,7 +71,7 @@ interface RenderPdfProps {
   onPdfOutlineChange?: (outline: PdfNativeOutlineItem[]) => void;
   pdfNavigateTo?: {id: string; requestId: number};
   pdfNavigateToPage?: {page:number;requestId:number};
-  pdfNavigateToPosition?: {page:number;progress:number;requestId:number};
+  pdfNavigateToPosition?: {page:number;progress:number;requestId:number;sourceLocator?:boolean;bbox?:number[]};
   savedNoteHighlights?: PdfNoteHighlight[];
   onNoteHighlightClick?: (id:string) => void;
   pdfIRTarget?: PdfIRTarget;
@@ -155,6 +156,7 @@ export default function RenderPdf({
   pdfSelectableText = false,
   pdfScrollSync,
   pdfHeaderStart,
+  pdfHeaderCenter,
   pdfHeaderEnd,
   onStudyOpenChange,
   onPdfIRDocumentChange,
@@ -708,6 +710,9 @@ export default function RenderPdf({
     if(lastNoteNavigation.current===key)return;
     lastNoteNavigation.current=key;
     cancelStudyNavigation();
+    if(request.sourceLocator){
+      setStudyHighlight(request.bbox?.length===4?{id:`guide-${request.requestId}`,text:"",page:request.page-1,bbox:[request.bbox[0],request.bbox[1],request.bbox[2],request.bbox[3]]}:undefined);
+    }
     let originPage=0;
     for(let index=0;index<pageTops.length;index++)if(pageTops[index]<=scrollTop+1)originPage=index;else break;
     setNoteReturn({page:originPage+1,progress:Math.max(0,Math.min(1,(scrollTop-(pageTops[originPage]||0))/(pageHeightsPx[originPage]||1)))});
@@ -1321,6 +1326,7 @@ export default function RenderPdf({
   const readerHeader = pdfToolbarMode === "none" ? null : (
     <nav className={`pdf-reader-modebar pdf-reader-header${pdfToolbarMode === "navigation" ? " pdf-reader-header--compact" : ""}`} aria-label={paperMode ? readerLabel("reading") : t("paperShell.document",{defaultValue:"Document"})}>
       <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
+      {pdfHeaderCenter && <div className="paper-mode-switch-slot">{pdfHeaderCenter}</div>}
       <div className="pdf-reader-header-end">
         {pdfToolbarMode === "navigation" ? <>{typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(null) : pdfHeaderEnd}{pageControls}</> : <>
         {pageControls}

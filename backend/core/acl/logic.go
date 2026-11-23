@@ -1,6 +1,7 @@
 package acl
 
 import (
+	"context"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"sort"
@@ -170,6 +171,15 @@ func ResolveUserGroupIDs(userID string) []string {
 		return nil
 	}
 	return st.loadUserGroupIDs(userID)
+}
+
+// ResolveUserGroupIDsContext resolves membership before a caller opens a transaction.
+func ResolveUserGroupIDsContext(ctx context.Context, userID string) []string {
+	st := GetStore()
+	if st == nil {
+		return []string{}
+	}
+	return st.loadUserGroupIDsContext(ctx, userID)
 }
 
 func hasPermission(permissions []string, want string) bool {

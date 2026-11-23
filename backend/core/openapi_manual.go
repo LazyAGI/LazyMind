@@ -85,6 +85,12 @@ func manualOpenAPISpec() map[string]any {
 	for path, operations := range formulaExplanationOpenAPIPaths() {
 		paths[path] = operations
 	}
+	for name, schema := range paperGuideOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range paperGuideOpenAPIPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range paperReadingOpenAPISchemas() {
 		schemas[name] = schema
 	}
@@ -1241,6 +1247,7 @@ func manualPaths() map[string]any {
 				param("query", "conversation_id", false, strSchema()),
 				param("query", "status", false, strSchema()), param("query", "task_type", false, strSchema()),
 				param("query", "keyword", false, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
+				param("query", "workflow_session_id", false, strSchema()),
 			), nil, response(200, "Task-center task page", refSchema("TaskCenterTaskListResponse")),
 		)},
 		"/task-center/tasks/{task_id}/removal-preview": map[string]any{"get": op("Preview removal of a task and related conversations", queryParams(param("path", "task_id", true, strSchema())), nil, response(200, "Removal impact", refSchema("TaskRemovalPreview")))},

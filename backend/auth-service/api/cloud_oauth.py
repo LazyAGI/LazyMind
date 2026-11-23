@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 
 from core.deps import current_user, require_internal_service_token
+from core.database import SessionLocal
 from core.rbac import permission_required
 from core import rbac
 from core.errors import AppException, ErrorCodes
@@ -28,6 +29,10 @@ from schemas.cloud_oauth import (
     GitHubCLISessionCreateBody,
     GitHubCLISessionResponse,
     GitHubStarBody,
+    GitHubStarDeferredAccepted,
+    GitHubStarDeferredBody,
+    GitHubStarDeferredResult,
+    GitHubStarDeferredStatus,
     GitHubStarLocalBody,
     GitHubStarLocalCapability,
     GitHubStarLocalResult,
@@ -37,8 +42,14 @@ from schemas.cloud_oauth import (
 from services.cloud_oauth_service import cloud_oauth_service
 from services.github_cli_auth import github_cli_auth_service
 from services.github_star_service import GitHubStarService
+from services.github_star_deferred import GitHubStarDeferredService
 
 github_star_service = GitHubStarService(connections=cloud_oauth_service)
+github_star_deferred_service = GitHubStarDeferredService(
+    session_factory=SessionLocal, star_service=github_star_service,
+    probe=github_cli_auth_service.runner.probe if github_cli_auth_service.host_credentials_enabled else None,
+    enabled=github_cli_auth_service.host_credentials_enabled,
+)
 
 
 # The permission exporter also runs under /app, without an auth-service directory.
@@ -99,6 +110,32 @@ def github_star_local(body: GitHubStarLocalBody, response: Response, user: User 
     response.headers['Cache-Control'] = 'no-store'
     probe = github_cli_auth_service.runner.probe if github_cli_auth_service.host_credentials_enabled else None
     return _github_star_call(github_star_service.star_local, confirmed=body.confirmed, probe=probe)
+
+
+@router.get('/github/star/deferred', response_model=GitHubStarDeferredStatus)
+@permission_required('model.read')
+def github_star_deferred_status(response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_star_call(github_star_deferred_service.status, owner_user_id=str(user.id))
+
+
+@router.post('/github/star/deferred', response_model=GitHubStarDeferredAccepted)
+@permission_required('model.write')
+def github_star_deferred_receive(body: GitHubStarDeferredBody, response: Response,
+                                 user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_star_call(github_star_deferred_service.receive, owner_user_id=str(user.id),
+                             confirmed=body.confirmed, source=body.source,
+                             connection_id=body.connection_id or '', expected_account_id=body.expected_account_id or '')
+
+
+@router.delete('/github/star/deferred', response_model=GitHubStarDeferredResult)
+@permission_required('model.write')
+def github_star_deferred_cancel(response: Response,
+                                intent_id: str = Query(min_length=1, max_length=64),  # noqa: B008
+                                user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_star_call(github_star_deferred_service.cancel, owner_user_id=str(user.id), intent_id=intent_id)
 
 
 def _github_cli_call(function, *args, **kwargs):

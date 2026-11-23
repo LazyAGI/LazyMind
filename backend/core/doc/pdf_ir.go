@@ -37,8 +37,11 @@ type pdfIRPayload struct {
 type pdfIRResult struct {
 	IRPath  string `json:"ir_path"`
 	RawPath string `json:"raw_path"`
+	// Held only for the guide request that selected this shared archive.
+	archive []byte
 }
 type pdfIRResponse struct {
+	Artifact     pdfIRResult     `json:"-"`
 	Status       string          `json:"status"`
 	SourceSHA256 string          `json:"source_sha256,omitempty"`
 	ErrorMessage string          `json:"error_message,omitempty"`
@@ -68,25 +71,42 @@ func pdfIRHash(ext documentExt) (string, error) {
 	return pdfir.SourceHash(p)
 }
 func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRResponse, error) {
+	return pdfIRStatusWithProjection(ctx, row, hash, true)
+}
+func pdfIRStatusWithProjection(ctx context.Context, row orm.Document, hash string, upgrade bool) (pdfIRResponse, error) {
 	s := pdfIRResponse{Status: "not_requested", SourceSHA256: hash}
-	var jobs []orm.AsyncJob
-	if e := store.DB().WithContext(ctx).Where("job_type = ? AND resource_type = ? AND resource_id = ?", pdfIRJobType, "document_pdf_ir", pdfIRResource(row.DatasetID, row.ID)).Order("created_at DESC").Find(&jobs).Error; e != nil {
-		return s, e
+	jobs, err := pdfIRJobs(ctx, row)
+	if err != nil {
+		return s, err
 	}
-	return pdfIRStatusFromJobs(row, hash, jobs), nil
+	return pdfIRStatusFromJobsWithProjection(row, hash, jobs, upgrade), nil
+}
+
+func pdfIRJobs(ctx context.Context, row orm.Document) ([]orm.AsyncJob, error) {
+	var jobs []orm.AsyncJob
+	err := store.DB().WithContext(ctx).Where("job_type = ? AND resource_type = ? AND resource_id = ?", pdfIRJobType, "document_pdf_ir", pdfIRResource(row.DatasetID, row.ID)).Order("created_at DESC").Find(&jobs).Error
+	return jobs, err
 }
 
 func pdfIRStatusFromJobs(row orm.Document, hash string, jobs []orm.AsyncJob) pdfIRResponse {
+	return pdfIRStatusFromJobsWithProjection(row, hash, jobs, true)
+}
+
+func pdfIRStatusFromJobsWithProjection(row orm.Document, hash string, jobs []orm.AsyncJob, upgrade bool) pdfIRResponse {
 	s := pdfIRResponse{Status: "not_requested", SourceSHA256: hash}
 	var ext documentExt
 	_ = json.Unmarshal(row.Ext, &ext)
 	source := pdfIRSource(ext)
 	var shared *pdfir.Document
 	if source != "" {
-		if raw, d, incomplete := pdfir.LookupSharedArchive(source, hash); raw != nil {
+		if raw, d, incomplete, artifact := lookupPDFIRSharedArtifact(source, hash, upgrade); raw != nil {
 			encoded, err := json.Marshal(d)
 			if err == nil && int64(len(encoded)) <= pdfIRMaxArtifactBytes {
 				shared = &d
+				if !upgrade {
+					artifact.archive = raw
+				}
+				s.Artifact = artifact
 			} else {
 				s.Status, s.ErrorMessage, s.ErrorCode = "failed", pdfIRTooLargeMessage, pdfIRTooLargeCode
 			}
@@ -126,7 +146,7 @@ jobsLoop:
 				}
 			}
 		case "succeeded":
-			d, message := readPDFIRJobResult(j, hash)
+			d, artifact, message := readPDFIRJobResult(j, hash, upgrade)
 			if d != nil {
 				if latest {
 					s.Status = "ready"
@@ -134,6 +154,7 @@ jobsLoop:
 				}
 				if shared == nil || shared.Parser.Model != "vlm" && d.Parser.Model == "vlm" {
 					shared = d
+					s.Artifact = artifact
 				}
 			} else if latest {
 				s.Status = "failed"
@@ -154,25 +175,67 @@ jobsLoop:
 	return s
 }
 
-func readPDFIRJobResult(j orm.AsyncJob, hash string) (*pdfir.Document, string) {
+// Keep shared archive provenance available to the guide precision projection.
+// Read-only guide requests must not promote legacy cache files.
+func lookupPDFIRSharedArtifact(source, hash string, upgrade bool) ([]byte, pdfir.Document, bool, pdfIRResult) {
+	incomplete := false
+	for _, model := range []string{"vlm", "pipeline"} {
+		path := pdfir.CachePath(source, hash, model)
+		if path == "" {
+			continue
+		}
+		for _, candidate := range sharedArchivePaths(source, path) {
+			f, err := os.Open(candidate)
+			if err != nil {
+				continue
+			}
+			raw, err := io.ReadAll(io.LimitReader(f, pdfir.MaxArchiveBytes+1))
+			f.Close()
+			incomplete = true
+			if err != nil || int64(len(raw)) > pdfir.MaxArchiveBytes {
+				continue
+			}
+			d, err := pdfir.AdaptSharedZIP(raw, hash, model)
+			if err == nil {
+				if upgrade && candidate != path && os.MkdirAll(filepath.Dir(path), 0700) == nil {
+					_ = os.Link(candidate, path)
+				}
+				return raw, d, false, pdfIRResult{IRPath: filepath.Join(filepath.Dir(candidate), hash+"-"+model+".json"), RawPath: candidate}
+			}
+		}
+	}
+	return nil, pdfir.Document{}, incomplete, pdfIRResult{}
+}
+
+func sharedArchivePaths(source, path string) []string {
+	legacy := filepath.Join(filepath.Dir(source), ".lazymind-artifacts", "mineru-cache-v1", filepath.Base(path))
+	if legacy == path {
+		return []string{path}
+	}
+	return []string{path, legacy}
+}
+
+func readPDFIRJobResult(j orm.AsyncJob, hash string, upgrade bool) (*pdfir.Document, pdfIRResult, string) {
 	var result pdfIRResult
 	if json.Unmarshal(j.ResultJSON, &result) != nil {
-		return nil, "PDF IR artifact is invalid; retry parsing"
+		return nil, result, "PDF IR artifact is invalid; retry parsing"
 	}
 	f, err := os.Open(result.IRPath)
 	if err != nil {
-		return nil, "PDF IR artifact is missing; retry parsing"
+		return nil, result, "PDF IR artifact is missing; retry parsing"
 	}
 	defer f.Close()
 	if info, err := f.Stat(); err == nil && info.Size() > pdfIRMaxArtifactBytes {
-		return nil, pdfIRTooLargeMessage
+		return nil, result, pdfIRTooLargeMessage
 	}
 	var d pdfir.Document
 	if err := json.NewDecoder(io.LimitReader(f, pdfIRMaxArtifactBytes)).Decode(&d); err != nil || d.SourceSHA256 != hash {
-		return nil, "PDF IR artifact is invalid; retry parsing"
+		return nil, result, "PDF IR artifact is invalid; retry parsing"
 	}
-	upgradePDFIRProjection(&d, result)
-	return &d, ""
+	if upgrade {
+		upgradePDFIRProjection(&d, result)
+	}
+	return &d, result, ""
 }
 
 type pdfStructureStatus = pdfir.StructureStatus

@@ -12,6 +12,9 @@ import i18n from '@/i18n';
 
 // Keep the real Task Center lookup: only its HTTP boundary is substituted.
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
+  readDeferredGitHubStarIntent: vi.fn().mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  }),
   readGitHubStarAccounts: vi.fn(), claimGitHubStarPrompt: vi.fn(), writeGitHubStar: vi.fn(), markGitHubStarSupported: vi.fn(),
 }));
 const account = { repository: 'LazyAGI/LazyMind', can_star: true, accounts: [{
@@ -48,6 +51,9 @@ function visible(value: 'visible' | 'hidden') {
   document.dispatchEvent(new Event('visibilitychange'));
 }
 beforeEach(async () => {
+  vi.mocked(api.readDeferredGitHubStarIntent).mockResolvedValue({
+    repository: 'LazyAGI/LazyMind', can_receive: false, local_supported: false, accounts: [], intent: null,
+  });
   vi.clearAllMocks(); confirmation = 0;
   visible('visible');
   roots = [root('new-root', 'running')];

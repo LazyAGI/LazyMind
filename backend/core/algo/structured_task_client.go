@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
@@ -24,6 +23,8 @@ type StructuredTaskRequest struct {
 	Version   string
 	Input     map[string]any
 	LLMConfig map[string]any
+	// TransportTimeout is set by the server; zero retains the default.
+	TransportTimeout time.Duration
 }
 
 type StructuredTaskUsage struct {
@@ -51,8 +52,12 @@ func (e *StructuredTaskError) Error() string { return "structured task: " + e.Co
 // The caller owns retries and business validation; never fall back to rewrite.
 func RunStructuredTask(ctx context.Context, req StructuredTaskRequest) (StructuredTaskResult, error) {
 	var result StructuredTaskResult
-	if req.Task == "" || req.Version == "" {
+	if req.Task == "" || req.Version == "" || req.TransportTimeout < 0 {
 		return result, &StructuredTaskError{Code: "invalid_task_config"}
+	}
+	timeout := req.TransportTimeout
+	if timeout == 0 {
+		timeout = 2 * time.Minute
 	}
 	payload := llmTaskRequest{Mode: "llm", TaskType: req.Task, Input: llmTaskInput{Data: req.Input}, LLMConfig: ensureLLMConfig(req.LLMConfig), Options: map[string]any{"task_version": req.Version}}
 	var response struct {
@@ -60,7 +65,7 @@ func RunStructuredTask(ctx context.Context, req StructuredTaskRequest) (Structur
 		Output json.RawMessage     `json:"output"`
 		Usage  StructuredTaskUsage `json:"usage"`
 	}
-	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &response, 2*time.Minute); err != nil {
+	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &response, timeout); err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
@@ -75,7 +80,7 @@ func RunStructuredTask(ctx context.Context, req StructuredTaskRequest) (Structur
 			if json.Unmarshal(httpErr.Body, &body) == nil && body.Detail.Code != "" {
 				failure = &body.Detail
 				switch body.Detail.Code {
-				case "invalid_task_input", "invalid_task_config", "unsupported_task_type", "unsupported_task_version", "invalid_model_output", "model_configuration", "authentication_failed", "rate_limited", "request_timeout", "transport_error", "model_call_failed",
+				case "invalid_task_input", "invalid_task_config", "unsupported_task_type", "unsupported_task_version", "invalid_model_output", "model_configuration", "authentication_failed", "rate_limited", "request_timeout", "task_timeout", "transport_error", "model_call_failed",
 					"invalid_request", "permission_denied", "not_found", "usage_limit_exceeded", "concurrency_limited", "quota_exhausted", "balance_exhausted", "organization_spend_limit_exceeded", "project_spend_limit_exceeded", "input_filtered", "output_filtered", "token_limit", "provider_overloaded", "service_unavailable", "provider_internal_error", "provider_rejected", "conflict", "unprocessable_entity", "protocol_error":
 					// Public provider/task classification; never expose raw upstream messages.
 				default:
@@ -91,7 +96,7 @@ func RunStructuredTask(ctx context.Context, req StructuredTaskRequest) (Structur
 		return result, &StructuredTaskError{Code: "invalid_model_output", Usage: response.Usage}
 	}
 	if response.Usage.Task != req.Task || response.Usage.Version != req.Version || response.Usage.ModelCalls != 1 {
-		return result, fmt.Errorf("structured task response contract mismatch")
+		return result, &StructuredTaskError{Code: "invalid_model_output", Usage: response.Usage}
 	}
 	log.Printf("structured_task task=%s version=%s model_calls=%d elapsed_ms=%d", req.Task, req.Version, response.Usage.ModelCalls, response.Usage.ElapsedMS)
 	return StructuredTaskResult{Output: output, Usage: response.Usage}, nil

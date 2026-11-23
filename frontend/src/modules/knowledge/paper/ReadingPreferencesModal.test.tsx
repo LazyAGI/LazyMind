@@ -21,12 +21,12 @@ it('loads personal defaults, explains missing configuration, and preserves edits
   fireEvent.click(save);
   await screen.findByText('保存失败，请重试');
   expect(close).not.toHaveBeenCalled();
-  expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ preset: 'custom', modes: { pdf_parse: 'automatic', ai_study: 'on_demand' } }));
+  expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ preset: 'custom', modes: { paper_guide: 'on_demand', pdf_parse: 'automatic', ai_study: 'on_demand' } }));
   api.save.mockResolvedValueOnce({});
   await waitFor(() => expect(save).not.toHaveClass('ant-btn-loading'));
   fireEvent.click(save);
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
-  expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ preset: 'custom', modes: { pdf_parse: 'automatic', ai_study: 'on_demand' } }));
+  expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ preset: 'custom', modes: { paper_guide: 'on_demand', pdf_parse: 'automatic', ai_study: 'on_demand' } }));
 });
 it('allows automatic study to use a retained structure when parse mode is on demand', async () => {
   api.get.mockResolvedValueOnce({ preset: 'custom', modes: { ...presetModes('demand'), ai_study: 'automatic' }, limits: { daily_pdf_documents: 100, daily_study_documents: 50, automatic_concurrency: 1 }, capabilities: [] });
@@ -43,7 +43,7 @@ it('keeps independent provider selections when changing a category and exposes r
   expect(screen.getByText('所选服务不可用，请重新选择或配置')).toBeInTheDocument();
   await chooseMode('AI 论文精读', '禁用生成');
   fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
-  await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ parser_ref: 'own:parser', study_model_ref: 'shared:missing', preset: 'custom', modes: { pdf_parse: 'on_demand', ai_study: 'disabled' } })));
+  await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ parser_ref: 'own:parser', study_model_ref: 'shared:missing', preset: 'custom', modes: { paper_guide: 'on_demand', pdf_parse: 'on_demand', ai_study: 'disabled' } })));
 });
 it('returns a missing selection to inherited default without changing either category mode', async () => {
   api.get.mockResolvedValueOnce({ preset: 'demand', parser_ref: 'own:gone', study_model_ref: '', modes: presetModes('demand'), limits: { daily_pdf_documents: 100, daily_study_documents: 50, automatic_concurrency: 1 }, capabilities: [], provider_selections: { parser: { options: [], default_label: 'MinerU' }, study: { options: [], default_label: 'Chat' } } });
@@ -52,10 +52,10 @@ it('returns a missing selection to inherited default without changing either cat
   fireEvent.mouseDown(parser);
   fireEvent.click(await screen.findByText('跟随默认（MinerU）'));
   fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
-  await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ parser_ref: '', study_model_ref: '', preset: 'custom', modes: { pdf_parse: 'on_demand', ai_study: 'on_demand' } })));
+  await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ parser_ref: '', study_model_ref: '', preset: 'custom', modes: { paper_guide: 'on_demand', pdf_parse: 'on_demand', ai_study: 'on_demand' } })));
 });
 it('shows both saved modes without shortcut presets or a disclosure step', async () => {
-  api.get.mockResolvedValueOnce({ preset: 'advance', modes: { pdf_parse: 'automatic', ai_study: 'on_demand' }, limits: { daily_pdf_documents: 100, daily_study_documents: 50, automatic_concurrency: 1 }, capabilities: [] });
+  api.get.mockResolvedValueOnce({ preset: 'advance', modes: { paper_guide: 'on_demand', pdf_parse: 'automatic', ai_study: 'on_demand' }, limits: { daily_pdf_documents: 100, daily_study_documents: 50, automatic_concurrency: 1 }, capabilities: [] });
   render(<ReadingPreferencesModal open onClose={() => {}} />);
   expect(await screen.findByRole('combobox', { name: 'PDF 解析' })).toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: 'AI 论文精读' })).toBeInTheDocument();
@@ -63,7 +63,7 @@ it('shows both saved modes without shortcut presets or a disclosure step', async
   expect(screen.queryByRole('button', { name: /收起设置|逐项调整/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
   await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({
-    preset: 'custom', modes: { pdf_parse: 'automatic', ai_study: 'on_demand' },
+    preset: 'custom', modes: { paper_guide: 'on_demand', pdf_parse: 'automatic', ai_study: 'on_demand' },
   })));
 });
 
@@ -77,4 +77,14 @@ it('shows independent daily usage, quota wait, and only two category controls', 
   fireEvent.change(screen.getByRole('spinbutton', { name: 'PDF 解析每日额度' }), { target: { value: '120' } });
   fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
   await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ limits: { daily_pdf_documents: 120, daily_study_documents: 50, automatic_concurrency: 1 } })));
+});
+it('only offers on-demand or disabled guide generation even in the full preset', async () => {
+ api.get.mockResolvedValueOnce({ preset: 'full', modes: presetModes('full'), limits: { daily_pdf_documents: 100, daily_study_documents: 50, automatic_concurrency: 1 }, capabilities: [] });
+ render(<ReadingPreferencesModal open onClose={() => {}} />);
+ const guide = await screen.findByRole('combobox', { name: '论文导读' });
+ fireEvent.mouseDown(guide);
+ expect(screen.queryByText('自动', { selector: '.ant-select-item-option-content' })).not.toBeInTheDocument();
+ fireEvent.click(screen.getByText('禁用生成', { selector: '.ant-select-item-option-content' }));
+ fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+ await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ modes: { pdf_parse: 'automatic', ai_study: 'automatic', paper_guide: 'disabled' } })));
 });

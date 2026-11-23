@@ -1753,6 +1753,24 @@ export interface ApiCoreConversationsNameTitlePatchRequest {
     'display_name': string;
     'title_revision': number;
 }
+export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost200Response {
+    'data'?: PaperGuideRevisionView;
+}
+export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet200Response {
+    'data'?: PaperGuideStatus;
+}
+export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut200Response {
+    'data'?: PaperGuideProgressRequest;
+}
+export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet200Response {
+    'data'?: PaperGuideEvidenceResponse;
+}
+export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet200Response {
+    'data'?: PaperGuideRevision;
+}
+export interface ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost200Response {
+    'data'?: PaperGuideCancellation;
+}
 export interface ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response {
     'pdf_structure'?: PDFStructureStatus;
     'status'?: ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum;
@@ -7213,6 +7231,298 @@ export interface Pages {
     'process_steps': CollectionPage;
     'sources': CollectionPage;
     'stage_artifacts': CollectionPage;
+}
+export interface PaperGuideAssetDecision {
+    'id': string;
+    'included': boolean;
+    'reason': string;
+}
+export interface PaperGuideBlock {
+    'asset_id'?: string;
+    'attribution': string;
+    'claim_ids': Array<string>;
+    'emphasis'?: string;
+    'evidence_ids': Array<string>;
+    'id': string;
+    'interaction'?: PaperGuideInteraction | null;
+    'kind': string;
+    'playground'?: PaperGuidePlayground | null;
+    'text': string;
+}
+export interface PaperGuideCancellation {
+    'canceled'?: boolean;
+}
+export interface PaperGuideCell {
+    'column': number;
+    'row': number;
+}
+export interface PaperGuideClaim {
+    'argument_type': string | null;
+    'attribution': string;
+    'conditions': Array<string>;
+    'evidence_ids': Array<string>;
+    'id': string;
+    'statement': string;
+    'support_status': string;
+}
+export interface PaperGuideCoverage {
+    'abstract_only': boolean;
+    'appendix': boolean;
+    'body': boolean;
+    'conclusion': boolean;
+    'limitations': boolean;
+    'page_warnings': Array<number>;
+    'references': boolean;
+    'warnings': Array<string>;
+}
+export interface PaperGuideEvidence {
+    'fragment_evidence_ids'?: Array<string>;
+    'id': string;
+    'locator': PaperGuideLocator;
+    'parent_asset_id'?: string;
+    'source_block_id': string;
+    'source_region_id'?: string;
+    'source_type': string;
+    'text': string;
+}
+export interface PaperGuideEvidenceResponse {
+    'evidence': PaperGuideEvidence;
+    'original_display'?: PaperGuideOriginalDisplay | null;
+    'source_current': boolean;
+}
+export interface PaperGuideFinding {
+    'issue_type': string;
+    'suggestion': string;
+    'target_id': string;
+    'target_type': string;
+}
+export interface PaperGuideFlow {
+    'datasets': Array<string>;
+    'field': string;
+    'method': string;
+    'modules': Array<string>;
+    'problems': Array<string>;
+}
+export interface PaperGuideGenerateRequest {
+    'expected_source_hash': string;
+    'idempotency_key': string;
+    'language': string;
+    'model_ref'?: string;
+    'regenerate': boolean;
+}
+export interface PaperGuideInteraction {
+    'explanation': string;
+    'higher_is_better': boolean;
+    'kind': PaperGuideInteractionKindEnum;
+    'metric': string;
+    'outputs': Array<PaperGuideInteractionOutput>;
+    'parameters': Array<PaperGuideInteractionParameter>;
+    'provenance': PaperGuideInteractionProvenanceEnum;
+    'rows': Array<PaperGuideInteractionRow>;
+    'steps': Array<PaperGuideInteractionStep>;
+    'title': string;
+    'unit': string;
+}
+
+export const PaperGuideInteractionKindEnum = {
+    Stepper: 'stepper',
+    Comparison: 'comparison',
+    Results: 'results',
+    Calculator: 'calculator'
+} as const;
+
+export type PaperGuideInteractionKindEnum = typeof PaperGuideInteractionKindEnum[keyof typeof PaperGuideInteractionKindEnum];
+export const PaperGuideInteractionProvenanceEnum = {
+    Reported: 'reported',
+    Derived: 'derived',
+    Illustrative: 'illustrative'
+} as const;
+
+export type PaperGuideInteractionProvenanceEnum = typeof PaperGuideInteractionProvenanceEnum[keyof typeof PaperGuideInteractionProvenanceEnum];
+
+export interface PaperGuideInteractionOutput {
+    'label': string;
+    'tokens': Array<string>;
+    'unit': string;
+}
+export interface PaperGuideInteractionParameter {
+    'id': string;
+    'label': string;
+    'max': number;
+    'min': number;
+    'step': number;
+    'unit': string;
+    'value': number;
+}
+export interface PaperGuideInteractionRow {
+    'group': string;
+    'label': string;
+    'note': string;
+    'value': number;
+}
+export interface PaperGuideInteractionStep {
+    'label': string;
+    'text': string;
+}
+export interface PaperGuideLocator {
+    'bbox'?: Array<number>;
+    'cells'?: Array<PaperGuideCell>;
+    'end'?: number;
+    'headers'?: Array<string>;
+    'kind': string;
+    'latex'?: string;
+    'page': number;
+    'start'?: number;
+}
+export interface PaperGuideModelIdentity {
+    'context_tokens': number;
+    'id': string;
+    'name': string;
+    'output_reserve_tokens'?: number;
+    'parameters_hash': string;
+    'protocol': string;
+    'ref': string;
+}
+export interface PaperGuideOriginalDisplay {
+    'bbox'?: Array<number>;
+    'caption'?: string;
+    'kind': string;
+    'number'?: string;
+    'page': number;
+}
+export interface PaperGuidePlan {
+    'claims': Array<PaperGuideClaim>;
+    'layout'?: string;
+    'paper_flow'?: PaperGuideFlow | null;
+    'profiles': PaperGuideProfiles;
+    'questions': Array<string>;
+    'required_assets': Array<PaperGuideAssetDecision>;
+    'sections': Array<PaperGuideSectionPlan>;
+    'subtitle'?: string;
+    'term_policy': Array<string>;
+    'title'?: string;
+}
+export interface PaperGuidePlayground {
+    'html': string;
+}
+export interface PaperGuideProfiles {
+    'primary': string | null;
+    'secondary': Array<string>;
+    'uncertainty_reason': string;
+}
+export interface PaperGuideProgressRequest {
+    'block_id': string;
+    'mode': string;
+    'offset': number;
+    'revision_id': string;
+    'section_key': string;
+}
+export interface PaperGuidePublishedSection {
+    'blocks': Array<PaperGuideBlock>;
+    'change_version': number;
+    'claim_ids': Array<string>;
+    'claims': Array<PaperGuideClaim>;
+    'key': string;
+    'publication_status'?: string;
+    'role': string;
+    'summary': string;
+    'title': string;
+    'version'?: number;
+}
+export interface PaperGuideReview {
+    'findings': Array<PaperGuideFinding>;
+}
+export interface PaperGuideRevision {
+    'coverage': PaperGuideCoverage;
+    'created_at': string;
+    'id': string;
+    'ir_digest': string;
+    'model': PaperGuideModelIdentity;
+    'plan'?: PaperGuidePlan | null;
+    'review_summary'?: PaperGuideReview | null;
+    'run': PaperGuideRunView;
+    'sections': Array<PaperGuidePublishedSection>;
+    'source_current': boolean;
+    'source_sha256': string;
+    'status': string;
+    'version': number;
+}
+export interface PaperGuideRevisionResponse {
+    'coverage': PaperGuideCoverage;
+    'created_at': string;
+    'id': string;
+    'ir_digest': string;
+    'model': PaperGuideModelIdentity;
+    'plan'?: PaperGuidePlan | null;
+    'review_summary'?: PaperGuideReview | null;
+    'run': PaperGuideRunView;
+    'sections': Array<PaperGuidePublishedSection>;
+    'source_current': boolean;
+    'source_sha256': string;
+    'status': string;
+    'version': number;
+}
+export interface PaperGuideRevisionView {
+    'created_at': string;
+    'id': string;
+    'ir_digest': string;
+    'model': PaperGuideModelIdentity;
+    'run': PaperGuideRunView;
+    'source_sha256': string;
+    'status': string;
+    'version': number;
+}
+export interface PaperGuideRunView {
+    'active_millis': number;
+    'call_limit': number;
+    'calls_used': number;
+    'cost_known': boolean;
+    'error_code'?: string;
+    'id': string;
+    'job_id': string;
+    'resume_block_reason'?: string;
+    'stage': string;
+}
+export interface PaperGuideSection {
+    'blocks': Array<PaperGuideBlock>;
+    'claim_ids': Array<string>;
+    'claims': Array<PaperGuideClaim>;
+    'publication_status'?: string;
+    'role': string;
+    'summary': string;
+    'title': string;
+    'version'?: number;
+}
+export interface PaperGuideSectionPlan {
+    'asset_ids': Array<string>;
+    'claim_ids': Array<string>;
+    'evidence_ids': Array<string>;
+    'focus': string;
+    'role': string;
+    'terms': Array<string>;
+    'title': string;
+}
+export interface PaperGuideStatus {
+    'can_generate': boolean;
+    'can_read': boolean;
+    'candidate_revision': PaperGuideRevisionView | null;
+    'enabled': boolean;
+    'progress'?: PaperGuideProgressRequest | null;
+    'published_revision': PaperGuideRevisionView | null;
+    'source_sha256': string;
+    'unavailable_reason'?: string;
+    'version': number;
+}
+export interface PaperGuideStatusResponse {
+    'can_generate': boolean;
+    'can_read': boolean;
+    'candidate_revision': PaperGuideRevisionView | null;
+    'enabled': boolean;
+    'progress'?: PaperGuideProgressRequest | null;
+    'published_revision': PaperGuideRevisionView | null;
+    'source_sha256': string;
+    'unavailable_reason'?: string;
+    'version': number;
 }
 export interface PaperLibraryAttachment {
     'academicState'?: AcademicDocumentState;
@@ -24419,6 +24729,337 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Generate or explicitly regenerate a guide
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PaperGuideGenerateRequest} paperGuideGenerateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost: async (dataset: string, document: string, paperGuideGenerateRequest: PaperGuideGenerateRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost', 'document', document)
+            // verify required parameter 'paperGuideGenerateRequest' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost', 'paperGuideGenerateRequest', paperGuideGenerateRequest)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/paper-guide:generate`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(paperGuideGenerateRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Lightweight status with ETag. Published and candidate revisions are separate; disabled generation does not prevent authorized reading.
+         * @summary Read personal guide status
+         * @param {string} dataset
+         * @param {string} document
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet: async (dataset: string, document: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/paper-guide`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (language !== undefined) {
+                localVarQueryParameter['language'] = language;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Save independent reading position; offset is a Unicode rune offset
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PaperGuideProgressRequest} paperGuideProgressRequest
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut: async (dataset: string, document: string, paperGuideProgressRequest: PaperGuideProgressRequest, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut', 'document', document)
+            // verify required parameter 'paperGuideProgressRequest' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut', 'paperGuideProgressRequest', paperGuideProgressRequest)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/paper-guide/progress`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (language !== undefined) {
+                localVarQueryParameter['language'] = language;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(paperGuideProgressRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read authorized original evidence; stale source coordinates cannot highlight the new PDF
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} revision
+         * @param {string} evidence
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet: async (dataset: string, document: string, revision: string, evidence: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet', 'document', document)
+            // verify required parameter 'revision' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet', 'revision', revision)
+            // verify required parameter 'evidence' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet', 'evidence', evidence)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}/evidence/{evidence}`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"revision"}}`, encodeURIComponent(String(revision)))
+                .replace(`{${"evidence"}}`, encodeURIComponent(String(evidence)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (language !== undefined) {
+                localVarQueryParameter['language'] = language;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read published sections, optionally after a change version
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} revision
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum} [language]
+         * @param {number} [afterVersion]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet: async (dataset: string, document: string, revision: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum, afterVersion?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet', 'document', document)
+            // verify required parameter 'revision' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet', 'revision', revision)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/paper-guide/revisions/{revision}`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"revision"}}`, encodeURIComponent(String(revision)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (language !== undefined) {
+                localVarQueryParameter['language'] = language;
+            }
+
+            if (afterVersion !== undefined) {
+                localVarQueryParameter['after_version'] = afterVersion;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Cancel future calls; retain published sections
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} run
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost: async (dataset: string, document: string, run: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost', 'document', document)
+            // verify required parameter 'run' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost', 'run', run)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/paper-guide/runs/{run}:cancel`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"run"}}`, encodeURIComponent(String(run)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (language !== undefined) {
+                localVarQueryParameter['language'] = language;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Resume with original model and remaining persisted budget
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} run
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost: async (dataset: string, document: string, run: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost', 'document', document)
+            // verify required parameter 'run' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost', 'run', run)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/paper-guide/runs/{run}:resume`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"run"}}`, encodeURIComponent(String(run)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (language !== undefined) {
+                localVarQueryParameter['language'] = language;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Observe shared PDF structure and retrieval readiness without submitting new work
          * @param {string} dataset
          * @param {string} document
@@ -30661,10 +31302,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @param {string} [keyword]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {string} [workflowSessionId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksGet: async (conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterTasksGet: async (conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, workflowSessionId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/task-center/tasks`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -30699,6 +31341,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (pageSize !== undefined) {
                 localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (workflowSessionId !== undefined) {
+                localVarQueryParameter['workflow_session_id'] = workflowSessionId;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -37087,6 +37733,118 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Generate or explicitly regenerate a guide
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PaperGuideGenerateRequest} paperGuideGenerateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost(dataset: string, document: string, paperGuideGenerateRequest: PaperGuideGenerateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost(dataset, document, paperGuideGenerateRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Lightweight status with ETag. Published and candidate revisions are separate; disabled generation does not prevent authorized reading.
+         * @summary Read personal guide status
+         * @param {string} dataset
+         * @param {string} document
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet(dataset: string, document: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet(dataset, document, language, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Save independent reading position; offset is a Unicode rune offset
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PaperGuideProgressRequest} paperGuideProgressRequest
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut(dataset: string, document: string, paperGuideProgressRequest: PaperGuideProgressRequest, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut(dataset, document, paperGuideProgressRequest, language, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read authorized original evidence; stale source coordinates cannot highlight the new PDF
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} revision
+         * @param {string} evidence
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet(dataset: string, document: string, revision: string, evidence: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet(dataset, document, revision, evidence, language, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read published sections, optionally after a change version
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} revision
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum} [language]
+         * @param {number} [afterVersion]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet(dataset: string, document: string, revision: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum, afterVersion?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet(dataset, document, revision, language, afterVersion, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Cancel future calls; retain published sections
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} run
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost(dataset: string, document: string, run: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost(dataset, document, run, language, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Resume with original model and remaining persisted budget
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} run
+         * @param {ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum} [language]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost(dataset: string, document: string, run: string, language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost(dataset, document, run, language, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Observe shared PDF structure and retrieval readiness without submitting new work
          * @param {string} dataset
          * @param {string} document
@@ -39468,11 +40226,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {string} [keyword]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {string} [workflowSessionId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterTasksGet(conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksGet(conversationId, status, taskType, keyword, page, pageSize, options);
+        async apiCoreTaskCenterTasksGet(conversationId?: string, status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, workflowSessionId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksGet(conversationId, status, taskType, keyword, page, pageSize, workflowSessionId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -42551,6 +43310,76 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Generate or explicitly regenerate a guide
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost(requestParameters.dataset, requestParameters.document, requestParameters.paperGuideGenerateRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lightweight status with ETag. Published and candidate revisions are separate; disabled generation does not prevent authorized reading.
+         * @summary Read personal guide status
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet(requestParameters.dataset, requestParameters.document, requestParameters.language, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Save independent reading position; offset is a Unicode rune offset
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut(requestParameters.dataset, requestParameters.document, requestParameters.paperGuideProgressRequest, requestParameters.language, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read authorized original evidence; stale source coordinates cannot highlight the new PDF
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet(requestParameters.dataset, requestParameters.document, requestParameters.revision, requestParameters.evidence, requestParameters.language, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read published sections, optionally after a change version
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet(requestParameters.dataset, requestParameters.document, requestParameters.revision, requestParameters.language, requestParameters.afterVersion, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Cancel future calls; retain published sections
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost(requestParameters.dataset, requestParameters.document, requestParameters.run, requestParameters.language, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Resume with original model and remaining persisted budget
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost(requestParameters.dataset, requestParameters.document, requestParameters.run, requestParameters.language, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Observe shared PDF structure and retrieval readiness without submitting new work
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -44300,7 +45129,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreTaskCenterTasksGet(requestParameters: DefaultApiApiCoreTaskCenterTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterTaskListResponse> {
-            return localVarFp.apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, requestParameters.workflowSessionId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -46386,6 +47215,97 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentEnsureParsedPo
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly paperGuideGenerateRequest: PaperGuideGenerateRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly paperGuideProgressRequest: PaperGuideProgressRequest
+
+    readonly language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly revision: string
+
+    readonly evidence: string
+
+    readonly language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly revision: string
+
+    readonly language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum
+
+    readonly afterVersion?: number
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly run: string
+
+    readonly language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly run: string
+
+    readonly language?: ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest {
@@ -47446,6 +48366,8 @@ export interface DefaultApiApiCoreTaskCenterTasksGetRequest {
     readonly page?: number
 
     readonly pageSize?: number
+
+    readonly workflowSessionId?: string
 }
 
 /**
@@ -49562,6 +50484,83 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Generate or explicitly regenerate a guide
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGeneratePost(requestParameters.dataset, requestParameters.document, requestParameters.paperGuideGenerateRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lightweight status with ETag. Published and candidate revisions are separate; disabled generation does not prevent authorized reading.
+     * @summary Read personal guide status
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideGet(requestParameters.dataset, requestParameters.document, requestParameters.language, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Save independent reading position; offset is a Unicode rune offset
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPut(requestParameters.dataset, requestParameters.document, requestParameters.paperGuideProgressRequest, requestParameters.language, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read authorized original evidence; stale source coordinates cannot highlight the new PDF
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGet(requestParameters.dataset, requestParameters.document, requestParameters.revision, requestParameters.evidence, requestParameters.language, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read published sections, optionally after a change version
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGet(requestParameters.dataset, requestParameters.document, requestParameters.revision, requestParameters.language, requestParameters.afterVersion, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Cancel future calls; retain published sections
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPost(requestParameters.dataset, requestParameters.document, requestParameters.run, requestParameters.language, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Resume with original model and remaining persisted budget
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePost(requestParameters.dataset, requestParameters.document, requestParameters.run, requestParameters.language, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Observe shared PDF structure and retrieval readiness without submitting new work
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -51491,7 +52490,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreTaskCenterTasksGet(requestParameters: DefaultApiApiCoreTaskCenterTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksGet(requestParameters.conversationId, requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, requestParameters.workflowSessionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -53049,6 +54048,36 @@ export const ApiCoreConversationsTrashGetKindEnum = {
     Task: 'task'
 } as const;
 export type ApiCoreConversationsTrashGetKindEnum = typeof ApiCoreConversationsTrashGetKindEnum[keyof typeof ApiCoreConversationsTrashGetKindEnum];
+export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+export type ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideGetLanguageEnum];
+export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+export type ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideProgressPutLanguageEnum];
+export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+export type ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionEvidenceEvidenceGetLanguageEnum];
+export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+export type ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRevisionsRevisionGetLanguageEnum];
+export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+export type ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunCancelPostLanguageEnum];
+export const ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+export type ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentPaperGuideRunsRunResumePostLanguageEnum];
 export const ApiCoreTaskCenterWorkbenchGetCategoryEnum = {
     Attention: 'attention',
     Running: 'running',

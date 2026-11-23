@@ -3,9 +3,14 @@ package academic
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
+	"lazymind/core/pdfir"
 )
 
 func TestSelectedReviewUsesConfirmedMaterialsWithoutExpansion(t *testing.T) {
@@ -85,6 +90,76 @@ func TestSelectedReviewUsesConfirmedMaterialsWithoutExpansion(t *testing.T) {
 	w = httptest.NewRecorder()
 	LaunchPaperWorkflow(w, paperRequest(`{"kind":"review","skip_expansion":true,"dataset_id":"papers","document_ids":["a","b"],"paper_ids":["a","b"],"request_key":"changed-source"}`))
 	if w.Code != 422 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+// A library may have a retained reading structure without any retrieval chunks.
+func TestSelectedReviewUsesParsedPDFWithoutRetrieval(t *testing.T) {
+	db := paperFixture(t)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	for _, id := range []string{"a", "b"} {
+		title := "Selected review paper " + id
+		pdf := filepath.Join(root, id+".pdf")
+		raw := "%PDF-1.7 " + id
+		hash := pdfir.Digest(raw)
+		if err := os.WriteFile(pdf, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&orm.Document{}).Where("id=?", id).Update("ext", marshal(map[string]string{"stored_path": pdf})).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&orm.AcademicWork{}).Where("id=?", id).Update("canonical_title", title).Error; err != nil {
+			t.Fatal(err)
+		}
+		ir := pdfir.Document{Version: 1, SourceSHA256: hash, Pages: []pdfir.Page{{Index: 0}, {Index: 1}}, Blocks: []pdfir.Block{
+			{Page: 0, Text: title}, {Page: 1, Text: strings.Repeat("We compared the measured performance in three experiments. ", 4)},
+		}}
+		path := filepath.Join(root, id+".json")
+		if err := os.WriteFile(path, marshal(ir), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.AsyncJob{ID: "parsed-" + id, JobType: "document_pdf_ir", ResourceType: "document_pdf_ir", ResourceID: pdfir.Digest("papers\x00" + id), Status: "succeeded", PayloadJSON: marshal(map[string]string{"source_sha256": hash, "revision": pdfir.Revision}), ResultJSON: marshal(map[string]string{"ir_path": path})}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := httptest.NewRecorder()
+	ResolvePaperSelection(w, paperRequest(`{"kind":"review","skip_expansion":true,"dataset_id":"papers","document_ids":["a","b"]}`))
+	var preview struct {
+		Materials []reviewMaterial `json:"materials"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil || len(preview.Materials) != 2 {
+		t.Fatal(w.Body.String(), err)
+	}
+	for _, material := range preview.Materials {
+		if material.Status != "preparing" || material.Eligible {
+			t.Fatalf("unexpected preview: %+v", material)
+		}
+	}
+	var jobs []orm.AsyncJob
+	if err := db.Where("job_type=?", "academic.paper_content").Find(&jobs).Error; err != nil || len(jobs) != 2 {
+		t.Fatal(jobs, err)
+	}
+	for _, job := range jobs {
+		if _, err := runPaperContent(t.Context(), asyncjob.Job{ResourceID: job.ResourceID, CreateUserID: "u", PayloadJSON: job.PayloadJSON}, nil); err != nil {
+			t.Fatal(err)
+		}
+		var content orm.AcademicPaperContent
+		if err := db.First(&content, "id=?", job.ResourceID).Error; err != nil || !usablePaperContent(content) {
+			t.Fatal(content.Error, err)
+		}
+		var pages []ContentPage
+		if err := json.Unmarshal(content.PagesJSON, &pages); err != nil || len(pages) != 2 || pages[0].Page != 1 || pages[1].Page != 2 {
+			t.Fatal(pages, err)
+		}
+	}
+	w = httptest.NewRecorder()
+	LaunchPaperWorkflow(w, paperRequest(`{"kind":"review","skip_expansion":true,"dataset_id":"papers","document_ids":["a","b"],"paper_ids":["a","b"],"request_key":"parsed-review"}`))
+	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

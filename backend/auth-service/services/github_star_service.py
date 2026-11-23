@@ -2,6 +2,8 @@
 import json
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
@@ -31,6 +33,9 @@ request = SimpleNamespace(urlopen=_urlopen)
 @dataclass
 class GitHubStarError(AppException):
     reason: str = 'unavailable'
+    retry_after_seconds: float | None = None
+    retry_at: datetime | None = None
+    remote_status: int | None = None
 
 
 def _error(error, reason):
@@ -44,7 +49,7 @@ class GitHubStarService:
         self._write_lock = threading.RLock()
 
     @staticmethod
-    def _http(path, token, *, method='GET', not_found=False, require_scope=False):
+    def _http(path, token, *, method='GET', not_found=False, require_scope=False, before_request=None):
         headers = {
             'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + token,
             'User-Agent': 'LazyMind-Star', 'X-GitHub-Api-Version': '2026-03-10',
@@ -54,6 +59,8 @@ class GitHubStarService:
         req = urllib_request.Request('https://api.github.com' + path, headers=headers,
                                      method=method, data=b'' if method == 'PUT' else None)
         try:
+            if before_request is not None:
+                before_request()
             with request.urlopen(req, timeout=10) as response:
                 if path == _STAR_PATH:
                     if response.status != 204:
@@ -84,14 +91,34 @@ class GitHubStarService:
                     pass
             exc.close()
             if limited:
-                raise _error((429, *ErrorCodes.GITHUB_STAR_UNAVAILABLE[1:]), 'rate_limited') from None
+                error = _error((429, *ErrorCodes.GITHUB_STAR_UNAVAILABLE[1:]), 'rate_limited')
+                after, reset = headers.get('Retry-After'), headers.get('X-RateLimit-Reset')
+                try:
+                    if after is not None:
+                        error.retry_after_seconds = max(0, float(after))
+                except (TypeError, ValueError):
+                    try:
+                        error.retry_at = parsedate_to_datetime(after)
+                        if error.retry_at.tzinfo is None:
+                            error.retry_at = error.retry_at.replace(tzinfo=timezone.utc)
+                    except (TypeError, ValueError, OverflowError):
+                        pass
+                try:
+                    if reset is not None:
+                        at = datetime.fromtimestamp(float(reset), timezone.utc)
+                        error.retry_at = max(error.retry_at, at) if error.retry_at is not None else at
+                except (TypeError, ValueError, OverflowError):
+                    pass
+                raise error from None
             if status == 404 and not_found:
                 return False
             if status == 401:
                 raise _error(ErrorCodes.GITHUB_STAR_AUTH_REQUIRED, 'reauthorize') from None
             if status == 403:
                 raise _error(ErrorCodes.GITHUB_STAR_PERMISSION_REQUIRED, 'permission_denied') from None
-            raise _error(ErrorCodes.GITHUB_STAR_UNAVAILABLE, 'unavailable') from None
+            error = _error(ErrorCodes.GITHUB_STAR_UNAVAILABLE, 'unavailable')
+            error.remote_status = status
+            raise error from None
         except (URLError, OSError, ValueError):
             raise _error(ErrorCodes.GITHUB_STAR_UNAVAILABLE, 'unavailable') from None
 
@@ -114,12 +141,12 @@ class GitHubStarService:
         account_id, login = self._inspect_token(access_token, expected_account_id=row['provider_account_id'])
         return access_token, account_id, login
 
-    def _inspect_token(self, access_token, *, expected_account_id=None):
-        profile = self._http('/user', access_token, require_scope=True)
+    def _inspect_token(self, access_token, *, expected_account_id=None, before_request=None):
+        profile = self._http('/user', access_token, require_scope=True, before_request=before_request)
         account_id, login = str(profile.get('id') or ''), str(profile.get('login') or '')
         if not account_id or not login or (expected_account_id is not None and account_id != expected_account_id):
             raise _error(ErrorCodes.GITHUB_STAR_ACCOUNT_CHANGED, 'account_changed')
-        repository = self._http('/repos/' + REPOSITORY, access_token)
+        repository = self._http('/repos/' + REPOSITORY, access_token, before_request=before_request)
         if str(repository.get('full_name') or '').lower() != REPOSITORY.lower():
             raise _error(ErrorCodes.GITHUB_STAR_UNAVAILABLE, 'unavailable')
         return account_id, login

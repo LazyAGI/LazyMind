@@ -49,6 +49,12 @@ output/playwright/
 .codex-gomodcache/
 
 # Local agent configuration and working files (repository root only).
+/.agent-e2e-private/
+/.env.agent-e2e.local
+/scripts/agent_e2e.providers.local.json
+/outputs/agent-e2e/
+/outputs/workbuddy-auth-fix/
+/outputs/meme-caption-fix/
 /.agent/
 /.agents/
 /.claude/
