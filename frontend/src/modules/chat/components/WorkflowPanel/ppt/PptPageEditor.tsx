@@ -1,7 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type MutableRefObject } from 'react';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
+import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
 import { SlotEditingContext } from '../slotEditingContext';
+
+export async function uploadMarkdownArtifact(markdown: string, originalPath: unknown) {
+  const filename = typeof originalPath === 'string' ? originalPath.split('/').pop() : undefined;
+  const file = new File([markdown], filename || 'artifact.md', {
+    type: 'text/markdown;charset=utf-8',
+  });
+  return { path: await uploadFileInChunks(file), size: file.size };
+}
 
 type Field = 'slide' | 'notes';
 type Draft = Partial<Record<Field, string>>;
@@ -15,10 +24,10 @@ type PageControls = {
 };
 export const PptPageEditContext = createContext<PageControls | null>(null);
 
-export function PptPageEditor({ sessionId, slide, notes, flushRef, refresh, children }: {
+export function PptPageEditor({ sessionId, slide, notes, stateVersion, flushRef, refresh, children }: {
   sessionId: string; slide: SlotRevision; notes?: SlotRevision;
   flushRef: MutableRefObject<(() => Promise<boolean>) | null>;
-  refresh?: () => void; children: ReactNode;
+  stateVersion?: number; refresh?: () => void; children: ReactNode;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const draft = useRef<Draft>({});
@@ -29,7 +38,14 @@ export function PptPageEditor({ sessionId, slide, notes, flushRef, refresh, chil
   const [error, setError] = useState('');
   const { registerFlush, setEditing } = useContext(SlotEditingContext);
   const editingKey = sessionId + ':ppt-page:' + slide.list_index;
-  if (!dirty && !pending.current) baseline.current = {slide, notes};
+  const savedVersion = useRef<number>();
+  if (!dirty && !pending.current && (savedVersion.current === undefined
+    || (stateVersion ?? -1) >= savedVersion.current
+    || (slide.revision === baseline.current.slide.revision && slide.draft_version === baseline.current.slide.draft_version
+      && notes?.revision === baseline.current.notes?.revision))) {
+    baseline.current = {slide, notes};
+    savedVersion.current = undefined;
+  }
 
   const update = useCallback((field: Field, text: string, original: string) => {
     if (text === original) delete draft.current[field];
@@ -49,14 +65,39 @@ export function PptPageEditor({ sessionId, slide, notes, flushRef, refresh, chil
     });
     pending.current = (async () => {
       try {
+        const carrier = base.notes?.artifact_value;
+        const file = changes.notes !== undefined && carrier?.path && ['text', 'json'].includes(carrier.type)
+          ? await uploadMarkdownArtifact(changes.notes, carrier.path) : undefined;
         const response = await WorkflowSessionApi().savePptPage(sessionId, base.slide.list_index!, {
           slide: field(base.slide, changes.slide),
-          notes: base.notes && { ...field(base.notes, changes.notes), list_index: base.notes.list_index! },
+          notes: base.notes && { ...field(base.notes, file ? undefined : changes.notes), file, list_index: base.notes.list_index! },
         });
         if (response.data?.code !== 0) throw new Error('save failed');
-        await refresh?.();
+        const result = response.data.data;
+        const committed = (slot: SlotRevision, text?: string) => {
+          const change = result.changes?.find((item: SlotRevision) => item.slot_id === slot.slot_id);
+          const revision = slot === base.slide ? result.revision : result.notes_revision;
+          if (revision === slot.revision) return slot;
+          let value = text === undefined ? slot.artifact_value : { text };
+          if (slot === base.notes && file) {
+            value = { ...carrier, ...file, type: 'text' };
+            delete value.url;
+          }
+          return {
+            ...slot, artifact_id: change?.artifact_id, revision,
+            draft_version: change?.draft_version ?? 1, change_source: 'human' as const,
+            created_at: change?.created_at ?? slot.created_at, artifact_value: value,
+            revision_count: (slot.revision_count ?? slot.revision) + 1,
+            version_number: (slot.revision_count ?? slot.revision) + 1,
+          };
+        };
+        baseline.current = {slide: committed(base.slide, changes.slide),
+          notes: base.notes && committed(base.notes, changes.notes)};
+        savedVersion.current = result.state_version ?? (stateVersion ?? 0) + 1;
         draft.current = {};
         setDirty(false);
+        // A refresh can fail after the server has committed this checkpoint.
+        void Promise.resolve().then(() => refresh?.()).catch(() => {});
         return true;
       } catch (err) {
         const conflict = (err as {response?: {status?: number}})?.response?.status === 409;
@@ -68,7 +109,7 @@ export function PptPageEditor({ sessionId, slide, notes, flushRef, refresh, chil
       }
     })();
     return pending.current;
-  }, [sessionId, refresh]);
+  }, [sessionId, refresh, stateVersion]);
 
   useEffect(() => {
     flushRef.current = dirty ? save : null;

@@ -67,7 +67,7 @@ import HtmlBlock from '@/modules/chat/components/MarkdownViewer/HtmlBlock';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
-import { PptPageEditContext } from './ppt/PptPageEditor';
+import { PptPageEditContext, uploadMarkdownArtifact } from './ppt/PptPageEditor';
 import { SlotHtmlSlide, type SlideNavigation } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
@@ -2172,19 +2172,8 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     }
     let nextValue: Record<string, unknown>;
     if (isOffloaded) {
-      const originalFilename = typeof raw?.path === 'string'
-        ? raw.path.split('/').pop() || 'artifact.md'
-        : 'artifact.md';
-      const file = new File([markdown], originalFilename, {
-        type: 'text/markdown;charset=utf-8',
-      });
-      const storedPath = await uploadFileInChunks(file);
-      nextValue = {
-        ...(raw && typeof raw === 'object' ? raw : {}),
-        type: 'text',
-        path: storedPath,
-        size: file.size,
-      };
+      const file = await uploadMarkdownArtifact(markdown, raw.path);
+      nextValue = { ...raw, ...file, type: 'text' };
       delete nextValue.url;
     } else if (raw && typeof raw === 'object' && raw.data !== undefined && raw.text === undefined) {
       nextValue = { ...raw, data: markdown };
@@ -5430,9 +5419,10 @@ export function SlotRenderer({
 }) {
   useTranslation();
   const page = useContext(PptPageEditContext);
-  if (page?.dirty) {
+  if (page) {
     if (slot.slot === 'preview_html') slot = page.slide;
     if (slot.slot === 'preview_notes' && page.notes) slot = page.notes;
+    revisionCount = slot.revision_count ?? revisionCount;
   }
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;

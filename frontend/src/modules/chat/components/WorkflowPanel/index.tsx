@@ -1293,7 +1293,7 @@ function CompositeSlotGrid({
           {reorderError && <span className='composite-toolbar__error'>{reorderError}</span>}
           <div className='composite-grid composite-grid--paged'>{editPage && pageSlide
             ? <PptPageEditor key={session.session_id + ':' + pageSlide.list_index} sessionId={session.session_id}
-                slide={pageSlide} notes={pageNotes?.selected ? pageNotes : undefined} flushRef={flushPptPage} refresh={onRefresh}>
+                stateVersion={session.state_version} slide={pageSlide} notes={pageNotes?.selected ? pageNotes : undefined} flushRef={flushPptPage} refresh={onRefresh}>
                 {renderRow(activePage)}
               </PptPageEditor>
             : renderRow(activePage)}</div>

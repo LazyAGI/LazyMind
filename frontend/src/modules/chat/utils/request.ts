@@ -733,7 +733,7 @@ export function WorkflowSessionApi() {
     },
     savePptPage(sessionId: string, index: number, body: {
       slide: {revision: number; draft_version?: number; text?: string};
-      notes?: {list_index: number; revision: number; draft_version?: number; text?: string};
+      notes?: {list_index: number; revision: number; draft_version?: number; text?: string; file?: {path: string; size: number}};
     }) {
       return axiosInstance.patch(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/preview_html/items/idx/${index}`, {ppt_page_edit: body});
     },

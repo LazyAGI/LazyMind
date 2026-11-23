@@ -5,18 +5,49 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"lazymind/core/store"
 )
 
+type pptNotesFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+// Only completed files in the owner's upload directory can replace page notes.
+func (file pptNotesFile) verify(owner string) error {
+	if owner == "" || !filepath.IsAbs(file.Path) {
+		return ErrConflict
+	}
+	directory := doc.TempUserFilesRoot(owner)
+	relative, err := filepath.Rel(directory, file.Path)
+	if err != nil || !filepath.IsLocal(relative) {
+		return ErrConflict
+	}
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return ErrConflict
+	}
+	defer root.Close()
+	info, err := root.Stat(relative)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != file.Size {
+		return ErrConflict
+	}
+	return nil
+}
+
 type pptPageField struct {
-	ListIndex    *int    `json:"list_index"`
-	Revision     int     `json:"revision"`
-	DraftVersion *int64  `json:"draft_version"`
-	Text         *string `json:"text"`
+	File         *pptNotesFile `json:"file"`
+	ListIndex    *int          `json:"list_index"`
+	Revision     int           `json:"revision"`
+	DraftVersion *int64        `json:"draft_version"`
+	Text         *string       `json:"text"`
 }
 
 type pptPageEdit struct {
@@ -24,13 +55,25 @@ type pptPageEdit struct {
 	Notes *pptPageField `json:"notes"`
 }
 
+type pptPageResult struct {
+	Revision      int       `json:"revision"`
+	NotesRevision int       `json:"notes_revision,omitempty"`
+	StateVersion  int64     `json:"state_version"`
+	Changes       []slotDTO `json:"changes"`
+}
+
 func handlePPTPageEdit(w http.ResponseWriter, r *http.Request, sid string, idx int, edit pptPageEdit) {
+	if edit.Slide.File != nil || (edit.Notes != nil && edit.Notes.File != nil &&
+		(edit.Notes.Text != nil || edit.Notes.File.Path == "" || edit.Notes.File.Size < 0)) {
+		common.ReplyErr(w, "invalid page edit", http.StatusBadRequest)
+		return
+	}
 	db := store.DB()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", 500)
 		return
 	}
-	result, err := savePPTPage(r.Context(), db, sid, idx, edit)
+	result, err := savePPTPage(r.Context(), db, sid, store.UserID(r), idx, edit)
 	if replyDraftVersionPreconditionError(w, err) {
 		return
 	}
@@ -45,9 +88,15 @@ func handlePPTPageEdit(w http.ResponseWriter, r *http.Request, sid string, idx i
 	common.ReplyOK(w, result)
 }
 
-func savePPTPage(ctx context.Context, db *gorm.DB, sid string, idx int, edit pptPageEdit) (map[string]int, error) {
-	result := map[string]int{}
+func savePPTPage(ctx context.Context, db *gorm.DB, sid, owner string, idx int, edit pptPageEdit) (pptPageResult, error) {
+	if edit.Notes != nil && edit.Notes.File != nil {
+		if err := edit.Notes.File.verify(owner); err != nil {
+			return pptPageResult{}, err
+		}
+	}
+	var result pptPageResult
 	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		result = pptPageResult{Changes: []slotDTO{}}
 		session, err := lockArtifactMutationSession(tx, sid)
 		if err != nil {
 			return err
@@ -92,7 +141,22 @@ func savePPTPage(ctx context.Context, db *gorm.DB, sid string, idx int, edit ppt
 				return row, err
 			}
 			next := previous
-			if field.Text != nil {
+			if field.File != nil {
+				var carrier map[string]any
+				if json.Unmarshal(previous, &carrier) != nil || carrier["path"] == nil ||
+					(carrier["type"] != "text" && carrier["type"] != "json") {
+					return row, ErrConflict
+				}
+				if carrier["path"] != field.File.Path {
+					carrier["type"], carrier["path"], carrier["size"] = "text", field.File.Path, field.File.Size
+					delete(carrier, "url")
+					next, err = json.Marshal(carrier)
+					if err != nil {
+						return row, err
+					}
+					force = true
+				}
+			} else if field.Text != nil {
 				var content struct {
 					Text *string `json:"text"`
 				}
@@ -108,10 +172,13 @@ func savePPTPage(ctx context.Context, db *gorm.DB, sid string, idx int, edit ppt
 			if !force {
 				return row, nil
 			}
-			saved, err := WriteSlotRevisionWithHumanArtifact(ctx, tx, sid, row.SlotID, row.Slot, row.StepID, row.Attempt, "list", row.ListIndex, "text", next, nil, "human", &field.Revision, field.DraftVersion)
+			saved, err := writeSlotRevisionWithHumanArtifact(ctx, tx, sid, row.SlotID, row.Slot, row.StepID, row.Attempt, "list", row.ListIndex, "text", next, nil, "human", &field.Revision, field.DraftVersion, false, nil, slotWriteOptions{preserveNotesFile: field.File != nil})
 			if err != nil {
 				return row, err
 			}
+			change := toSlotDTO(saved)
+			change.DraftVersion = 1 // New human artifact checkpoints start at version one.
+			result.Changes = append(result.Changes, change)
 			return *saved, nil
 		}
 		var oldNotes, newNotes orm.WorkflowSlotRevision
@@ -141,7 +208,7 @@ func savePPTPage(ctx context.Context, db *gorm.DB, sid string, idx int, edit ppt
 			if err != nil {
 				return err
 			}
-			result["notes_revision"] = newNotes.Revision
+			result.NotesRevision = newNotes.Revision
 		}
 		saved, err := write(slide, edit.Slide, oldNotes.ID != newNotes.ID)
 		if err != nil {
@@ -154,8 +221,14 @@ func savePPTPage(ctx context.Context, db *gorm.DB, sid string, idx int, edit ppt
 				}
 			}
 		}
-		result["revision"] = saved.Revision
-		return nil
+		result.Revision = saved.Revision
+		return tx.Model(&orm.WorkflowSession{}).Where("id = ?", sid).Select("state_version").Scan(&result.StateVersion).Error
 	})
-	return result, err
+	if err != nil {
+		return pptPageResult{}, err
+	}
+	for _, change := range result.Changes {
+		NotifyWorkflowArtifactUpdated(ctx, db, sid, change.StepID, change.SlotID, change.Slot, change.Revision, change.ListIndex, "human")
+	}
+	return result, nil
 }
