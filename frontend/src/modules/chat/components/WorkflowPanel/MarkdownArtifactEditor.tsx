@@ -711,13 +711,11 @@ export function MarkdownArtifactEditor({
   conflictRef.current = conflict;
 
   useEffect(() => {
-    onContentChange?.(
-      dirty
-        ? writerMarkdownForSave(materializedDraftMarkdown)
-        : anchorSourceMarkdown,
-      dirty,
-    );
-  }, [anchorSourceMarkdown, dirty, materializedDraftMarkdown, onContentChange]);
+    if (!onContentChange) return;
+    const content = dirty ? writerMarkdownForSave(materializedDraftMarkdown) : anchorSourceMarkdown;
+    if (pageManaged) onContentChange(content, dirty);
+    else onContentChange(content);
+  }, [anchorSourceMarkdown, dirty, materializedDraftMarkdown, onContentChange, pageManaged]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
