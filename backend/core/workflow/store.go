@@ -1119,6 +1119,20 @@ func selectSlotRevision(ctx context.Context, db *gorm.DB,
 			First(&target).Error; err != nil {
 			return err
 		}
+		if target.PPTNotesRevisionID != nil && slotID == "preview_html" {
+			var notes orm.WorkflowSlotRevision
+			if err := tx.Where("id = ? AND session_id = ? AND slot_id = ?", *target.PPTNotesRevisionID, sessionID, "preview_notes").First(&notes).Error; err != nil {
+				return err
+			}
+			if _, err := selectSlotRevision(ctx, tx, sessionID, notes.SlotID, notes.ListIndex, notes.Revision, changeSource); err != nil {
+				return err
+			}
+			// Selecting the notes may advance the session event version.
+			session, err = lockArtifactMutationSession(tx, sessionID)
+			if err != nil {
+				return err
+			}
+		}
 		if target.Selected {
 			return nil
 		}

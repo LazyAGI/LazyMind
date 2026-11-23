@@ -731,6 +731,12 @@ export function WorkflowSessionApi() {
         { ...options, data: orderVersion !== undefined ? { order_version: orderVersion } : undefined },
       );
     },
+    savePptPage(sessionId: string, index: number, body: {
+      slide: {revision: number; draft_version?: number; text?: string};
+      notes?: {list_index: number; revision: number; draft_version?: number; text?: string};
+    }) {
+      return axiosInstance.patch(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/preview_html/items/idx/${index}`, {ppt_page_edit: body});
+    },
     patchSlotItem(
       sessionId: string,
       slotId: string,

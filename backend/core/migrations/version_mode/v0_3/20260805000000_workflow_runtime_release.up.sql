@@ -3918,3 +3918,5 @@ WHERE job_type = 'document_pdf_ir' AND started_at IS NOT NULL
   AND CAST(payload_json ->> 'automatic' AS TEXT) IN ('true', '1')
   AND COALESCE(payload_json ->> 'source_sha256', '') <> ''
 GROUP BY create_user_id, payload_json ->> 'source_sha256';
+
+ALTER TABLE plugin_slot_revisions ADD COLUMN ppt_notes_revision_id VARCHAR(36);

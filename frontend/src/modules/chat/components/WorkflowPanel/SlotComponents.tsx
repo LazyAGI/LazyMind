@@ -67,6 +67,7 @@ import HtmlBlock from '@/modules/chat/components/MarkdownViewer/HtmlBlock';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
+import { PptPageEditContext } from './ppt/PptPageEditor';
 import { SlotHtmlSlide, type SlideNavigation } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
@@ -856,6 +857,7 @@ interface SlotVersionPopoverProps {
   currentValue?: any;
   readCurrentValue?: () => unknown;
   triggerLabel?: string;
+  pageNumber?: number;
   readOnly?: boolean;
   onRollback?: (revision: number) => Promise<boolean>;
   currentChangeSource?: 'ai' | 'human' | 'provider_sync';
@@ -880,6 +882,7 @@ export function SlotVersionPopover({
   currentValue,
   readCurrentValue,
   triggerLabel,
+  pageNumber,
   readOnly = false,
   onRollback,
   currentChangeSource,
@@ -889,6 +892,7 @@ export function SlotVersionPopover({
   onDiscardDraft,
 }: SlotVersionPopoverProps) {
   // effectiveDraftIndex: index used for draftStore operations (localStorage key).
+  const pageEditor = useContext(PptPageEditContext);
   const { onBrowse } = useContext(SlotEditingContext);
   const effectiveDraftIndex = draftListIndex ?? listIndex;
   const popoverKey: PopoverKey = `${sessionId}:${slotId}:${listIndex}`;
@@ -928,6 +932,7 @@ export function SlotVersionPopover({
       setOpen(false);
       return;
     }
+    if (pageEditor && !await pageEditor.save()) return;
     onBrowse?.();
     // Always load version history; in draft mode also default-select the draft entry.
     setLoading(true);
@@ -956,7 +961,7 @@ export function SlotVersionPopover({
     } finally {
       setLoading(false);
     }
-  }, [getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId, readCurrentValue, currentValue, onBrowse]);
+  }, [pageEditor, getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId, readCurrentValue, currentValue, onBrowse]);
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
@@ -1110,7 +1115,7 @@ export function SlotVersionPopover({
         {/* Header */}
         <div className='workflow-slot__version-popover-header'>
           <span className='workflow-slot__version-popover-title'>
-            {historyTitle}
+            {pageNumber ? `第 ${pageNumber} 页 · ${historyTitle}` : historyTitle}
           </span>
           <button
             className='workflow-slot__version-popover-close'
@@ -1859,6 +1864,8 @@ function rawTextOffsetAtPoint(
 
 export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
   const raw = slot.artifact_value;
+  const pageEdit = useContext(PptPageEditContext);
+  const updateNotes = slotId === 'preview_notes' ? pageEdit?.update : undefined;
   const isJsonBlock = widget?.widgetType === 'json-block';
   const { patchSlotCaption, patchSlotItemValue } = useWorkflowStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
@@ -2145,6 +2152,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     return undefined;
   })();
 
+  const reportPageNotes = useCallback((markdown: string, dirty?: boolean) => {
+    if (dirty !== undefined) updateNotes?.('notes', dirty ? markdown : displayText, displayText);
+  }, [updateNotes, displayText]);
+
   const saveMarkdown = useCallback(async (
     markdown: string,
     baseRevision: number,
@@ -2154,6 +2165,11 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
       throw new Error(tr('chat.writerMarkdown.saveFailed'));
     }
 
+    if (updateNotes && pageEdit) {
+      updateNotes('notes', markdown, displayText);
+      if (!await pageEdit.save()) throw new Error(tr('chat.writerMarkdown.saveFailed'));
+      return { markdown };
+    }
     let nextValue: Record<string, unknown>;
     if (isOffloaded) {
       const originalFilename = typeof raw?.path === 'string'
@@ -2194,7 +2210,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     setCurrentValue(nextValue);
     if (typeof revision === 'number' && revision > 0) setLocalRevision(revision);
     return { markdown, revision };
-  }, [apiListIndex, effectiveListIndex, isOffloaded, localDraftVersion, patchSlotItemValue, raw, readOnly, sessionId, slotId]);
+  }, [apiListIndex, displayText, pageEdit, updateNotes, effectiveListIndex, isOffloaded, localDraftVersion, patchSlotItemValue, raw, readOnly, sessionId, slotId]);
 
   const canRewriteMarkdown = canEditMarkdown
     && localRevision > 0
@@ -2280,7 +2296,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   const textMeta = (
     <div className='workflow-slot__text-meta'>
       {!canEditMarkdown && <ArtifactSourceButton value={editing || hasPendingDraft ? displayText : isOffloaded ? offloadedText : currentValue?.text ?? currentValue?.data ?? currentValue} />}
-      {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && (
+      {!updateNotes && revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && (
         <SlotVersionPopover
           sessionId={sessionId}
           slotId={slotId}
@@ -2336,6 +2352,9 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
       {canEditMarkdown ? (
         <>
           <MarkdownArtifactEditor
+            key={updateNotes ? slot.revision : undefined}
+            pageManaged={Boolean(updateNotes)}
+            onContentChange={updateNotes ? reportPageNotes : undefined}
             markdown={displayText}
             contentKind={widget?.widgetType === 'ppt-prompt' ? 'prompt' : 'document'}
             sourceRevision={localRevision}
@@ -5410,6 +5429,11 @@ export function SlotRenderer({
   hideImageMutationActions?: boolean;
 }) {
   useTranslation();
+  const page = useContext(PptPageEditContext);
+  if (page?.dirty) {
+    if (slot.slot === 'preview_html') slot = page.slide;
+    if (slot.slot === 'preview_notes' && page.notes) slot = page.notes;
+  }
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
   }
@@ -5504,9 +5528,11 @@ export function SlotRenderer({
         {!cardMode && sessionId && artifactSlotKey && revisionCount !== undefined && revisionCount > 0 && (
           <div className='workflow-slot__artifact-footer'>
             <div className='workflow-slot__artifact-footer-left'>
+              {slot.change_source === 'human' && <span>已修改</span>}
               <SlotVersionPopover
                 sessionId={sessionId}
                 slotId={artifactSlotKey}
+                pageNumber={slot.sort_order}
                 listIndex={slot.list_index ?? -1}
                 revisionCount={revisionCount}
                 currentRevision={slot.revision}
