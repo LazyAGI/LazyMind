@@ -1,0 +1,33 @@
+name: Agent E2E Script Checks
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/agent-e2e*.yml'
+      - 'scripts/agent_e2e*'
+      - 'scripts/tests/test_agent_e2e*'
+      - 'scripts/ci-agent-tools/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-e2e-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install Pillow==12.0.0 PyYAML==6.0.3
+      - name: Test supervisor without accounts or model requests
+        run: python -m unittest discover -s scripts/tests -p 'test_agent_e2e*.py' -v
