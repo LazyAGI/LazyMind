@@ -2,6 +2,8 @@
 
 **[中文](README.CN.md)** | **English**
 
+> **External Agent CI setup:** Configure your own model access and keys using the [setup guide](scripts/agent_e2e.md). Keep local credentials outside the repository and use GitHub Actions Secrets for CI. Never commit keys or login files.
+
 <img width="1672" height="600" alt="LazyMind logo" src="docs/assets/lazymind-banner.png" />
 
 > **LazyMind: Keep AI-Agent under your control.**
