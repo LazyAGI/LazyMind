@@ -1,6 +1,7 @@
 """Exercise the scheduler's real tag command against a local Git remote."""
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -14,6 +15,14 @@ class ScheduleSnapshotTests(unittest.TestCase):
     def test_snapshot_tags_same_main_commit_without_moving_main(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/agent-e2e-scheduled.yml').read_text())
         command = workflow['jobs']['snapshot']['steps'][1]['run']
+        bash = shutil.which('bash')
+        if os.name == 'nt':
+            # PATH may resolve Windows' WSL launcher instead of Git Bash.
+            git_exe = Path(shutil.which('git')).resolve()
+            bash = next((str(candidate) for parent in git_exe.parents
+                         for candidate in (parent / 'bin/bash.exe', parent / 'usr/bin/bash.exe')
+                         if candidate.is_file()), None)
+        self.assertIsNotNone(bash, 'Git Bash is required for the scheduler shell test')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             remote = root / 'remote.git'
@@ -21,8 +30,8 @@ class ScheduleSnapshotTests(unittest.TestCase):
             env = {**os.environ, 'GIT_CONFIG_NOSYSTEM': '1',
                    'GIT_AUTHOR_NAME': 'CI test', 'GIT_AUTHOR_EMAIL': 'ci@example.invalid',
                    'GIT_COMMITTER_NAME': 'CI test', 'GIT_COMMITTER_EMAIL': 'ci@example.invalid',
-                   'GITHUB_RUN_ID': '12345', 'GITHUB_OUTPUT': str(root / 'output'),
-                   'GITHUB_STEP_SUMMARY': str(root / 'summary')}
+                   'GITHUB_RUN_ID': '12345', 'GITHUB_OUTPUT': (root / 'output').as_posix(),
+                   'GITHUB_STEP_SUMMARY': (root / 'summary').as_posix()}
 
             def git(*args, cwd=source):
                 return subprocess.check_output(['git', *args], cwd=cwd, env=env,
@@ -40,9 +49,10 @@ class ScheduleSnapshotTests(unittest.TestCase):
             tags = []
             for attempt in ('1', '2'):
                 (root / 'output').write_text('')
-                subprocess.run(['bash', '-c', command], cwd=source,
+                execution = subprocess.run([bash, '-c', command], cwd=source,
                                env={**env, 'GITHUB_RUN_ATTEMPT': attempt},
-                               check=True, capture_output=True, text=True)
+                               capture_output=True, text=True)
+                self.assertEqual(execution.returncode, 0, execution.stdout + execution.stderr)
                 outputs = dict(line.split('=', 1) for line in (root / 'output').read_text().splitlines())
                 self.assertEqual(outputs['sha'], sha)
                 self.assertTrue(outputs['tag'].startswith('ci-'))
