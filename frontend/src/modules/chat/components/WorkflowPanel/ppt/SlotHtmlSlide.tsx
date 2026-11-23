@@ -1,6 +1,6 @@
 import { useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { PptPageEditContext } from './PptPageEditor';
-import { slideTextEditor } from './slideTextEdit';
+import { editSvgText, slideTextEditor } from './slideTextEdit';
 import { createPortal } from 'react-dom';
 import { HighlightOutlined } from '@ant-design/icons';
 import { ArtifactSourceButton } from '../ArtifactSourceButton';
@@ -164,6 +164,7 @@ const EDITOR_STYLE = `
   [data-selection-scope="group"],
   [data-lazymind-selection-group="true"],
   [data-lazymind-selection-target="visual"] { cursor: crosshair !important; }
+  [data-ppt-text-block], [data-ppt-text-block] * { cursor: text !important; }
   .lazymind-ppt-edit-hover-overlay,
   .lazymind-ppt-edit-group-hover-overlay,
   .lazymind-ppt-edit-selection-overlay,
@@ -498,10 +499,10 @@ export function SlotHtmlSlide({
   const savePage = pageEdit?.save;
   const textRuns = useRef<ReturnType<typeof slideTextEditor> | null>(null);
   const [textSelection, setTextSelection] = useState<{
-    frame: HTMLIFrameElement; node: HTMLElement; text: string; bounds: DOMRect;
+    frame: HTMLIFrameElement; node: HTMLElement; text: string;
   } | null>(null);
   // A manual page save reloads srcDoc. Reopen the selection on the saved revision.
-  const pendingTextAction = useRef<{zoomed: boolean; run: string; text: string; revision: number; slide: string} | null>(null);
+  const pendingTextAction = useRef<{zoomed: boolean; block: string; text: string; revision: number; slide: string} | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const frameCleanupRef = useRef(new Map<HTMLIFrameElement, () => void>());
@@ -661,8 +662,9 @@ export function SlotHtmlSlide({
     excerpt?: string,
   ) => {
     const candidates = candidateNodes.map((target): SelectedPptElement => {
-      const stableEl = selectionElementId(target);
-      const structuralPath = target.dataset.el ? null : pptDomPath(target);
+      const block = excerpt !== undefined ? textRuns.current?.selection(Number(target.dataset.pptTextBlock)) : undefined;
+      const stableEl = block ? '__lazymind_text_block' : selectionElementId(target);
+      const structuralPath = target.dataset.el || block ? null : pptDomPath(target);
       const computed = frame.contentWindow?.getComputedStyle(target);
       const computedStyle: PptHtmlComputedStyle | undefined = computed ? {
         font_size: computed.fontSize,
@@ -679,6 +681,7 @@ export function SlotHtmlSlide({
         node: target,
         target: {
           el: stableEl,
+          ...(block ? { text_block: block } : {}),
           index: dataElOccurrenceIndex(target),
           ...(structuralPath ? {
             dom_path: structuralPath,
@@ -737,6 +740,7 @@ export function SlotHtmlSlide({
       type: 'ppt_html',
       page,
       el: primary.el,
+      ...(primary.text_block ? { text_block: primary.text_block } : {}),
       ...(primary.index ? { index: primary.index } : {}),
       ...(primary.dom_path ? { dom_path: primary.dom_path } : {}),
       ...(primary.tag ? { tag: primary.tag } : {}),
@@ -774,12 +778,11 @@ export function SlotHtmlSlide({
     const runs = textRuns.current;
     let svgEditor: { label: HTMLElement; input: HTMLInputElement } | null = null;
     const textHost = (target: EventTarget | null) => svgEditor && target === svgEditor.input
-      ? svgEditor.label : (target as Element | null)?.closest?.<HTMLElement>('[data-ppt-text-run]');
+      ? svgEditor.label : (target as Element | null)?.closest?.<HTMLElement>('[data-ppt-text-block]');
     if (runs && updateText) {
-      doc.querySelectorAll<HTMLElement>('[data-ppt-text-run]').forEach(node => {
-        const text = runs.value(Number(node.dataset.pptTextRun));
-        if (text === undefined) return;
-        node.textContent = text;
+      doc.querySelectorAll<HTMLElement>('[data-ppt-text-block]').forEach(node => {
+        const content = runs.content(Number(node.dataset.pptTextBlock));
+        if (content !== undefined && node.innerHTML !== content) node.innerHTML = content;
         if (node.closest('svg')) {
           node.setAttribute('tabindex', '0');
           node.style.pointerEvents = 'all';
@@ -793,33 +796,21 @@ export function SlotHtmlSlide({
     if (pending && pending.slide === slideIdentity && slot.revision !== pending.revision
       && pending.zoomed === frame.classList.contains('slot-html-slide__frame--zoomed')) {
       pendingTextAction.current = null;
-      const node = doc.querySelector<HTMLElement>(`[data-ppt-text-run="${CSS.escape(pending.run)}"]`);
-      if (node?.textContent?.includes(pending.text)) {
-        selectElements(frame, [node.closest<HTMLElement>('[data-el]') ?? node], node, false, pending.text);
+      const node = doc.querySelector<HTMLElement>(`[data-ppt-text-block="${CSS.escape(pending.block)}"]`);
+      if (node?.textContent === pending.text) {
+        selectElements(frame, [node], node, false, pending.text);
       }
     }
     let clickedText: HTMLElement | null = null;
     const onTextSelection = () => {
-      if (svgEditor && doc.activeElement === svgEditor.input) {
-        const { input, label } = svgEditor;
-        const text = input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0) || input.value;
-        setTextSelection(text.trim() ? {frame, node: label, text, bounds: input.getBoundingClientRect()} : null);
-        return;
-      }
-      const sel = doc.getSelection();
-      const range = sel?.rangeCount && !sel.isCollapsed ? sel.getRangeAt(0) : null;
-      const text = sel?.toString() ?? '';
-      const ancestor = range?.commonAncestorContainer;
-      const element = ancestor?.nodeType === 1 ? ancestor as HTMLElement : ancestor?.parentElement;
-      const node = element?.closest<HTMLElement>('[data-ppt-text-run], [data-el]');
-      if (range && text.trim() && node && (node.matches('[data-ppt-text-run]') || node.querySelector('[data-ppt-text-run]'))) {
-        clickedText = null;
-        setTextSelection({frame, node, text, bounds: range.getBoundingClientRect()});
-      } else if (sel?.isCollapsed && clickedText && doc.activeElement === clickedText && clickedText.textContent?.trim()) {
-        setTextSelection({frame, node: clickedText, text: clickedText.textContent, bounds: clickedText.getBoundingClientRect()});
-      } else {
-        setTextSelection(current => current?.frame === frame ? null : current);
-      }
+      const range = doc.getSelection();
+      const anchor = range?.anchorNode;
+      const element = anchor?.nodeType === Node.ELEMENT_NODE ? anchor as Element : anchor?.parentElement;
+      const node = svgEditor?.label ?? textHost(element ?? null) ?? clickedText;
+      const active = node && (doc.activeElement === node || svgEditor?.label === node)
+        && (!range || range.isCollapsed || svgEditor || (range.focusNode && node.contains(range.focusNode)));
+      const text = node?.textContent ?? '';
+      setTextSelection(active && text.trim() ? {frame, node, text} : null);
     };
     // SVG text does not provide a native editing caret. Edit the label in an
     // HTML input over its rendered bounds, keeping SVG layout in the source.
@@ -851,14 +842,14 @@ export function SlotHtmlSlide({
     const onInput = (event: Event) => {
       const node = textHost(event.target);
       if (!runs || !node || !updateText) return;
-      const index = Number(node.dataset.pptTextRun);
-      const text = svgEditor && event.target === svgEditor.input ? svgEditor.input.value : node.innerText;
-      if (svgEditor?.label === node) node.textContent = text;
-      updateText('slide', runs.edit(index, text), runs.original);
+      const index = Number(node.dataset.pptTextBlock);
+      if (svgEditor?.label === node) editSvgText(node, svgEditor.input.value);
+      updateText('slide', runs.editBlock(index, node), runs.original);
+      onTextSelection();
       for (const other of frameCleanupRef.current.keys()) {
         if (other === frame) continue;
-        const peer = other.contentDocument?.querySelector<HTMLElement>(`[data-ppt-text-run="${index}"]`);
-        if (peer) peer.textContent = text;
+        const peer = other.contentDocument?.querySelector<HTMLElement>(`[data-ppt-text-block="${index}"]`);
+        if (peer) peer.innerHTML = node.innerHTML;
       }
     };
     let hoverCandidateKey = '';
@@ -1050,22 +1041,18 @@ export function SlotHtmlSlide({
 
   const renderTextAction = (zoomed: boolean) => {
     if (!editable || !textSelection || selection || editPreview || expanded !== zoomed) return null;
-    const { frame, node, text, bounds } = textSelection;
+    const { frame, node, text } = textSelection;
     if (!frame.isConnected || !node.isConnected || frame.classList.contains('slot-html-slide__frame--zoomed') !== zoomed) return null;
-    const scale = fittedFrame?.scale ?? 1;
-    const left = frame.offsetLeft + bounds.left * scale;
-    const top = frame.offsetTop + bounds.top * scale;
     return <button type='button' className='slot-html-slide__ai-action'
-      style={zoomed ? undefined : { left: `clamp(2px, ${left}px, 100% - 80px)`, top: top >= 36 ? top - 34 : frame.offsetTop + bounds.bottom * scale + 2 }}
       onMouseDown={event => event.preventDefault()} onClick={async () => {
-        if (pageEdit?.dirty && node.dataset.pptTextRun !== undefined) {
-          pendingTextAction.current = {zoomed, run: node.dataset.pptTextRun, text, revision: slot.revision, slide: slideIdentity};
+        if (pageEdit?.dirty && node.dataset.pptTextBlock !== undefined) {
+          pendingTextAction.current = {zoomed, block: node.dataset.pptTextBlock, text, revision: slot.revision, slide: slideIdentity};
           if (!await pageEdit.save()) pendingTextAction.current = null;
           return;
         }
         if (savePage && !await savePage()) return;
         setTextSelection(null);
-        selectElements(frame, [node.closest<HTMLElement>('[data-el]') ?? node], node, false, text);
+        selectElements(frame, [node], node, false, text);
       }}>
       <HighlightOutlined aria-hidden />AI 润色
     </button>;
@@ -1117,11 +1104,13 @@ export function SlotHtmlSlide({
       <div ref={viewportRef} className='slot-html-slide__viewport slot-html-slide__viewport--interactive'>
         {renderFrame(false)}
         <ArtifactSourceButton value={editPreview?.candidate_html || sourceHtml} overlay />
-        {renderTextAction(false)}
-        {allowExpand && (
-          <button type='button' className='slot-html-slide__expand-button'
-            onClick={() => setExpanded(true)} aria-label='放大幻灯片'>放大</button>
-        )}
+        <div className='slot-html-slide__preview-actions'>
+          {renderTextAction(false)}
+          {allowExpand && (
+            <button type='button' className='slot-html-slide__expand-button'
+              onClick={() => setExpanded(true)} aria-label='放大幻灯片'>放大</button>
+          )}
+        </div>
         {editable && !updateText && !editPreview && (
           <div className='slot-html-slide__edit-hint'>点击元素进行 AI 修改</div>
         )}
@@ -1156,7 +1145,7 @@ export function SlotHtmlSlide({
           baseRevision={localRevision}
           baseDraftVersion={localDraftVersion}
           selection={selection}
-          terminology='edit'
+          terminology={selection?.type === 'ppt_html' && selection.text_block ? 'polish' : 'edit'}
           interactionRootRef={hostRef}
           onClose={clearSelection}
           onApplied={() => undefined}

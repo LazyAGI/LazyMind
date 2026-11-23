@@ -477,7 +477,16 @@ export interface PptHtmlComputedStyle {
   font_weight?: string;
 }
 
+export interface PptTextBlock {
+  occurrence: number;
+  el: string;
+  tag: string;
+  segments: string[];
+  direct_index?: number;
+}
+
 export interface PptHtmlSelectionTarget {
+  text_block?: PptTextBlock;
   el: string;
   index?: number;
   dom_path?: number[];
@@ -492,6 +501,7 @@ export type RewriteSelection =
   | { type: 'markdown'; selected_text: string }
   | {
     type: 'ppt_html';
+    text_block?: PptTextBlock;
     page: number;
     el: string;
     /** 1-based occurrence among elements carrying the same data-el. */
