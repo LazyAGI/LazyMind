@@ -47,10 +47,7 @@ type PaperRef struct {
 	PaperURL          string   `json:"paper_url,omitempty"`
 	PDFURL            string   `json:"pdf_url,omitempty"`
 }
-type ContentPage struct {
-	Page int    `json:"page"`
-	Text string `json:"text"`
-}
+type ContentPage = doc.PDFTextPage
 
 func paperRef(work orm.AcademicWork) PaperRef {
 	p := PaperRef{PaperID: work.ID, Title: work.CanonicalTitle, Year: work.PublicationYear, Venue: work.Venue, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase}
@@ -227,6 +224,19 @@ func readKnownPaper(ctx context.Context, userID string, source paperSource, cont
 					break
 				}
 				token = result.NextPageToken
+			}
+		}
+		if source.UseReadingStructure && source.Hash != "" {
+			hash := documentFileHash(document)
+			if hash != source.Hash {
+				return nil, "", "", "", errors.New("selected PDF changed")
+			}
+			pages, err := doc.ReadPDFStructurePages(ctx, document, hash)
+			if err != nil {
+				return nil, "", "", "", err
+			}
+			if len(pages) > 0 {
+				return pages, "kb", hash, source.Paper.SourceVersion, nil
 			}
 		}
 		var ext struct {

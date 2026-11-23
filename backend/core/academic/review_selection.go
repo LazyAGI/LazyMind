@@ -8,6 +8,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/conversationgroup"
+	"lazymind/core/doc"
 	"lazymind/core/store"
 )
 
@@ -37,8 +38,24 @@ func reviewSelectionMaterials(r *http.Request, user, dataset string, papers []Wo
 			return nil, err
 		}
 		if status != "ready" {
+			structures, err := doc.ObservePDFStructures(r.Context(), store.DB(), dataset, []string{document.ID})
+			if err != nil {
+				return nil, err
+			}
+			structure := structures[document.ID]
+			switch {
+			case structure.Available:
+				status = "ready"
+			case structure.Status == "running" || structure.Status == "queued":
+				status, reason = "processing", ""
+			case structure.Status == "failed":
+				status, reason = "failed", structure.ErrorMessage
+			}
+		}
+		if status != "ready" {
 			item.Status, item.Reason = status, firstNonEmpty(reason, "论文尚未解析完成")
 		} else {
+			source.UseReadingStructure = true
 			content, err := ensurePaperContent(r.Context(), store.DB(), user, source.Paper.PaperID, source)
 			if err != nil {
 				return nil, err

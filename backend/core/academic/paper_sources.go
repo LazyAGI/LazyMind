@@ -34,6 +34,8 @@ type paperSource struct {
 	Revision   int64               `json:"revision,omitempty"`
 	IsSeed     bool                `json:"is_seed"`
 	Candidates []FulltextCandidate `json:"candidates,omitempty"`
+
+	UseReadingStructure bool `json:"use_reading_structure,omitempty"`
 }
 
 type paperDiscovery struct {
