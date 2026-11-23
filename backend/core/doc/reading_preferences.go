@@ -71,6 +71,14 @@ func ReadingPreferences(w http.ResponseWriter, r *http.Request) {
 		key := descriptor.ID
 		c := readingCapability{Capability: descriptor, Available: true, EffectiveMode: p.Modes[key]}
 		switch key {
+		case readingpolicy.PaperGuide:
+			if !PaperGuideEnabled() {
+				c.Available = false
+				c.UnavailableReason = "整篇导读功能未启用"
+			} else if modelErr != nil {
+				c.Available = false
+				c.UnavailableReason = "请配置可用的研读模型"
+			}
 		case readingpolicy.PDFParse:
 			if parseErr != nil {
 				c.Available = false

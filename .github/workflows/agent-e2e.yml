@@ -1,0 +1,143 @@
+name: LazyMind Agent E2E (macOS self-hosted)
+
+on:
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: Agent installed and authenticated on this runner
+        type: choice
+        options: [workbuddy, codex, deepseek-harness, all]
+        default: workbuddy
+      case:
+        description: Business workflow to run
+        type: choice
+        options: [meme, ppt, paper, all]
+        default: meme
+      approve_test_reviews:
+        description: Allow automatic approval for this run's fixed test fixtures
+        type: boolean
+        default: false
+      probe_only:
+        description: Only verify real Agent MCP connectivity without starting business workflows
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A local LazyMind account/runtime must not be driven by overlapping matrices.
+concurrency:
+  group: lazymind-agent-e2e
+  cancel-in-progress: false
+
+jobs:
+  agent-e2e:
+    runs-on: [self-hosted, macOS, lazymind-ci]
+    timeout-minutes: 300
+    env:
+      TEST_AGENT: ${{ inputs.agent }}
+      TEST_CASE: ${{ inputs.case }}
+      APPROVE_TEST_REVIEWS: ${{ inputs.approve_test_reviews }}
+      PROBE_ONLY: ${{ inputs.probe_only }}
+      LAZYMIND_CI_LLM_API_KEY: ${{ secrets.LAZYMIND_CI_LLM_API_KEY }}
+      LAZYMIND_CI_IMAGE_API_KEY: ${{ secrets.LAZYMIND_CI_IMAGE_API_KEY }}
+      LAZYMIND_CI_LLM_BASE_URL: ${{ vars.LAZYMIND_CI_LLM_BASE_URL }}
+      LAZYMIND_CI_LLM_MODEL: ${{ vars.LAZYMIND_CI_LLM_MODEL }}
+      LAZYMIND_CI_LLM_API: ${{ vars.LAZYMIND_CI_LLM_API }}
+      LAZYMIND_CI_IMAGE_BASE_URL: ${{ vars.LAZYMIND_CI_IMAGE_BASE_URL }}
+      LAZYMIND_CI_IMAGE_MODEL: ${{ vars.LAZYMIND_CI_IMAGE_MODEL }}
+      LAZYMIND_CI_IMAGE_API: ${{ vars.LAZYMIND_CI_IMAGE_API }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - name: Remind and check runner configuration
+        run: |
+          set -euo pipefail
+          echo '首次运行请阅读 scripts/agent_e2e.md；使用自己的 Key，并启动、登录 runner 上的 LazyMind。'
+          umask 077
+          TEST_ROOT="$RUNNER_TEMP/lazymind-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TEST_ROOT=$TEST_ROOT" >> "$GITHUB_ENV"
+          command -v uv
+          command -v go
+          command -v node
+          mkdir -p "$TEST_ROOT"
+          if [[ -n "$LAZYMIND_CI_LLM_API_KEY" || -n "$LAZYMIND_CI_IMAGE_API_KEY" ]]; then
+            cp scripts/agent_e2e.providers.example.json "$TEST_ROOT/providers.json"
+            LAZYMIND_CI_PROVIDERS_CONFIG="$TEST_ROOT/providers.json"
+            echo '模型认证来源：GitHub Actions Secrets。'
+          elif [[ -f "$HOME/.config/lazymind-ci/providers.json" ]]; then
+            LAZYMIND_CI_PROVIDERS_CONFIG="$HOME/.config/lazymind-ci/providers.json"
+            echo '模型认证来源：runner 本机仓库外的私有配置。'
+          else
+            cp scripts/agent_e2e.providers.example.json "$TEST_ROOT/providers.json"
+            LAZYMIND_CI_PROVIDERS_CONFIG="$TEST_ROOT/providers.json"
+          fi
+          echo "LAZYMIND_CI_PROVIDERS_CONFIG=$LAZYMIND_CI_PROVIDERS_CONFIG" >> "$GITHUB_ENV"
+          if [[ "$TEST_AGENT" == workbuddy || "$TEST_AGENT" == all ]]; then
+            config_case="$TEST_CASE"
+            if [[ "$PROBE_ONLY" == true ]]; then config_case=ppt; fi
+            uv run scripts/agent_e2e.py config-check --case "$config_case" --providers-config "$LAZYMIND_CI_PROVIDERS_CONFIG"
+          fi
+          uv run scripts/agent_e2e.py doctor --output "$TEST_ROOT/results"
+      - name: Prepare locked PPT exporter and Chromium
+        if: ${{ !inputs.probe_only && (inputs.case == 'ppt' || inputs.case == 'all') }}
+        run: |
+          set -euo pipefail
+          exporter="$GITHUB_WORKSPACE/workflows/ppt-workflow/runtime/scripts/export_pptx"
+          export PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Application Support/LazyMind/deps/editable-ppt/browsers"
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --prefix "$exporter" --omit=dev --ignore-scripts
+          node "$exporter/node_modules/playwright/cli.js" install chromium
+          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          cd "$exporter"
+          node --input-type=module <<'JS'
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch({ headless: true });
+          try {
+            const page = await browser.newPage();
+            await page.setContent('<h1>LazyMind CI browser check</h1>');
+            if (await page.locator('h1').textContent() !== 'LazyMind CI browser check') throw new Error('Chromium check failed');
+            console.log('Chromium ready:', browser.version());
+          } finally { await browser.close(); }
+          JS
+      - name: Run real Agent workflows
+        run: |
+          set -euo pipefail
+          options=(run --agent "$TEST_AGENT" --case "$TEST_CASE"
+            --timeout 1800
+            --providers-config "$LAZYMIND_CI_PROVIDERS_CONFIG"
+            --private-profile-root "$TEST_ROOT/private-profiles"
+            --output "$TEST_ROOT/results")
+          if [[ "$APPROVE_TEST_REVIEWS" == true ]]; then
+            options+=(--approve-test-reviews)
+          fi
+          if [[ "$PROBE_ONLY" == true ]]; then
+            options+=(--probe)
+          fi
+          uv run scripts/agent_e2e.py "${options[@]}"
+      - name: Write report
+        if: always()
+        run: |
+          if [[ -d "$TEST_ROOT/results" ]]; then
+            uv run scripts/agent_e2e.py report --output "$TEST_ROOT/results"
+          fi
+      - name: Upload selected reports only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lazymind-agent-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            ${{ env.TEST_ROOT }}/results/report.md
+            ${{ env.TEST_ROOT }}/results/junit.xml
+      - name: Remove temporary CI profiles and results
+        if: always()
+        run: |
+          if [[ "$TEST_ROOT" == "$RUNNER_TEMP"/lazymind-ci-* ]]; then
+            rm -rf -- "$TEST_ROOT"
+          fi

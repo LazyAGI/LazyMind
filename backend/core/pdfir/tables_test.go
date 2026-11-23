@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -123,6 +124,26 @@ func TestSingleCaptionOnMultipleTablesWithoutGeometryIsUnverified(t *testing.T) 
 	for _, b := range d.Blocks {
 		if b.Table != nil && (b.Table.Number != "" || len(b.Table.RelatedBlocks) != 0) {
 			t.Fatal("single caption assumed to belong to last table")
+		}
+	}
+}
+
+func TestParagraphCanCaptionOneTableAndMentionAnother(t *testing.T) {
+	source := `[
+        {"type":"table","page_idx":0,"table_caption":["Table 1: Compare Table 2"]},
+        {"type":"table","page_idx":1,"table_caption":["Table 2: Ablation"]},
+        {"type":"text","page_idx":0,"text":"<b>Table 1: Compare Table 2</b>"},
+        {"type":"text","page_idx":1,"text":"Table 2, Table 1 and Tab. 2."},
+        {"type":"formula","page_idx":1,"text":"Table 1"}
+    ]`
+	d, err := AdaptZIP(tableArchive(t, source, ""), "hash", "vlm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, relation := range []string{"caption", "mention"} {
+		want := []TableRelation{{d.Blocks[2].ID, relation}, {d.Blocks[3].ID, "mention"}}
+		if got := d.Blocks[i].Table.RelatedBlocks; !slices.Equal(got, want) {
+			t.Errorf("table %d: got %+v, want %+v", i+1, got, want)
 		}
 	}
 }

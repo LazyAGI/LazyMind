@@ -42,17 +42,24 @@ type Block struct {
 	Text  string    `json:"text,omitempty"`
 }
 type Document struct {
-	ProjectionVersion int      `json:"projection_version,omitempty"`
-	Version           int      `json:"version"`
-	SourceSHA256      string   `json:"source_sha256"`
-	Parser            Parser   `json:"parser"`
-	CoordinateSpace   string   `json:"coordinate_space"`
-	Pages             []Page   `json:"pages"`
-	Blocks            []Block  `json:"blocks"`
-	Warnings          []string `json:"warnings,omitempty"`
+	Precision         *SourcePrecision `json:"source_precision,omitempty"`
+	ProjectionVersion int              `json:"projection_version,omitempty"`
+	Version           int              `json:"version"`
+	SourceSHA256      string           `json:"source_sha256"`
+	Parser            Parser           `json:"parser"`
+	CoordinateSpace   string           `json:"coordinate_space"`
+	Pages             []Page           `json:"pages"`
+	Blocks            []Block          `json:"blocks"`
+	Warnings          []string         `json:"warnings,omitempty"`
 }
 
-func Digest(v string) string { s := sha256.Sum256([]byte(v)); return hex.EncodeToString(s[:]) }
+func Digest(v string) string { return digestBytes([]byte(v)) }
+
+func digestBytes(v []byte) string {
+	sum := sha256.Sum256(v)
+	return hex.EncodeToString(sum[:])
+}
+
 func SourceHash(p string) (string, error) {
 	f, e := os.Open(p)
 	if e != nil {
@@ -76,65 +83,103 @@ func bounded(r io.Reader, n int64) ([]byte, error) {
 	}
 	return b, e
 }
-func AdaptZIP(raw []byte, hash, model string) (Document, error) {
-	d := Document{Version: 1, SourceSHA256: hash, Parser: Parser{"mineru", model}, CoordinateSpace: "normalized_top_left", Pages: []Page{}, Blocks: []Block{}}
+
+type archivePayload struct {
+	layout []byte
+	items  []contentItem
+}
+
+func readArchiveMember(file *zip.File) ([]byte, error) {
+	reader, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return bounded(reader, maxJSONBytes)
+}
+
+func readArchivePayload(raw []byte, requireLayout bool) (archivePayload, error) {
+	var payload archivePayload
 	if int64(len(raw)) > MaxArchiveBytes {
-		return d, errors.New("archive too large")
+		if requireLayout {
+			return payload, precisionError("archive size limit")
+		}
+		return payload, errors.New("archive too large")
 	}
-	z, e := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if e != nil {
-		return d, e
+	z, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return payload, err
 	}
-	var content, layout []byte
+	if requireLayout && len(z.File) > 4096 {
+		return payload, precisionError("archive member limit")
+	}
+	var content, layout *zip.File
 	layoutCount := 0
 	for _, f := range z.File {
 		if path.IsAbs(f.Name) || strings.Contains(f.Name, "\\") || strings.Contains("/"+f.Name, "/../") {
-			return d, errors.New("unsafe archive member")
+			if requireLayout {
+				return payload, precisionError("unsafe member")
+			}
+			return payload, errors.New("unsafe archive member")
 		}
 		if path.Base(f.Name) == "layout.json" || strings.HasSuffix(f.Name, "_middle.json") {
 			layoutCount++
-			if layoutCount == 1 {
-				r, err := f.Open()
-				if err == nil {
-					layout, err = bounded(r, maxJSONBytes)
-					if err != nil {
-						layout = nil
-					}
-					r.Close()
-				}
-			} else {
-				layout = nil
+			layout = f
+			if requireLayout && layoutCount > 1 {
+				return payload, precisionError("ambiguous layout")
 			}
 		}
 		if strings.HasSuffix(f.Name, "_content_list.json") {
 			if content != nil {
-				return d, errors.New("ambiguous content lists")
+				return payload, errors.New("ambiguous content lists")
 			}
-			r, e := f.Open()
-			if e != nil {
-				return d, e
+			content = f
+		}
+	}
+	if requireLayout && layoutCount == 0 {
+		return payload, precisionError("missing retained layout")
+	}
+	if layoutCount == 1 {
+		payload.layout, err = readArchiveMember(layout)
+		if err != nil {
+			if requireLayout {
+				return payload, err
 			}
-			content, e = bounded(r, maxJSONBytes)
-			r.Close()
-			if e != nil {
-				return d, e
-			}
+			payload.layout = nil
 		}
 	}
 	if content == nil {
-		return d, errors.New("missing content list")
+		return payload, errors.New("missing content list")
 	}
-	var items []contentItem
+	data, err := readArchiveMember(content)
+	if err != nil {
+		return payload, err
+	}
+	err = json.Unmarshal(data, &payload.items)
+	return payload, err
+}
 
-	if e = json.Unmarshal(content, &items); e != nil {
-		return d, e
+func baseDocument(hash, model string) Document {
+	return Document{Version: 1, SourceSHA256: hash, Parser: Parser{"mineru", model}, CoordinateSpace: "normalized_top_left", Pages: []Page{}, Blocks: []Block{}}
+}
+
+func AdaptZIP(raw []byte, hash, model string) (Document, error) {
+	d := baseDocument(hash, model)
+	payload, err := readArchivePayload(raw, false)
+	if err != nil {
+		return d, err
 	}
+	return adaptPayload(d, payload)
+}
+
+func adaptPayload(d Document, payload archivePayload) (Document, error) {
+	items := payload.items
 	pages := map[int]bool{}
 	for i, v := range items {
 		if v.Page == nil || *v.Page < 0 || *v.Page > 100000 {
 			return d, errors.New("invalid page index")
 		}
-		b := Block{ID: Digest(fmt.Sprintf("%s:%s:%s:%d", hash, Revision, model, i))[:24], Type: v.Type, Page: *v.Page, Text: v.Text}
+		b := Block{ID: Digest(fmt.Sprintf("%s:%s:%s:%d", d.SourceSHA256, Revision, d.Parser.Model, i))[:24], Type: v.Type, Page: *v.Page, Text: v.Text}
 		pages[b.Page] = true
 		if b.Type == "equation" || b.Type == "formula" {
 			b.Type = "formula"
@@ -167,7 +212,8 @@ func AdaptZIP(raw []byte, hash, model string) (Document, error) {
 		d.Pages = append(d.Pages, Page{Index: p})
 	}
 	sort.Slice(d.Pages, func(i, j int) bool { return d.Pages[i].Index < d.Pages[j].Index })
-	projectTables(&d, items, layout)
-	projectImages(&d, items, layout)
+	captions := layoutCaptions(payload.layout)
+	projectTables(&d, items, captions.tables)
+	projectImages(&d, items, captions.images)
 	return d, nil
 }

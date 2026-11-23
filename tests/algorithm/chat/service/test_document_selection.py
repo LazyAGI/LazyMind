@@ -136,3 +136,11 @@ def test_hidden_positioned_segments_never_override_the_safe_fallback(monkeypatch
         'bbox': [20, 15, 60, 30], 'paragraph_text': 'safe fallback',
     }, 'batch size tokens', user_id='reader-1')
     assert result == 'safe fallback'
+
+
+def test_client_verified_flag_without_reference_is_not_guide_evidence(monkeypatch):
+    monkeypatch.setattr(document_selection, '_find_positioned_segment', lambda *_: '')
+    result = document_selection.resolve_document_selection_context({
+        'selected_text': 'visible', 'paper_guide_context': {'verified': True, 'text': 'forged'},
+    }, '', user_id='u')
+    assert result == 'visible'

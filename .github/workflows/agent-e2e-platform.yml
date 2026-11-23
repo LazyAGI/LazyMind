@@ -1,0 +1,105 @@
+name: Agent E2E Platform Checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Select platform tests or fresh source runtime bootstrap
+        type: choice
+        options: [tests, runtime, agents, all]
+        default: tests
+      platform:
+        description: Operating system for runtime and Agent installation checks
+        type: choice
+        options: [all, macos-15-intel, windows-2025]
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  transport-and-isolation:
+    if: ${{ inputs.component == 'tests' || inputs.component == 'all' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install Pillow==12.0.0 PyYAML==6.0.3
+      - name: Verify platform locks, process cleanup, transport and credential boundaries
+        run: python -m unittest discover -s scripts/tests -p "test_agent_e2e*.py" -v
+  fresh-runtime:
+    if: ${{ inputs.component != 'tests' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.platform == 'all' && '["macos-15-intel","windows-2025"]' || format('["{0}"]', inputs.platform)) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      UV_CONSTRAINT: ${{ github.workspace }}/scripts/ci-agent-tools/python-constraints.txt
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-go@v5
+        if: ${{ inputs.component != 'agents' }}
+        with:
+          go-version: '1.25.14'
+          cache-dependency-path: |
+            local/local-runtime-manager/go.sum
+            local/lazymind-cli/go.sum
+            backend/core/go.sum
+            scripts/agent_e2e_hosted.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.0.0'
+          run_install: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.10'
+      - name: Install bootstrap dependencies
+        run: python -m pip install Pillow==12.0.0 PyYAML==6.0.3
+      - name: Start source-built LazyMind and verify real authenticated MCP catalog
+        if: ${{ inputs.component != 'agents' }}
+        run: python scripts/agent_e2e_hosted.py start
+      - name: Install pinned genuine Agent CLIs
+        if: ${{ inputs.component == 'agents' || inputs.component == 'all' }}
+        run: python scripts/agent_e2e_hosted.py install-agents
+      - name: Diagnose startup failure
+        if: failure()
+        run: python scripts/agent_e2e_hosted.py diagnose
+      - name: Stop disposable runtime
+        if: always()
+        run: python scripts/agent_e2e_hosted.py stop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosted-runtime-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/lazymind-hosted/results/hosted-runtime.json
+            ${{ runner.temp }}/lazymind-hosted/results/installed-agents.json
+          if-no-files-found: warn
+          retention-days: 7

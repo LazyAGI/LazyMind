@@ -49,6 +49,7 @@ import type { ExcelSelection } from "./renderers/render-excel";
 export interface FileViewerRef {
   exportImagePdf: () => Promise<void>;
   getPdfData: () => ArrayBuffer | null;
+  getPdfVersion: () => object | null;
 }
 
 interface FileViewerProps {
@@ -60,6 +61,7 @@ interface FileViewerProps {
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   pdfNoteHighlights?: PdfNoteHighlight[];
   onPdfNoteHighlightClick?: (id:string) => void;
+  pdfHeaderCenter?: ReactNode;
   pdfHeaderStart?: ReactNode;
   pdfHeaderEnd?: ReactNode | ((tools: ReactNode) => ReactNode);
   onPdfStudyOpenChange?: (open: boolean) => void;
@@ -67,7 +69,7 @@ interface FileViewerProps {
   onPdfOutlineChange?: (outline: import("@/modules/knowledge/api/pdfOutline").PdfNativeOutlineItem[]) => void;
   pdfNavigateTo?: {id: string; requestId: number};
   pdfNavigateToPage?: {page: number; requestId: number};
-  pdfNavigateToPosition?: {page:number;progress:number;requestId:number};
+  pdfNavigateToPosition?: {page:number;progress:number;requestId:number;sourceLocator?:boolean;bbox?:number[]};
   pdfIRTarget?: import("@/modules/knowledge/api/pdfIR").PdfIRTarget;
   renderMarkdown?: (markdown: string) => ReactNode;
   data?: ArrayBuffer;
@@ -428,6 +430,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             pdfToolbarMode={props.pdfToolbarMode}
             pdfSelectableText={props.pdfSelectableText}
             pdfHeaderStart={props.pdfHeaderStart}
+            pdfHeaderCenter={props.pdfHeaderCenter}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
             onStudyOpenChange={props.onPdfStudyOpenChange}
@@ -565,6 +568,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     props.pdfNoteHighlights,
     props.onPdfNoteHighlightClick,
     props.pdfHeaderStart,
+    props.pdfHeaderCenter,
     props.pdfHeaderEnd,
     props.file,
     props.fileName,
@@ -614,6 +618,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     () => ({
       exportImagePdf,
       getPdfData: () => fileData && fileType === "pdf" ? fileData.slice(0) : null,
+      getPdfVersion: () => fileType === "pdf" ? fileData ?? null : null,
     }),
     [exportImagePdf, fileData, fileType],
   );
@@ -623,6 +628,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       {fileType === "pdf" && (loading || !fileData || !pdfPreviewData) && (props.pdfHeaderStart || props.pdfHeaderEnd) && <div className="pdf-reader-workspace" style={{flexShrink:0}}>
         <nav className="pdf-reader-modebar pdf-reader-header" aria-label={t("pdfReader.reading")}>
           <div className="pdf-reader-header-start">{props.pdfHeaderStart}</div>
+          {props.pdfHeaderCenter && <div className="paper-mode-switch-slot">{props.pdfHeaderCenter}</div>}
           <div />
           <div className="pdf-reader-header-end">{typeof props.pdfHeaderEnd === "function" ? props.pdfHeaderEnd(null) : props.pdfHeaderEnd}</div>
         </nav>

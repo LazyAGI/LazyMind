@@ -1,0 +1,866 @@
+import { v4 as uuidv4 } from "uuid";
+import { downloadPaperGuide } from "./PaperGuide/guideDownload";
+import GuideSectionIcon from "./PaperGuide/GuideSectionIcon";
+import GuideGenerationProgress, { GuideSkeleton } from "./PaperGuide/GuideGenerationProgress";
+import { BgColorsOutlined, DownloadOutlined, DownOutlined, MoonOutlined, ReloadOutlined, SunOutlined } from "@ant-design/icons";
+import { Button, Dropdown, message, Modal, Popover, Select } from "antd";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useTranslation } from "react-i18next";
+import {
+  extractErrorCode,
+  getLocalizedErrorMessage,
+} from "@/components/request";
+import type {
+  PaperGuideEvidence,
+  PaperGuideEvidenceResponse,
+  PaperGuideProgressRequest,
+  PaperGuideBlock,
+} from "@/api/generated/core-client";
+import {
+  getReadingPreferences,
+  type ReadingProviderSelection,
+} from "../api/readingPreparation";
+import { usePaperReaderSession } from "../api/paperReader";
+import { paperGuideApi } from "../api/paperGuide";
+import { usePaperGuide } from "./PaperGuide/usePaperGuide";
+import { recordGuideLatency } from "./PaperGuide/readingLatency";
+import { isGuideRunActive } from "./PaperGuide/guideRunState";
+import PaperGuideReader from "./PaperGuide/PaperGuideReader";
+import PaperGuideEvidencePreview from "./PaperGuide/PaperGuideEvidence";
+import PaperGuideAsset, {
+  type GuidePreview,
+} from "./PaperGuide/PaperGuideAsset";
+import { useGuideSourcePreview } from "./PaperGuide/useGuideSourcePreview";
+import type { PdfIRDocument } from "../api/pdfIR";
+
+const languageOptions = [{ value: "zh", label: "简体中文" }, { value: "en", label: "English" }];
+
+const budgetStopCode = "paper_guide_budget_exhausted";
+const qualityStopCode = "paper_guide_review_required";
+const regenerationCode = "paper_guide_regeneration_required";
+
+const blockedResumeReasons = new Map<string, typeof budgetStopCode | typeof qualityStopCode | typeof regenerationCode>([
+  ["2004404", budgetStopCode], [budgetStopCode, budgetStopCode],
+  ["2004411", qualityStopCode], [qualityStopCode, qualityStopCode],
+  ["2004413", regenerationCode], [regenerationCode, regenerationCode],
+] as const);
+
+function guideRequestId(error: unknown): string | undefined {
+  const response = (error as { response?: {
+    data?: { data?: { request_id?: unknown } };
+    headers?: Record<string, unknown>;
+  } } | undefined)?.response;
+  const id = response?.data?.data?.request_id ?? response?.headers?.["x-request-id"];
+  return typeof id === "string" && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id) ? id : undefined;
+}
+
+interface Props {
+  dataset: string;
+  document: string;
+  title: string;
+  eligible: boolean;
+  source: ReactNode | ((readingModeSwitch: ReactNode) => ReactNode);
+  auxiliary: ReactNode;
+  dock: ReactNode;
+  divider?: ReactNode;
+  back: ReactNode;
+  auxiliaryOpen: boolean;
+  auxiliaryTab: string;
+  onAuxiliary: (tab: string | undefined) => void;
+  onNavigate: (e: PaperGuideEvidence) => void;
+  onReturnSource?: () => void;
+  getPdfData: () => ArrayBuffer | null | Promise<ArrayBuffer>;
+  getPdfVersion?: () => object | null;
+  ir?: PdfIRDocument;
+  onModeChange?: (guide: boolean) => void;
+}
+export default function PaperReadingWorkspace(p: Props) {
+  const { i18n } = useTranslation();
+  const zh = i18n.language.startsWith("zh");
+  const account = usePaperReaderSession();
+  const [exporting, setExporting] = useState(false);
+  const [night, setNight] = useState(() => localStorage.getItem("paper-guide-night") === "true");
+  const [paper, setPaper] = useState(() => {
+    const saved = localStorage.getItem("paper-guide-paper");
+    return saved === "cream" || saved === "sage" ? saved : "white";
+  });
+  const lightAction = night ? (zh ? "开灯" : "Lights on") : (zh ? "关灯" : "Lights off");
+  const paperLabel = zh ? "页面底色" : "Page color";
+  const languageKey = `paper-guide-language/${account}/${p.dataset}/${p.document}`;
+  const [languageChoice, setLanguageChoice] = useState<{ key: string; value: "zh" | "en" }>();
+  const savedLanguage = localStorage.getItem(languageKey);
+  const language = languageChoice?.key === languageKey ? languageChoice.value
+    : savedLanguage === "zh" || savedLanguage === "en" ? savedLanguage : zh ? "zh" : "en";
+  const [draftLanguage, setDraftLanguage] = useState<{ key: string; value: "zh" | "en" }>();
+  const generationLanguage = draftLanguage?.key === languageKey ? draftLanguage.value : language;
+  const selectLanguage = (value: "zh" | "en") => {
+    setLanguageChoice({ key: languageKey, value });
+    setDraftLanguage(undefined);
+    localStorage.setItem(languageKey, value);
+    setModeChoice({ key: storageKey, value: "article" });
+    localStorage.setItem(storageKey, "article");
+  };
+  const guide = usePaperGuide(p.dataset, p.document, language, p.eligible);
+  const storageKey = `paper-guide-mode/${guide.identity}/${p.dataset}/${p.document}`;
+  const [modeChoice, setModeChoice] = useState<{ key: string; value: string }>();
+  const savedMode = modeChoice?.key === storageKey ? modeChoice.value : localStorage.getItem(storageKey);
+  const [mountedSourceKey, setMountedSourceKey] = useState<string>();
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [width, setWidth] = useState(0);
+  const container = useRef<HTMLDivElement>(null);
+  const [model, setModel] = useState("");
+  const [regenerateOpen, setRegenerateOpen] = useState(false);
+  const [models, setModels] = useState<ReadingProviderSelection>();
+  const [busy, setBusy] = useState(false);
+  const [acceptedStage, setAcceptedStage] = useState("");
+  const firstRead = useRef<{ key: string; revision: string; started: number; outline: boolean }>();
+  const [pendingGeneration, setPendingGeneration] = useState(false);
+  const [error, setError] = useState<{ message: string; requestId?: string }>();
+  const candidate = guide.status?.candidate_revision || guide.revision;
+  const mutationScope = `${storageKey}/${language}/${candidate?.id || ""}`;
+  const latestMutationScope = useRef(mutationScope);
+  latestMutationScope.current = mutationScope;
+  const mutationSequence = useRef(0);
+  const [rejectedResume, setRejectedResume] = useState<{
+    scope: string;
+    reason: typeof qualityStopCode | typeof regenerationCode | typeof budgetStopCode;
+    requestId?: string;
+  }>();
+  const resumeRejection =
+    rejectedResume?.scope === mutationScope ? rejectedResume.reason : undefined;
+  const requiresRegeneration =
+    candidate?.run.error_code === regenerationCode ||
+    resumeRejection === regenerationCode;
+  const budgetBlocked = candidate?.run.resume_block_reason === budgetStopCode ||
+    candidate?.run.error_code === budgetStopCode || resumeRejection === budgetStopCode;
+  const qualityBlocked =
+    candidate?.run.resume_block_reason === qualityStopCode ||
+    candidate?.run.error_code === qualityStopCode ||
+    resumeRejection === qualityStopCode;
+  useEffect(() => {
+    mutationSequence.current += 1;
+    setRejectedResume(undefined);
+    setError(undefined);
+    setBusy(false);
+    setPendingGeneration(false);
+  }, [mutationScope]);
+  const [evidence, setEvidence] = useState<PaperGuideEvidenceResponse>();
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const evidenceAbort = useRef<AbortController>();
+  const evidenceOpener = useRef<HTMLButtonElement>();
+  const latest = useRef("");
+  latest.current = `${storageKey}/${language}`;
+  const progressTimer = useRef<ReturnType<typeof setTimeout>>();
+  const opened = useRef(false);
+  const target = useMemo(
+    () => ({ dataset: p.dataset, document: p.document, language }),
+    [p.dataset, p.document, language],
+  );
+  const localProgress = useRef<PaperGuideProgressRequest>();
+  const canEnter = !!(
+    guide.status?.enabled ||
+    (guide.status?.can_read &&
+      (guide.status.published_revision || guide.status.candidate_revision))
+  );
+  const awaitingGuideStatus = !guide.status && !guide.error;
+  const readErrorStatus = (guide.error as { response?: { status?: number } } | undefined)?.response?.status;
+  const initialReadFailed = !guide.status && !!guide.error && readErrorStatus !== 403 && readErrorStatus !== 404;
+  const restoringGuide = (awaitingGuideStatus || initialReadFailed) && savedMode === "article";
+  const showGuide = p.eligible && (restoringGuide || (canEnter &&
+    (savedMode === "article" || (!savedMode && !!guide.status?.published_revision))));
+  useEffect(() => {
+    if (showGuide && !savedMode) localStorage.setItem(storageKey, "article");
+  }, [showGuide, savedMode, storageKey]);
+  const revisionId = guide.revision?.id;
+  const evidenceCurrent = !!(
+    evidence?.source_current && guide.revision?.source_current
+  );
+  useEffect(() => {
+    setSourceOpen(false);
+    setModel("");
+    setRegenerateOpen(false);
+    setModels(undefined);
+    localProgress.current = undefined;
+    opened.current = false;
+    return () => {
+      evidenceAbort.current?.abort();
+      clearTimeout(progressTimer.current);
+    };
+  }, [storageKey, language]);
+  useEffect(() => {
+    p.onModeChange?.(showGuide);
+  }, [showGuide, p.onModeChange]);
+  useEffect(() => {
+    if (!container.current) return;
+    const observer = new ResizeObserver((entries) =>
+      setWidth(entries[0].contentRect.width),
+    );
+    observer.observe(container.current);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!showGuide || opened.current) return;
+    opened.current = true;
+    p.onAuxiliary(undefined);
+    void getReadingPreferences()
+      .then((v) => {
+        if (latest.current === `${storageKey}/${language}`)
+          setModels(v.provider_selections?.study);
+      })
+      .catch(() => {});
+  }, [showGuide, storageKey, language]);
+  const setReadingMode = (value: string) => {
+    setModeChoice({ key: storageKey, value });
+    localStorage.setItem(storageKey, value);
+    setSourceOpen(false);
+    if (value === "article") p.onAuxiliary(undefined);
+  };
+  const run = async (
+    action: "generate" | "regenerate" | "cancel" | "resume",
+  ) => {
+    const sequence = ++mutationSequence.current;
+    const isCurrent = () =>
+      latestMutationScope.current === mutationScope &&
+      mutationSequence.current === sequence;
+    const clickedAt = performance.now();
+    setAcceptedStage("");
+    setBusy(true);
+    if (action === "generate" || action === "regenerate" || action === "resume") setPendingGeneration(true);
+    setError(undefined);
+    try {
+      if (action === "generate" || action === "regenerate") {
+        const accepted = await paperGuideApi.generate({ ...target, language: generationLanguage }, {
+          language: generationLanguage,
+          expected_source_hash: guide.status?.source_sha256 || "",
+          idempotency_key: uuidv4(),
+          regenerate: action === "regenerate",
+          ...(action === "regenerate" && model ? { model_ref: model } : {}),
+        });
+        if (isCurrent() && accepted?.id) {
+          setAcceptedStage(accepted.run?.stage || "");
+          if (action === "generate") {
+            firstRead.current = { key: storageKey, revision: accepted.id, started: clickedAt, outline: false };
+          }
+        }
+      } else if (candidate) {
+        await paperGuideApi[action](target, candidate.id);
+      }
+      if (isCurrent()) {
+        if ((action === "generate" || action === "regenerate") && generationLanguage !== language) {
+          setEvidence(undefined);
+          evidenceAbort.current?.abort();
+          selectLanguage(generationLanguage);
+        } else await guide.refresh();
+      }
+    } catch (e) {
+      if (isCurrent()) {
+        setPendingGeneration(false);
+        const code = action === "resume" ? extractErrorCode(e) : undefined;
+        const reason = code ? blockedResumeReasons.get(code) : undefined;
+        if (reason) {
+          // Keep this revision blocked if the next status fetch fails or is stale.
+          setRejectedResume({ scope: mutationScope, reason, requestId: guideRequestId(e) });
+          void guide.refresh().catch(() => {});
+        } else {
+          setError({ message: getLocalizedErrorMessage(e), requestId: guideRequestId(e) });
+        }
+      }
+    } finally {
+      if (isCurrent()) setBusy(false);
+    }
+  };
+  const requestEvidence = useCallback(
+    async (id: string) => {
+      if (!revisionId) return;
+      const key = `${storageKey}/${language}`;
+      evidenceAbort.current?.abort();
+      const abort = new AbortController();
+      evidenceAbort.current = abort;
+      setEvidence(undefined);
+      setEvidenceLoading(true);
+      try {
+        const e = await paperGuideApi.evidence(
+          target,
+          revisionId,
+          id,
+          abort.signal,
+        );
+        if (!abort.signal.aborted && latest.current === key) setEvidence(e);
+      } catch (e) {
+        if (!abort.signal.aborted && latest.current === key)
+          setError({ message: getLocalizedErrorMessage(e), requestId: guideRequestId(e) });
+      } finally {
+        if (!abort.signal.aborted && latest.current === key)
+          setEvidenceLoading(false);
+      }
+    },
+    [storageKey, language, target, revisionId],
+  );
+  const openEvidence = (id: string, opener: HTMLButtonElement) => {
+    evidenceOpener.current = opener;
+    void requestEvidence(id);
+  };
+  const closeEvidence = useCallback(() => {
+    evidenceAbort.current?.abort();
+    setEvidence(undefined);
+    setEvidenceLoading(false);
+  }, []);
+  useEffect(() => {
+    evidenceOpener.current = undefined;
+    closeEvidence();
+  }, [storageKey, target, revisionId, showGuide, closeEvidence]);
+  const currentSourceHash = p.ir?.source_sha256 ?? guide.status?.source_sha256;
+  const { preview, sourceVerified, verifyCurrentSource } = useGuideSourcePreview(
+    `${storageKey}/${revisionId ?? ""}`,
+    guide.revision?.source_sha256,
+    !!guide.revision?.source_current,
+    currentSourceHash,
+    p.getPdfData,
+    p.getPdfVersion,
+  );
+  const saveProgress = (progress: PaperGuideProgressRequest) => {
+    localProgress.current = progress;
+    clearTimeout(progressTimer.current);
+    progressTimer.current = setTimeout(() => {
+      void paperGuideApi.progress(target, progress).catch(() => {});
+    }, 700);
+  };
+  const sourceVisible = !showGuide || sourceOpen;
+  useEffect(() => {
+    if (sourceVisible) setMountedSourceKey(storageKey);
+  }, [sourceVisible, storageKey]);
+  const mountSource = sourceVisible || mountedSourceKey === storageKey;
+  const auxVisible = mountSource && p.auxiliaryOpen && !sourceOpen;
+  const dual = width >= 1100;
+  const articleVisible = showGuide && (dual || (!sourceOpen && !auxVisible));
+  useEffect(() => {
+    const timing = firstRead.current;
+    const revision = guide.revision;
+    if (!articleVisible || !timing || timing.key !== storageKey || timing.revision !== revision?.id || !revision) return;
+    const recordVisible = () => {
+      if (document.visibilityState === "hidden" || firstRead.current !== timing) return;
+      if (!timing.outline && revision.plan?.sections.length) {
+        recordGuideLatency("outline", timing.started);
+        timing.outline = true;
+      }
+      if (revision.sections.some(section => section.blocks.some(block => block.kind === "paragraph" && block.text.trim()))) {
+        recordGuideLatency("firstParagraph", timing.started);
+        firstRead.current = undefined;
+      }
+    };
+    recordVisible();
+    document.addEventListener("visibilitychange", recordVisible);
+    return () => document.removeEventListener("visibilitychange", recordVisible);
+  }, [articleVisible, guide.revision, storageKey]);
+  const stage = candidate?.run.stage;
+  const resumable = !!stage && ["paused", "failed", "canceled"].includes(stage);
+  const active = isGuideRunActive(stage);
+  useEffect(() => { if (active || resumable || stage === "completed" || stage === "source_changed") setPendingGeneration(false); }, [active, resumable, stage]);
+  const generating = active || pendingGeneration;
+  const submittingFirstGuide = pendingGeneration && !candidate && !acceptedStage;
+  const generationClock = useRef<{ active: boolean; startedAt: number; generationStartedAt?: number }>({ active: false, startedAt: Date.now() });
+  if (generating && !generationClock.current.active) {
+    generationClock.current.startedAt = Date.now();
+    generationClock.current.generationStartedAt = undefined;
+  }
+  if (generating && active && stage && stage !== "queued" && generationClock.current.generationStartedAt === undefined) {
+    generationClock.current.generationStartedAt = Date.now();
+  }
+  generationClock.current.active = generating;
+  const errorNames = [
+    "source_changed",
+    "preparation_required",
+    "model_unavailable",
+    "budget_exhausted",
+    "context_too_long",
+    "invalid_evidence",
+    "material_insufficient",
+    "permission_revoked",
+    "conflict",
+    "disabled",
+    "review_required",
+    "generation_failed",
+    "regeneration_required",
+    "model_timeout",
+    "model_request_failed",
+  ];
+  const reasonText = (value?: string) => {
+    if (!value) return "";
+    if(value === "paper_guide_source_precision_unavailable") return zh
+      ? "无法从保留的解析文件核实来源物理页，暂不能生成新导读。原文及历史导读仍可阅读。"
+      : "Source pages could not be verified from the retained parse archive. New guides are unavailable; the original paper and historical guides remain readable.";
+    const index = errorNames.indexOf(value.replace(/^paper_guide_/, ""));
+    return index >= 0
+      ? i18n.t(`errors.${2004401 + index}`)
+      : zh
+        ? "暂时无法完成，请重试或调整模型。"
+        : "Unable to complete this run. Retry or choose another model.";
+  };
+  const qualityHelp = zh
+    ? "当前版本无法继续生成，请重新生成导读。"
+    : "This revision can’t continue. Generate a new guide.";
+  const runReason = budgetBlocked ? reasonText(budgetStopCode) : requiresRegeneration
+    ? reasonText(regenerationCode)
+    : qualityBlocked
+      ? qualityHelp
+      : reasonText(candidate?.run.error_code);
+  const labels: Record<string, string> = zh
+    ? {
+        queued: "正在排队",
+        waiting_source: "正在准备论文结构",
+        reading: "正在读取论文",
+        planning: "正在规划章节",
+        checking: "正在检查章节格式",
+        analyzing: "正在梳理论文主线与依据",
+        writing: "正在并行撰写章节",
+        reviewing: "正在核对全文依据",
+        completed: "导读已就绪",
+        paused: "生成已中断，已完成内容保留",
+        canceled: "已取消后续生成，已完成内容保留",
+        failed: "生成失败，已完成内容保留",
+        source_changed: "原文已变化，请基于新原文生成",
+      }
+    : {
+        queued: "Queued",
+        waiting_source: "Preparing the paper structure",
+        reading: "Reading the paper",
+        planning: "Planning chapters",
+        checking: "Checking chapter format",
+        analyzing: "Tracing the argument and evidence",
+        writing: "Writing chapters in parallel",
+        reviewing: "Reviewing the complete guide",
+        completed: "Guide ready",
+        paused: "Generation interrupted; published passages remain available",
+        canceled: "Generation canceled; published passages remain available",
+        failed: "Generation failed; published passages remain available",
+        source_changed: "Source changed; generate from the new paper",
+      };
+  function openAssetPage(evidence: PaperGuideEvidence) {
+    void verifyCurrentSource().then(current => {
+      if (!current?.()) return;
+      setSourceOpen(true);
+      p.onAuxiliary(undefined);
+      p.onNavigate(evidence);
+    }).catch(() => {});
+  }
+  function renderAsset(block: PaperGuideBlock) {
+    return (
+      <GuideInlineAsset
+        key={`${guide.revision?.id}/${block.id}`}
+        compactCaption={guide.revision?.plan?.layout === "flashpapers"}
+        captionText={block.kind === "figure" ? block.text : undefined}
+        id={block.asset_id}
+        revision={guide.revision!.id}
+        target={target}
+        preview={preview}
+        language={language}
+        current={guide.revision!.source_current}
+        onEvidence={openEvidence}
+        onOpenPage={sourceVerified ? openAssetPage : undefined}
+      />
+    );
+  }
+  const readingModeSwitch = p.eligible && (awaitingGuideStatus || initialReadFailed || canEnter) ? (
+          <div role="group" aria-label={zh ? "阅读模式" : "Reading mode"}>
+            <button
+              aria-pressed={!showGuide}
+              onClick={() => setReadingMode("source")}
+            >
+              {zh ? "原文" : "Original"}
+            </button>
+            <button
+              aria-pressed={showGuide}
+              onClick={() => setReadingMode("article")}
+            >
+              {zh ? "导读" : "Guide"}
+            </button>
+          </div>
+  ) : null;
+  const progressRevision = active ? (candidate?.id === guide.revision?.id ? guide.revision : guide.writingRevision) : undefined;
+  const submittedAt = active && candidate ? Date.parse(candidate.created_at) : NaN;
+  const progressProps = {
+    startedAt: Number.isFinite(submittedAt) ? Math.min(submittedAt, Date.now()) : generationClock.current.startedAt,
+    generationStartedAt: generationClock.current.generationStartedAt,
+    zh,
+    stage: pendingGeneration && !active ? acceptedStage || "submitting" : stage || "queued",
+    total: progressRevision?.plan?.sections.length ?? 0,
+    done: progressRevision?.sections.filter(section => section.blocks.length > 0).length ?? 0,
+    writingSummary: progressRevision?.sections.some(section => section.role === "overview" &&
+      !section.blocks.length && section.publication_status === "generating"),
+    writing: progressRevision?.sections.filter(section =>
+      !section.blocks.length && section.publication_status === "generating"
+    ).map(section => section.title) ?? [],
+  };
+  function openRegeneration() {
+    setModel("");
+    setDraftLanguage({ key: languageKey, value: language });
+    setRegenerateOpen(true);
+  }
+  const languageLabel = zh ? "导读语言" : "Guide language";
+  const modelLabel = zh ? "本次生成模型" : "Model for this run";
+  const languageSelect = (id: string) => <Select<"zh" | "en"> id={id} aria-label={languageLabel}
+    options={languageOptions} virtual={false} value={generationLanguage} disabled={busy || generating}
+    onChange={(value: "zh" | "en") => setDraftLanguage({ key: languageKey, value })}
+  />;
+  const statusRequestId = guideRequestId(guide.error);
+  const requestId = error ? error.requestId : guide.error ? statusRequestId : resumeRejection && rejectedResume?.requestId;
+  const failedJob = candidate?.run.error_code ? candidate.run : undefined;
+  const toolbarDetails = <div className="guide-toolbar-details">
+    {generating && <GuideGenerationProgress {...progressProps} />}
+            {Boolean(error || guide.error) && (
+              <p role="alert" className="guide-error-notice">
+                <GuideSectionIcon role="limitations"/>{error?.message || getLocalizedErrorMessage(guide.error)}
+              </p>
+            )}
+            {(requestId || failedJob?.job_id) && (
+              <div className="guide-error-details" role="group" aria-label={zh ? "诊断信息" : "Diagnostic details"}>
+                {requestId && <p>{zh ? "请求编号" : "Request ID"} <code>{requestId}</code></p>}
+                {failedJob?.job_id && <p>{zh ? "生成任务" : "Generation job"} <code>{failedJob.job_id}</code></p>}
+                {failedJob?.error_code && <p>{zh ? "错误码" : "Error code"} <code>{failedJob.error_code}</code></p>}
+              </div>
+            )}
+            {guide.availableRevision && guide.revision && (
+              <div className="paper-guide-status">
+                <span>
+                  {zh
+                    ? "新版已就绪，当前保留你正在读的版本。"
+                    : "A new version is ready. Your current version remains open."}
+                </span>
+                <Button
+                  onClick={() =>
+                    void guide.selectRevision(guide.availableRevision!.id)
+                  }
+                >
+                  {zh ? "阅读新版" : "Read new version"}
+                </Button>
+              </div>
+            )}
+
+            {stage && stage !== "completed" && (
+              <div className="paper-guide-status" role="status">
+                {(!active || runReason) && <span>
+                  {labels[stage] || (zh ? "正在准备" : "Preparing")}{" "}
+                  {guide.revision?.id === candidate?.id && guide.revision?.plan?.layout === "flashpapers" && guide.revision.plan.sections.length > 0 && <span>{guide.revision.sections.filter(section => section.blocks.length > 0).length} / {guide.revision.plan.sections.length} {zh ? "章已完成" : "chapters ready"} </span>}
+                  {runReason && <span>{runReason}</span>}
+                </span>}
+                {active ? (
+                  <Button disabled={busy} onClick={() => void run("cancel")}>
+                    {zh ? "取消后续生成" : "Cancel remaining generation"}
+                  </Button>
+                ) : (
+                  (requiresRegeneration || qualityBlocked || budgetBlocked || resumable || stage === "source_changed") && (
+                    <>
+                      {resumable && !requiresRegeneration && !qualityBlocked && !budgetBlocked && (
+                        <Button
+                          disabled={busy || !guide.status?.can_generate}
+                          onClick={() => void run("resume")}
+                        >
+                          {zh ? "继续生成" : "Resume"}
+                        </Button>
+                      )}
+                      <Button
+                        disabled={busy || !guide.status?.can_generate}
+                        onClick={openRegeneration}
+                      >
+                        {zh ? "重新生成导读" : "Generate a new guide"}
+                      </Button>
+                    </>
+                  )
+                )}
+              </div>
+            )}
+            {guide.revision && !guide.revision.source_current && (
+              <p className="paper-guide-warning">
+                {zh
+                  ? "历史版本：原文或来源定位已更新，来源跳转和导读追问已停用。"
+                  : "Historical version: source content or positioning was updated; source navigation and guide follow-up are disabled."}
+              </p>
+            )}
+            {guide.revision?.status === "limited" && guide.revision.plan?.layout !== "flashpapers" && (
+              <p className="paper-guide-warning">
+                {zh
+                  ? "有限完成：部分材料未能解读，请查看文末覆盖范围。"
+                  : "Limited coverage: some materials could not be interpreted. See coverage below."}
+              </p>
+            )}
+
+  </div>;
+  const hasDetails = Boolean(generating || error || guide.error || guide.availableRevision || (stage && stage !== "completed") || (guide.revision && !guide.revision.source_current) || guide.revision?.status === "limited");
+  return (
+    <div
+      ref={container}
+      className={`paper-reading-workspace${showGuide ? " is-guide" : ""}${sourceOpen ? " has-source" : ""}${auxVisible ? " has-auxiliary" : ""}`}
+      data-dual={dual}
+      data-guide-paper={showGuide ? paper : undefined}
+      data-guide-light={showGuide ? (night ? "night" : "day") : undefined}
+    >
+      {readingModeSwitch && (showGuide || typeof p.source !== "function") && (
+        <header className="paper-guide-toolbar">
+          <div className="paper-guide-back">{showGuide && p.back}</div>{readingModeSwitch}
+          {showGuide && <div className="guide-toolbar-actions">
+            <div className="guide-toolbar-cluster">
+              {(guide.revision || savedLanguage === "zh" || savedLanguage === "en") && <Select<"zh" | "en"> className="guide-reading-language" variant="borderless" aria-label={zh ? "阅读语言" : "Reading language"} value={language} disabled={busy || generating} options={languageOptions} virtual={false} onChange={selectLanguage} popupMatchSelectWidth={128} />}
+              {hasDetails && <Popover trigger="click" placement="bottomRight" getPopupContainer={(node: HTMLElement) => node.parentElement || node} content={toolbarDetails}>
+                <button className="guide-status-trigger" aria-label={zh ? "生成状态与操作" : "Generation status and actions"}>
+                  {generating ? <GuideGenerationProgress {...progressProps} compact /> : <span>{error || guide.error ? (zh ? "生成遇到问题" : "Generation issue") : guide.availableRevision ? (zh ? "新版已就绪" : "New version ready") : stage === "paused" ? (zh ? "生成已中断" : "Interrupted") : labels[stage || ""] || (zh ? "版本提示" : "Version notice")}</span>}
+                  <DownOutlined aria-hidden />
+                </button>
+              </Popover>}
+              {guide.revision?.run.stage === "completed" && !generating && <Button icon={<ReloadOutlined aria-hidden />} disabled={busy} onClick={openRegeneration}>{zh ? "重新生成" : "Regenerate"}</Button>}
+            </div>
+            <div className="guide-toolbar-cluster guide-toolbar-tools">
+              {guide.revision?.sections.some(section => section.blocks.length) && <Dropdown trigger={["click"]} placement="bottomRight" menu={{
+                items: [{ key: "html", label: zh ? "下载 HTML" : "Download HTML" }, { key: "pdf", label: zh ? "另存为 PDF…" : "Save as PDF…" }],
+                onClick: async ({ key }: { key: string }) => {
+                  const article = container.current?.querySelector<HTMLElement>(".paper-guide-article");
+                  if (!article || exporting || (key !== "html" && key !== "pdf")) return;
+                  setExporting(true);
+                  try {
+                    await downloadPaperGuide(article, language, key);
+                  } catch (cause) {
+                    void message.error((zh ? "导出失败：" : "Export failed: ") + (cause instanceof Error ? cause.message : String(cause)));
+                  } finally {
+                    setExporting(false);
+                  }
+                },
+              }}>
+                <Button type="text" loading={exporting} title={zh ? "下载导读" : "Download guide"} aria-label={zh ? "下载导读" : "Download guide"} icon={<DownloadOutlined />} />
+              </Dropdown>}
+              <Button type="text" title={lightAction} aria-label={lightAction} icon={night ? <SunOutlined /> : <MoonOutlined />}
+                onClick={() => { setNight(!night); localStorage.setItem("paper-guide-night", String(!night)); }} />
+              <Dropdown trigger={["click"]} placement="bottomRight" menu={{
+                selectable: true, selectedKeys: [paper],
+                items: [
+                  { key: "white", label: zh ? "素白" : "White" },
+                  { key: "cream", label: zh ? "暖纸" : "Warm paper" },
+                  { key: "sage", label: zh ? "鼠尾草绿" : "Soft sage" },
+                ].map(item => ({ ...item, icon: <span aria-hidden className={`guide-paper-swatch swatch-${item.key}`} /> })),
+                onClick: ({ key }: { key: string }) => {
+                  if (key === "white" || key === "cream" || key === "sage") {
+                    setPaper(key);
+                    localStorage.setItem("paper-guide-paper", key);
+                  }
+                },
+              }}>
+                <Button type="text" title={paperLabel} aria-label={paperLabel} icon={<BgColorsOutlined />} />
+              </Dropdown>
+            </div>
+          </div>}
+        </header>
+      )}
+      <Modal open={regenerateOpen && showGuide} title={zh ? "重新生成论文导读" : "Regenerate paper guide"} onCancel={() => setRegenerateOpen(false)}
+        okText={zh ? "开始重新生成" : "Start regeneration"} cancelText={zh ? "取消" : "Cancel"}
+        okButtonProps={{ disabled: busy || generating || !guide.status?.can_generate }}
+        onOk={() => { setRegenerateOpen(false); void run("regenerate"); }}>
+        <div className="pdf-translation-config">
+          <div className="pdf-translation-config-row"><label htmlFor="guide-regenerate-language">{languageLabel}</label>{languageSelect("guide-regenerate-language")}</div>
+          <div className="pdf-translation-config-row"><label htmlFor="guide-regenerate-model">{modelLabel}</label><Select id="guide-regenerate-model" aria-label={modelLabel} value={model} onChange={setModel} virtual={false}
+            options={[{ value: "", label: zh ? "跟随阅读偏好" : "Use reading preference" },
+              ...(models?.options ?? []).map(({ id, label }) => ({ value: id, label }))]} /></div>
+          <p>{zh ? "预计约 2 分钟。同语言重新生成期间可以继续阅读当前版本。" : "Usually about 2 minutes. You can keep reading the current version during same-language regeneration."}</p>
+          {!guide.status?.can_generate && <p role="alert">{reasonText(guide.status?.unavailable_reason)}</p>}
+        </div>
+      </Modal>
+      <div className="paper-reading-panes">
+        {showGuide && (
+          <main
+            className="paper-guide-main"
+            hidden={!dual && (sourceOpen || auxVisible)}
+          >
+            {guide.revision && (guide.revision.sections.length > 0 || guide.revision.plan?.layout === "flashpapers") ? (
+              <PaperGuideReader
+                revision={guide.revision}
+                title={p.title}
+                language={language}
+                compact={sourceOpen || auxVisible || width < 720}
+                progress={localProgress.current || guide.status?.progress}
+                onProgress={saveProgress}
+                onEvidence={openEvidence}
+                renderAsset={renderAsset}
+              />
+            ) : initialReadFailed ? (
+              <div className="paper-guide-empty">
+                <p role="alert">{getLocalizedErrorMessage(guide.error)}</p>
+                {statusRequestId && <p>{zh ? "请求编号" : "Request ID"} <code>{statusRequestId}</code></p>}
+                <Button onClick={() => void guide.refresh()}>{zh ? "重新加载导读" : "Reload guide"}</Button>
+              </div>
+            ) : (generating && !submittingFirstGuide) || restoringGuide ? (<div className="paper-guide-preparing" aria-busy="true"><GuideSkeleton/></div>) : (
+              <div className="paper-guide-empty">
+                <div className="guide-empty-symbol"><GuideSectionIcon role="glossary"/></div>
+                <div className="guide-article-kicker">{zh ? "论文导读" : "PAPER GUIDE"}</div>
+                <h1>{p.title}</h1>
+                <h2>
+                  {zh
+                    ? "沿着论文的论证读懂全文"
+                    : "Read through the paper’s argument"}
+                </h2>
+                <p>
+                  {zh
+                    ? "从研究背景与核心问题开始，理解主要贡献，并逐项对照原文依据。"
+                    : "Understand the background, central question, contribution, and supporting evidence."}
+                </p>
+                <div className="guide-empty-features">
+                  {[["big-idea", zh ? "核心思路" : "Key ideas"], ["how-it-works", zh ? "方法拆解" : "How it works"], ["playground", zh ? "交互探索" : "Interactive exploration"]].map(([role, label]) => <span key={role}><GuideSectionIcon role={role}/>{label}</span>)}
+                </div>
+                {!active && !candidate && (
+                  <>
+                    <div className="guide-language-field"><label htmlFor="guide-start-language">{languageLabel}</label>{languageSelect("guide-start-language")}</div>
+                    <button
+                      disabled={generating || busy || !guide.status?.can_generate}
+                      onClick={() => void run("generate")}
+                    >
+                      {submittingFirstGuide ? (zh ? "正在提交…" : "Submitting…") : p.ir
+                        ? zh
+                          ? "生成论文导读"
+                          : "Generate paper guide"
+                        : zh
+                          ? "准备论文并生成导读"
+                          : "Prepare paper and generate guide"}
+                    </button>
+                    {!p.ir && (
+                      <p>
+                        {zh
+                          ? "先解析论文结构，再生成导读。"
+                          : "The paper structure will be parsed before generation."}
+                      </p>
+                    )}
+                    {guide.status?.unavailable_reason && (
+                      <p>{reasonText(guide.status.unavailable_reason)}</p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </main>
+        )}
+        <div className="paper-reading-source" hidden={!sourceVisible}>
+          {mountSource && (typeof p.source === "function" ? p.source(showGuide ? null : readingModeSwitch) : p.source)}
+        </div>
+        {!showGuide && p.divider}
+        <div className="paper-reading-auxiliary" hidden={!auxVisible}>
+          {mountSource && p.auxiliary}
+        </div>
+      </div>
+      {!showGuide && p.dock}
+      <Modal
+        open={showGuide && !!revisionId && (!!evidence || evidenceLoading)}
+        title={zh ? "来源预览" : "Source preview"}
+        footer={null}
+        destroyOnHidden
+        focusTriggerAfterClose={false}
+        onCancel={closeEvidence}
+        afterClose={() => {
+          const opener = evidenceOpener.current;
+          evidenceOpener.current = undefined;
+          if (
+            opener?.isConnected &&
+            opener.getClientRects().length &&
+            getComputedStyle(opener).visibility === "visible"
+          ) {
+            opener.focus({ preventScroll: true });
+          }
+        }}
+        width={720}
+      >
+        {evidence && guide.revision ? (
+          <PaperGuideEvidencePreview
+            value={{ ...evidence, source_current: evidenceCurrent }}
+            currentSourceHash={currentSourceHash}
+            revisionSourceHash={guide.revision.source_sha256}
+            language={language}
+            onClose={closeEvidence}
+            onNavigate={(e) => {
+              evidenceOpener.current = undefined;
+              closeEvidence();
+              setSourceOpen(true);
+              p.onAuxiliary(undefined);
+              p.onNavigate(e);
+            }}
+          >
+            {["figure", "chart", "table", "formula", "image"].includes(
+              evidence.evidence.source_type,
+            ) && evidenceCurrent && (
+              <PaperGuideAsset
+                onEvidence={requestEvidence}
+                evidence={evidence.evidence}
+                preview={preview}
+                language={language}
+              />
+            )}
+          </PaperGuideEvidencePreview>
+        ) : evidenceLoading ? (
+          <p role="status">{zh ? "正在读取来源…" : "Loading source…"}</p>
+        ) : null}
+      </Modal>
+    </div>
+  );
+}
+function GuideInlineAsset({
+  id,
+  revision,
+  target,
+  preview,
+  language,
+  current,
+  onEvidence,
+  onOpenPage,
+  compactCaption,
+  captionText,
+}: {
+  captionText?: string;
+  compactCaption?: boolean;
+  id?: string;
+  revision: string;
+  target: Parameters<typeof paperGuideApi.evidence>[0];
+  preview: GuidePreview;
+  language: string;
+  current: boolean;
+  onEvidence: (id: string, opener: HTMLButtonElement) => void;
+  onOpenPage?: (evidence: PaperGuideEvidence) => void;
+}) {
+  const [loaded, setEvidence] = useState<{
+    id: string;
+    revision: string;
+    target: typeof target;
+    value: PaperGuideEvidenceResponse;
+  }>();
+  const value = current && loaded?.id === id && loaded?.revision === revision && loaded?.target === target
+    ? loaded.value : undefined;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setEvidence(undefined);
+    setFailed(false);
+    if (!id || !current) return;
+    const abort = new AbortController();
+    void paperGuideApi
+      .evidence(target, revision, id, abort.signal)
+      .then((v) => {
+        if (!abort.signal.aborted) {
+          if (v.source_current && v.evidence.id === id) setEvidence({ id, revision, target, value: v });
+          else setFailed(true);
+        }
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) setFailed(true);
+      });
+    return () => abort.abort();
+  }, [id, revision, target, current]);
+  return (
+    <PaperGuideAsset compactCaption={compactCaption} captionText={captionText}
+      evidence={value?.evidence}
+      originalDisplay={value?.original_display}
+      onEvidence={onEvidence}
+      onOpenPage={onOpenPage}
+      unavailable={failed || !current || !id}
+      preview={preview}
+      language={language}
+    />
+  );
+}

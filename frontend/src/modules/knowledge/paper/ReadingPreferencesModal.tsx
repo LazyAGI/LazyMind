@@ -4,7 +4,7 @@ import { Alert, Button, Collapse, InputNumber, Modal, Select, Space, Spin, Typog
 import { getLocalizedErrorMessage } from '@/components/request';
 import { getReadingPreferences, saveReadingPreferences, type ReadingPreferences, type ReadingCapabilityId, type ReadingMode } from '../api/readingPreparation';
 import './ReadingPreferencesModal.css';
-const names: Record<ReadingCapabilityId, string> = { pdf_parse: 'PDF 解析', ai_study: 'AI 论文精读' };
+const names: Record<ReadingCapabilityId, string> = { paper_guide: '论文导读', pdf_parse: 'PDF 解析', ai_study: 'AI 论文精读' };
 export default function ReadingPreferencesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { token } = theme.useToken();
   const [draft, setDraft] = useState<ReadingPreferences>();
@@ -16,7 +16,7 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
   useEffect(() => {
     if (!open) return;
     let stale = false; setLoading(true); setError(''); setDraft(undefined);
-    getReadingPreferences().then(value => { if (!stale) { setDraft(value); setLoadedRefs({ parser_ref: value.parser_ref || '', study_model_ref: value.study_model_ref || '' }); } }).catch(err => { if (!stale) setError(getLocalizedErrorMessage(err)); }).finally(() => { if (!stale) setLoading(false); });
+    getReadingPreferences().then(value => { if (!stale) { setDraft({ ...value, modes: { ...value.modes, paper_guide: value.modes.paper_guide ?? 'on_demand' } }); setLoadedRefs({ parser_ref: value.parser_ref || '', study_model_ref: value.study_model_ref || '' }); } }).catch(err => { if (!stale) setError(getLocalizedErrorMessage(err)); }).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
   }, [open, reload]);
   const needsStructureHint = draft?.modes.ai_study === 'automatic' && draft.modes.pdf_parse !== 'automatic';
@@ -49,9 +49,9 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
       <div className="reading-capabilities">
         {Object.entries(names).map(([key, name]) => {
           const id = key as ReadingCapabilityId; const capability = draft.capabilities.find(c => c.id === id);
-          return <div className="reading-capability" key={id}><div><strong>{name}</strong><p>{id === 'pdf_parse' ? '识别正文、公式、图片与表格，供后续研读使用。' : '统一精读论文中的公式、图片和表格。'}</p>
+          return <div className="reading-capability" key={id}><div><strong>{name}</strong><p>{id === 'paper_guide' ? '按需生成整篇导读；不会随自动准备发起。' : id === 'pdf_parse' ? '识别正文、公式、图片与表格，供后续研读使用。' : '统一精读论文中的公式、图片和表格。'}</p>
             {capability?.unavailable_reason && <Typography.Text type="warning">{capability.unavailable_reason}</Typography.Text>}</div>
-            <Select aria-label={name} value={draft.modes[id]} disabled={saving} options={[{ value: 'on_demand', label: '按需' }, { value: 'automatic', label: '自动' }, { value: 'disabled', label: '禁用生成' }]} onChange={(mode: ReadingMode) => setDraft({ ...draft, modes: { ...draft.modes, [id]: mode } })} />
+            <Select aria-label={name} value={draft.modes[id]} disabled={saving} options={[{ value: 'on_demand', label: '按需' }, ...(id === 'paper_guide' ? [] : [{ value: 'automatic', label: '自动' }]), { value: 'disabled', label: '禁用生成' }]} onChange={(mode: ReadingMode) => setDraft({ ...draft, modes: { ...draft.modes, [id]: mode } })} />
           </div>;
         })}
       </div>

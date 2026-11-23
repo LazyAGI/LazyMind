@@ -97,6 +97,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const directReview = selectedReview && !expansionEnabled;
     const launchesExpansion = launch?.kind === 'expansion' || (launch?.kind === 'review' && !directReview);
     const eligibleReviewPapers = reviewSelection?.papers.filter(paper => reviewSelection.materials?.some(material => material.paper_id === paper.paper.paper_id && material.eligible)) || [];
+    const pendingReviewCount = reviewSelection?.materials?.filter(item => !item.eligible && pendingReviewMaterialStatuses.has(item.status)).length || 0;
     useEffect(() => {
         if (!directReview) { setReviewSelection(undefined); setSelectionLoading(false); return; }
         let active = true;
@@ -630,7 +631,11 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 </details>
                 {directReview && !reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.selectionPending', { count: selected.length })}</Typography.Paragraph>}
                 {directReview && selectionFailure && <Alert type="error" showIcon message={selectionFailure} action={<Button onClick={() => setSelectionRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
-                {directReview && !selectionLoading && !selectionFailure && eligibleReviewPapers.length < 2 && <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />}
+                {directReview && reviewSelection && !selectionFailure && eligibleReviewPapers.length < 2 && (
+                    eligibleReviewPapers.length + pendingReviewCount >= 2
+                        ? <Alert type="info" showIcon message={t('paperTasks.reviewPreparing')} />
+                        : <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />
+                )}
                 {directReview && reviewSelection && eligibleReviewPapers.length >= 2 && eligibleReviewPapers.length < reviewSelectedCount && <Alert type="warning" showIcon message={t('paperTasks.reviewSummary', { selected: reviewSelectedCount, count: eligibleReviewPapers.length, skipped: reviewSelectedCount - eligibleReviewPapers.length })} />}
             </section>}
             {launch && !launch.direction && !selectedReview && launch.kind !== 'expansion' && <div className="paper-task-launch-selection">

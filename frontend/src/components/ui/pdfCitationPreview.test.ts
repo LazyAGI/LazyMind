@@ -466,3 +466,12 @@ describe("PDF citation preview", () => {
     cache.dispose();
   });
 });
+
+it("renders guide crops at higher resolution while bounding the page canvas", async () => {
+  const pdf = pdfDocument();
+  const cache = createPdfCitationPreviewCache({ renderScale: 3 });
+  const image = await cache.get(pdf, target(), { exact: true });
+  expect(image!.width).toBeGreaterThan(150);
+  expect(pdf.page.render.mock.calls[0][0].viewport.height).toBe(2048);
+  cache.dispose();
+});

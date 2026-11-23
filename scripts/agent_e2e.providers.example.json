@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "llm": {
+    "api_key": "",
+    "api_key_env": "LAZYMIND_CI_LLM_API_KEY",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-6.1-sol",
+    "api": "openai-responses"
+  },
+  "image": {
+    "api_key": "",
+    "api_key_env": "LAZYMIND_CI_IMAGE_API_KEY",
+    "base_url": "https://api.siliconflow.cn/v1",
+    "model": "Kwai-Kolors/Kolors",
+    "api": "siliconflow-images"
+  }
+}
