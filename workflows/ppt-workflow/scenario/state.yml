@@ -71,12 +71,11 @@ steps:
       requests for reading reflections. Unless the user specified a count, budget
       three content pages per paper plus explicitly requested opening/closing
       pages. Explain an inferred count; a confirmed count takes precedence.
-      - Without an uploaded template, set template_mode=none and author HTML.
-      Preserve an explicit request for a downloadable/editable PPTX in the brief;
-      this requires export after HTML authoring. Do not ask an output-format or
-      template-upload question merely because those features exist.
-      - With a supplied template, set template_mode=upload and preserve the
-      confirmed HTML or native_pptx choice. Inspect the original PPTX directly,
+      - Preserve the confirmed presentation_output_format with or without a
+      template. HTML publishes interactive slides and notes; users can export
+      the current slides from the panel. Native PPTX publishes a PowerPoint file.
+      - Set template_mode=none when there is no bound template. With a supplied
+      template, set template_mode=upload and inspect the original PPTX directly,
       across every page, including canvas, editable slots, layouts, typography,
       charts, images and sample content. Do not convert it to PDF just to read it.
       HTML recreates the inspected style; native_pptx reuses actual template
@@ -89,8 +88,8 @@ steps:
       also supply historical evidence with its date and attribution preserved.
 
       Visual decisions:
-      - Preserve explicit user direction. Academic/scientific presentations default
-      to white (#FFFFFF), dark text (#111111), restrained chart accents and
+      - Preserve explicit user direction. Only without an uploaded template or
+      an explicit user palette, academic/scientific presentations default to white (#FFFFFF), dark text (#111111), restrained chart accents and
       readable evidence-led typography; AI backgrounds default to disabled.
       - An uploaded template determines style and disables AI backgrounds. Do not
       ask again for palette, typography, decorative images or background choices.
@@ -138,7 +137,7 @@ steps:
       style_flow must always be auto.
       generation_mode must be full, and template_mode must be
       exactly none or upload. presentation_output_format must be html or native_pptx;
-      without a template use html, with a template preserve the confirmed choice.
+      preserve the confirmed startup format in both template modes.
       When a template is uploaded, template_content_brief must cover every original
       page, source hash, required evidence and missing inputs before this step passes.
 
@@ -180,6 +179,25 @@ steps:
       - Optional additional web/image research has a six-call budget. Required source
       pagination, full-text reads and PR-description reads are exempt. Stop optional
       research when the gap is filled. Never claim exhaustive coverage after truncation.
+      - Web search works without an API key through default Keenable; a configured
+      user provider takes priority. Do not ask new users to configure search before
+      trying the available tool. On partial/unavailable results or a single search
+      error, continue other research and retain the query, reason and missing evidence
+      in material_summary. Wikipedia fallback supplies background only; it cannot
+      verify current facts, quantitative updates or real photos. Do not invent them.
+      - If an indispensable source remains unavailable because search is unavailable,
+      first publish the collected evidence and missing queries in material_summary,
+      then call ppt_request_search_configuration when offered with the actual failure (rate limit,
+      exhausted quota, invalid key or network error) and missing required evidence.
+      Stop after its dependency error: the host shows configuration and resumes this
+      original task after setup. Preserve collected sources; after configuration retry
+      only missing searches. Never request API keys in chat. For a source that simply
+      has no matching results, ask for a replacement or omission in material_clarification.
+      In an external runtime without that configuration tool, put the failure and
+      /settings?section=knowledge&tool=web-search in material_clarification instead;
+      request configuration and continuation of this same task, preserving gathered evidence.
+      Optional missing materials must not stop the workflow: mark them in the summary,
+      relevant slide/notes and final delivery, with no fabricated claims or citations.
       - Templates are visual references unless the user also designated their content
       as evidence. Follow the template's page-specific collection plan. Do not use
       sample charts, sample metrics or placeholder achievements as source facts.
@@ -294,6 +312,7 @@ steps:
       - kb
       - knowledge_management
       - web_search
+      - ppt_request_search_configuration
       - wikipedia
       - ppt_search_web_images
       - ppt_search_assets
@@ -446,7 +465,8 @@ steps:
       1. Shared style: canvas, palette, typography, spacing, graphic language and
       output constraints. Retain user-approved style and template geometry.
       2. Layout: meaningful hierarchy, positions, chart/diagram structure and content
-      areas. HTML uses 1600×900; native PPTX uses the inspected template's dimensions.
+      areas. HTML uses 1600×900. Native PPTX uses the inspected template's dimensions
+      when one is bound and a standard 16:9 canvas otherwise.
       3. Exact visible copy: title, explanations, formulas, labels and source-backed
       data. Use readable Markdown, not internal JSON or duplicate object lists.
       4. Assets: approved evidence images, background binding and intended use. Reuse
@@ -460,9 +480,10 @@ steps:
       than visible citation footers unless the user requested visible references.
 
       Template rules apply to both representations: preserve its visual hierarchy,
-      typography and brand elements; remove unapproved sample claims. For native PPTX,
-      plan editable text/charts/tables and actual source-page mappings. For HTML,
-      recreate the inspected design without pretending the HTML is a native file.
+      typography and brand elements; remove unapproved sample claims. For native PPTX
+      with a template, plan editable text/charts/tables and actual source-page mappings.
+      For native PPTX without a template, plan ordered editable titles, body text and notes.
+      For HTML with a template, recreate the inspected design.
       AI backgrounds, when enabled, align one-to-one with pages and are already
       approved; do not regenerate or change them during prompt planning.
 
@@ -694,7 +715,7 @@ steps:
         foreground image in an <img data-ppt-image="ARTIFACT_ID"> in the intended
         layout with meaningful alt text. Core fills src from the saved bytes.
         Include a #bg layer for the bound AI background. Use the returned HTML
-        for rendering, export and publication. Keep the markers and embedded
+        for rendering and publication. Keep the markers and embedded
         assets intact. Publish using output.value_file (content_type=text) or
         an inline text value. For targeted regeneration use the partial selector
         or the existing preview list_index in the inline text object. Fix
@@ -706,28 +727,31 @@ steps:
       without asking a model to write them again. Publish each page/notes pair in
       approved order once checked. Buffer out-of-order worker results until earlier
       pages are acknowledged. A partial delivery is not a completed full run.
-      - Deliver the actual PPTX as native_pptx when the user explicitly requested a
-      downloadable/editable file, using the completed pages and scripts. HTML
-      previews or an export button do not satisfy that explicit request. Otherwise
-      the HTML pages and notes are the deliverable; no automatic export is needed.
-
-      Export recovery: use ppt_export_deck to convert existing HTML and notes to PPTX.
-      On font/asset/export failures preserve all pages and scripts and retry export
-      after fixing the resource. Never switch to ppt_generate_native_pptx or
-      ppt_fill_template, change presentation_output_format, or restart planning
-      merely to work around an export failure.
+      - Deliver the interactive HTML pages and notes. Do not convert the deck or
+      publish native_pptx. The panel can export the latest HTML on user action.
 
       Native route (presentation_output_format=native_pptx):
-      - Inspect/reuse the uploaded template's actual source pages, editable slots,
-      geometry and effective fonts. Select, repeat or omit source layouts to meet
-      the requested count. Do not assume the template length is the target count.
-      - Preserve unspecified artwork, layout and text styling; remove unapproved
-      sample claims. Keep native text, tables, charts and notes editable, with
-      truthful data and correct fonts. Use the same approved page copy as HTML
-      would use, not an independently shortened deck.
+      - With a template, reuse its actual source pages, editable slots, geometry
+      and fonts. Select, repeat or omit source layouts to meet the requested count.
+      Preserve unspecified artwork, layout and styling, remove unapproved sample
+      claims, and keep native text, tables, charts and notes editable.
+      - New content must use the corresponding template region's actual colors,
+      fonts and hierarchy as the starting point. Slot inspection may omit colors;
+      use ppt_analyze_template and read profile.html_template.pages for source-page
+      backgrounds and text run styles before filling new boxes. Reuse cached
+      evidence. Pass text_boxes.color explicitly; a new box does not automatically
+      inherit source styling. Do not apply generic black text to a retained dark
+      background, or assume all regions on a dark page share the same background.
+      The model chooses styling from the visible evidence and user intent; any
+      visible property remains editable. Do not invent unseen template colors.
+      - Without a template, create native slides from the approved page prompts
+      in order. Use speaker_notes_source when available. Report any requested
+      elements the generator cannot create.
+      - In LazyMind use ppt_fill_template for template-based creation and
+      ppt_generate_native_pptx for direct creation without a template.
+      - Preserve the approved page copy, truthful data and correct fonts.
       - Publish a real non-empty PPTX after validating page count, content and notes.
-      Optional HTML previews are not required and cannot replace the file. Do not
-      launch HTML generation after a successful native delivery.
+      Publish the native file as the sole slide deliverable.
 
       Visual review:
       - Render the delivered representation when available; inspect actual pixels
@@ -738,9 +762,11 @@ steps:
       - Check overflow, clipping, text/graphic collisions, font readability, image
       presence, aspect ratios and chart labels. Preserve natural glyph widths;
       never stretch text/images with unequal scale to fill a box.
-      - Use the supplied review/repair prompts only for this phase. Apply at most
-      two bounded repairs to defective pages, preserving content and the last usable
-      version. Record findings and any unavailable checks without claiming approval.
+      - Use the supplied review/repair prompts only for this phase. Allow changes to any visible content or styling in native PPTX and HTML,
+      including fonts, colors, images, charts, tables, backgrounds and structure.
+      Re-render and review each candidate with no fixed repair-round limit. Stop on
+      passed review, cancellation, unavailable checks, model failure or repeated
+      versions. Preserve factual meaning and the last usable version. Record findings and any unavailable checks without claiming approval.
       - For native PPTX, visual findings or unavailable rendering/vision are advisory:
       keep a structurally valid, usable delivered file and disclose limitations.
       Do not turn optional visual repair into failure or a parent-chat follow-up task.
@@ -754,7 +780,7 @@ steps:
       replacement updates its binding and only the affected page.
       - Insert/delete/reorder operations keep every nonempty prompt/background/HTML/
       notes list in the same visual order, with stable identities and unchanged
-      revisions for unaffected items. Update an existing downloadable PPTX as well.
+      revisions for unaffected items. Native edits update the native file directly.
       - Reuse acknowledged outputs and generated files after interruption. Surface
       exact failures and missing capabilities, retaining useful progress; never
       restart the entire deck to repair one page.
@@ -771,7 +797,6 @@ steps:
       - pptx_analyzer
       - ppt_fill_template
       - ppt_generate_pages
-      - ppt_export_deck
       - ppt_find_deck
       - ppt_run_stage
       - ppt_list_pages
@@ -845,14 +870,11 @@ steps:
       Visual findings, missing screenshot/vision support, and unsuccessful
       optional layout repairs are advisory. They must never fail a step that
       already delivered a usable native_pptx; keep the last published version.
-      For HTML authoring with an explicitly requested PPTX download, native_pptx
-      must also contain the actual exported file with matching count, copy and notes.
       For a full HTML run: the exact requested number of preview_html HTML pages must
       be saved (DOCTYPE/html documents), with matching preview_notes sort_order.
       After page-level checks, publish each page and its matching notes in approved
       page order. Buffer any page that finishes early until all earlier pages and
       notes have been acknowledged. Preserve the approved page identities.
-      Keep saved HTML pages and notes if an optional PPTX export fails.
       preview_notes must be aligned with preview_html; the auto-generated draft
       must be a natural spoken explanation, not copied formula source. For
       academic pages explain intuition, key quantities, measured comparisons and

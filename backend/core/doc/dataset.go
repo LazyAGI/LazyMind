@@ -935,6 +935,58 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 	common.ReplyJSON(w, Dataset{Name: "datasets/" + ds.ID, DatasetID: ds.ID, DisplayName: ds.DisplayName, Desc: ds.Desc, Scene: ds.Scene, ResourceVersion: ds.ResourceVersion, CoverImage: ds.CoverImage, IsEmpty: true, Parsers: parseDatasetParsers(ds.Ext), Algo: parseDatasetAlgo(ds.Ext), Creator: ds.CreateUserName, IsOwner: true, CreateTime: ds.CreatedAt, UpdateTime: ds.UpdatedAt, Acl: []string{acl.PermissionDatasetRead, acl.PermissionDatasetWrite, acl.PermissionDatasetUpload}, Type: datasetTypeToPB(ds.Type), Tags: parseDatasetTags(ds.Ext), ProcessingLevel: ds.ProcessingLevel, ProcessingRevision: ds.ProcessingRevision, TransitionStatus: ds.TransitionStatus, ReaderFallbackAccepted: ds.ReaderFallbackAccepted, Capabilities: capabilitiesForProcessingLevel(ds.ProcessingLevel)})
 }
 
+// DeletedDatasetIDs recognizes owner-visible tombstones and receipts left after a legacy purge.
+func DeletedDatasetIDs(r *http.Request, db *gorm.DB, ids []string) (map[string]bool, error) {
+	result := make(map[string]bool)
+	if len(ids) == 0 {
+		return result, nil
+	}
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		return nil, err
+	}
+	tenant := resourceTenant(caller.TenantID)
+	db = db.WithContext(r.Context())
+	var rows []orm.Dataset
+	if err := db.Select("id", "deleted_at", "create_user_id", "tenant_id").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	present := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		present[row.ID] = true
+		if row.DeletedAt != nil && row.CreateUserID == caller.UserID && resourceTenant(row.TenantID) == tenant {
+			result[row.ID] = true
+		}
+	}
+	var keys []string
+	for _, id := range ids {
+		if !present[id] {
+			keys = append(keys, "dataset-delete:"+id)
+		}
+	}
+	if len(keys) == 0 {
+		return result, nil
+	}
+	var receipts []orm.ResourceOperationReceipt
+	if err := db.Select("operation_key", "result").
+		Where("tenant_id = ? AND user_id = ? AND action = ? AND operation_key IN ?", tenant, caller.UserID, "knowledge.resource.delete", keys).
+		Find(&receipts).Error; err != nil {
+		return nil, err
+	}
+	for _, receipt := range receipts {
+		var outcome ResourceOperationResult
+		if json.Unmarshal(receipt.Result, &outcome) != nil || len(outcome.Items) != 1 {
+			continue
+		}
+		item := outcome.Items[0]
+		id := item.ResourceRef.KnowledgeBaseID
+		if item.ResourceRef.Kind == "knowledge_base" && item.ResourceStatus == "deleted" && receipt.OperationKey == "dataset-delete:"+id {
+			result[id] = true
+		}
+	}
+	return result, nil
+}
+
 func GetDataset(w http.ResponseWriter, r *http.Request) {
 	replyDataset(w, r, nil)
 }
@@ -968,6 +1020,18 @@ func replyDataset(w http.ResponseWriter, r *http.Request, operation *ResourceOpe
 		Caller:    caller,
 	})
 	if err != nil {
+		var failure *DatasetServiceError
+		if errors.As(err, &failure) && failure.Code == DatasetServiceNotFound {
+			deleted, lookupErr := DeletedDatasetIDs(r, corestore.DB(), []string{datasetID})
+			if lookupErr != nil {
+				common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
+				return
+			}
+			if deleted[datasetID] {
+				common.ReplyErr(w, "knowledge base deleted", http.StatusGone)
+				return
+			}
+		}
 		replyDatasetCatalogGetServiceError(w, err)
 		return
 	}

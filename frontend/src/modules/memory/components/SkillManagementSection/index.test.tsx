@@ -375,6 +375,7 @@ describe("SkillManagementSection organize task recovery", () => {
     const signal = skillApiMocks.waitForSkillOrganize.mock.calls[0][1] as AbortSignal;
     fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
     await screen.findByText("admin.memorySkillOrganizeFailed");
+    expect(screen.queryByRole("link", { name: "admin.memorySkillOrganizeConfigureModel" })).not.toBeInTheDocument();
     expect(signal.aborted).toBe(false);
     expect(screen.getByTestId("organize-disabled")).toHaveTextContent("true");
     fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
@@ -382,11 +383,12 @@ describe("SkillManagementSection organize task recovery", () => {
     expect(signal.aborted).toBe(true);
   });
 
-  it("displays a typed failure reported by task polling", async () => {
+  it.each(["skill_organize_model_unavailable", "skill_organize_model_transport"])("offers model configuration for %s reported by task polling", async (errorCode) => {
     skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "failed-model", status: "organize_plan"});
-    skillApiMocks.waitForSkillOrganize.mockResolvedValue({status: "failed", errorCode: "skill_organize_model_transport", error: "provider unavailable"});
+    skillApiMocks.waitForSkillOrganize.mockResolvedValue({status: "failed", errorCode, error: "provider unavailable"});
     render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
     expect(await screen.findByText("admin.memorySkillOrganizeModelUnavailable")).toBeVisible();
+    expect(screen.getByRole("link", { name: "admin.memorySkillOrganizeConfigureModel" })).toHaveAttribute("href", "/settings?section=model_defaults");
   });
 
   it.each(["response", "polling"])("warns about retained drafts via %s without blocking other organize work", async (source) => {

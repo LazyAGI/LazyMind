@@ -224,7 +224,7 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
     act(() => window.dispatchEvent(new Event(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT)));
 
     const row = screen.getByRole("group", { name: "modelProvider.module.llmChatTitle" });
-    expect(await within(row).findByText("cloud_signed_out")).toBeInTheDocument();
+    expect(await within(row).findByText("modelProvider.unavailableReasons.cloud_signed_out")).toBeInTheDocument();
     expect(within(row).getByText("LazyMind Text · LazyMind Cloud")).toBeInTheDocument();
     expect(row).not.toHaveClass("is-pending");
     expect(within(row).queryByRole("switch")).not.toBeInTheDocument();

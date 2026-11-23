@@ -974,6 +974,17 @@ func OnSubAgentDone(
 		if !admitted {
 			return
 		}
+		if status == subagent.StatusSucceeded {
+			recovering, err := startNativeChatRecovery(ctx, db, stateStore, pctx.SessionID, onSSE)
+			if err != nil {
+				onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+				return
+			}
+			if recovering {
+				go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+				return
+			}
+		}
 		onSSE("step_waiting", map[string]any{
 			"session_id": pctx.SessionID,
 			"step_id":    pctx.StepID,
@@ -1120,6 +1131,7 @@ func triggerNextChatTurn(
 	convID, sessionID, workflowID, currentStep, workflowMode, userID, syntheticMsg string,
 	onReady func(),
 	syntheticSource string,
+	recovery ...NativeChatRecovery,
 ) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
 	workflowCtx := map[string]any{
@@ -1130,6 +1142,9 @@ func triggerNextChatTurn(
 	}
 	if syntheticSource != "" {
 		workflowCtx["synthetic_source"] = syntheticSource
+	}
+	if len(recovery) > 0 {
+		workflowCtx["recovery"] = recovery[0]
 	}
 	reqBody := map[string]any{
 		"query":           syntheticMsg,

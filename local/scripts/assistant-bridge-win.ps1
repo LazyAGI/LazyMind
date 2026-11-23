@@ -16,7 +16,23 @@ if (-not $env:LOCALAPPDATA) {
 }
 
 $installDir = Join-Path $env:LOCALAPPDATA 'LazyMind\assistant-bridge'
+$receiptPath = Join-Path $installDir 'launcher-path.txt'
 $installedBinary = Join-Path $installDir 'lazymind.exe'
+if (Test-Path -LiteralPath $receiptPath -PathType Leaf) {
+    $installedBinary = (Get-Content -LiteralPath $receiptPath -Raw).Trim()
+    if (-not $installedBinary.StartsWith($installDir + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid Assistant Bridge launcher receipt.' }
+}
+$bridgePort = if ($env:LAZYMIND_WSL_BRIDGE_PORT) { $env:LAZYMIND_WSL_BRIDGE_PORT } else { '8090' }
+if ($bridgePort -notmatch '^\d{1,5}$' -or [int]$bridgePort -lt 1 -or [int]$bridgePort -gt 65535) { throw 'Invalid LazyMind frontend port.' }
+$deployment = if ($env:LAZYMIND_WSL_BRIDGE_DEPLOYMENT) { $env:LAZYMIND_WSL_BRIDGE_DEPLOYMENT } else { 'compose' }
+if ($deployment -notin @('local', 'compose')) { throw 'Invalid LazyMind deployment type.' }
+$clientArguments = @('--client-id', "$deployment`:$SourcePath`:$bridgePort")
+if ($deployment -eq 'local') {
+    $env:LAZYMIND_RUNTIME_PROFILE = 'desktop'
+} else {
+    Remove-Item Env:LAZYMIND_RUNTIME_PROFILE -ErrorAction SilentlyContinue
+    $clientArguments += @('--server-url', "http://localhost:$bridgePort")
+}
 
 function Invoke-Bridge([string]$Path, [string[]]$Arguments) {
     $output = & $Path @Arguments
@@ -39,7 +55,7 @@ if ($Action -eq 'stop') {
     } else {
         $null
     }
-    if ($binary) { Invoke-Bridge $binary @('assistant', 'stop') | Out-Null }
+    if ($binary) { Invoke-Bridge $binary (@('assistant', 'stop') + $clientArguments) | Out-Null }
     Write-Output 'LAZYMIND_ASSISTANT_BRIDGE_OK:stop'
     return
 }
@@ -48,18 +64,23 @@ if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
     throw "Windows Assistant Bridge build was not found: $SourcePath"
 }
 
-# Stop either an existing native Bridge or a stale WSL-forwarded Bridge before
-# replacing the executable. The CLI waits until the loopback listener closes.
-Invoke-Bridge $SourcePath @('assistant', 'stop') | Out-Null
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+# Never replace an in-use executable or stop another deployment's bridge.
+# The CLI negotiates reuse and stages the daemon independently of this launcher.
+$digest = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$versionDirectory = Join-Path $installDir $digest
+$installedBinary = Join-Path $versionDirectory 'lazymind.exe'
+New-Item -ItemType Directory -Force -Path $versionDirectory | Out-Null
 $temporary = "$installedBinary.$PID.tmp"
 try {
-    Copy-Item -LiteralPath $SourcePath -Destination $temporary -Force
-    Move-Item -LiteralPath $temporary -Destination $installedBinary -Force
+    if (-not (Test-Path -LiteralPath $installedBinary -PathType Leaf)) {
+        Copy-Item -LiteralPath $SourcePath -Destination $temporary -Force
+        Move-Item -LiteralPath $temporary -Destination $installedBinary -Force
+    }
 } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
 }
-Invoke-Bridge $installedBinary @('assistant', 'start') | Out-Null
+Set-Content -LiteralPath $receiptPath -Value $installedBinary -Encoding UTF8
+Invoke-Bridge $installedBinary (@('assistant', 'start') + $clientArguments) | Out-Null
 $status = Invoke-Bridge $installedBinary @('assistant', 'status') | ConvertFrom-Json
 if ($status.running -isnot [bool] -or -not $status.running -or $status.platform -ne 'windows') {
     throw 'Native Windows Assistant Bridge health verification failed.'

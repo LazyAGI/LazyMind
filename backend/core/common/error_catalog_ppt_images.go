@@ -35,4 +35,6 @@ func init() {
 	registerAdditionalErrorPattern("%s has no saved output for requested list index %d", "A requested page has no saved output", http.StatusUnprocessableEntity, 2005629)
 	registerAdditionalErrorPattern("%s has %d saved pages; expected %d from %s", "Saved page count does not match the approved page plan", http.StatusUnprocessableEntity, 2005630)
 	registerAdditionalErrorPattern("selected material image %s has no binding in any page prompt", "A selected material image is not bound to any page prompt", http.StatusUnprocessableEntity, 2005631)
+	registerAdditionalErrorAlias("native_pptx has no published pptx file for this attempt", "This attempt has no published native PPTX file", http.StatusUnprocessableEntity, 2005632)
+	registerAdditionalErrorAlias("presentation_output_format must be html or native_pptx", "Presentation output format must be HTML or native PPTX", http.StatusUnprocessableEntity, 2005633)
 }

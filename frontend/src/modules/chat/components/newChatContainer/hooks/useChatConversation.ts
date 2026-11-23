@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -143,6 +144,7 @@ export function useChatConversation({
   onRequestPendingChange,
   t,
 }: UseChatConversationOptions) {
+  const { i18n } = useTranslation();
   const navigate = useNavigate();
   const [modelFallbackNotification, modelFallbackNotificationHolder] = notification.useNotification({
     placement: "bottomRight", duration: 0, pauseOnHover: false, stack: false,
@@ -919,8 +921,8 @@ export function useChatConversation({
       message: t("chat.modelFallbackSucceeded"),
       description: [
         t("chat.modelFallbackDescription", {
-          from: formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow),
-          to: formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow), reason,
+          from: formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow, i18n.language),
+          to: formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow, i18n.language), reason,
         }),
         record.context_compacted === true ? t("chat.modelFallbackContextAdapted") : undefined,
       ].filter(Boolean).join(" "),
@@ -2035,11 +2037,16 @@ export function useChatConversation({
     setMessageList(newMessageList);
 
     scroll.scrollToEnd();
+    // The runtime recognizes rewind commands by step ID. Keep the visible name in history.
+    const rewindStepId = params.workflow_control?.kind === 'rewind' && params.workflow_control.step_id;
     const opened = await openSSE(
-      inputs,
+      rewindStepId ? inputs.map(input => input.input_type === 'text'
+        ? { ...input, text: `${t('chat.workflowRollbackPrefix')}${rewindStepId}` }
+        : input) : inputs,
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
         ...(params.initial_model_selection ? { initial_model_selection: params.initial_model_selection } : {}),
+        ...(rewindStepId ? { display_query: normalizedText } : {}),
         ...(params.workflow_control ? { workflow_control: params.workflow_control } : {}),
         ...(params.run_in_background ? { run_in_background: true } : {}),
         ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name } : {}),

@@ -235,7 +235,7 @@ func legacyUserStoppedAt(db *gorm.DB, current []orm.WorkflowSessionStep) (time.T
 
 func preparingState(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep) (View, error) {
 	preparing := View{Status: "running", Reason: "preparing"}
-	if session.ControllerHost == "lazymind" && len(current) > 0 {
+	if session.ControllerHost == "lazymind" {
 		historyID, err := ChatHistoryID(session)
 		if err != nil {
 			return View{}, err
@@ -246,11 +246,14 @@ func preparingState(db *gorm.DB, session orm.WorkflowSession, current []orm.Work
 			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return View{}, err
 			}
-			if err == nil && history.RunStatus == "completed" {
+			if err == nil && (history.RunStatus == "completed" || history.RunStatus == "failed") {
 				for _, step := range current {
 					if step.Status != "succeeded" {
 						return View{Status: "failed", Reason: step.Status}, nil
 					}
+				}
+				if history.RunStatus == "failed" {
+					return View{Status: "failed", Reason: "controller_failed"}, nil
 				}
 				return View{Status: "waiting", Reason: "next_step_required"}, nil
 			}

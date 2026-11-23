@@ -98,12 +98,33 @@ func TestOrdinaryModelFallbackReconnectHydratesCommittedThenOpenCall(t *testing.
 	}}
 	store.Init(db, db, stateStore)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
+	ctx, cancel := context.WithCancel(t.Context())
 	req := httptest.NewRequest(http.MethodGet, "/tasks/replay:stream", nil).WithContext(ctx)
 	req = mux.SetURLVars(req, map[string]string{"task_id": "replay"})
-	rec := httptest.NewRecorder()
-	StreamTask(rec, req)
+	rec := &executionStreamRecorder{ResponseRecorder: httptest.NewRecorder(), frames: make(chan executionStreamFrame, 128)}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		StreamTask(rec, req)
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+	// End the live request after replay reaches the open call, not after an
+	// arbitrary database latency budget. The timer only guards a missing event.
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	openReplayed := false
+	for !openReplayed {
+		select {
+		case frame := <-rec.frames:
+			openReplayed = frame.Type == "think" && frame.Think == "OPEN"
+		case <-done:
+			t.Fatal("task stream ended before replaying the open model call")
+		case <-timer.C:
+			t.Fatal("task stream did not replay the open model call")
+		}
+	}
+	cancel()
+	<-done
 	body := rec.Body.String()
 	closed := strings.Index(body, `"phase":"rollback"`)
 	opened := strings.Index(body, `"phase":"begin"`)

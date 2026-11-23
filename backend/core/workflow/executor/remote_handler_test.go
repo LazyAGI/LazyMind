@@ -615,28 +615,66 @@ func TestRemoteHandlerPersistsArtifactFileUnderCoreUploadRoot(t *testing.T) {
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
 	value := AttemptContext{AttemptID: "attempt-1", SessionID: "session-1", StepID: "step-1"}
 	handler, _, claim := remoteHandlerFixture(t, value)
+	upload := func(name string) string {
+		t.Helper()
+		rec := remoteHandlerRequest(handler.UploadArtifactFile, http.MethodPost, "/artifact-files",
+			value.AttemptID, claim.LeaseToken, map[string]any{
+				"filename": name, "content_base64": base64.StdEncoding.EncodeToString([]byte("png")),
+			})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var envelope struct {
+			Data struct {
+				Path string `json:"path"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		path := envelope.Data.Path
+		wantDir := filepath.Join(root, "workflow-artifacts", "session-1", "attempt-1")
+		if filepath.Dir(path) != wantDir {
+			t.Fatalf("path=%q want directory %q", path, wantDir)
+		}
+		if len(filepath.Base(path)) > 45 || filepath.Ext(path) != ".png" {
+			t.Fatalf("invalid disk filename: %s", filepath.Base(path))
+		}
+		content, err := os.ReadFile(path)
+		if err != nil || string(content) != "png" {
+			t.Fatalf("persisted content=%q err=%v", content, err)
+		}
+		return path
+	}
+	upload("../result.png")
+	longRoot := filepath.Join(root, strings.Repeat("u", max(1, 145-len(root)-1)))
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", longRoot)
 	rec := remoteHandlerRequest(handler.UploadArtifactFile, http.MethodPost, "/artifact-files",
 		value.AttemptID, claim.LeaseToken, map[string]any{
-			"filename": "../result.png", "content_base64": base64.StdEncoding.EncodeToString([]byte("png")),
+			"filename":       strings.Repeat("long", 80) + ".abcdefghijklmnop",
+			"content_base64": base64.StdEncoding.EncodeToString([]byte("fallback")),
 		})
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("long root upload failed: %d %s", rec.Code, rec.Body.String())
 	}
-	var envelope struct {
-		Data struct {
-			Path string `json:"path"`
-		} `json:"data"`
+	var fallback struct {
+		Data struct{ Path string }
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+	if err := json.Unmarshal(rec.Body.Bytes(), &fallback); err != nil {
 		t.Fatal(err)
 	}
-	wantDir := filepath.Join(root, "workflow-artifacts", "session-1", "attempt-1")
-	if filepath.Dir(envelope.Data.Path) != wantDir {
-		t.Fatalf("path=%q want directory %q", envelope.Data.Path, wantDir)
+	if filepath.Base(fallback.Data.Path) != "file.abcdefghijklmnop" ||
+		filepath.Dir(filepath.Dir(fallback.Data.Path)) != filepath.Join(longRoot, "workflow-artifacts") {
+		t.Fatalf("upload did not use the managed short path: %s", fallback.Data.Path)
 	}
-	content, err := os.ReadFile(envelope.Data.Path)
-	if err != nil || string(content) != "png" {
-		t.Fatalf("persisted content=%q err=%v", content, err)
+	if content, err := os.ReadFile(fallback.Data.Path); err != nil || string(content) != "fallback" {
+		t.Fatalf("fallback content=%q err=%v", content, err)
+	}
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	longName := "CON." + strings.Repeat("long", 70)
+	first := upload(longName + "-a.png")
+	if first != upload(longName+"-a.png") || first == upload(longName+"-b.png") {
+		t.Fatal("long filenames must produce stable and distinct paths")
 	}
 }
 

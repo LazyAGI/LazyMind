@@ -2356,7 +2356,9 @@ export interface ChatModelRoute {
     'mode'?: ChatModelRouteModeEnum;
     'model_id'?: string;
     'model_name'?: string;
+    'provider_display_name'?: string;
     'provider_id'?: string;
+    'provider_is_custom'?: boolean;
     'provider_name'?: string;
     'reason'?: ChatModelRouteReasonEnum;
     'selection_version'?: number;
@@ -2444,7 +2446,9 @@ export interface ChatModelSwitchIdentity {
     'candidate_id': string;
     'model_id': string;
     'model_name'?: string;
+    'provider_display_name'?: string;
     'provider_group_id': string;
+    'provider_is_custom'?: boolean;
     'provider_name'?: string;
     'source': ChatModelSwitchIdentitySourceEnum;
 }
@@ -5536,6 +5540,7 @@ export interface EpisodeMemoryDetailResponse {
 export interface EpisodeMemoryListData {
     'items': Array<EpisodeMemory>;
     'next_page_token': string;
+    'supports_page_number'?: boolean;
     'total_size': number;
 }
 export interface EpisodeMemoryListResponse {
@@ -6093,6 +6098,7 @@ export interface KnowledgeMarketTaskListItemOpenAPIResponse {
     'can_delete'?: boolean;
     'can_retry'?: boolean;
     'created_at': string;
+    'dataset_deleted'?: boolean;
     'dataset_id': string;
     'display_state'?: string;
     'error_message': string;
@@ -7739,6 +7745,10 @@ export interface ProviderRequestAdvanced {
 }
 export interface ProviderRequestConfigOpenAPIResponse {
     'advanced'?: ProviderRequestAdvanced;
+    /**
+     * Legacy encrypted options could not be read. Preserve them unless the user explicitly chooses to replace or clear them.
+     */
+    'advanced_unavailable'?: boolean;
     'default_protocol': ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum;
     'protocols'?: Array<ProviderRequestProtocolOpenAPIItem>;
 }
@@ -28284,10 +28294,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @summary List current user\'s Episode Memory
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {number} [page]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryEpisodesGet: async (pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreMemoryEpisodesGet: async (pageSize?: number, pageToken?: string, page?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/memory/episodes`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -28306,6 +28317,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (pageToken !== undefined) {
                 localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -38524,11 +38539,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @summary List current user\'s Episode Memory
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {number} [page]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryEpisodesGet(pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EpisodeMemoryListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryEpisodesGet(pageSize, pageToken, options);
+        async apiCoreMemoryEpisodesGet(pageSize?: number, pageToken?: string, page?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EpisodeMemoryListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryEpisodesGet(pageSize, pageToken, page, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryEpisodesGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -43590,7 +43606,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreMemoryEpisodesGet(requestParameters: DefaultApiApiCoreMemoryEpisodesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<EpisodeMemoryListResponse> {
-            return localVarFp.apiCoreMemoryEpisodesGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreMemoryEpisodesGet(requestParameters.pageSize, requestParameters.pageToken, requestParameters.page, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -47139,6 +47155,8 @@ export interface DefaultApiApiCoreMemoryEpisodesGetRequest {
     readonly pageSize?: number
 
     readonly pageToken?: string
+
+    readonly page?: number
 }
 
 /**
@@ -50706,7 +50724,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreMemoryEpisodesGet(requestParameters: DefaultApiApiCoreMemoryEpisodesGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryEpisodesGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreMemoryEpisodesGet(requestParameters.pageSize, requestParameters.pageToken, requestParameters.page, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

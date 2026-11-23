@@ -867,7 +867,7 @@ func manualSchemas() map[string]any {
 			prop("mode", enumStringSchema("auto", "fixed")), prop("strategy", strSchema()),
 			prop("task_class", enumStringSchema("simple", "balanced", "complex", "long_context", "fixed", "auto")),
 			prop("reason", enumStringSchema("simple_task", "complex_task", "long_context", "session_sticky", "default_balanced", "retry_same_model", "fixed", "initial_selection", "model_unavailable", "model_fallback")),
-			prop("model_id", strSchema()), prop("provider_id", strSchema()), prop("provider_name", strSchema()),
+			prop("model_id", strSchema()), prop("provider_id", strSchema()), prop("provider_name", strSchema()), prop("provider_display_name", strSchema()), prop("provider_is_custom", boolSchema()),
 			prop("model_name", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")),
 			prop("selection_version", int64Schema()),
 		),
@@ -904,6 +904,7 @@ func manualSchemas() map[string]any {
 		),
 		"EpisodeMemoryListData": objReq(
 			[]string{"items", "total_size", "next_page_token"},
+			prop("supports_page_number", boolSchema()),
 			prop("items", array(refSchema("EpisodeMemory"))),
 			prop("total_size", int64Schema()),
 			prop("next_page_token", strSchema()),
@@ -939,7 +940,7 @@ func manualSchemas() map[string]any {
 			prop("transport_diagnostic", objReq([]string{"code"}, prop("code", enumStringSchema("upstream_stream_failed", "upstream_stream_timeout")))),
 		),
 		"ChatModelSwitchIdentity": objReq([]string{"candidate_id", "source", "model_id", "provider_group_id"},
-			prop("candidate_id", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")), prop("model_id", strSchema()), prop("provider_group_id", strSchema()), prop("provider_name", strSchema()), prop("model_name", strSchema())),
+			prop("candidate_id", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")), prop("model_id", strSchema()), prop("provider_group_id", strSchema()), prop("provider_name", strSchema()), prop("provider_display_name", strSchema()), prop("provider_is_custom", boolSchema()), prop("model_name", strSchema())),
 		"ChatModelSwitchedData":       modelSwitchDataSchema(),
 		"ChatModelOutput":             objReq([]string{"run_id", "call_index"}, prop("run_id", strSchema()), prop("call_index", map[string]any{"type": "integer", "minimum": 0, "description": "Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run."}), prop("phase", map[string]any{"type": "string", "enum": []string{"begin", "commit", "rollback"}, "description": "Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed."})),
 		"ChatModelSwitchRecord":       map[string]any{"allOf": []any{refSchema("ChatModelSwitchedData"), objReq([]string{"event_id"}, prop("event_id", strSchema()))}},
@@ -1398,6 +1399,7 @@ func manualPaths() map[string]any {
 				"parameters": queryParams(
 					param("query", "page_size", false, intSchema()),
 					param("query", "page_token", false, strSchema()),
+					param("query", "page", false, map[string]any{"type": "integer", "minimum": 1, "description": "One-based page number. Mutually exclusive with page_token."}),
 				),
 				"responses": map[string]any{
 					"200": response(200, "Episode Memory page", refSchema("EpisodeMemoryListResponse")),

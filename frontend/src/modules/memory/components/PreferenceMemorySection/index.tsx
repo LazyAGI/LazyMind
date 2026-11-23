@@ -17,7 +17,6 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   DeleteOutlined,
   HolderOutlined,
-  LeftOutlined,
   RightOutlined,
   SettingOutlined,
   ClearOutlined,
@@ -60,6 +59,8 @@ import { getMemorySourceLabelKey } from "../../memorySourceLabels";
 import SafeReferenceMarkdown from "./SafeReferenceMarkdown";
 
 import { usePreferenceOrganizer } from "../../hooks/usePreferenceOrganizer";
+
+import MemoryPagination from "../MemoryPagination";
 
 const PAGE_SIZE = 5;
 
@@ -653,39 +654,14 @@ export default function PreferenceMemorySection() {
             </SortableContext>
           </DndContext>
 
-          <div className="memory-preference-pagination">
-            <span>
-              {t("admin.memoryPreferencePage", {
-                count: visibleItems.length,
-                page: pageIndex + 1,
-                total: list.totalSize,
-              })}
-            </span>
-            <div className="memory-preference-pagination-actions">
-              <Button
-                aria-label={t("common.previous")}
-                disabled={pageIndex === 0 || ordering}
-                icon={<LeftOutlined />}
-                size="small"
-                onClick={() =>
-                  setPageIndex((current) => Math.max(0, current - 1))
-                }
-              />
-              <Button
-                aria-label={t("common.next")}
-                disabled={pageIndex >= pageCount - 1 || ordering}
-                icon={<RightOutlined />}
-                size="small"
-                onClick={() =>
-                  setPageIndex((current) =>
-                    Math.min(pageCount - 1, current + 1),
-                  )
-                }
-              >
-                {t("common.next")}
-              </Button>
-            </div>
-          </div>
+          <MemoryPagination
+            page={pageIndex + 1}
+            pageSize={PAGE_SIZE}
+            total={list.items.length}
+            disabled={ordering}
+            label={t("admin.memoryPreferenceTitle")}
+            onChange={page => setPageIndex(page - 1)}
+          />
         </>
       )}
 

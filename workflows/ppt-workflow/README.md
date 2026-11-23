@@ -109,9 +109,9 @@ and provider reason instead of silently falling back.
 
 ## Optional PPTX template
 
-HTML is the default output. Startup never asks whether to use/upload a template
-or to choose quick/full generation. An already supplied template is bound to
-`template_pptx`; only then is the user asked for HTML or PPTX if unspecified.
+At startup, ask the user to choose interactive HTML with PPTX export or direct
+native PPTX whenever the request leaves the route open. Reuse an explicit or
+previously confirmed choice. Bind a supplied template to `template_pptx`.
 Both template routes skip style questions and AI backgrounds. HTML recreates
 the template style with components, without using full-slide background images.
 Native PPTX composition can repeat, omit and reorder source layouts to meet the
@@ -277,9 +277,9 @@ artifact-size limits still apply; large fonts can cause an explicit size error.
 - Page generation uses approved complete page prompts directly; rewrite prompts
   are reserved for requested edits.
 - Page generation is sequential by default; publication preserves approved order.
-- Export: UI export remains available. An explicit request for a PPTX file uses
-  `ppt_export_deck` or `ppt_export_html` and publishes `native_pptx`. UI default =
-  browser raster PPTX. Local/Desktop enables editable export automatically after
+- Export: the interactive deck publishes HTML and notes. The panel exports
+  selected HTML on demand, with browser raster PPTX as the default. The native
+  route publishes the PowerPoint file. Local/Desktop enables editable export after
   its dependency bundle is detected; container deployments use
   `LAZYMIND_OUTPUT_EDITABLE_PPT=true`.
 

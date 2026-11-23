@@ -320,12 +320,14 @@ steps:
         material_images may remain empty.
       - For KB_STYLE, use web_search/image_search_and_validate only when the KB result is empty or lacks
         usable visual style information, or when the user explicitly asks for image references.
-      - When web image collection is actually needed, call web_search once with one specific
-        visual query, include_images=true, and max_results=15. Extract only the direct URLs from
-        the returned image fields (for Tavily: the summary result's extra.images); do not use
-        ordinary result-page URLs. Then call image_search_and_validate once with that exact list
-        as candidate_urls, target_valid=3, max_candidates=15. Do not shorten, reconstruct, decode,
-        or remove query/signature parameters from any URL.
+      - When web image collection is actually needed, call image_search_and_validate with one
+        specific visual query, target_valid=3, max_candidates=15. It uses configured image search,
+        or default Keenable and real Wikimedia Commons image candidates without requiring a key.
+        If web_search already supplied image URLs, pass those exact URLs as candidate_urls.
+        Use include_images=true only when the selected provider schema supports it (Tavily);
+        Keenable's web search does not accept that parameter. Never use ordinary result-page
+        URLs or Wikipedia article text as images. Preserve source_metadata, attribution and
+        license information. Do not shorten, reconstruct, decode or remove URL parameters.
       - **Save only 1–3 validated images total.** Use `selected[*].url` from
         image_search_and_validate verbatim, including every query/signature parameter.
       - When real web images are required but web_search is unavailable, call

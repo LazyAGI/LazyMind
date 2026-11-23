@@ -13,7 +13,7 @@ vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "" }));
 const render = (ui: ReactNode) => renderUI(ui, { wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider> });
 
 afterEach(() => { cleanup(); act(() => useConversationRunningStore.setState({ entries: {} })); vi.useRealTimers(); });
-beforeEach(() => detail.mockReset());
+beforeEach(() => detail.mockReset().mockResolvedValue({ data: { conversation: {} } }));
 
 describe("ConversationPreview", () => {
   it("shows group membership and loads the branch origin for grouped conversations", async () => {

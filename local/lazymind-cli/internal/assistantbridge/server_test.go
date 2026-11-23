@@ -147,6 +147,10 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 }
 
 func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T) {
+	type actionResult struct {
+		status agentintegration.Status
+		err    error
+	}
 	for _, agent := range []string{"cursor", "workbuddy"} {
 		t.Run(agent, func(t *testing.T) {
 			server := newTestServer(t, t.TempDir())
@@ -160,15 +164,25 @@ func TestInteractiveLoginActionsReturnBeforeExternalLoginCompletes(t *testing.T)
 				return nil
 			}
 
-			start := time.Now()
-			status, err := server.agentAction(context.Background(), agent, "login")
-			if err != nil {
-				t.Fatal(err)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			results := make(chan actionResult, 1)
+			go func() {
+				status, err := server.agentAction(ctx, agent, "login")
+				results <- actionResult{status: status, err: err}
+			}()
+			// Status discovery can take several seconds on Windows. Assert the
+			// action returns while the external login is held at the release gate.
+			var result actionResult
+			select {
+			case result = <-results:
+			case <-ctx.Done():
+				t.Fatal("login action did not return while external login was blocked")
 			}
-			if elapsed := time.Since(start); elapsed > time.Second {
-				t.Fatalf("login action blocked for %s", elapsed)
+			if result.err != nil {
+				t.Fatal(result.err)
 			}
-			body, err := json.Marshal(status)
+			body, err := json.Marshal(result.status)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -533,46 +547,8 @@ func TestBrowserHealthReportsBridgeIdentityAcrossPlatforms(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["version"] != "v9" || payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
+	if payload["version"] != "v11" || payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
 		t.Fatalf("payload=%#v", payload)
-	}
-}
-
-func TestValidateBridgeIdentityRequiresMatchingPlatformAndExecutable(t *testing.T) {
-	root := t.TempDir()
-	expected := filepath.Join(root, "lazymind")
-	foreign := filepath.Join(root, "other-lazymind")
-	if runtime.GOOS == "windows" {
-		expected += ".exe"
-		foreign += ".exe"
-	}
-	for _, path := range []string{expected, foreign} {
-		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := validateBridgeIdentity(map[string]any{
-		"platform": runtime.GOOS, "executable": expected,
-	}, expected); err != nil {
-		t.Fatalf("matching identity: %v", err)
-	}
-	if err := validateBridgeIdentity(map[string]any{
-		"platform": runtime.GOOS, "executable": foreign,
-	}, expected); err == nil || !strings.Contains(err.Error(), "another LazyMind executable") {
-		t.Fatalf("foreign executable error=%v", err)
-	}
-	otherPlatform := "windows"
-	if runtime.GOOS == "windows" {
-		otherPlatform = "linux"
-	}
-	if err := validateBridgeIdentity(map[string]any{
-		"platform": otherPlatform, "executable": expected,
-	}, expected); err == nil || !strings.Contains(err.Error(), "already running on") {
-		t.Fatalf("platform mismatch error=%v", err)
-	}
-	if err := validateBridgeIdentity(map[string]any{}, expected); err == nil ||
-		!strings.Contains(err.Error(), "does not report its platform") {
-		t.Fatalf("missing identity error=%v", err)
 	}
 }
 

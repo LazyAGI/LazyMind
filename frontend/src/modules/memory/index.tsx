@@ -91,6 +91,7 @@ import {
   type SkillDraftPreviewRecord,
 } from "./skillApi";
 import { buildSkillZipBlob } from "./skillPackage";
+import { showBuiltinSkillInstallError } from "./skillInstallFeedback";
 import { abortSkillTempUpload, getSkillPackageValidationError, isInvalidSkillPackageError, uploadSkillTempFile } from "./skillUpload";
 import { useSkillImportTask } from "./hooks/useSkillImportTask";
 import SkillImportProgress from "./components/SkillManagementSection/SkillImportProgress";
@@ -3657,7 +3658,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         message.success(t("admin.memoryBuiltinSkillEnableSuccess"));
       } catch (error) {
         console.error("Enable builtin skill failed:", error);
-        message.error(getLocalizedErrorMessage(error));
+        showBuiltinSkillInstallError(error, builtinSkillUid);
         throw error;
       } finally {
         setBuiltinSkillEnableLoading((previous) => {

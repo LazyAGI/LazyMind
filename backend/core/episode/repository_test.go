@@ -341,6 +341,10 @@ func TestRepositoryListUsesStableCreationTimePagination(t *testing.T) {
 	if len(secondPage.Items) != 1 || secondPage.Items[0].Summary != "first" {
 		t.Fatalf("second page = %#v", secondPage)
 	}
+	jumped, err := repo.list(context.Background(), "user-1", 2, "", 2)
+	if err != nil || len(jumped.Items) != 1 || jumped.Items[0].ID != secondPage.Items[0].ID || jumped.TotalSize != 3 {
+		t.Fatalf("jumped page = %#v err = %v", jumped, err)
+	}
 	if secondPage.NextPageToken != "" {
 		t.Fatalf("second page next_page_token = %q, want empty", secondPage.NextPageToken)
 	}

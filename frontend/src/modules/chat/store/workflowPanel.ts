@@ -673,13 +673,8 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
     ? { ...(rawUI ?? {}) as WorkflowUI, source_type: spec.source_type }
     : (rawUI ?? {}) as WorkflowUI;
   if (Array.isArray(spec.steps)) {
-    const stepLabels: Record<string, string> = {};
-    for (const step of spec.steps) {
-      if (step && typeof step.id === 'string' && typeof step.label === 'string' && step.label.trim()) {
-        stepLabels[step.id] = step.label;
-      }
-    }
-    ui = { ...ui, stepLabels };
+    const labels = spec.steps.filter(step => typeof step?.id === 'string' && typeof step?.label === 'string' && step.label.trim());
+    if (labels.length) ui = { ...ui, stepLabels: Object.fromEntries(labels.map(step => [step.id, step.label])) };
   }
   const slotDefs = new Map<string, SlotDef>();
   if (Array.isArray(spec.slots)) {

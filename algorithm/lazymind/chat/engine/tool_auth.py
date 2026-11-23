@@ -24,7 +24,7 @@ def inject_tool_config(tool_config: Optional[dict[str, Any]]) -> None:
     existing = lazyllm.globals.config['dynamic_tool_auth'] or {}
     lazyllm.globals.config['dynamic_tool_auth'] = {
         name: value for name, value in existing.items()
-        if name not in {'google', 'bing', 'bocha', 'tavily'}
+        if name not in {'google', 'bing', 'bocha', 'tavily', 'keenable'}
     }
     clear_mail_tool_auth()
     _inject_tool_config({k: v for k, v in (tool_config or {}).items() if k != 'document_directory_scopes'})

@@ -215,13 +215,18 @@ func loadEmbeddingIndexKnowledgeBaseCounts(ctx context.Context, db *gorm.DB) (em
 		counts.Indexed = counts.Affected
 		return counts, nil
 	}
-	// A target indexed level is enough to require a conservative safety check,
-	// but it does not mean that vectors are ready for display.
+	// Keep legacy and in-flight work protected. A successful vector purge leaves
+	// an explicit pending/manual marker with no task or vector artifact; the
+	// library's desired processing level alone must not count those as vectors.
 	if err := db.WithContext(ctx).Table("datasets d").
 		Joins("JOIN documents doc ON doc.dataset_id = d.id AND doc.deleted_at IS NULL").
 		Joins("LEFT JOIN document_processing_states s ON s.dataset_id = d.id AND s.document_id = doc.id").
 		Where("doc.document_type IS NULL OR doc.document_type <> ?", "FOLDER").
 		Where("d.deleted_at IS NULL AND (d.processing_level NOT IN ? OR s.index_status = ?)", nonIndexedLevels, "succeeded").
+		Where(`NOT (COALESCE(s.index_status, '') = 'pending'
+			AND COALESCE(s.embedding_version, '') IN ('reembed:manual', 'rebuild:manual')
+			AND COALESCE(s.index_artifact_ref, '') = '' AND COALESCE(s.index_fingerprint, '') = ''
+			AND COALESCE(s.index_error_code, '') = '' AND COALESCE(s.index_error_message, '') = '')`).
 		Distinct("d.id").Count(&counts.Affected).Error; err != nil {
 		return embeddingIndexKnowledgeBaseCounts{}, err
 	}

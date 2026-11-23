@@ -185,7 +185,7 @@ describe('shared workflow compact layout', () => {
       expect(within(shortcuts).queryByRole('button', { name: stepId })).not.toBeInTheDocument();
       expect(within(shortcuts).queryByRole('button', { name: '旧页签名称' })).not.toBeInTheDocument();
       fireEvent.click(rollback);
-      await waitFor(() => expect(send).toHaveBeenCalledWith(`请重新执行步骤 ${stepId}`, {
+      await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 整理辅助文档', {
         session_id: 'layout-test', kind: 'rewind', step_id: stepId, expected_state_version: 0,
       }));
     },
@@ -704,6 +704,7 @@ describe('shared workflow compact layout', () => {
   it.each(['completed', 'failed'] as const)('binds the %s rerun to Chat and still saves before rerunning', async (status) => {
     fixture.session.status = status;
     fixture.session.projection!.display!.status = status;
+    fixture.ui.stepLabels = { prepare: '整理验收清单', write_document: 'write_document' };
     const send = vi.fn();
     // Let the asynchronous UI load and editor-action registration settle before
     // asserting the save-before-rerun contract.
@@ -711,9 +712,9 @@ describe('shared workflow compact layout', () => {
     await screen.findByRole('button', { name: '发布' });
     const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
     expect(shortcuts).toBeVisible();
-    expect(within(shortcuts).getByRole('button', { name: '写作准备' })).toBeVisible();
+    expect(within(shortcuts).getByRole('button', { name: '整理验收清单' })).toBeVisible();
     fireEvent.click(within(shortcuts).getByRole('button', { name: '成稿' }));
-    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 write_document', {
+    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 成稿', {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     }));
     expect(fixture.flush).toHaveBeenCalledOnce();
@@ -1133,7 +1134,7 @@ describe('shared workflow compact layout', () => {
     const button = await waitForCompletedContinueButton();
     await act(async () => fireEvent.click(button));
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
-    expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}write_document`, {
+    expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}成稿`, {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     });
   });

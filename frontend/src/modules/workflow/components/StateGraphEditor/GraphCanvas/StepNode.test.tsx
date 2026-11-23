@@ -40,6 +40,8 @@ describe('step card authoring details', () => {
     render(<ReactFlowProvider><StepNodeRenderer {...props} /></ReactFlowProvider>);
     expect(screen.getByText('selfEvolutionRun.sgeNodeInputs: Notes、Backup')).toBeInTheDocument();
     expect(screen.getByText('selfEvolutionRun.sgeNodeUserConfirm')).toBeInTheDocument();
+    expect(screen.getByText('Review notes').closest('.step-node-header')).toBeInTheDocument();
+    expect(screen.queryByText('review')).not.toBeInTheDocument();
     expect(screen.getByText('Summary')).toBeInTheDocument();
   });
 

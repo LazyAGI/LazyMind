@@ -476,7 +476,7 @@ func TestPublicEpisodeHandlersAreGatewayUserScoped(t *testing.T) {
 	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listResponse); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if listResponse.Data.TotalSize != 3 ||
+	if !listResponse.Data.SupportsPageNumber || listResponse.Data.TotalSize != 3 ||
 		len(listResponse.Data.Items) != 2 ||
 		listResponse.Data.Items[0].Summary != "third" ||
 		listResponse.Data.NextPageToken == "" {
@@ -484,6 +484,27 @@ func TestPublicEpisodeHandlersAreGatewayUserScoped(t *testing.T) {
 	}
 	if bytes.Contains(listRecorder.Body.Bytes(), []byte(`"user_id"`)) {
 		t.Fatalf("public list leaked user_id: %s", listRecorder.Body.String())
+	}
+
+	for _, query := range []string{"page=0", "page=2&page_token=cursor", "page=abc"} {
+		req := httptest.NewRequest(http.MethodGet, "/memory/episodes?"+query, nil)
+		req.Header.Set("X-User-Id", "user-1")
+		rec := httptest.NewRecorder()
+		ListEpisodes(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("query %s returned %d", query, rec.Code)
+		}
+	}
+	jump := httptest.NewRequest(http.MethodGet, "/memory/episodes?page_size=2&page=2", nil)
+	jump.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	ListEpisodes(rec, jump)
+	var jumped struct {
+		Data PublicPage `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &jumped); err != nil || rec.Code != http.StatusOK ||
+		len(jumped.Data.Items) != 1 || jumped.Data.Items[0].Summary != "first" || jumped.Data.TotalSize != 3 {
+		t.Fatalf("invalid second page: %s", rec.Body.String())
 	}
 
 	ownerGet := httptest.NewRequest(http.MethodGet, "/memory/episodes/"+userOneIDs[0], nil)

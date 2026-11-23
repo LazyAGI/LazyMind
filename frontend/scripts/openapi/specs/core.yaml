@@ -2786,8 +2786,12 @@ components:
                     type: string
                 model_name:
                     type: string
+                provider_display_name:
+                    type: string
                 provider_id:
                     type: string
+                provider_is_custom:
+                    type: boolean
                 provider_name:
                     type: string
                 reason:
@@ -2832,8 +2836,12 @@ components:
                     type: string
                 model_name:
                     type: string
+                provider_display_name:
+                    type: string
                 provider_group_id:
                     type: string
+                provider_is_custom:
+                    type: boolean
                 provider_name:
                     type: string
                 source:
@@ -8394,6 +8402,8 @@ components:
                     type: array
                 next_page_token:
                     type: string
+                supports_page_number:
+                    type: boolean
                 total_size:
                     format: int64
                     type: integer
@@ -16519,6 +16529,8 @@ components:
                     type: boolean
                 created_at:
                     type: string
+                dataset_deleted:
+                    type: boolean
                 dataset_id:
                     type: string
                 display_state:
@@ -17392,7 +17404,10 @@ components:
             properties:
                 advanced:
                     $ref: '#/components/schemas/ProviderRequestAdvanced'
-                    description: Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
+                    description: Custom headers, query parameters and extra JSON body, stored locally as plaintext JSON. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
+                advanced_unavailable:
+                    description: Legacy encrypted options could not be read. Preserve them unless the user explicitly chooses to replace or clear them.
+                    type: boolean
                 default_protocol:
                     enum:
                         - openai
@@ -19513,7 +19528,7 @@ components:
             properties:
                 advanced:
                     $ref: '#/components/schemas/ProviderRequestAdvanced'
-                    description: Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
+                    description: Custom headers, query parameters and extra JSON body, stored locally as plaintext JSON. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
                 default_protocol:
                     enum:
                         - openai
@@ -31923,6 +31938,13 @@ paths:
                   required: false
                   schema:
                     type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    description: One-based page number. Mutually exclusive with page_token.
+                    minimum: 1
+                    type: integer
             responses:
                 "200":
                     content:

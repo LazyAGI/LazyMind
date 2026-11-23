@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -204,7 +205,7 @@ func catalogAcquirePackageByUID(ctx context.Context, catalogPath, uid, cacheRoot
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			return nil, catalogFailure("download builtin Skill %s failed; retry or update the catalog: %v", uid, call.err)
+			return nil, fmt.Errorf("download builtin Skill %s failed; retry or update the catalog: %w", uid, call.err)
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -218,15 +219,55 @@ func acquireLockedPackage(ctx context.Context, catalogPath string, entry Catalog
 	if pkg, found, err := cachedPackage(catalogPath, entry, cacheRoot); err != nil || found {
 		return pkg, err
 	}
-	if len(entry.AppliedPatches) > 0 && entry.OriginVersion == "" {
-		return Package{}, catalogFailure("builtin Skill %s is missing origin_version; regenerate the catalog", entry.UID)
-	}
 	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
 		return Package{}, catalogFailure("create builtin Skill cache: %v", err)
 	}
-	resolvedURL, pathPrefixes, err := lockedDownloadSource(entry)
-	if err != nil {
-		return Package{}, err
+	sources, attemptTimeout := packageSources(entry)
+	return acquireFromSources(ctx, catalogPath, entry, cacheRoot, client, sources, attemptTimeout)
+}
+
+func acquireFromSources(ctx context.Context, catalogPath string, entry CatalogSkill, cacheRoot string, client *http.Client, sources []packageSource, attemptTimeout time.Duration) (Package, error) {
+	failures := make([]SourceFailure, 0, len(sources))
+	causes := make([]error, 0, len(sources))
+	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return Package{}, err
+		}
+		attempt, cancel := context.WithTimeout(ctx, attemptTimeout)
+		pkg, err := acquireFromSource(attempt, catalogPath, entry, cacheRoot, client, source)
+		cancel()
+		if err == nil {
+			return pkg, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return Package{}, err
+		}
+		var localError *os.PathError
+		var renameError *os.LinkError
+		if errors.As(err, &localError) || errors.As(err, &renameError) {
+			return Package{}, err
+		}
+		failures = append(failures, source.failure(err))
+		causes = append(causes, fmt.Errorf("%s: %w", source.name, err))
+	}
+	return Package{}, &PackageDownloadError{Failures: failures, cause: errors.Join(causes...)}
+}
+
+func acquireFromSource(ctx context.Context, catalogPath string, entry CatalogSkill, cacheRoot string, client *http.Client, source packageSource) (Package, error) {
+	resolvedURL := source.url
+	var pathPrefixes []string
+	if source.name == originSource {
+		if len(entry.AppliedPatches) > 0 && entry.OriginVersion == "" {
+			return Package{}, fmt.Errorf("%w: missing origin_version for %s", errPackageValidation, entry.UID)
+		}
+		var err error
+		resolvedURL, pathPrefixes, err = lockedDownloadSource(entry)
+		if err != nil {
+			return Package{}, fmt.Errorf("%w: %w", errSourceInvalid, err)
+		}
+	}
+	if resolvedURL == "" {
+		return Package{}, errMirrorUnpublished
 	}
 	downloaded, err := downloadArchive(ctx, client, resolvedURL, cacheRoot)
 	if err != nil {
@@ -234,10 +275,14 @@ func acquireLockedPackage(ctx context.Context, catalogPath string, entry Catalog
 	}
 	defer os.Remove(downloaded)
 
+	if source.name != originSource {
+		return cacheVerifiedPackage(ctx, entry, downloaded, catalogPath, cacheRoot)
+	}
+
 	expectedOriginHash, expectedOriginSize, expectedOriginTree := lockedOrigin(entry)
 	originPath, originFiles, err := selectOrigin(downloaded, pathPrefixes, cacheRoot, expectedOriginHash, expectedOriginSize, expectedOriginTree)
 	if err != nil {
-		return Package{}, err
+		return Package{}, fmt.Errorf("%w: %w", errPackageValidation, err)
 	}
 	if originPath != downloaded {
 		defer os.Remove(originPath)
@@ -247,16 +292,16 @@ func acquireLockedPackage(ctx context.Context, catalogPath string, entry Catalog
 		patchCatalogPath := filepath.Join(filepath.Dir(catalogPath), "patches", "catalog.yaml")
 		patches, err := skillpatch.LoadCatalog(patchCatalogPath)
 		if err != nil {
-			return Package{}, catalogFailure("load builtin Skill patches: %v", err)
+			return Package{}, fmt.Errorf("%w: load builtin Skill patches: %v", errPackageValidation, err)
 		}
 		patched, err := skillpatch.Apply(skillpatch.Target{
 			UID: entry.UID, Version: entry.OriginVersion, OriginTreeHash: expectedOriginTree,
 		}, originFiles, patches)
 		if err != nil {
-			return Package{}, err
+			return Package{}, fmt.Errorf("%w: %v", errPackageValidation, err)
 		}
 		if err := validateAppliedPatches(entry, patched); err != nil {
-			return Package{}, err
+			return Package{}, fmt.Errorf("%w: %v", errPackageValidation, err)
 		}
 		finalPath, err = skillpackage.WriteZip(patched.Files, cacheRoot)
 		if err != nil {
@@ -264,20 +309,26 @@ func acquireLockedPackage(ctx context.Context, catalogPath string, entry Catalog
 		}
 		defer os.Remove(finalPath)
 	}
-	if _, err := verifiedPackage(entry, finalPath); err != nil {
-		return Package{}, catalogFailure("locked final package mismatch: %v", err)
+	return cacheVerifiedPackage(ctx, entry, finalPath, catalogPath, cacheRoot)
+}
+
+func cacheVerifiedPackage(ctx context.Context, entry CatalogSkill, archivePath, catalogPath, cacheRoot string) (Package, error) {
+	pkg, err := verifiedPackage(entry, archivePath)
+	if err != nil {
+		return Package{}, fmt.Errorf("%w: locked final package mismatch: %w", errPackageValidation, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return Package{}, err
 	}
 	cachePath := cachePathForEntry(cacheRoot, entry)
-	if err := os.Rename(finalPath, cachePath); err != nil {
+	if err := os.Rename(archivePath, cachePath); err != nil {
 		if pkg, found, _ := cachedPackage(catalogPath, entry, cacheRoot); found {
 			return pkg, nil
 		}
-		return Package{}, catalogFailure("save builtin Skill cache: %v", err)
+		return Package{}, fmt.Errorf("save builtin Skill cache: %w", err)
 	}
-	return verifiedPackage(entry, cachePath)
+	pkg.ArchivePath = cachePath
+	return pkg, nil
 }
 
 func lockedOrigin(entry CatalogSkill) (hash string, size int64, tree string) {
@@ -378,7 +429,7 @@ func downloadClient() *http.Client {
 	proxied.Proxy = http.ProxyFromEnvironment
 	return &http.Client{
 		Transport: &downloadTransport{direct: direct, proxied: proxied, proxyFor: http.ProxyFromEnvironment},
-		Timeout:   5 * time.Minute,
+		Timeout:   originDownloadTimeout,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return catalogFailure("too many download redirects")
@@ -482,7 +533,7 @@ func dialPublicDownloadAddress(ctx context.Context, network, address string, res
 	} else {
 		addresses, err = resolver.LookupNetIP(ctx, "ip", host)
 		if err != nil {
-			return nil, catalogFailure("resolve download host failed: %v", err)
+			return nil, fmt.Errorf("resolve download host failed: %w", err)
 		}
 	}
 	allowed := false
@@ -501,7 +552,7 @@ func dialPublicDownloadAddress(ctx context.Context, network, address string, res
 	if !allowed {
 		return nil, catalogFailure("download host resolves only to non-public addresses")
 	}
-	return nil, catalogFailure("connect to download host failed: %v", lastErr)
+	return nil, fmt.Errorf("connect to download host failed: %w", lastErr)
 }
 
 func downloadArchive(ctx context.Context, client *http.Client, rawURL, cacheRoot string) (string, error) {
@@ -516,10 +567,10 @@ func downloadArchive(ctx context.Context, client *http.Client, rawURL, cacheRoot
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", catalogFailure("download returned HTTP %d", response.StatusCode)
+		return "", downloadHTTPError(response.StatusCode)
 	}
 	if response.ContentLength > maxDownloadBytes {
-		return "", catalogFailure("download exceeds %d bytes", maxDownloadBytes)
+		return "", fmt.Errorf("%w: download exceeds %d bytes", errPackageValidation, maxDownloadBytes)
 	}
 	file, err := os.CreateTemp(cacheRoot, ".builtin-download-*.zip")
 	if err != nil {
@@ -538,7 +589,7 @@ func downloadArchive(ctx context.Context, client *http.Client, rawURL, cacheRoot
 		return "", err
 	}
 	if size > maxDownloadBytes {
-		return "", catalogFailure("download exceeds %d bytes", maxDownloadBytes)
+		return "", fmt.Errorf("%w: download exceeds %d bytes", errPackageValidation, maxDownloadBytes)
 	}
 	if err := file.Sync(); err != nil {
 		return "", err

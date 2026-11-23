@@ -130,6 +130,9 @@ func EnqueueCredentialBackup(tx *gorm.DB, groupID string, revision int64, operat
 		}
 		if revision >= current.LocalCredentialRevision {
 			if err := tx.Model(&current).Where("local_credential_revision <= ?", revision).Updates(map[string]any{
+				// A metadata-only save can retain the API key revision. Give
+				// the new work a new identity so an older upload cannot remove it.
+				"id":                        uuid.NewString(),
 				"local_credential_revision": revision, "operation": string(operation), "backup_state": string(BackupPending),
 				"attempt_count": 0, "next_attempt_at": now, "last_error_code": 0, "updated_at": now,
 			}).Error; err != nil {

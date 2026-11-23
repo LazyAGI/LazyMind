@@ -2355,6 +2355,33 @@ func handleStreamChat(
 		go cancelChatOnStop(chatCtx, stateStore, convID, historyID, chatCancel)
 	}
 
+	if workflowContext, ok := reqBody["workflow_context"].(map[string]any); ok && workflowContext["recovery"] != nil {
+		encoded, encodeErr := json.Marshal(workflowContext["recovery"])
+		var recovery workflow.NativeChatRecovery
+		err := encodeErr
+		if err == nil {
+			err = json.Unmarshal(encoded, &recovery)
+		}
+		if dualReply {
+			err = fmt.Errorf("workflow recovery requires a single Chat run")
+		}
+		var version int64
+		if err == nil {
+			version, err = workflow.AdmitNativeChatRecovery(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, historyID, recovery)
+		}
+		if err != nil {
+			terminal, persistedID := failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns, target, historyExt, "workflow_recovery_rejected")
+			replyChatTerminalError(w, err.Error(), http.StatusConflict, terminal, persistedID)
+			return
+		}
+		defer func() {
+			finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := workflow.FinishNativeControlTurn(finishCtx, db, recovery.SessionID, version); err != nil {
+				log.Logger.Error().Err(err).Str("session_id", recovery.SessionID).Msg("failed to settle workflow recovery turn")
+			}
+		}()
+	}
 	if control, ok := reqBody["_workflow_control"].(*workflow.NativeControlCommand); ok {
 		owner, _ := reqBody["_workflow_control_owner"].(string)
 		delete(reqBody, "_workflow_control")
@@ -3396,6 +3423,11 @@ func streamSingleAnswer(
 			}
 		}
 		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(output.text), now)
+	}
+	if persisted && !externalFinalized && runTerminal.Status == "failed" {
+		if err := workflow.RecoverNativeChatAfterFailure(persistCtx, db, stateStore, convID, historyID); err != nil {
+			log.Logger.Error().Err(err).Str("conversation_id", convID).Msg("failed to recover native workflow after Chat failure")
+		}
 	}
 }
 

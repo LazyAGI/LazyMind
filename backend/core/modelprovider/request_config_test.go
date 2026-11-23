@@ -150,8 +150,8 @@ func TestRequestConfigSaveSurvivesConcurrentSQLiteWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	key, err := apiKeyForGroup(db, &savedGroup)
-	if err != nil || key != "saved-key" || savedGroup.CredentialRevision != 2 {
-		t.Fatalf("group credential was not refreshed exactly once: revision=%d, key readable=%t, err=%v", savedGroup.CredentialRevision, key == "saved-key", err)
+	if err != nil || key != "saved-key" || savedGroup.CredentialRevision != group.CredentialRevision || savedGroup.APIKeyCiphertext != group.APIKeyCiphertext {
+		t.Fatalf("advanced-only save changed group credential: revision=%d, key readable=%t, err=%v", savedGroup.CredentialRevision, key == "saved-key", err)
 	}
 }
 

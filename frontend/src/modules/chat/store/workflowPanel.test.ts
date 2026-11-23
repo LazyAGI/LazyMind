@@ -91,6 +91,15 @@ describe('runtime skipped tab visibility', () => {
 });
 
 describe('hydrateWorkflowUI', () => {
+  it('keeps two distinct step labels even when both steps use the same tab', () => {
+    const panel = (label: string) => hydrateWorkflowUI({
+      ui: { tabs: [{ id: 'draft', label: 'Draft' }] },
+      steps: [{ id: 'write', label }, { id: 'proof', label: 'Proofread' }],
+    });
+    expect(panel('Write').stepLabels).toEqual({ write: 'Write', proof: 'Proofread' });
+    expect(panel('Rewrite').stepLabels).toEqual({ write: 'Rewrite', proof: 'Proofread' });
+  });
+
   it('loads the material image gallery from the current PPT workflow YAML', () => {
     const spec = load(readFileSync(resolve(process.cwd(), '../workflows/ppt-workflow/workflow.yaml'), 'utf8'));
     const ui = workflowUIForAudience(hydrateWorkflowUI(spec), false);

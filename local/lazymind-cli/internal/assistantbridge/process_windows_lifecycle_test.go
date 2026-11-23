@@ -35,6 +35,15 @@ type detachedLifecycleReady struct {
 // Exercise the actual launcher process, not just its creation flags: closing
 // the foreground MCP job must leave the shared, detached service alive.
 func TestWindowsDetachedServiceSurvivesLauncherExit(t *testing.T) {
+	t.Run("with launcher marker", func(t *testing.T) {
+		testWindowsDetachedServiceSurvivesLauncherExit(t, "foreground")
+	})
+	t.Run("without launcher marker", func(t *testing.T) {
+		testWindowsDetachedServiceSurvivesLauncherExit(t, "foreground-unmarked")
+	})
+}
+
+func testWindowsDetachedServiceSurvivesLauncherExit(t *testing.T, role string) {
 	root := t.TempDir()
 	home := filepath.Join(root, "state")
 	t.Setenv("LAZYMIND_CONNECTOR_CONFIG", "")
@@ -63,7 +72,7 @@ func TestWindowsDetachedServiceSurvivesLauncherExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, launcher, "-test.run="+lifecycleHelper)
-	command.Env = append(os.Environ(), lifecycleRoleKey+"=foreground", lifecycleRootKey+"="+root)
+	command.Env = append(os.Environ(), lifecycleRoleKey+"="+role, lifecycleRootKey+"="+root)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {
@@ -132,8 +141,8 @@ func TestWindowsLauncherDetachedServiceHelper(t *testing.T) {
 	}
 	var err error
 	switch role {
-	case "foreground":
-		err = runDetachedLifecycleForeground(root)
+	case "foreground", "foreground-unmarked":
+		err = runDetachedLifecycleForeground(root, role == "foreground-unmarked")
 	case "daemon":
 		err = runDetachedLifecycleDaemon(root)
 	default:
@@ -146,7 +155,7 @@ func TestWindowsLauncherDetachedServiceHelper(t *testing.T) {
 	os.Exit(0)
 }
 
-func runDetachedLifecycleForeground(root string) error {
+func runDetachedLifecycleForeground(root string, clearMarker bool) error {
 	if os.Getenv("LAZYMIND_CONNECTOR_LAUNCHER_JOB") != "1" {
 		return errors.New("foreground helper was not started through the launcher")
 	}
@@ -165,6 +174,11 @@ func runDetachedLifecycleForeground(root string) error {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	if clearMarker {
+		if err := os.Unsetenv("LAZYMIND_CONNECTOR_LAUNCHER_JOB"); err != nil {
+			return err
+		}
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -176,12 +190,11 @@ func runDetachedLifecycleForeground(root string) error {
 	defer log.Close()
 	command := exec.Command(self, "-test.run="+lifecycleHelper)
 	command.SysProcAttr = detachedProcessAttributes()
-	command.Env = append(detachedServiceEnvironment(filepath.Join(root, "state")), lifecycleRoleKey+"=daemon")
+	command.Env = append(bridgeEnvironment(filepath.Join(root, "state"), false), lifecycleRoleKey+"=daemon")
 	command.Stdout, command.Stderr = log, log
-	if err := command.Start(); err != nil {
+	if _, _, err := startBridgeProcess(command); err != nil {
 		return fmt.Errorf("start detached service: %w", err)
 	}
-	_ = command.Process.Release()
 	return waitDetachedLifecycleFile(filepath.Join(root, "ready"), "", 5*time.Second)
 }
 

@@ -195,6 +195,23 @@ afterEach(() => {
 });
 
 describe("knowledge market background tasks", () => {
+  it("keeps cached dataset names unlinked until the opened dialog gets its own response", async () => {
+    const cached = task("cached", { dataset_id: "ds-old" });
+    jobs.set("cached", cached);
+    await mountPage();
+    let finish!: () => void;
+    vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockImplementationOnce(() => new Promise(resolve => {
+      finish = () => resolve({ items: [{ ...cached, dataset_deleted: true }], total: 1, page: 1, page_size: 10, unfinished_count: 1 });
+    }));
+    await click(taskEntry(1));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText(cached.name)).toBeInTheDocument();
+    expect(dialog.queryByRole("link", { name: cached.name })).toBeNull();
+    await act(async () => finish());
+    expect(dialog.getByText(cached.name + " · 知识库已删除")).toBeInTheDocument();
+    expect(dialog.queryByRole("link", { name: cached.name })).toBeNull();
+  });
+
   it("shows the server's global count independently of locally tracked jobs", async () => {
     vi.mocked(marketApi.listKnowledgeMarketTaskPage).mockResolvedValue({
       items: [], total: 30, page: 1, page_size: 10, unfinished_count: 7,

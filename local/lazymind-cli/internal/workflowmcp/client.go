@@ -603,7 +603,7 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 			WorkflowID: input.WorkflowID, RevisionID: revisionID,
 			Questions: prepared.Questions, ClarificationValues: prepared.ClarificationValues,
 			MissingClarificationFields: prepared.MissingClarificationFields, MissingInputs: prepared.MissingInputs,
-			AgentInstruction: "No Workflow session has been created. Ask the returned questions using their exact field IDs. Merge the returned clarification_values with the user's answers and submit them as clarification_values to workflow.start, preserving request_context and revision_id. Resolve missing_inputs with actual imported sources via inputs or input_bindings. Use a new idempotency_key when answers or inputs change; preserve the key only for unchanged-payload retries. Do not call workflow.step.begin or open a Workflow panel before a session_id is returned.",
+			AgentInstruction: "No Workflow session has been created. Ask the returned questions using their exact field IDs. When a question has recommended_choice, present that choice first and mark it as recommended. Wait for the user's selection and submit the original choice without the recommendation suffix. Merge the returned clarification_values with the user's answers and submit them as clarification_values to workflow.start, preserving request_context and revision_id. Resolve missing_inputs with actual imported sources via inputs or input_bindings. Use a new idempotency_key when answers or inputs change; preserve the key only for unchanged-payload retries. Do not call workflow.step.begin or open a Workflow panel before a session_id is returned.",
 		}, nil
 	case "", "ready":
 		// Older Core versions returned only preparation_id. Keep that contract

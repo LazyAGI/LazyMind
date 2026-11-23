@@ -94,8 +94,9 @@ function ArtifactRow({ artifact, onReload, sourceContext, workflow }: { artifact
   </li>;
 }
 
-export function TaskArtifactList({ artifacts, final = false, onReload, sourceContexts, workflow, workflowForArtifact }: {
-  artifacts: PublicArtifact[]; final?: boolean; onReload?: () => Promise<unknown>; sourceContexts?: Record<string, ArtifactSourceContext>;
+export function TaskArtifactList({ artifacts, final = false, total, loadAll, onReload, sourceContexts, workflow, workflowForArtifact }: {
+  artifacts: PublicArtifact[]; final?: boolean; total?: number;
+  loadAll?: (active: () => boolean) => Promise<void>; onReload?: () => Promise<unknown>; sourceContexts?: Record<string, ArtifactSourceContext>;
   workflow?: WorkflowPreviewOrigin;
   workflowForArtifact?: (artifact: PublicArtifact) => WorkflowPreviewOrigin | undefined;
 }) {
@@ -104,10 +105,26 @@ export function TaskArtifactList({ artifacts, final = false, onReload, sourceCon
   const listId = useId();
   const [expanded, setExpanded] = useState(true);
   const unique = [...new Map(artifacts.map(artifact => [artifact.artifact_id, artifact])).values()];
-  if (!unique.length) return null;
+  const count = Math.max(total ?? 0, unique.length);
+  const [showAll, setShowAll] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current++; }, []);
+  const expand = async () => {
+    const request = ++generation.current;
+    setShowAll(true);
+    setLoadFailed(false);
+    try {
+      await loadAll?.(() => request === generation.current);
+    } catch {
+      if (generation.current === request) setLoadFailed(true);
+    }
+  };
+  if (!count) return null;
+  const visible = final || showAll ? unique : unique.slice(0, 3);
   const heading = <><FileTextOutlined aria-hidden="true" />
     <span>{t(final ? "taskCenter.ordinaryFinalArtifacts" : "taskCenter.ordinaryStageArtifacts")}</span>
-    <span className="ordinary-section-count">· {unique.length}</span>
+    <span className="ordinary-section-count">· {count}</span>
   </>;
   return <section className="ordinary-activity-section ordinary-artifact-section" aria-labelledby={headingId}>
     <h3 className="ordinary-section-heading" id={headingId}>
@@ -118,6 +135,14 @@ export function TaskArtifactList({ artifacts, final = false, onReload, sourceCon
           : <RightOutlined className="ordinary-artifact-chevron" aria-hidden="true" />}
       </button> : heading}
     </h3>
-    <ul className="ordinary-artifact-list" id={listId} hidden={final && !expanded}>{unique.map(artifact => <ArtifactRow key={artifact.artifact_id} artifact={artifact} onReload={onReload} sourceContext={sourceContexts?.[artifact.producer_display_key]} workflow={workflow ?? workflowForArtifact?.(artifact)} />)}</ul>
+    <ul className="ordinary-artifact-list" id={listId} hidden={final && !expanded}>{visible.map(artifact => <ArtifactRow key={artifact.artifact_id} artifact={artifact} onReload={onReload} sourceContext={sourceContexts?.[artifact.producer_display_key]} workflow={workflow ?? workflowForArtifact?.(artifact)} />)}</ul>
+    {!final && count > 3 && <button className="ordinary-load-more" type="button" aria-controls={listId} aria-expanded={showAll}
+      onClick={() => {
+        if (!showAll) { void expand(); return; }
+        generation.current++;
+        setShowAll(false);
+        setLoadFailed(false);
+      }}>{t(showAll ? "taskCenter.collapseStageArtifacts" : "taskCenter.expandStageArtifacts")}</button>}
+    {loadFailed && <div role="alert">{t("taskCenter.ordinaryLoadError")} <button type="button" onClick={() => void expand()}>{t("common.retry")}</button></div>}
   </section>;
 }

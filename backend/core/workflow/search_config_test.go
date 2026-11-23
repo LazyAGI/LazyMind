@@ -88,6 +88,16 @@ func TestDatasetIDsFromSearchConfig_Empty(t *testing.T) {
 
 // --- DB-backed tests ---
 
+func TestRequiredWebSearchIsAvailableForFirstRunWithoutProviderSelection(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserSelectedProvider{})
+	issues := skillCapabilityRuntimeConfigIssues(t.Context(), db.DB, "new-user", []skillCapabilityRequirement{
+		{ID: "web_search", Label: "网页搜索", WorkflowCapability: "web_search", Supported: true, Required: true},
+	})
+	if len(issues) != 0 {
+		t.Fatalf("built-in search must satisfy first-run workflow requirements: %+v", issues)
+	}
+}
+
 func newConversationTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 	return orm.MigrateTestDB(t, &orm.Conversation{})

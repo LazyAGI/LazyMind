@@ -44,7 +44,7 @@ func PrepareDistributionUpgrade(w http.ResponseWriter, r *http.Request) {
 	response, err := newDistributionService(db).Prepare(r.Context(), skilldistribution.PrepareRequest{SkillID: skillID, UserID: userID, DownloadPackage: true})
 	if err != nil {
 		if errors.Is(err, skilldistribution.ErrPackageUnavailable) {
-			replyError(w, "builtin skill package download failed: "+err.Error(), http.StatusBadGateway)
+			replyBuiltinPackageError(w, err)
 			return
 		}
 		replyServiceError(w, err)

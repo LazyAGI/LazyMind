@@ -323,7 +323,8 @@ jobs:
         run: |
           $diagnostics = Join-Path $env:RUNNER_TEMP 'go-cli-diagnostics'
           New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
-          go test ./... -json "-debug-actiongraph=$diagnostics/actions.json" 2> "$diagnostics/cache.log" |
+          # Keep short CLI probe deadlines independent of the other native lifecycle tests.
+          go test -p 1 ./... -json "-debug-actiongraph=$diagnostics/actions.json" 2> "$diagnostics/cache.log" |
             Tee-Object -FilePath "$diagnostics/tests.jsonl"
           $testExitCode = $LASTEXITCODE
           Get-Content "$diagnostics/cache.log"

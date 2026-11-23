@@ -22,6 +22,17 @@ func init() {
 	registerAdditionalError("discovery value required", http.StatusBadRequest, 2002952)
 	registerAdditionalError("skill organize task is not running", http.StatusConflict, 2003145)
 	registerAdditionalError("skill organize cancel failed", http.StatusBadGateway, 2003146)
+	const downloadFailure = "builtin skill package download failed"
+	registerAdditionalErrorPattern("download builtin skill %s failed; retry or update the catalog", downloadFailure, http.StatusBadGateway, 2003147)
+	for _, source := range []string{
+		"save builtin skill cache",
+		"resolve download host failed",
+		"connect to download host failed",
+		"no mirror published for the locked package",
+		"package validation failed",
+	} {
+		registerAdditionalErrorAlias(source, downloadFailure, http.StatusBadGateway, 2003147)
+	}
 	registerAdditionalError("request_id and item_ids are required", http.StatusBadRequest, 2003163)
 	registerAdditionalError("action must be accept, reject, or revoke", http.StatusBadRequest, 2003164)
 	registerAdditionalErrorPattern("缺少审批项 %s 的 Skill 绑定", "Skill organize approval binding is missing", http.StatusInternalServerError, 2003165)
