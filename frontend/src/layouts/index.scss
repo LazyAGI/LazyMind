@@ -235,6 +235,10 @@
     &.is-active {
       color: #2563eb;
       background: #eff6ff;
+
+      .sider-module-icon {
+        color: inherit;
+      }
     }
 
     .sider-module-icon {

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import WorkflowInstalledView from './WorkflowInstalledView';
@@ -38,6 +38,7 @@ const labels: Record<string, string> = {
   'admin.memoryWorkflowCallModeUpdated': '工作流调用方式已更新',
   'admin.memoryWorkflowCallModeUpdateFailed': '更新工作流调用方式失败',
   'admin.memoryWorkflowTypeBuiltin': '内置',
+  'admin.memoryWorkflowActionUse': '使用该工作流',
   'admin.memoryWorkflowActionView': '查看工作流',
   'admin.memoryWorkflowActionCopy': '复制工作流',
   'admin.memoryWorkflowCopyName': '{{name}} 副本',
@@ -76,10 +77,13 @@ beforeAll(() => {
   });
 });
 
+function Location() { const location = useLocation(); return <output data-testid="location">{JSON.stringify({ pathname: location.pathname, state: location.state })}</output>; }
+
 function renderView() {
   render(
     <MemoryRouter>
       <WorkflowInstalledView t={t} onNewWorkflow={vi.fn()} />
+      <Location />
     </MemoryRouter>,
   );
 }
@@ -197,4 +201,85 @@ describe('WorkflowInstalledView call mode', () => {
       expect(workflowApiMocks.copyBuiltinWorkflow).toHaveBeenCalledWith('image-workflow', 'AI 图片生成 副本');
     });
   });
+  it('shows use/view/copy in order and launches the exact workflow without running or copying it', async () => {
+    renderView();
+    const use = await screen.findByRole('button', { name: '使用该工作流' });
+    const actions = use.closest('.memory-resource-actions')!;
+    expect(within(actions as HTMLElement).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+      .toEqual(['使用该工作流', '查看工作流', '复制工作流']);
+    expect(use.querySelector('[data-workflow-icon="circle-arrow-right"]')).not.toBeNull();
+    fireEvent.click(use);
+    expect(JSON.parse(screen.getByTestId('location').textContent!)).toEqual({ pathname: '/agent/chat/home', state: { workflowLaunch: { workflowRef: 'builtin:image-workflow', name: 'AI 图片生成' } } });
+    expect(workflowApiMocks.copyBuiltinWorkflow).not.toHaveBeenCalled();
+    expect(workflowApiMocks.setUserWorkflowCallMode).not.toHaveBeenCalled();
+  });
+
+  it('stably prioritizes the full result before pagination and keeps the order after filtering', async () => {
+    const otherIds = Array.from({ length: 22 }, (_, i) => `other-${i}`);
+    const ids = [...otherIds, 'image-workflow', 'writer-workflow', 'paper-writing', 'image-workflow-v2', 'paper_ppt_with_reflection_mock', 'ppt-workflow', 'academic_research_pipeline'];
+    workflowApiMocks.listBuiltinWorkflows.mockResolvedValue(ids.map(id => ({ id, name: `name:${id}`, steps: [] })));
+    renderView();
+    await screen.findByText('name:ppt-workflow');
+    const names = () => [...document.querySelectorAll('.memory-term-link')].map(node => node.textContent);
+    const priority = ['ppt-workflow', 'image-workflow-v2', 'paper-writing', 'writer-workflow', 'academic_research_pipeline', 'paper_ppt_with_reflection_mock'];
+    expect(names()).toEqual([...priority, ...otherIds.slice(0, 14)].map(id => `name:${id}`));
+    fireEvent.click(screen.getByTitle('2'));
+    expect(names()).toEqual([...otherIds.slice(14), 'image-workflow'].map(id => `name:${id}`));
+    fireEvent.click(screen.getByRole('tab', { name: '内置' }));
+    expect(names().slice(0, priority.length)).toEqual(priority.map(id => `name:${id}`));
+  });
+
+  it('loads all server pages before displaying the catalog in non-desktop mode', async () => {
+    workflowApiMocks.listWorkflowDrafts.mockResolvedValueOnce({ records: [], total: 101 })
+      .mockResolvedValueOnce({ records: [{ id: 'last', name: 'Last draft', updated_at: '2026-09-07', source_type: 'ai' }], total: 101 });
+    renderView();
+    expect(await screen.findByText('Last draft')).toBeVisible();
+    expect(workflowApiMocks.listWorkflowDrafts).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 100 });
+  });
+
+  it('prevents using paused workflows and unpublished drafts', async () => {
+    workflowApiMocks.listUserWorkflowSettings.mockResolvedValue([{ workflow_ref: 'builtin:image-workflow', call_mode: 'disabled' }]);
+    workflowApiMocks.listWorkflowDrafts.mockResolvedValue({ records: [{ id: 'unpublished', name: 'Draft', source_type: 'ai', updated_at: '2026-09-07' }], total: 1 });
+    renderView();
+    await screen.findByText('Draft');
+    expect(screen.getAllByRole('button', { name: '使用该工作流' })).toHaveLength(2);
+    screen.getAllByRole('button', { name: '使用该工作流' }).forEach(button => expect(button).toBeDisabled());
+  });
+
+  it('adapts pagination to the body height and retains the current item across resize', async () => {
+    let height = 300;
+    const clientHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('ant-table-body') ? height : 0;
+    });
+    const rowBounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const footer = this.querySelector<HTMLElement>('.ant-table-pagination');
+      const footerStyle = footer ? getComputedStyle(footer) : undefined;
+      const footerMargins = (parseFloat(footerStyle?.marginTop || '') || 0) + (parseFloat(footerStyle?.marginBottom || '') || 0);
+      const elementHeight = this.classList.contains('ant-table-row') ? 60
+        : this.classList.contains('memory-list-content') ? height + footerMargins
+        : this.classList.contains('ant-table-body') ? height : 0;
+      return { height: elementHeight, width: 0, top: 0, bottom: elementHeight, left: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) };
+    });
+    try {
+      workflowApiMocks.listBuiltinWorkflows.mockResolvedValue(Array.from({ length: 30 }, (_, i) => ({ id: `other-${i}`, name: `Row ${i}`, steps: [] })));
+      renderView();
+      const names = () => [...document.querySelectorAll('.memory-term-link')].map(node => node.textContent);
+      await waitFor(() => expect(names()).toHaveLength(5));
+      fireEvent.click(screen.getByTitle('2'));
+      expect(names()[0]).toBe('Row 5');
+      act(() => { height = 600; window.dispatchEvent(new Event('resize')); });
+      await waitFor(() => expect(names()).toHaveLength(10));
+      expect(names()).toContain('Row 5');
+      fireEvent.click(screen.getByTitle('2'));
+      expect(names()[0]).toBe('Row 10');
+      act(() => { height = 120; window.dispatchEvent(new Event('resize')); });
+      await waitFor(() => expect(names()).toEqual(['Row 10', 'Row 11']));
+      fireEvent.click(screen.getByRole('tab', { name: '内置' }));
+      expect(names()).toEqual(['Row 0', 'Row 1']);
+    } finally {
+      clientHeight.mockRestore();
+      rowBounds.mockRestore();
+    }
+  });
+
 });

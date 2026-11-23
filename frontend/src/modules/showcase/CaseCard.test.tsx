@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { ConfigProvider } from "antd";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -70,6 +71,54 @@ function LocationStateProbe() {
 }
 
 describe("CaseCard", () => {
+  it("reveals a truncated title after one second and preserves its click action", async () => {
+    vi.useFakeTimers();
+    try {
+      const onTry = vi.fn();
+      const view = render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><CaseCard item={item} onTry={onTry} /></MemoryRouter></ConfigProvider>);
+      const title = screen.getByRole('heading', { name: item.title });
+      Object.defineProperties(title, { scrollWidth: { value: 280 }, clientWidth: { value: 120 } });
+      const link = title.closest('a')!;
+      fireEvent.mouseEnter(link);
+      await act(async () => { vi.advanceTimersByTime(999); });
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(screen.getByRole('tooltip')).toHaveTextContent(item.title);
+      fireEvent.click(link);
+      expect(onTry).toHaveBeenCalledWith(item);
+      fireEvent.mouseLeave(link);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not show a tooltip for a complete title or a brief hover", async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(<MemoryRouter><CaseCard item={item} /></MemoryRouter>);
+      const title = screen.getByRole('heading', { name: item.title });
+      let width = 280;
+      Object.defineProperties(title, { scrollWidth: { value: 280 }, clientWidth: { get: () => width } });
+      const link = title.closest('a')!;
+      fireEvent.mouseEnter(link);
+      await act(async () => { vi.advanceTimersByTime(1200); });
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      fireEvent.mouseLeave(link);
+      width = 120;
+      fireEvent.mouseEnter(link);
+      await act(async () => { vi.advanceTimersByTime(500); });
+      fireEvent.mouseLeave(link);
+      await act(async () => { vi.advanceTimersByTime(1200); });
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses the card body for try and keeps the corner action for details", () => {
     const onTry = vi.fn();
     render(

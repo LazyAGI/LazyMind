@@ -123,11 +123,27 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1 1 180px;
+  max-width: 220px;
+
+  > .ant-btn { flex-shrink: 0; }
+
+  .memory-skill-market-source {
+    flex: 1 1 140px;
+    min-width: 100px;
+  }
 
   .memory-skill-market-search {
     width: clamp(200px, 17vw, 260px);
   }
 
+}
+
+.memory-skill-toolbar-actions.is-market {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .memory-skill-market-category-popover,
@@ -143,19 +159,7 @@
     background: #e6f4ff;
   }
 
-  .memory-skill-category-bar.is-popover {
-    position: absolute;
-    top: 40px;
-    right: 0;
-    z-index: 20;
-    width: max-content;
-    max-width: 420px;
-    padding: 8px;
-    border: 1px solid #e5eaf2;
-    border-radius: 8px;
-    background: #fff;
-    box-shadow: 0 8px 24px rgba(31, 35, 41, 0.12);
-  }
+
 }
 
 .memory-skill-market-search-popover {
@@ -217,6 +221,8 @@
 }
 
 .memory-skill-market-publish {
+  flex: 0 0 auto;
+  white-space: nowrap;
   height: 32px;
   padding: 0 14px;
   border: 0;
@@ -491,6 +497,44 @@
   min-height: 0;
 }
 
+.memory-skill-market-category-dropdown {
+  width: 260px;
+  max-width: calc(100vw - 24px);
+
+  .ant-dropdown-menu { max-height: min(480px, 60vh); overflow-y: auto; }
+  .ant-dropdown-menu-item { padding: 9px 12px; }
+  .ant-dropdown-menu-title-content { min-width: 0; }
+}
+
+.memory-skill-market-category-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+
+  > span:last-child { color: #8a98ae; font-size: 12px; font-variant-numeric: tabular-nums; }
+}
+
+.memory-skill-market-category-summary {
+  flex-shrink: 0;
+  padding: 0 24px;
+}
+
+.memory-skill-market-current-category {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid #d9e5fa;
+  border-radius: 18px;
+  background: #f5f8ff;
+  color: #526b93;
+  font-size: 12px;
+  line-height: 18px;
+
+  .memory-skill-market-current-count { color: #8a98ae; font-size: 11px; font-variant-numeric: tabular-nums; }
+}
+
 .memory-cloud-resource-view {
   display: flex;
   flex: 1;
@@ -738,86 +782,13 @@
   }
 }
 
-.memory-skill-filter-meta-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 4px;
-}
-
-.memory-skill-category-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-}
-
-.memory-skill-category-pill {
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  color: #475467;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 650;
-  cursor: pointer;
-
-  &:hover {
-    border-color: #e5eaf2;
-    background: #f8fafc;
-    color: #175cd3;
-  }
-
-  &.is-active {
-    border-color: #bfd2ff;
-    background: #eef4ff;
-    color: #175cd3;
-  }
-}
-
-.memory-skill-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid #edf1f5;
-  padding: 2px 0 10px;
-}
-
-.memory-skill-section-title {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-
-  h3 {
-    margin: 0;
-    color: #101828;
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1.4;
-  }
-}
-
-.memory-skill-section-count {
-  color: #667085;
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
 .memory-skill-market {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 16px;
   min-height: 0;
-  padding: 0 24px 16px;
+  background: #f6f8fc;
+  border-top: 1px solid #edf0f5;
 }
 
 .memory-skill-market-scroll {
@@ -826,32 +797,97 @@
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  padding: 20px 24px 24px;
 }
 
 .memory-skill-market-pagination {
   display: flex;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
   justify-content: flex-end;
-  padding-top: 4px;
+  padding: 12px 24px;
+  background: #fff;
+  border-top: 1px solid #e8edf4;
+  .ant-pagination { flex-wrap: wrap; row-gap: 8px; }
+  > .ant-select { min-width: 132px; }
+}
+
+.memory-skill-market-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .memory-skill-section {
+  --market-category-color: #58677e;
+  --market-category-bg: #edf0f5;
   display: flex;
   flex-direction: column;
+  gap: 14px;
+
+  &.is-blue { --market-category-color: #2869bb; --market-category-bg: #eaf2ff; }
+  &.is-purple { --market-category-color: #7a57a9; --market-category-bg: #f2ecfa; }
+  &.is-teal { --market-category-color: #287d70; --market-category-bg: #e6f4ef; }
+}
+
+.memory-skill-market-group-heading {
+  display: flex;
+  align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+
+.memory-skill-market-category-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 7px 12px;
+  border-radius: 20px;
+  color: var(--market-category-color);
+  background: var(--market-category-bg);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  > span { flex-shrink: 0; }
+}
+
+.memory-skill-market-group-line {
+  flex: 1;
+  min-width: 8px;
+  height: 1px;
+  background: #e2e8f2;
+}
+
+.memory-skill-market-group-count {
+  flex-shrink: 0;
+  padding: 4px 7px;
+  border: 1px solid #e5eaf3;
+  border-radius: 6px;
+  background: #fff;
+  color: #748198;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .memory-skill-recommend-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
   gap: 14px;
 }
 
 .memory-skill-tile {
+  box-sizing: border-box;
   min-width: 0;
-  min-height: 196px;
-  display: flex;
-  flex-direction: column;
+  min-height: 176px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-rows: auto 1fr auto;
+  gap: 8px 10px;
   padding: 16px;
   border: 1px solid #e8edf4;
   border-radius: 12px;
@@ -868,19 +904,13 @@
   }
 }
 
-.memory-skill-tile-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
 .memory-skill-tile-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: #eef4ff;
-  color: #175cd3;
+  grid-row: 1 / 3;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--market-category-bg);
+  color: var(--market-category-color);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -889,15 +919,39 @@
 }
 
 .memory-skill-tile-name {
+  grid-column: 2;
   display: -webkit-box;
-  margin: 14px 0 8px;
+  align-self: start;
+  min-width: 0;
+  min-height: 36px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
   overflow: hidden;
   color: #101828;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 650;
   line-height: 1.4;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  &:hover { color: #1769df; }
+}
+
+.memory-skill-market-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  color: #748198;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  &::before { content: ''; width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: #9aabc2; }
 }
 
 .memory-origin-mark,
@@ -1039,11 +1093,15 @@
 }
 
 .memory-skill-tile-desc {
+  grid-column: 2;
+  align-self: start;
   margin: 0;
-  min-height: calc(2em * 1.55);
+  min-height: 3.5em;
+  max-height: 3.5em;
   color: #667085;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -1051,20 +1109,27 @@
 }
 
 .memory-skill-tile-foot {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: auto;
-  padding-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e8edf4;
 }
 
 .memory-skill-tile-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  margin-left: auto;
   gap: 6px;
+  .ant-btn { border-radius: 6px; font-size: 12px; }
+  .memory-skill-market-install { border-color: transparent; background: #edf4ff; color: #1769df; box-shadow: none; }
+  .memory-skill-market-install:hover:not(:disabled) { background: #dfeaff; color: #155ac1; border-color: #c8dafa; }
 }
 
 .memory-skill-badge-installed {
@@ -1073,15 +1138,15 @@
 }
 
 .memory-skill-installed-action.ant-btn {
-  color: #667085;
-  background: #f3f4f7;
-  border-color: #e5e7eb;
+  color: #2d7b59;
+  background: #eaf6f0;
+  border-color: transparent;
 
   &:disabled,
   &.ant-btn-disabled {
-    color: #667085;
-    background: #f3f4f7;
-    border-color: #e5e7eb;
+    color: #2d7b59;
+    background: #eaf6f0;
+    border-color: transparent;
     opacity: 1;
   }
 }
@@ -1284,16 +1349,6 @@
     padding-bottom: 0;
   }
 
-  .memory-skill-market-toolbar-filters {
-    flex: 1 1 100%;
-    flex-wrap: wrap;
-
-    .memory-skill-market-search {
-      flex: 1 1 240px;
-      width: auto;
-    }
-  }
-
   .memory-skill-view-tabs {
     flex-wrap: wrap;
     gap: 20px;
@@ -1304,7 +1359,7 @@
     flex-wrap: wrap;
   }
 
-  .memory-skill-market {
+  .memory-skill-market-scroll {
     padding-inline: 16px;
   }
 
@@ -1317,9 +1372,6 @@
     }
   }
 
-  .memory-skill-recommend-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 900px) {
@@ -1346,18 +1398,81 @@
     width: 100%;
   }
 
-  .memory-skill-recommend-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .memory-skill-tile-foot {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .memory-skill-tile-actions {
-    justify-content: flex-end;
-  }
 }
 
 @import "./embedded.scss";
+
+// Workflow icons share one neutral treatment; the silhouette carries the meaning.
+.memory-skill-installed .memory-table-main-icon.memory-workflow-icon,
+.memory-skill-installed .memory-table-main-icon.memory-skill-use-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #e5ebf4;
+  background: #f4f7fb;
+  color: #647fa5;
+  padding: 0;
+  transition: color 150ms, background-color 150ms, border-color 150ms, box-shadow 150ms;
+
+  &:hover:not(:disabled),
+  &:focus-visible:not(:disabled) {
+    color: #175cd3;
+    background: #eaf2ff;
+    border-color: #91b7f3;
+    box-shadow: 0 0 0 2px rgba(23, 92, 211, 0.12);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #175cd3;
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    color: #b8bec9;
+    cursor: not-allowed;
+  }
+}
+
+.memory-resource-actions.memory-workflow-actions,
+.memory-resource-actions.memory-skill-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  gap: 4px;
+
+  .ant-btn {
+    flex: 0 0 28px;
+    border-radius: 6px;
+    &:hover:not(:disabled) { color: #344054; background: #f2f4f7; }
+    &:disabled { color: #b8bec9; }
+  }
+}
+
+.memory-workflow-installed {
+  // Allocate a bounded table track and a separate footer track. Percentage heights
+  // on both loading wrappers otherwise let the body push pagination out of view.
+  .memory-table {
+    height: 0;
+    .ant-spin-nested-loading { flex: 1; height: 0; min-height: 0; }
+    .ant-spin-container {
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      min-height: 0;
+    }
+    .ant-table-pagination { margin-bottom: 0; }
+  }
+
+  .memory-skill-installed-filters { flex-shrink: 0; }
+  .memory-table-main-title .memory-term-link {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+@container (max-width: 820px) {
+  .memory-skill-management.is-workflow-view {
+    .memory-skill-heading-group { width: auto; flex: 1; min-width: 0; }
+    .memory-skill-toolbar-actions { width: auto; flex: 0 0 auto; }
+  }
+}

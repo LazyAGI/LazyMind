@@ -1,5 +1,6 @@
 import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from '@/modules/taskCenter/events';
 import { useWorkflowChanges } from '@/modules/taskCenter/useWorkflowChanges';
+import WorkflowIcon from '@/modules/workflow/components/WorkflowIcon';
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -296,7 +297,7 @@ export default function MainLayout() {
   const showSettingsTrigger =
     settingsMenuItems.length > 0 || !hideLocalUserControls;
   const resourceNavItems = [
-    ...(directoriesEnabled ? [{ key: "/document-directories", label: t("directories.title"), icon: <BookOutlined /> }] : []),
+    ...(directoriesEnabled ? [{ key: "/document-directories", label: t("directories.title"), icon: <WorkflowIcon name="folder-tree" size={14} /> }] : []),
     {
       key: "/lib/knowledge",
       label: t("layout.knowledgeBase"),
@@ -310,7 +311,7 @@ export default function MainLayout() {
     ...(isVocabularyEnabled() ? [{
       key: "/lib/vocabulary",
       label: t("vocabularyPage.title"),
-      icon: <BookOutlined />,
+      icon: <WorkflowIcon name="notebook-tabs" size={14} />,
     }] : []),
     ...(developerActive ? [{
       key: "/dataset-management",
@@ -618,11 +619,11 @@ export default function MainLayout() {
     <div className="sider-module-popover sider-module-popover--grouped">
       <div className="sider-module-popover-group">
         <div className="sider-module-popover-group-header">
-          <AppstoreOutlined />
+          <WorkflowIcon name="tree-deciduous" size={14} />
           <span>{t("layout.memoryManagement")}</span>
         </div>
         {[
-          { key: "/memory-management/skills", label: t("admin.memoryTabSkills"), icon: <AppstoreOutlined /> },
+          { key: "/memory-management/skills", label: t("admin.memoryTabSkills"), icon: <WorkflowIcon name="component" size={14} /> },
           { key: "/memory-management/experience", label: t("admin.memoryTabExperience"), icon: <HistoryOutlined /> },
           { key: "/memory-management/glossary", label: t("admin.memoryTabGlossary"), icon: <BookOutlined /> },
         ].map((item) => (
@@ -1056,7 +1057,7 @@ export default function MainLayout() {
               align={{ offset: [-4, 0] }}
               overlayClassName="sider-module-overlay"
             >
-              <button type="button" className="sider-module-trigger" aria-label={t("layout.resourceLib")}>
+              <button type="button" className={`sider-module-trigger${resourceNavItems.some(item => matchPath(`${item.key}/*`, pathname)) ? " is-active" : ""}`} aria-label={t("layout.resourceLib")}>
                 <span className="sider-module-icon">
                   <FolderOpenOutlined />
                 </span>
@@ -1075,9 +1076,9 @@ export default function MainLayout() {
               align={{ offset: [-4, 0] }}
               overlayClassName="sider-module-overlay"
             >
-              <button type="button" className="sider-module-trigger" aria-label={t("layout.aiEvolution")}>
+              <button type="button" className={`sider-module-trigger${matchPath("/memory-management/*", pathname) || (canAccessSelfEvolution && matchPath("/self-evolution/*", pathname)) ? " is-active" : ""}`} aria-label={t("layout.aiEvolution")}>
                 <span className="sider-module-icon">
-                  <CodeOutlined />
+                  <WorkflowIcon name="orbit" size={15} />
                 </span>
                 <span className="sider-module-text">{t("layout.aiEvolution")}</span>
                 <RightOutlined className="sider-module-arrow" />

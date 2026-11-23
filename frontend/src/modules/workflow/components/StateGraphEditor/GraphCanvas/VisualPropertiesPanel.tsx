@@ -9,7 +9,7 @@ import { NODE_MIN_WIDTH } from './StepNode';
 
 const colorString = (color: Color) => color.toHexString();
 const visibilityFields: Array<[keyof NodeVisibility, string]> = [
-  ['stepId', '步骤标识'], ['label', '展示名称'], ['outputs', '产出'], ['approval', '审批/执行标志'],
+  ['label', '展示名称'], ['outputs', '产出'], ['approval', '审批/执行标志'],
   ['conditionalRoute', '条件路由标志'], ['parallelRoute', '并行标志'], ['skippable', '可跳过标志'],
 ];
 const gradientDirections = [

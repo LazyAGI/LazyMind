@@ -17,7 +17,7 @@ const skillApiMocks = vi.hoisted(() => ({
   listSkillOrganizeTasks: vi.fn(),
   waitForSkillOrganize: vi.fn(),
 }));
-const viewMocks = vi.hoisted(() => ({ props: {} as Record<string, any>, review: {} as Record<string, any>, approval: {} as Record<string, any> }));
+const viewMocks = vi.hoisted(() => ({ props: {} as Record<string, any>, review: {} as Record<string, any>, approval: {} as Record<string, any>, market: {} as Record<string, any> }));
 const contextMocks = vi.hoisted(() => ({
   useMemoryManagementOutletContext: vi.fn(),
 }));
@@ -38,6 +38,7 @@ vi.mock("./SkillManagementToolbar", () => ({
     onOrganizeCancelRun,
     onReviewDrafts,
     pendingDraftCount,
+    marketFilters,
   }: {
     organizeDisabled: boolean;
     organizeStatus: string;
@@ -45,6 +46,7 @@ vi.mock("./SkillManagementToolbar", () => ({
     onOrganizeCancelRun: () => void;
     onReviewDrafts?: () => void;
     pendingDraftCount: number;
+    marketFilters: React.ReactNode;
   }) => (
     <div>
       <button onClick={() => onOrganizeSkills("light")}>organize</button>
@@ -53,6 +55,7 @@ vi.mock("./SkillManagementToolbar", () => ({
       {onReviewDrafts ? (
         <button onClick={onReviewDrafts}>admin.memorySkillDraftReviewTitle</button>
       ) : null}
+      {marketFilters}
       <output data-testid="pending-count">{pendingDraftCount}</output>
       <span data-testid="organize-status">{organizeStatus}</span>
       <span data-testid="organize-disabled">{String(organizeDisabled)}</span>
@@ -60,20 +63,12 @@ vi.mock("./SkillManagementToolbar", () => ({
   ),
 }));
 vi.mock("./SkillInstalledView", () => ({ default: (props: Record<string, any>) => { viewMocks.props = props; return <output data-testid="selected">{props.selectedOrganizeSkillIds.join(",")}</output>; } }));
-vi.mock("./SkillMarketView", () => ({ default: () => null }));
+vi.mock("./SkillMarketView", () => ({ default: (props: Record<string, any>) => { viewMocks.market = props; return null; } }));
 vi.mock("./SkillAdminPublishModal", () => ({ default: () => null }));
 vi.mock("./WorkflowInstalledView", () => ({ default: () => null }));
-vi.mock("./skillHelpers", () => ({
-  collectMarketTags: () => [],
-  filterMarketSkills: () => [],
-}));
-vi.mock("./skillMarketMockData", () => ({
-  mapMarketSkillRecordToAsset: (record: unknown) => record,
-}));
 vi.mock("./collaborationVisibility", () => ({
   shouldShowSkillMessageCenter: () => false,
 }));
-vi.mock("./skillCategoryIcon", () => ({ renderSkillCategoryIcon: () => null }));
 vi.mock("@/modules/workflow/components/NewWorkflowModal", () => ({
   default: () => null,
 }));
@@ -125,6 +120,145 @@ describe("SkillManagementSection organize task recovery", () => {
       manualSkillReviewRunning: false,
       handleRunManualSkillReview: vi.fn(),
     });
+  });
+
+  it("sorts builtin and admin skills together before paging and scopes pages to the selected major category", async () => {
+    const record = (id: string, category: string, marketSource = "builtin") => ({
+      id, name: id, category, description: id, tags: [], content: "", marketSource,
+      marketItemId: id, sourceSkillId: id,
+    });
+    const writers = Array.from({ length: 14 }, (_, i) => record(`writer-${i}`, "writing"));
+    skillApiMocks.listBuiltinSkills.mockResolvedValue([...writers, record("finder", "search")]);
+    skillApiMocks.listSkillMarketPage.mockResolvedValue({
+      records: [record("admin-finder", "research", "admin"), record("admin-writer", "writing", "admin")],
+      total: 2, page: 1, pageSize: 100,
+    });
+    skillApiMocks.listSkillMarketTags.mockResolvedValue([]);
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({
+      ...contextMocks.useMemoryManagementOutletContext(), skillView: "market",
+    });
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(viewMocks.market.total).toBe(17));
+    expect(viewMocks.market.skillAssets.map((s: { id: string }) => s.id)).toEqual([
+      "finder", "admin-finder", ...writers.slice(0, 10).map(s => s.id),
+    ]);
+    act(() => viewMocks.market.onColumnsChange(3));
+    expect(viewMocks.market.skillAssets.map((s: { id: string }) => s.id)).toEqual([
+      "finder", "admin-finder", ...writers.slice(0, 12).map(s => s.id),
+    ]);
+    act(() => viewMocks.market.onPageChange(2, 12));
+    expect(viewMocks.market.skillAssets.map((s: { id: string }) => s.id)).toEqual(["writer-12", "writer-13", "admin-writer"]);
+    act(() => viewMocks.market.onColumnsChange(1));
+    expect(viewMocks.market.page).toBe(1);
+    act(() => viewMocks.market.onPageChange(2, 12));
+    expect(viewMocks.market.skillAssets.map((s: { id: string }) => s.id)).toEqual([
+      ...writers.slice(10).map(s => s.id), "admin-writer",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "admin.memorySkillMarketTags" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /admin.memorySkillMarketCategories.writing/ }));
+    expect(viewMocks.market.page).toBe(1);
+    expect(viewMocks.market.total).toBe(15);
+    act(() => viewMocks.market.onPageChange(2, 12));
+    expect(viewMocks.market.skillAssets.map((s: { id: string }) => s.id)).toEqual(["writer-12", "writer-13", "admin-writer"]);
+    expect(skillApiMocks.listSkillMarketPage).toHaveBeenCalledTimes(1);
+    expect(skillApiMocks.listBuiltinSkills).toHaveBeenCalledTimes(1);
+
+    // Source filtering retains the current major category and resets to its first page.
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({
+      ...contextMocks.useMemoryManagementOutletContext(), marketSkillSource: "admin",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "admin.memorySkillMarketTags" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /admin.memorySkillMarketCategories.writing/ }));
+    await waitFor(() => expect(viewMocks.market.total).toBe(1));
+    expect(viewMocks.market.skillAssets[0].id).toBe("admin-writer");
+    expect(viewMocks.market.page).toBe(1);
+    expect(skillApiMocks.listSkillMarketPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads and paginates builtin skills without requesting the admin catalog", async () => {
+    const records = Array.from({ length: 14 }, (_, index) => ({
+      id: `builtin-${index}`, name: `builtin-${index}`, description: "", category: "writing",
+      tags: [], content: "", marketSource: "builtin",
+    }));
+    skillApiMocks.listBuiltinSkills.mockResolvedValue(records);
+    skillApiMocks.listSkillMarketPage.mockRejectedValue(new Error("Admin catalog unavailable"));
+    skillApiMocks.listSkillMarketTags.mockResolvedValue([]);
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({
+      ...contextMocks.useMemoryManagementOutletContext(), skillView: "market", marketSkillSource: "builtin",
+    });
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+
+    await waitFor(() => expect(viewMocks.market.total).toBe(14));
+    expect(viewMocks.market.loading).toBe(false);
+    expect(viewMocks.market.skillAssets).toHaveLength(12);
+    act(() => viewMocks.market.onPageChange(2, 12));
+    expect(viewMocks.market.skillAssets.map((skill: { id: string }) => skill.id)).toEqual(["builtin-12", "builtin-13"]);
+    expect(skillApiMocks.listSkillMarketPage).not.toHaveBeenCalled();
+    expect(skillApiMocks.listBuiltinSkills).toHaveBeenCalledTimes(1);
+  });
+
+  it("switches to builtin skills while the admin catalog is pending and ignores its stale failure", async () => {
+    const builtin = { id: "builtin-writer", name: "Writer", description: "", category: "writing", tags: [], content: "", marketSource: "builtin" };
+    skillApiMocks.listBuiltinSkills.mockResolvedValue([builtin]);
+    let rejectAdmin!: (error: Error) => void;
+    skillApiMocks.listSkillMarketPage.mockReturnValue(new Promise((_, reject) => { rejectAdmin = reject; }));
+    skillApiMocks.listSkillMarketTags.mockResolvedValue([]);
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({
+      ...contextMocks.useMemoryManagementOutletContext(), skillView: "market",
+    });
+    const { rerender } = render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(skillApiMocks.listSkillMarketPage).toHaveBeenCalledTimes(1));
+    expect(viewMocks.market.loading).toBe(true);
+
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({
+      ...contextMocks.useMemoryManagementOutletContext(), marketSkillSource: "builtin",
+    });
+    rerender(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(viewMocks.market.loading).toBe(false));
+    expect(viewMocks.market.total).toBe(1);
+    await act(async () => rejectAdmin(new Error("Old admin request failed")));
+    expect(viewMocks.market.skillAssets.map((skill: { id: string }) => skill.id)).toEqual(["builtin-writer"]);
+    expect(viewMocks.market.loading).toBe(false);
+    expect(skillApiMocks.listSkillMarketPage).toHaveBeenCalledTimes(1);
+
+    skillApiMocks.listSkillMarketPage.mockResolvedValue({
+      records: [{ ...builtin, id: "admin-writer", marketSource: "admin" }], total: 1, page: 1, pageSize: 100,
+    });
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({
+      ...contextMocks.useMemoryManagementOutletContext(), marketSkillSource: "all",
+    });
+    rerender(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(viewMocks.market.total).toBe(2));
+    expect(skillApiMocks.listSkillMarketPage).toHaveBeenCalledTimes(2);
+    expect(skillApiMocks.listBuiltinSkills).toHaveBeenCalledTimes(1);
+  });
+
+  it("combines keyword and tag filtering with category pagination without fetching again for page navigation", async () => {
+    const records = ["match-a", "other", "match-b"].map((id, index) => ({
+      id, name: id, description: id, category: "writing", tags: index === 0 ? ["report"] : [],
+      content: "", marketSource: "builtin", marketItemId: id, sourceSkillId: id,
+    }));
+    skillApiMocks.listBuiltinSkills.mockResolvedValue(records);
+    skillApiMocks.listSkillMarketPage.mockResolvedValue({ records: [], total: 0, page: 1, pageSize: 100 });
+    skillApiMocks.listSkillMarketTags.mockResolvedValue(["report"]);
+    contextMocks.useMemoryManagementOutletContext.mockReturnValue({
+      ...contextMocks.useMemoryManagementOutletContext(), skillView: "market", marketCategory: "report",
+    });
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await waitFor(() => expect(viewMocks.market.total).toBe(1));
+    fireEvent.click(screen.getByRole("button", { name: "admin.memorySkillMarketTags" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /admin.memorySkillMarketCategories.writing/ }));
+    fireEvent.click(screen.getByRole("button", { name: "admin.memorySkillMarketSearchPlaceholder" }));
+    const search = await screen.findByPlaceholderText("admin.memorySkillMarketSearchPlaceholder");
+    fireEvent.change(search, { target: { value: "match" } });
+    await waitFor(() => expect(skillApiMocks.listSkillMarketPage).toHaveBeenLastCalledWith({
+      page: 1, pageSize: 100, keyword: "match", tags: ["report"],
+    }));
+    expect(viewMocks.market.skillAssets.map((s: { id: string }) => s.id)).toEqual(["match-a"]);
+    expect(viewMocks.market.page).toBe(1);
+    fireEvent.change(search, { target: { value: "no-result" } });
+    await waitFor(() => expect(viewMocks.market.total).toBe(0));
+    expect(viewMocks.market.skillAssets).toEqual([]);
   });
 
   it("includes organize proposals in the single pending review entry", async () => {

@@ -22,6 +22,7 @@ import {
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { listSkillAssetsPage } from "@/modules/memory/skillApi";
 import { listShowcaseCases } from "@/modules/showcase/api";
+import { getWorkflowPriority } from "@/modules/workflow/workflowPresentation";
 import { showcaseEntryType, type ShowcaseEntryType } from "@/modules/showcase/classification";
 import {
   ChatServiceApi,
@@ -75,6 +76,8 @@ type MenuPlacement = {
 };
 
 export interface MentionEditorRef {
+  selectWorkflow: (workflow: { workflowRef: string; name: string }) => Promise<void>;
+  selectSkill: (skill: { skillId: string; name: string }) => Promise<void>;
   focus: () => void;
   focusAtEnd: () => void;
   getMentions: () => ChatMention[];
@@ -245,7 +248,11 @@ async function loadCandidates(type: CandidateType, keyword: string, runInBackgro
   if (type === "workflow") {
     const response = await axiosInstance.get(`${BASE_URL}/api/core/chat/settings/workflows`, { params: { keyword } });
     const payload = unwrap<{ workflows?: Array<Record<string, unknown>> }>(response.data);
-    const workflows = payload.workflows || [];
+    const priority = (item: Record<string, unknown>) => {
+      const ref = String(item.workflow_ref || "");
+      return getWorkflowPriority(ref.startsWith("builtin:") ? ref.slice("builtin:".length) : undefined);
+    };
+    const workflows = [...(payload.workflows || [])].sort((left, right) => priority(left) - priority(right));
     const names = new Map<string, number>();
     for (const item of workflows) {
       const name = String(item.name || item.workflow_id || "");
@@ -430,35 +437,6 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     onChange(serialized.text);
     onMentionsChange(allowMentions ? serialized.mentions : []);
   }, [allowMentions, onChange, onMentionsChange]);
-
-  useImperativeHandle(ref, () => ({
-    focus: () => editorRef.current?.focus(),
-    focusAtEnd: () => {
-      const editor = editorRef.current;
-      if (!editor) return;
-      editor.focus();
-      const caret = document.createRange();
-      caret.selectNodeContents(editor);
-      caret.collapse(false);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(caret);
-    },
-    getMentions: () => allowMentions && editorRef.current ? serializeEditor(editorRef.current).mentions : [],
-    getDraftWithoutMentions: (excluded) => {
-      const editor = editorRef.current?.cloneNode(true) as HTMLElement | undefined;
-      if (!editor) return;
-      editor.querySelectorAll<HTMLElement>('.chat-mention-chip').forEach(chip => {
-        if (excluded.some(mention => mention.type === chip.dataset.mentionType && mention.resource_id === chip.dataset.resourceId)) chip.remove();
-      });
-      return serializeEditor(editor);
-    },
-    setPlainText: (text) => {
-      if (!editorRef.current) return;
-      editorRef.current.textContent = text;
-      emit();
-    },
-  }), [allowMentions, emit]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -699,6 +677,54 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       editor.focus();
     }
   }, [beforeWorkflowSelect, closeMenu, emit, onEntryModeChange, t]);
+
+  useImperativeHandle(ref, () => ({
+    selectSkill: async ({ skillId, name }) => {
+      const editor = editorRef.current;
+      if (!editor || disabled || !allowMentions) return;
+      const range = document.createRange();
+      const previous = Array.from(editor.querySelectorAll<HTMLElement>('[data-mention-type="skill"]'))
+        .find(chip => chip.dataset.resourceId === skillId);
+      if (previous) range.selectNode(previous);
+      else { range.selectNodeContents(editor); range.collapse(true); }
+      await commitCandidate({ type: 'skill', id: skillId, name }, { trigger: '/', keyword: '', range });
+    },
+    selectWorkflow: async ({ workflowRef, name }) => {
+      const editor = editorRef.current;
+      if (!editor || disabled || !allowMentions) return;
+      const range = document.createRange();
+      const previous = editor.querySelector('[data-mention-type="workflow"]');
+      if (previous) range.selectNode(previous);
+      else { range.selectNodeContents(editor); range.collapse(true); }
+      await commitCandidate({ type: 'workflow', id: workflowRef, name }, { trigger: '/', keyword: '', range });
+    },
+    focus: () => editorRef.current?.focus(),
+    focusAtEnd: () => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.focus();
+      const caret = document.createRange();
+      caret.selectNodeContents(editor);
+      caret.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(caret);
+    },
+    getMentions: () => allowMentions && editorRef.current ? serializeEditor(editorRef.current).mentions : [],
+    getDraftWithoutMentions: (excluded) => {
+      const editor = editorRef.current?.cloneNode(true) as HTMLElement | undefined;
+      if (!editor) return;
+      editor.querySelectorAll<HTMLElement>('.chat-mention-chip').forEach(chip => {
+        if (excluded.some(mention => mention.type === chip.dataset.mentionType && mention.resource_id === chip.dataset.resourceId)) chip.remove();
+      });
+      return serializeEditor(editor);
+    },
+    setPlainText: (text) => {
+      if (!editorRef.current) return;
+      editorRef.current.textContent = text;
+      emit();
+    },
+  }), [allowMentions, disabled, emit, commitCandidate]);
 
   const insertCandidate = useCallback(async (candidate: Candidate) => {
     const editor = editorRef.current;

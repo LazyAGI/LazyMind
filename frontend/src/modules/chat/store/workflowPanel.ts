@@ -621,6 +621,8 @@ export interface CompositeBehavior {
 }
 
 export interface WorkflowUI {
+  /** Step names from the pinned workflow declaration, independent of result tabs. */
+  stepLabels?: Record<string, string>;
   /** Root slot metadata, including slots not referenced by a tab. */
   slotDefinitions?: SlotDef[];
   source_type?: string;
@@ -670,6 +672,15 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
   let ui = typeof spec.source_type === 'string'
     ? { ...(rawUI ?? {}) as WorkflowUI, source_type: spec.source_type }
     : (rawUI ?? {}) as WorkflowUI;
+  if (Array.isArray(spec.steps)) {
+    const stepLabels: Record<string, string> = {};
+    for (const step of spec.steps) {
+      if (step && typeof step.id === 'string' && typeof step.label === 'string' && step.label.trim()) {
+        stepLabels[step.id] = step.label;
+      }
+    }
+    ui = { ...ui, stepLabels };
+  }
   const slotDefs = new Map<string, SlotDef>();
   if (Array.isArray(spec.slots)) {
     for (const value of spec.slots) {
