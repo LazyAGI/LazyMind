@@ -131,16 +131,14 @@ func stageBridgeExecutable(root string) (string, error) {
 	if _, err := io.Copy(hash, source); err != nil {
 		return "", err
 	}
-	packageID, err := workflowconnector.PackageIdentity(self)
+	sidecars, err := workflowconnector.ReadPackage(self)
 	if err != nil {
-		return "", err
+		log.Printf("Workflow Connector source package: %v", err)
 	}
-	hash.Write([]byte(packageID))
+	hash.Write([]byte(sidecars.Identity()))
 	path := filepath.Join(root, "bridge", "bin", hex.EncodeToString(hash.Sum(nil)), filepath.Base(self))
-	if packageID != "" {
-		if err := workflowconnector.StagePackage(self, path); err != nil {
-			return "", err
-		}
+	if err := sidecars.Stage(path); err != nil {
+		log.Printf("Workflow Connector staged package: %v", err)
 	}
 	if _, err := os.Stat(path); err == nil {
 		return path, nil

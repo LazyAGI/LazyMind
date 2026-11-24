@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,8 @@ import (
 	"lazymind/agentconnector/internal/assistantbridge"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/workflowconnector"
+	"lazymind/agentconnector/internal/workflowconnector/connectortest"
 )
 
 // The subprocess executes the real CLI/HTTP server, including detached launch,
@@ -231,6 +234,129 @@ func TestBridgeSurvivesDesktopCrashOnlyWhileComposeUsesIt(t *testing.T) {
 				if err := assistantbridge.ReleaseClient(ctx, compose); err != nil {
 					t.Fatal(err)
 				}
+			}
+		})
+	}
+}
+
+func TestAssistantColdStartWithDamagedConnectorPackage(t *testing.T) {
+	for _, tc := range []struct {
+		name, damaged, healthy, path, diagnostic string
+	}{
+		{"missing WorkBuddy manifest", "workbuddy", "codex", "connector.json", "installation record"},
+		{"corrupt Codex module", "codex", "workbuddy", "main.mjs", "release digest mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			distribution := t.TempDir()
+			t.Setenv("LAZYMIND_HOME", root)
+			t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
+			t.Setenv("LAZYMIND_COEXISTENCE_TEST_HELPER", "1")
+			t.Setenv(connectorconfig.EnvironmentKey, "")
+			t.Setenv("LAZYMIND_BRIDGE_ISOLATED", "")
+			self, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(distribution, filepath.Base(self))
+			if err := os.Link(self, binary); err != nil {
+				body, err := os.ReadFile(self)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(binary, body, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			connectortest.WriteMinimalPackage(t, binary, tc.damaged)
+			healthy := connectortest.WritePackage(t, binary, tc.healthy, "0.2.0", map[string]string{
+				"main.mjs": "export const healthy = true;", "adapter.mjs": "", "presentation.mjs": "",
+			})
+			badPath := filepath.Join(distribution, "workflow-connectors", tc.damaged, tc.path)
+			if tc.path == "connector.json" {
+				err = os.Remove(badPath)
+			} else {
+				err = os.WriteFile(badPath, []byte("modified after packaging"), 0600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			address := listener.Addr().String()
+			_ = listener.Close()
+			t.Setenv("LAZYMIND_ASSISTANT_BRIDGE_URL", "http://"+address)
+			deployment := httptest.NewServer(http.NotFoundHandler())
+			defer deployment.Close()
+			browser := httptest.NewServer(http.NotFoundHandler())
+			defer browser.Close()
+
+			runAssistant := func(action, origin string) (string, string, error) {
+				ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, binary, "assistant", action, "--client-id", "package-test:"+origin, "--server-url", origin)
+				var stderr bytes.Buffer
+				cmd.Stderr = &stderr
+				out, err := cmd.Output()
+				return string(out), stderr.String(), err
+			}
+			t.Cleanup(func() {
+				// Reuse the broker for the browser origin so its lease can
+				// be released through the normal deployment stop command.
+				if _, err := assistantbridge.Health(context.Background(), address); err != nil {
+					return
+				}
+				_, _, _ = runAssistant("start", browser.URL)
+				_, _, _ = runAssistant("stop", browser.URL)
+				_, _, _ = runAssistant("stop", deployment.URL)
+			})
+			out, diagnostic, err := runAssistant("start", deployment.URL)
+			if err != nil {
+				t.Fatalf("cold start: %v\n%s\n%s", err, out, diagnostic)
+			}
+			wantPath := badPath
+			if tc.path != "connector.json" {
+				wantPath = filepath.Dir(badPath)
+			}
+			if !strings.Contains(diagnostic, tc.diagnostic) || !strings.Contains(diagnostic, wantPath) {
+				t.Fatalf("diagnostic for damaged connector = %q", diagnostic)
+			}
+
+			// The browser origin has no prior CLI registration. Only the
+			// staged daemon can seed this newly created isolated environment.
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+address+"/v1/session",
+				strings.NewReader(`{"server_url":`+strconvQuote(browser.URL)+`,"access_token":"browser","refresh_token":"refresh"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Origin", browser.URL)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("browser session: %v", response.Status)
+			}
+			identity, err := connectorconfig.OriginIdentity(browser.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			home, err := connectorconfig.EnvironmentHome(root, identity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			installed, err := workflowconnector.Resolve(home, tc.healthy)
+			if err != nil {
+				t.Fatalf("isolated environment cannot resolve healthy connector: %v", err)
+			}
+			if revision, err := installed.Revision(); err != nil || revision != healthy.Release {
+				t.Fatalf("installed connector revision = %q, want %q (err = %v)", revision, healthy.Release, err)
+			}
+			if _, err := os.Stat(workflowconnector.RecordPath(home, tc.damaged)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("damaged connector record should be absent: %v", err)
 			}
 		})
 	}

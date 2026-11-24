@@ -68,11 +68,37 @@ if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
 # The CLI negotiates reuse and stages the daemon independently of this launcher.
 $digest = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $sidecar = Join-Path (Split-Path -Parent $SourcePath) 'workflow-connectors'
-$hasSidecar = Test-Path -LiteralPath $sidecar -PathType Container
-if ($hasSidecar) {
-    $codex = (Get-FileHash -LiteralPath (Join-Path $sidecar 'codex\connector.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $workbuddy = (Get-FileHash -LiteralPath (Join-Path $sidecar 'workbuddy\connector.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $digest += '-' + $codex.Substring(0, 8) + $workbuddy.Substring(0, 8)
+$sidecarHosts = @()
+if (Test-Path -LiteralPath $sidecar -PathType Container) {
+    foreach ($connectorHost in @('codex', 'workbuddy')) {
+        $hostPath = Join-Path $sidecar $connectorHost
+        try {
+            $manifest = Join-Path $hostPath 'connector.json'
+            if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+                throw "Missing installation record: $manifest"
+            }
+            # Include module contents so a damaged or repaired host gets its
+            # own launcher directory even when the manifest is unchanged.
+            $directory = Get-Item -LiteralPath $hostPath
+            $files = Get-ChildItem -LiteralPath $directory.FullName -File -Recurse -Force | Sort-Object FullName
+            $fingerprint = foreach ($file in $files) {
+                $relative = $file.FullName.Substring($directory.FullName.Length + 1)
+                $fileDigest = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+                "$relative=$fileDigest"
+            }
+            $hasher = [Security.Cryptography.SHA256]::Create()
+            try {
+                $hash = $hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($fingerprint -join "`n"))
+                $hostDigest = [BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+            } finally {
+                $hasher.Dispose()
+            }
+            $digest += "-$connectorHost-$($hostDigest.Substring(0, 16))"
+            $sidecarHosts += $connectorHost
+        } catch {
+            [Console]::Error.WriteLine("Workflow Connector source package ($connectorHost) ${hostPath}: $($_.Exception.Message)")
+        }
+    }
 }
 $versionDirectory = Join-Path $installDir $digest
 $installedBinary = Join-Path $versionDirectory 'lazymind.exe'
@@ -86,16 +112,22 @@ try {
 } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
 }
-if ($hasSidecar) {
+foreach ($connectorHost in $sidecarHosts) {
     $installedSidecar = Join-Path $versionDirectory 'workflow-connectors'
-    if (-not (Test-Path -LiteralPath $installedSidecar -PathType Container)) {
-        $temporarySidecar = "$installedSidecar.$PID.tmp"
-        try {
-            Copy-Item -LiteralPath $sidecar -Destination $temporarySidecar -Recurse
-            Move-Item -LiteralPath $temporarySidecar -Destination $installedSidecar
-        } finally {
-            Remove-Item -LiteralPath $temporarySidecar -Recurse -Force -ErrorAction SilentlyContinue
+    $hostPath = Join-Path $sidecar $connectorHost
+    $installedHost = Join-Path $installedSidecar $connectorHost
+    if (Test-Path -LiteralPath $installedHost -PathType Container) { continue }
+    $temporaryHost = "$installedHost.$PID.tmp"
+    try {
+        New-Item -ItemType Directory -Force -Path $installedSidecar | Out-Null
+        Copy-Item -LiteralPath $hostPath -Destination $temporaryHost -Recurse
+        [IO.Directory]::Move($temporaryHost, $installedHost)
+    } catch {
+        if (-not (Test-Path -LiteralPath $installedHost -PathType Container)) {
+            [Console]::Error.WriteLine("Workflow Connector staged package ($connectorHost) ${installedHost}: $($_.Exception.Message)")
         }
+    } finally {
+        Remove-Item -LiteralPath $temporaryHost -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 Set-Content -LiteralPath $receiptPath -Value $installedBinary -Encoding UTF8

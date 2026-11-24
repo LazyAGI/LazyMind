@@ -175,17 +175,24 @@ func (i Installation) configureCopy(destination string) error {
 		return err
 	}
 	defer os.RemoveAll(staging)
-	revision, err := i.revision(staging)
+	if err := i.verifyRelease(staging); err != nil {
+		return err
+	}
+	if err := writeManifest(filepath.Join(staging, manifestName), i.Manifest); err != nil {
+		return err
+	}
+	return os.Rename(staging, destination)
+}
+
+func (i Installation) verifyRelease(copyTo string) error {
+	revision, err := i.revision(copyTo)
 	if err != nil {
 		return err
 	}
 	if revision != i.Release {
 		return fmt.Errorf("%s Connector release digest mismatch at %s", displayHost(i.Host), i.Dir)
 	}
-	if err := writeManifest(filepath.Join(staging, manifestName), i.Manifest); err != nil {
-		return err
-	}
-	return os.Rename(staging, destination)
+	return nil
 }
 
 func writeManifest(path string, manifest Manifest) error {
@@ -266,42 +273,75 @@ func Ensure(ctx context.Context, home, executable, host string) error {
 	return err
 }
 
-func PackageIdentity(executable string) (string, error) {
-	_, err := os.Stat(filepath.Join(filepath.Dir(executable), packageDirectory))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	releases := make([]string, 0, len(hosts))
-	for _, host := range hosts {
-		source, err := packaged(executable, host)
-		if err != nil {
-			return "", err
-		}
-		releases = append(releases, source.Release)
-	}
-	sum := sha256.Sum256([]byte(strings.Join(releases, "\x00")))
-	return hex.EncodeToString(sum[:]), nil
+// Package is the set of verified sidecars available beside an executable.
+type Package struct {
+	identity string
+	sources  []Installation
 }
 
-func StagePackage(executable, destination string) error {
-	for _, host := range hosts {
+// ReadPackage returns the usable sidecars together with diagnostics for any
+// failed hosts. A missing package directory is valid for standalone builds.
+func ReadPackage(executable string) (Package, error) {
+	var result Package
+	_, err := os.Stat(filepath.Join(filepath.Dir(executable), packageDirectory))
+	if errors.Is(err, os.ErrNotExist) {
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	releases := make([]string, len(hosts))
+	var failures error
+	for index, host := range hosts {
 		source, err := packaged(executable, host)
-		if err != nil {
-			return err
+		if err == nil {
+			err = source.verifyRelease("")
 		}
-		dir := filepath.Join(filepath.Dir(destination), packageDirectory, host)
-		if _, err := os.Stat(filepath.Join(dir, manifestName)); errors.Is(err, os.ErrNotExist) {
-			if err := source.configureCopy(dir); err != nil {
-				return err
+		if err != nil {
+			failures = errors.Join(failures, err)
+			continue
+		}
+		result.sources = append(result.sources, source)
+		releases[index] = source.Release
+	}
+	if len(result.sources) > 0 {
+		// Empty release slots distinguish partial packages from each other and
+		// from a full package while keeping existing full-package identities.
+		sum := sha256.Sum256([]byte(strings.Join(releases, "\x00")))
+		result.identity = hex.EncodeToString(sum[:])
+	}
+	return result, failures
+}
+
+func (p Package) Identity() string { return p.identity }
+
+func (p Package) Stage(destination string) error {
+	var failures error
+	for _, source := range p.sources {
+		staged, err := packaged(destination, source.Host)
+		if errors.Is(err, os.ErrNotExist) {
+			err = source.configureCopy(staged.Dir)
+			if err != nil {
+				// Another launcher may have published the same release.
+				if published, readErr := packaged(destination, source.Host); readErr == nil {
+					staged, err = published, nil
+				}
+			} else {
+				continue
 			}
-		} else if err != nil {
-			return err
+		}
+		if err == nil {
+			if staged.Release != source.Release {
+				err = fmt.Errorf("expected release %s, found %s", source.Release, staged.Release)
+			} else {
+				err = staged.verifyRelease("")
+			}
+		}
+		if err != nil {
+			failures = errors.Join(failures, &PathError{Host: source.Host, Item: "staged package", Path: staged.Dir, Err: err})
 		}
 	}
-	return nil
+	return failures
 }
 
 func reloadPath(home, host string) string {
