@@ -49,7 +49,7 @@ async function runUpdateBootstrap(parameters, adopt) {
   const started = await call("up", tx, 180_000);
   if (started.status !== "ready" || started.transactionId !== tx || started.owner !== ownerToken || started.bootstrap !== true) throw startupFailure("update_startup_failed");
   try {
-    await parameters.onRuntimeStarted?.();
+    await parameters.onRuntimeStarted?.(record.runtimeRoot);
     const proof = await call("verify", tx, 180_000);
     if (proof.status !== "ready" || proof.transactionId !== tx || proof.owner !== ownerToken
       || proof.releaseId !== expectedRelease || proof.version !== parameters.currentVersion

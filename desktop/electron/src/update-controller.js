@@ -124,14 +124,22 @@ function createDesktopUpdater({ currentVersion, invokeHelper, readLocalState, re
     return pending.promise;
   };
 
-  const cancel = () => {
+  const clearDownloadIntent = () => {
+    downloadIntent?.clear();
+    interrupted = undefined;
+    recordFailure = undefined;
+  };
+  const cancel = (requireClear = false) => {
     if (disposed) return getState();
     if (resuming) resuming.cancelled = true;
     if (queued) { queued.cancelled = true; queued = undefined; }
     if (active && !active.cancelled) { active.cancelled = true; active.abort.abort(); publish({ phase: "cancelling", reason: undefined }); }
-    try { downloadIntent?.clear(); recordFailure = undefined; }
-    catch { recordFailure = "update_record_write"; publish({ phase: active ? "cancelling" : "error", reason: recordFailure }); return getState(); }
-    interrupted = undefined;
+    try { clearDownloadIntent(); }
+    catch {
+      recordFailure = "update_record_write"; publish({ phase: active ? "cancelling" : "error", reason: recordFailure });
+      if (requireClear) throw failure(recordFailure);
+      return getState();
+    }
     publish({ pendingDownload: false, ...(!active && !checking ? { ...(offer ? {} : clearOffer()), phase: receipt ? "downloaded" : offer ? "available" : "idle", reason: undefined } : {}) });
     return getState();
   };
@@ -170,7 +178,7 @@ function createDesktopUpdater({ currentVersion, invokeHelper, readLocalState, re
   if (installIntent) installFlow = createUpdateInstallFlow({ currentVersion, store: installIntent, nativeInstaller, runtime, clock,
     context: () => ({ configuration: config?.config, offer, receipt }), download, cancelDownload: cancel,
     rediscover: async () => { const local = await readLocalState(); return { local, decision: await invokeHelper("discover", { state: local }) }; },
-    publish, getState, revealPackage, clearDownloadIntent: () => downloadIntent?.clear(), invalidateOffer: clearOffer,
+    publish, getState, revealPackage, clearDownloadIntent, invalidateOffer: clearOffer,
   });
   return { getState, check: () => check(false, true),
     checkOnFocus() {
@@ -182,13 +190,20 @@ function createDesktopUpdater({ currentVersion, invokeHelper, readLocalState, re
     resumeDownload: () => installFlow?.pending() ? Promise.reject(failure("native_update_busy")) : resumeDownload(),
     async install(releaseId) {
       if (!installFlow) throw failure("native_install_unavailable");
+      const inspection = installFlow.checkSourceOnOpen();
+      if (inspection && await inspection === "cancelled") return getState();
       installFlow.assertReady();
-      if (!offer) await check(true);
+      if (!offer) {
+        const continuing = installFlow.pending();
+        await check(true);
+        if (continuing && !installFlow.pending()) return getState();
+      }
       return installFlow.begin(releaseId || state.releaseId);
     },
     async later() { return installFlow ? installFlow.later() : cancel(); },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    start() { if (!started) started = Promise.resolve(installFlow?.startup()).then(() => check()).then(() => { schedule(); return getState(); }); return started; },
+    completeNativeStartup: transactionId => installFlow?.completeNativeStartup(transactionId),
+    start() { if (!started) started = Promise.resolve(installFlow?.startup()).then(result => result === "cancelled" ? getState() : check()).then(() => { schedule(); return getState(); }); return started; },
     async revealDownloaded() { if (receipt) await revealPackage(receipt.packagePath); else if (installFlow) await installFlow.reveal(); else throw failure("download_not_ready"); },
     dispose() { if (disposed) return; disposed = true; installFlow?.dispose(); if (timer) clock.clearTimeout(timer); if (queued) queued.cancelled = true; active?.abort.abort(); checkAbort?.abort(); listeners.clear(); },
   };

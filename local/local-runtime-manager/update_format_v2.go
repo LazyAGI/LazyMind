@@ -105,6 +105,11 @@ func stableUpdateFormat(shapes map[string]updateDatabaseShape) (string, error) {
 			}
 		} else {
 			got := shapeDigest(shape, family == "core")
+			// Databases initialized at #758 gained label_custom after default_recipient_id.
+			// Alias only this complete schema to its verified fresh counterpart.
+			if family == "channel" && got == "04f619b1f260926e956841ed9c89e929f97d9f4b68bdf88a56bebf82a7ccd187" {
+				got = "dbd34e4f14b35fa1cf1419fdac0e53ade64b5525c251bdd416e835abe2614e4a"
+			}
 			if got != want && (family != "lazyllm" || !slices.Contains(recipe.LazyLLMVariants, got)) {
 				return "", updateStateFailure("data_unknown")
 			}

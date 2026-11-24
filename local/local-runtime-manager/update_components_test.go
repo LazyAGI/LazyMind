@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -212,6 +213,117 @@ func TestUpdateComponentPreflightCLI(t *testing.T) {
 			if !bytes.Equal(before, after) || strings.Contains(out.String(), f.paths.RuntimeRoot) || strings.Contains(out.String(), owner) {
 				t.Fatal("preflight mutated state or exposed local details")
 			}
+		})
+	}
+}
+
+func TestV1UpdateMeasuresAndChecksOptionalComponents(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		installed    []string
+		legacySource bool
+		blocked      bool
+	}{
+		{name: "older-rag-catalog-to-dual", legacySource: true},
+		{name: "neither-installed"},
+		{name: "rag-only", installed: []string{"rag"}},
+		{name: "cluster-only", installed: []string{"cluster"}},
+		{name: "both-installed", installed: []string{"rag", "cluster"}},
+		{name: "target-removes-installed-cluster", installed: []string{"rag", "cluster"}, blocked: true},
+		{name: "target-changes-installed-cluster-abi", installed: []string{"cluster"}, blocked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newUpdateStateFixture(t)
+			if f.cfg.UpdateStorage.Version != 1 {
+				t.Fatal("expected a desktop without the v2 format recipe")
+			}
+			writeJSON := func(filename string, value any) []byte {
+				t.Helper()
+				raw, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Dir(filename), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filename, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+				return raw
+			}
+			rag := pythonComponent{ID: "rag", Revision: strings.Repeat("a", 64), SHA256: strings.Repeat("b", 64), Tag: strings.Repeat("c", 64),
+				BaseFingerprint: strings.Repeat("d", 64), Platform: runtime.GOOS, Arch: runtime.GOARCH, PythonABI: "cp311",
+				Packages: map[string]string{"pymilvus": "2.6.0"}, CatalogURL: "https://fixture.invalid/rag/catalog.json"}
+			cluster := rag
+			cluster.ID, cluster.Revision, cluster.SHA256 = "cluster", strings.Repeat("e", 64), strings.Repeat("f", 64)
+			cluster.CatalogURL, cluster.Packages = "https://fixture.invalid/cluster/catalog.json", map[string]string{"umap-learn": "0.5.7"}
+			all := map[string]pythonComponent{"rag": rag, "cluster": cluster}
+			source := pythonComponentCatalog{SchemaVersion: 1, Platform: runtime.GOOS, Arch: runtime.GOARCH, Components: map[string]pythonComponent{"rag": rag}}
+			sourcePath := filepath.Join(f.paths.ResourcesRoot, "config", "python-components.json")
+			writeJSON(sourcePath, source)
+			want := map[string]string{}
+			for _, id := range tc.installed {
+				selected := all[id]
+				// The runtime uses the selected same-tag revision, which can differ from the packaged pin.
+				selected.Revision = hexDigest([]byte(id + "-selected"))
+				selected.SHA256 = hexDigest([]byte(id + "-payload"))
+				want[id] = selected.Revision
+				dir := filepath.Join(f.paths.RuntimeRoot, "deps", "python-components", id, selected.Revision)
+				if err := os.MkdirAll(filepath.Join(dir, "site-packages"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				writeJSON(filepath.Join(dir, "bundle-manifest.json"), selected)
+				writeJSON(filepath.Join(filepath.Dir(dir), "catalog-"+selected.Tag+".json"), selected)
+				if err := os.WriteFile(filepath.Join(dir, ".ready"), []byte(selected.SHA256), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var previousProfile string
+			if _, installedCluster := want["cluster"]; !installedCluster {
+				previousProfile = f.measure(t).DataProfile
+			}
+			if !tc.legacySource {
+				source.Components = all
+				writeJSON(sourcePath, source)
+			}
+			measured, err := measureDesktopUpdateState(t.Context(), f.cfg, f.paths)
+			if err != nil || measured.Dirty || !strings.HasPrefix(measured.DataProfile, "sqlite-v1-") || measured.Components == nil || !maps.Equal(measured.Components, want) {
+				t.Errorf("v1 measurement = %+v, %v; want installed selections %v", measured, err, want)
+			}
+			if previousProfile != "" && measured.DataProfile != previousProfile {
+				t.Errorf("adding an uninstalled catalog entry changed the previous v1 data profile")
+			}
+			target := source
+			target.Components = maps.Clone(all)
+			switch tc.name {
+			case "target-removes-installed-cluster":
+				delete(target.Components, "cluster")
+			case "target-changes-installed-cluster-abi":
+				cluster.PythonABI = "cp312"
+				target.Components["cluster"] = cluster
+			}
+			file := filepath.Join(t.TempDir(), "target-components.json")
+			raw := writeJSON(file, target)
+			var out bytes.Buffer
+			runner := &fakeRunner{t: t}
+			cli := NewCLI(&out, io.Discard, runner, "fixture-manager")
+			if err := cli.Run(t.Context(), []string{"update-components-check", "--profile", "desktop", "--repo-root", f.cfg.RepoRoot,
+				"--resources-root", f.paths.ResourcesRoot, "--runtime-root", f.paths.RuntimeRoot, "--owner-token", f.cfg.OwnerToken,
+				"--components", file, "--sha256", hexDigest(raw), "--size", strconv.Itoa(len(raw))}); err != nil {
+				t.Fatal(err)
+			}
+			var result struct{ Status, Reason, DataProfile string }
+			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if tc.blocked {
+				if result.Status != "blocked" || result.Reason != "component_update_incompatible" || result.DataProfile != "" {
+					t.Errorf("incompatible target returned %s", out.String())
+				}
+			} else if result.Status != "compatible" || result.DataProfile == "" || result.DataProfile != measured.DataProfile {
+				t.Errorf("compatible target returned %s, want measured source profile %q", out.String(), measured.DataProfile)
+			}
+			runner.assertCommandCount(0)
 		})
 	}
 }

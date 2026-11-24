@@ -924,7 +924,7 @@ func verifyNativeStartup(ctx context.Context, cfg RuntimeConfig, paths RuntimePa
 	if dirty || profile != want {
 		return nil, updateStateFailure("update_startup_failed")
 	}
-	components, err := measuredUpdateComponents(paths, running.Algorithm.RAGDisabled, true)
+	components, err := measuredUpdateComponents(paths, running.Algorithm.RAGDisabled)
 	if err != nil {
 		return nil, err
 	}
@@ -965,37 +965,48 @@ func currentUpdateBootID(ctx context.Context) (string, error) {
 	defer cancel()
 	var command *exec.Cmd
 	if runtime.GOOS == "darwin" {
-		command = exec.CommandContext(bounded, "/usr/sbin/sysctl", "-n", "kern.boottime")
+		command = exec.CommandContext(bounded, "/usr/sbin/sysctl", "-n", "kern.bootsessionuuid")
 	} else if runtime.GOOS == "windows" {
 		command = exec.CommandContext(bounded, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTimeUtc()")
 	} else {
 		return "", updateStateFailure("unsupported_storage")
 	}
 	raw, err := command.Output()
-	if err != nil || len(raw) > 4096 || len(bytes.TrimSpace(raw)) == 0 {
+	if err != nil || len(raw) > 4096 {
 		return "", updateStateFailure("handoff_state_unknown")
 	}
-	sum := sha256.Sum256(bytes.TrimSpace(raw))
+	raw = bytes.TrimSpace(raw)
+	if runtime.GOOS == "darwin" {
+		return desktopupdate.DarwinBootSession(string(raw))
+	}
+	// Windows receipts already contain the digest of the decimal UTC FILETIME.
+	stamp, err := strconv.ParseUint(string(raw), 10, 64)
+	if err != nil || stamp == 0 || strconv.FormatUint(stamp, 10) != string(raw) {
+		return "", updateStateFailure("handoff_state_unknown")
+	}
+	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
 }
 func adoptNativeRepair(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, identity desktopupdate.Config, record *desktopupdate.NativeRecord, root string) (*desktopupdate.NativeRecord, error) {
-	if record.Phase != "repair" || !nativeIdentityMatches(record, identity, paths) {
+	if (record.Phase != "repair" && record.Phase != "installing") || !nativeIdentityMatches(record, identity, paths) {
 		return nil, updateStateFailure("repair_target_not_accepted")
 	}
-	if record.SourceActor != nil {
-		alive, err := desktopupdate.SameProcess(*record.SourceActor)
+	for _, previous := range []*desktopupdate.ProcessIdentity{record.SourceActor, record.HandoffActor} {
+		if previous == nil {
+			continue
+		}
+		alive, err := desktopupdate.SameProcess(*previous)
 		if err != nil || alive {
 			return nil, updateStateFailure("handoff_state_unknown")
 		}
 	}
-	if record.HandoffActor != nil {
-		alive, err := desktopupdate.SameProcess(*record.HandoffActor)
-		if err != nil || alive {
-			return nil, updateStateFailure("handoff_state_unknown")
-		}
-	} else {
-		boot, err := currentUpdateBootID(ctx)
-		if err != nil || record.BootID == "" || boot == record.BootID {
+	// Compare an OS-provided session under the native record lock only after
+	// validating the scope, signed repair permission and installed target.
+	var boot string
+	if record.SourceActor == nil || record.HandoffActor == nil {
+		var err error
+		boot, err = currentUpdateBootID(ctx)
+		if err != nil {
 			return nil, updateStateFailure("handoff_restart_required")
 		}
 	}
@@ -1048,7 +1059,7 @@ func adoptNativeRepair(ctx context.Context, cfg RuntimeConfig, paths RuntimePath
 	} else if rag, ok := targetComponents["rag"]; ok {
 		repair.TargetComponent = &rag
 	}
-	if err := nativeCommand(ctx, root, "adopt-repair", map[string]any{"transactionId": record.TransactionID, "sourceReleaseId": record.SourceReleaseID, "failedTargetReleaseId": record.TargetReleaseID, "acceptanceDigest": accepted.PolicyDigest, "handoffTerminated": true, "repairTarget": repair}); err != nil {
+	if err := nativeCommand(ctx, root, "adopt-repair", map[string]any{"transactionId": record.TransactionID, "sourceReleaseId": record.SourceReleaseID, "failedTargetReleaseId": record.TargetReleaseID, "acceptanceDigest": accepted.PolicyDigest, "handoffTerminated": boot == "", "bootId": boot, "repairTarget": repair}); err != nil {
 		return nil, err
 	}
 	return desktopupdate.ReadNativeRecord(root)

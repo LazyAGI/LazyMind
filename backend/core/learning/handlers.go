@@ -22,6 +22,13 @@ func service() *Service { return New(store.DB()) }
 
 var preanalysisCancelFuncs sync.Map
 
+// ActivePreanalysisTasks includes accepted executions through their last write.
+func ActivePreanalysisTasks() int64 {
+	var active int64
+	preanalysisCancelFuncs.Range(func(_, _ any) bool { active++; return true })
+	return active
+}
+
 func Catalog(w http.ResponseWriter, _ *http.Request) {
 	common.ReplyOK(w, map[string]any{"capabilities": Capabilities(), "question_types": QuestionTypes(), "profiles": BuiltinProfiles(), "local_available": LocalAvailable()})
 }
@@ -368,7 +375,11 @@ func RunPreanalysisTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	preanalysisCancelFuncs.Store(taskID, cancel)
+	if _, running := preanalysisCancelFuncs.LoadOrStore(taskID, cancel); running {
+		cancel()
+		common.ReplyErr(w, "preanalysis task is already running", 409)
+		return
+	}
 	go func() {
 		defer preanalysisCancelFuncs.Delete(taskID)
 		defer cancel()
@@ -399,7 +410,7 @@ func CancelPreanalysisTask(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 400)
 		return
 	}
-	if raw, ok := preanalysisCancelFuncs.LoadAndDelete(taskID); ok {
+	if raw, ok := preanalysisCancelFuncs.Load(taskID); ok {
 		raw.(context.CancelFunc)()
 	}
 	common.ReplyOK(w, task)

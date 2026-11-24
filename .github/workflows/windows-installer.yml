@@ -628,6 +628,7 @@ jobs:
         shell: pwsh
         env:
           EXPECTED_VERSION: ${{ needs.build-windows-installer.outputs.package_version }}
+          EXPECT_SIGNED_RUNTIME: ${{ inputs.enable_updates }}
         run: |
           $ErrorActionPreference = "Stop"
           $installDir = Join-Path $env:LOCALAPPDATA "Programs\LazyMind"
@@ -636,6 +637,32 @@ jobs:
           foreach ($requiredFile in @($app, $uninstaller)) {
             if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
               throw "Installed file is missing: $requiredFile"
+            }
+          }
+
+          $runtime = Join-Path $installDir "resources\runtime"
+          $bin = Join-Path $runtime "bin"
+          $manifest = Get-Content -Raw -LiteralPath (Join-Path $runtime "manifest.json") | ConvertFrom-Json -AsHashtable
+          foreach ($requiredPin in @("lark-cli.sha256", "feishu-credential-helper.sha256", "github-auth-helper.sha256")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $bin $requiredPin) -PathType Leaf)) {
+              throw "Missing installed runtime checksum: $requiredPin"
+            }
+          }
+          foreach ($file in Get-ChildItem -LiteralPath $bin -File) {
+            if ($file.Extension -notin @(".exe", ".sha256")) { continue }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash
+            if ($manifest.checksums["bin/$($file.Name)"] -ne $hash) {
+              throw "Installed runtime manifest checksum mismatch: $($file.Name)"
+            }
+            if ($file.Extension -eq ".sha256") {
+              $exe = Join-Path $bin ($file.BaseName + ".exe")
+              $pin = (Get-Content -Raw -LiteralPath $file.FullName).Trim()
+              if ($pin -ne (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash) {
+                throw "Installed runtime executable checksum mismatch: $exe"
+              }
+              if ($env:EXPECT_SIGNED_RUNTIME -eq "true" -and (Get-AuthenticodeSignature -LiteralPath $exe).Status -ne "Valid") {
+                throw "Installed runtime executable has no valid Authenticode signature: $exe"
+              }
             }
           }
 

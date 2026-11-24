@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 const read = name => fs.readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), "utf8");
 
 function assertConjunctiveGate(job, expectedTerms) {
@@ -116,4 +117,39 @@ test("the same macOS Installer exposes a separate opt-in unsigned update test", 
   assert.ok(caller, "the macOS Installer remains callable from the tag workflow");
   assert.match(caller, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/,
     "the nested release workflow must be allowed to read action artifacts");
+});
+
+test("a legacy nested policy and a new round with the same URL keep their own component directories", t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lm-nested-legacy-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const repo = "fixture/updates", prefix = "updates/unsigned-test/demo/";
+  const base = `https://modelscope.cn/datasets/${repo}/resolve/master/${prefix}`;
+  const template = { mode: "unsigned-test", audience: "personal", channel: "personal-test", updaterProtocol: 2,
+    signingIdentity: "adhoc", trustDomain: "existing", policyURL: base + "round-41/policy.json",
+    publicKeys: { key: Buffer.alloc(32, 3).toString("base64") }, allowedOrigins: ["https://modelscope.cn"] };
+  const script = fileURLToPath(new URL("./resolve-unsigned-test-round.mjs", import.meta.url));
+  const env = { PATH: process.env.PATH, RUNNER_TEMP: dir, GITHUB_RUN_ID: "41", TEST_VERSION: "0.5.225",
+    TEST_BASE_URL: base, UPDATE_REPO: repo, LAZYMIND_UPDATE_BASE_URL: base,
+    LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: JSON.stringify(template) };
+  const invoke = (args, extraEnv = {}) => execFileSync(process.execPath, [script, ...args],
+    { encoding: "utf8", env: { ...env, ...extraEnv } });
+  const fresh = JSON.parse(invoke([]));
+  assert.equal(fresh.config.policyURL, template.policyURL);
+  assert.notEqual(fresh.config.trustDomain, template.trustDomain);
+  for (const [config, releaseBase] of [[template, base], [fresh.config, fresh.baseURL]]) {
+    const releaseId = "darwin-arm64-0.5.224";
+    const built = { ...config, releaseId, version: "0.5.224", platform: "darwin", arch: "arm64" };
+    const release = { releaseId, version: built.version, platform: built.platform, arch: built.arch,
+      updaterProtocol: built.updaterProtocol, signingIdentity: built.signingIdentity };
+    for (const [kind, file] of [["package", "package.zip"], ["components", "components.json"], ["feed", "feed.json"]]) {
+      release[kind] = { url: releaseBase + `releases/${releaseId}/${file}` };
+    }
+    const folder = path.join(dir, "unsigned-test-source", releaseId);
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, "release.json"), JSON.stringify({ release, config: built }));
+    assert.deepEqual(JSON.parse(invoke([], { TEST_SOURCE_RUN: "40", GITHUB_RUN_ID: "42" })), { config, baseURL: releaseBase });
+    const signedConfig = path.join(dir, "update-config.json");
+    fs.writeFileSync(signedConfig, JSON.stringify(built));
+    assert.equal(invoke(["--component-prefix", signedConfig]), prefix + releaseBase.slice(base.length) + "RAG");
+  }
 });

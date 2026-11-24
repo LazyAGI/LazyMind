@@ -270,7 +270,7 @@ func extendPublication(previous, next update.Policy) (update.Policy, error) {
 	next.Revoked = previous.Revoked
 	next.RepairAcceptances = previous.RepairAcceptances
 	next.MinUpdaterProtocol = max(next.MinUpdaterProtocol, previous.MinUpdaterProtocol)
-	return next, nil
+	return update.CompactPublicationHistory(next, len(previous.Edges))
 }
 
 func run(args []string) error {
@@ -349,6 +349,16 @@ func run(args []string) error {
 		previous, err := readPublication(*previousPath, config, now, true)
 		if err != nil {
 			return err
+		}
+		// Match the URLs the signer serializes, including their actual encoded size.
+		for i := range policy.Releases {
+			r := &policy.Releases[i]
+			for _, artifact := range []*update.Artifact{&r.Package, &r.Feed, &r.Components} {
+				artifact.URL, err = update.ResolveURL(config, artifact.URL)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		policy, err = extendPublication(previous, policy)
 		if err != nil {

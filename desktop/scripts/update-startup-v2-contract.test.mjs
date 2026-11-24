@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import vm from "node:vm";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const startup = require("../electron/src/update-startup.js");
+const { createDesktopUpdater } = require("../electron/src/update-controller.js");
 const tx = "a".repeat(32), owner = "fixture-target-owner", revision = "b".repeat(64);
 const copy = value => JSON.parse(JSON.stringify(value));
 
@@ -279,3 +281,60 @@ for (const mode of ["ordinary", "background", "installer-warmup"]) {
     if (mode === "background") assert.ok(!calls.includes("window"));
   });
 }
+
+test("an explicitly completed newer repair uses the verified root for its guard and clears stale renderer repair state", async t => {
+  const source = readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
+  const runtimeRoot = path.resolve("fixture-custom-runtime");
+  let durable, ready, startDiscovery, started, guardArgs, prompted = 0;
+  const f = fixture({ repair: true, intercept(action) {
+    if (action === "complete") durable = null;
+  } });
+  Object.assign(f.record, { status: "repair", phase: "installing", version: 2, sourceVersion: "1.0.0",
+    releaseId: "target", nextVersion: "1.1.0", runtimeRoot });
+  durable = copy(f.record);
+  const updater = createDesktopUpdater({
+    currentVersion: "1.2.0", readLocalState: async () => ({ dataProfile: f.record.dataProfile, dirty: false }),
+    invokeHelper: async command => command === "config" ? { status: "enabled", config: { updaterProtocol: 2 } }
+      : { status: "up_to_date" },
+    // Electron constructs the updater before app.whenReady. This store models
+    // the independent CLI receipt that complete removes after peer release.
+    installIntent: { read: () => durable && copy(durable), clear() { assert.equal(durable, null); } },
+    runtime: { verifyStartup: async () => ({ configuration: { releaseId: "repair", version: "1.2.0" },
+      local: { dataProfile: f.record.dataProfile, dirty: false } }) },
+  });
+  t.after(() => updater.dispose());
+  assert.equal(updater.getState().phase, "repair");
+  const context = {
+    app: { whenReady: () => ({ then(fn) { ready = fn; } }), exit: code => assert.fail("unexpected app exit " + code) },
+    session: { defaultSession: {} }, desktopCapturer: {}, Menu: {}, screen: {},
+    installScreenCapture() {}, startupMetricsRecorder: { mark() {} }, clearFrontendCaches: async () => {},
+    appendStartupLog() {}, serializeError: String, isWindows: false, isInstallerWarmup: false, cloudConfiguration: {},
+    powerMonitor: { on() {} }, clearTemporaryCredentials() {}, isPackaged: true, ownerToken: owner,
+    repoRoot: "/fixture/app", runtimeResourcesRoot: "/fixture/target", explicitRuntimeRoot: "", path,
+    currentReleaseId: "repair", currentVersion: "1.2.0", runSidecar: f.parameters.invoke,
+    prepareDesktopStartup: startup.prepareDesktopStartup, adoptDesktopRepair: startup.adoptDesktopRepair,
+    startGuard() { guardArgs = context.sidecarArgs("guard"); },
+    runMacInstallationWarmupIfNeeded: async () => {}, windowHiddenByUser: true, frontendOpeningAllowed: false,
+    desktopUpdater: { ...updater, start(...args) { started = updater.start(...args); return started; } },
+    setTimeout(fn) { startDiscovery = fn; return { unref() {} }; },
+    dialog: { async showMessageBox() { prompted++; return { response: 0 }; }, showErrorBox: assert.fail },
+  };
+  vm.runInNewContext(source.slice(source.indexOf("function sidecarArgs("), source.indexOf("function sidecarEnv(")), context);
+  vm.runInNewContext(source.slice(source.indexOf("app.whenReady().then"), source.indexOf('  app.on("window-all-closed"')), context);
+  await ready();
+  assert.equal(prompted, 1);
+  assert.equal(f.calls.at(-1).action, "complete");
+  assert.equal(durable, null);
+  startDiscovery();
+  await started;
+  await t.test("guard receives the recorded root on its first invocation", () => {
+    assert.ok(guardArgs.includes("--runtime-root"));
+    assert.equal(guardArgs[guardArgs.indexOf("--runtime-root") + 1], runtimeRoot);
+  });
+  await t.test("completed repair does not reappear when renderer discovery starts", () => {
+    const state = updater.getState();
+    assert.ok(["installed", "up_to_date"].includes(state.phase), JSON.stringify(state));
+    assert.equal(state.currentVersion, "1.2.0");
+    assert.ok(!state.pendingUpdate);
+  });
+});

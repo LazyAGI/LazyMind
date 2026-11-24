@@ -162,11 +162,11 @@ def prepare(current, history, evidence, validator, output, *, repo=None, verify_
     pairs, edges = [], []
     sequence = 1
     if previous is None:
-        if historical_records or reports or verify_source_only:
+        if historical_records or reports:
             raise PlanError('No published policy exists for the requested upgrade source')
     else:
-        if not historical_records:
-            raise PlanError('An existing policy requires the previous successful build artifacts')
+        if not historical_records and not verify_source_only:
+            raise PlanError('An existing policy requires release records from native source verification')
         with tempfile.TemporaryDirectory(prefix='lm-published-policy-') as tmp:
             old_path = Path(tmp) / 'policy.json'
             write_bytes(old_path, previous)
@@ -187,7 +187,9 @@ def prepare(current, history, evidence, validator, output, *, repo=None, verify_
                     baseline = source_id == latest['releaseId']
                     pair = {'sourceReleaseId': source_id, 'targetReleaseId': target_id, 'dataProfile': target['formatProfile']}
                     pairs.append({**pair, 'sourceRelease': source, 'baseline': baseline})
-                    if verify_source_only and not baseline:
+                    # With no build artifact, the native job reconstructs even the latest
+                    # source from the package and catalog pinned by this verified policy.
+                    if verify_source_only and (not baseline or not historical_records):
                         continue
                     loaded = historical_records.get(source_id)
                     if loaded is None or loaded[0]['release'] != source:

@@ -68,8 +68,13 @@ on:
         description: "Version of the isolated test app, for example 0.5.210"
         required: false
         type: string
+      test_round:
+        description: "Create a new isolated update round or continue a published baseline"
+        required: false
+        type: choice
+        options: [new, continue]
       source_build_run_id:
-        description: "Successful test run for the published baseline A; leave empty only for the initial baseline"
+        description: "For continue: latest successful source run, published:legacy, or published:<first-run-id>"
         required: false
         type: string
 
@@ -106,6 +111,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.enable_unsigned_update_test
     runs-on: macos-15
     timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
     env:
       LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION: ${{ vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_MINIMUM_SYSTEM_VERSION }}
     steps:
@@ -114,13 +122,20 @@ jobs:
           ENABLE_OFFICIAL_UPDATES: ${{ inputs.enable_updates }}
           TEST_VERSION: ${{ inputs.test_version }}
           TEST_SOURCE_RUN: ${{ inputs.source_build_run_id }}
+          TEST_ROUND: ${{ inputs.test_round }}
           TEST_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
           OFFICIAL_BASE_URL: ${{ vars.LAZYMIND_UPDATE_BASE_URL }}
         run: |
           set -euo pipefail
           [[ "${ENABLE_OFFICIAL_UPDATES}" != true ]]
           [[ "${TEST_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ -z "${TEST_SOURCE_RUN}" || "${TEST_SOURCE_RUN}" =~ ^[0-9]+$ ]]
+          [[ -z "${TEST_SOURCE_RUN}" || "${TEST_SOURCE_RUN}" =~ ^[1-9][0-9]{0,19}$ || "${TEST_SOURCE_RUN}" =~ ^published:(legacy|[1-9][0-9]{0,19})$ ]]
+          case "${TEST_ROUND}" in
+            new) [[ -z "${TEST_SOURCE_RUN}" ]] || { echo "::error::New rounds must leave source_build_run_id empty"; exit 1; } ;;
+            continue) [[ -n "${TEST_SOURCE_RUN}" ]] || { echo "::error::Continued rounds require source_build_run_id"; exit 1; } ;;
+            '') ;; # Older dispatch callers select continuation by providing a source run.
+            *) echo "::error::Unknown test round selection"; exit 1 ;;
+          esac
           [[ "${TEST_BASE_URL}" == https://modelscope.cn/datasets/*/resolve/master/* ]]
           [[ "${TEST_BASE_URL%/}" != "${OFFICIAL_BASE_URL%/}" ]]
           : "${LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION:?Set LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_MINIMUM_SYSTEM_VERSION}"
@@ -144,15 +159,40 @@ jobs:
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           version: "0.11.31"
+      - name: Download the continued test round's source artifact
+        if: inputs.source_build_run_id != ''
+        env:
+          TEST_SOURCE_RUN: ${{ inputs.source_build_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ "${TEST_SOURCE_RUN}" == published:* ]]; then exit 0; fi
+          test "${TEST_SOURCE_RUN}" != "${GITHUB_RUN_ID}"
+          test "$(gh run view "${TEST_SOURCE_RUN}" --json conclusion --jq .conclusion)" = success
+          gh run download "${TEST_SOURCE_RUN}" --name "desktop-update-macos-${TEST_SOURCE_RUN}" --dir "${RUNNER_TEMP}/unsigned-test-source"
       - name: Build and stage the isolated test app
         env:
           TEST_VERSION: ${{ inputs.test_version }}
+          TEST_SOURCE_RUN: ${{ inputs.source_build_run_id }}
           LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON }}
           LAZYMIND_UPDATE_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
         run: |
           set -euo pipefail
+          if [[ "${TEST_SOURCE_RUN}" == published:* ]]; then
+            validator="${RUNNER_TEMP}/test-source-validator"
+            (cd local/local-runtime-manager && go build -tags lazymind_unsigned_test -o "${validator}" ./cmd/update-publisher)
+            node desktop/scripts/resolve-unsigned-test-round.mjs --target-config > "${RUNNER_TEMP}/trusted-test-target.json"
+            uv run --no-project --python 3.11 python desktop/scripts/verify-published-test-baseline.py \
+              --target-config "${RUNNER_TEMP}/trusted-test-target.json" --validator "${validator}"
+          fi
+          round="$(node desktop/scripts/resolve-unsigned-test-round.mjs)"
+          LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON="$(jq -ec '.config' <<< "${round}")"
+          LAZYMIND_UPDATE_BASE_URL="$(jq -er '.baseURL' <<< "${round}")"
+          export LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON LAZYMIND_UPDATE_BASE_URL
           export LAZYMIND_PYTHON_COMPONENT_BASE_URL="${LAZYMIND_UPDATE_BASE_URL%/}/RAG/"
           bash desktop/scripts/build-unsigned-update-test.sh "${TEST_VERSION}" "${RUNNER_TEMP}/unsigned-update-test"
+          jq -r '"Test policy: \(.config.policyURL)\nTrust domain: \(.config.trustDomain)"' <<< "${round}" >> "${GITHUB_STEP_SUMMARY}"
       - name: Upload isolated test update artifact
         uses: actions/upload-artifact@v7
         with:

@@ -145,6 +145,67 @@ test("packaging does not mutate signatures after the builder has finalized runti
   }
 });
 
+test("Windows packaging pins the signed runtime copies and preserves other manifest entries", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "lm-windows-runtime-pins-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const stage = path.join(root, "stage"), appOutDir = path.join(root, "win-unpacked");
+  const packed = path.join(appOutDir, "resources", "runtime");
+  const launcher = path.join(root, "launcher.exe");
+  fs.mkdirSync(appOutDir);
+  fs.writeFileSync(launcher, "launcher fixture");
+  fs.writeFileSync(path.join(appOutDir, "LazyMind.exe"), "Electron fixture");
+  const pinnedNames = ["lark-cli", "feishu-credential-helper", "github-auth-helper", "another-tool"];
+  const files = { "bin/core.exe": "core fixture", "bin/tool.cfg": "fixed settings", "builtin-skills/catalog.json": "{}" };
+  for (const name of pinnedNames) {
+    const bytes = "unsigned " + name;
+    files[`bin/${name}.exe`] = bytes;
+    // Both formats occur in build-windows-x64.ps1.
+    files[`bin/${name}.sha256`] = sha(bytes) + (name === "lark-cli" ? "\r\n" : "");
+  }
+  for (const [name, bytes] of Object.entries(files)) {
+    const file = path.join(stage, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, bytes);
+  }
+  const manifest = { version: 1, platform: "windows", features: { recording: true },
+    checksums: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, sha(bytes)])) };
+  fs.writeFileSync(path.join(stage, "manifest.json"), JSON.stringify(manifest));
+
+  const module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(configPath, "utf8"), {
+    module, require, __dirname: path.dirname(fileURLToPath(configPath)), Buffer, setTimeout, console,
+    process: { platform: "win32", arch: "x64", env: { LAZYMIND_DESKTOP_RUNTIME_STAGE: stage,
+      LAZYMIND_DESKTOP_WINDOWS_LAUNCHER: launcher, WIN_CSC_LINK: "fixture" } },
+  });
+  const config = module.exports;
+  const runtimeResource = config.extraResources.find(resource => resource.from === stage);
+  assert.equal(runtimeResource?.to, "runtime");
+  const context = { appOutDir, electronPlatformName: "win32", arch: 1, packager: { appInfo: { productFilename: "LazyMind", version: "1.0.0" } } };
+  const builderRequire = createRequire(require.resolve("electron-builder/package.json"));
+  const { WinPackager } = builderRequire("app-builder-lib/out/winPackager");
+  const appBuilderRequire = createRequire(builderRequire.resolve("app-builder-lib/package.json"));
+  const { copyDir, DO_NOT_USE_HARD_LINKS } = appBuilderRequire("builder-util/out/fs");
+  const signing = { platformSpecificBuildOptions: config.win, shouldSignFile: WinPackager.prototype.shouldSignFile,
+    sign: async file => fs.promises.appendFile(file, "|fixture signature") };
+  // PlatformPackager copies extraResources with the Windows transformer before afterPack.
+  await copyDir(stage, packed, { isUseHardLink: DO_NOT_USE_HARD_LINKS,
+    transformer: WinPackager.prototype.createTransformerForExtraFiles.call(signing, context) });
+  await config.afterPack(context);
+  await config.afterSign?.(context);
+
+  const expected = { ...manifest, checksums: { ...manifest.checksums } };
+  for (const [name, bytes] of Object.entries(files)) {
+    const copied = fs.readFileSync(path.join(packed, name));
+    if (name.endsWith(".exe")) assert.equal(copied.toString(), bytes + "|fixture signature", name);
+    else if (name.endsWith(".sha256")) {
+      const executable = name.slice(0, -".sha256".length) + ".exe";
+      assert.equal(copied.toString().trim(), sha(fs.readFileSync(path.join(packed, executable))), name);
+    } else assert.equal(copied.toString(), bytes, name);
+    expected.checksums[name] = sha(copied);
+  }
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(packed, "manifest.json"), "utf8")), expected);
+});
+
 test("release CI uses the shared tag decision without an additional prerelease filter", () => {
   const workflow = fs.readFileSync(new URL("../../.github/workflows/desktop-release.yml", import.meta.url), "utf8");
   const job = workflow.slice(workflow.indexOf("\n  release:"));

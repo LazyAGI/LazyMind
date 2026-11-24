@@ -3,12 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,6 +23,310 @@ import (
 
 	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
+
+// The repair build is installed outside the updater. Its verified identity
+// is supplied at the same boundary used by the CLI. Policy fetch, signatures,
+// process identity, original storage and persistent adoption are real.
+func TestExplicitRepairAfterInterruptedInstalling(t *testing.T) {
+	requirePackagedDesktopStorage(t)
+	f := actualUpdateFormatFixture(t, 2)
+	record := bootstrapRecord(t, f, t.TempDir(), "installing", nil)
+	identity, err := readNativeConfiguration(t.Context(), f.paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity.PublicKeys = map[string]string{"fixture": base64.StdEncoding.EncodeToString(pub)}
+	identity.ReleaseID, identity.Version = "repair", "1.2.0"
+	catalog, err := os.ReadFile(record["componentsPath"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetCatalog := filepath.Join(f.paths.ResourcesRoot, "config", "python-components.json")
+	if err := os.MkdirAll(filepath.Dir(targetCatalog), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(targetCatalog, catalog, 0600); err != nil {
+		t.Fatal(err)
+	}
+	live, dead := repairTestActors(t)
+	boot, err := currentUpdateBootID(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scenarios := []string{"accepted-after-exit", "accepted-after-reboot", "already-in-repair", "no-signed-permission", "invalid-signature", "source-still-alive", "installer-still-alive", "same-boot-no-installer"}
+	if runtime.GOOS == "darwin" {
+		scenarios = append(scenarios, "legacy-observation", "legacy-no-signed-permission", "foreign-session", "foreign-platform", "foreign-transaction")
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario, func(t *testing.T) {
+			root := t.TempDir()
+			var envelope []byte
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(envelope) }))
+			defer server.Close()
+			prevTransport := http.DefaultTransport
+			http.DefaultTransport = server.Client().Transport
+			defer func() { http.DefaultTransport = prevTransport }()
+			cfg := identity
+			cfg.PolicyURL = server.URL + "/policy.json"
+			cfg.AllowedOrigins = []string{server.URL, "https://updates.example.invalid"}
+			row := maps.Clone(record)
+			row["sourceActor"], row["handoffActor"] = dead, dead
+			row["componentStage"] = desktopupdate.NativeComponentStage{Status: "prepared", TransactionID: row["transactionId"].(string), ComponentMode: "absent"}
+			if scenario == "source-still-alive" {
+				row["sourceActor"] = live
+			}
+			if scenario == "installer-still-alive" {
+				row["handoffActor"] = live
+			}
+			if scenario == "already-in-repair" {
+				row["phase"] = "repair"
+			}
+			newBootProof := scenario == "same-boot-no-installer" || scenario == "accepted-after-reboot"
+			if newBootProof {
+				delete(row, "handoffActor")
+				row["phase"] = "pending"
+			} else if scenario == "legacy-observation" || scenario == "legacy-no-signed-permission" || strings.HasPrefix(scenario, "foreign-") {
+				delete(row, "handoffActor")
+				row["bootId"] = hexDigest([]byte("legacy sysctl display in another timezone"))
+			} else if scenario == "accepted-after-exit" {
+				row["bootId"] = hexDigest([]byte("legacy sysctl output"))
+			}
+			now := time.Now().UTC()
+			policy := bootstrapPolicyPayload(cfg, row, 42, now)
+			oldCfg := cfg
+			oldCfg.ReleaseID, oldCfg.Version = "source", "1.0.0"
+			before, err := desktopupdate.Check(t.Context(), signBootstrapPolicy(t, private, policy), oldCfg, bootstrapPolicyLocalState(f.measure(t)), root, false, now)
+			if err != nil || before.Status != "direct" {
+				t.Fatalf("original signed update: %+v %v", before, err)
+			}
+			row["policyDigest"], row["policySequence"] = before.PolicyDigest, before.PolicySequence
+			saveBootstrapRecord(t, root, row)
+			tx := row["transactionId"].(string)
+			if newBootProof {
+				stored := boot
+				if scenario == "accepted-after-reboot" {
+					stored = previousRepairTestBoot(t, boot)
+				}
+				if err := nativeCommand(t.Context(), root, "installing", map[string]any{"transactionId": tx, "sourcePaused": true, "sourceActive": 0,
+					"dataProfile": row["sourceDataProfile"], "componentMode": "absent", "bootId": stored}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			original, err := desktopupdate.ReadNativeRecord(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			releases := policy["releases"].([]any)
+			repair := maps.Clone(releases[1].(map[string]any))
+			repair["releaseId"], repair["version"] = cfg.ReleaseID, cfg.Version
+			policy["policySequence"], policy["releases"] = 43, append(releases, repair)
+			if scenario != "no-signed-permission" && scenario != "legacy-no-signed-permission" {
+				policy["repairAcceptances"] = []any{map[string]any{"sourceReleaseId": "source", "failedTargetReleaseId": "target", "repairReleaseId": "repair",
+					"sourceDataProfile": original.SourceDataProfile, "targetDataProfile": original.SourceDataProfile, "targetComponentsSHA256": original.ComponentsSHA256,
+					"componentTransitions": policy["edges"].([]any)[0].(map[string]any)["componentTransitions"]}}
+			}
+			signingKey := private
+			if scenario == "invalid-signature" {
+				_, signingKey, err = ed25519.GenerateKey(rand.Reader)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			envelope = signBootstrapPolicy(t, signingKey, policy)
+			fence := filepath.Join(root, "native-v2", tx+".boot-session.json")
+			type observation struct {
+				TransactionID string `json:"transactionId"`
+				BootSession   string `json:"bootSession"`
+			}
+			writeObservation := func(value observation) {
+				t.Helper()
+				raw, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(fence, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if newBootProof && runtime.GOOS == "darwin" && original.BootID != "" {
+				t.Fatal("an older Desktop can misread the new boot proof as a changed legacy hash")
+			}
+			switch scenario {
+			case "foreign-session":
+				writeObservation(observation{tx, "darwin-session-v2:8be2b98a-e5ff-402a-8c70-1a4d836f24a3"})
+			case "foreign-platform":
+				writeObservation(observation{tx, "windows-filetime-v1:131000000000000000"})
+			case "foreign-transaction":
+				writeObservation(observation{strings.Repeat("f", 32), previousRepairTestBoot(t, boot)})
+			case "legacy-observation":
+				var first os.FileInfo
+				for i := 0; i < 2; i++ {
+					got, err := adoptNativeRepair(t.Context(), f.cfg, f.paths, cfg, original, root)
+					if got != nil || desktopupdate.ErrorCode(err) != "handoff_restart_required" {
+						t.Fatalf("legacy receipt authorized without observing a reboot: %v", err)
+					}
+					raw, err := os.ReadFile(fence)
+					var saved observation
+					if err != nil || json.Unmarshal(raw, &saved) != nil || saved != (observation{tx, boot}) {
+						t.Fatalf("missing transaction-bound stable boot observation: %v", err)
+					}
+					info, err := os.Stat(fence)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if i == 1 && !os.SameFile(first, info) {
+						t.Fatal("same-boot retry replaced its original observation")
+					}
+					first = info
+					reloaded, err := desktopupdate.ReadNativeRecord(root)
+					if err != nil || reloaded == nil {
+						t.Fatalf("read legacy intent: %v", err)
+					}
+					expected := *original
+					expected.BootID = "" // An older reader must fail closed on a missing process identity.
+					if !reflect.DeepEqual(reloaded, &expected) {
+						t.Fatal("arming a reboot changed transaction authorization or original bindings")
+					}
+					original = reloaded
+				}
+				// Represent an observation written on a genuinely different session:
+				// only this historical input is substituted; the current OS probe is real.
+				writeObservation(observation{tx, previousRepairTestBoot(t, boot)})
+				signed := envelope
+				envelope = []byte(`{}`)
+				if got, err := adoptNativeRepair(t.Context(), f.cfg, f.paths, cfg, original, root); err == nil || got != nil {
+					t.Fatal("a different observed boot bypassed fresh signed repair permission")
+				}
+				envelope = signed
+			}
+			got, err := adoptNativeRepair(t.Context(), f.cfg, f.paths, cfg, original, root)
+			persisted, readErr := desktopupdate.ReadNativeRecord(root)
+			if readErr != nil || persisted == nil {
+				t.Fatalf("lost recovery transaction: %v", readErr)
+			}
+			if persisted.TransactionID != original.TransactionID || persisted.SourceReleaseID != "source" || persisted.TargetReleaseID != "target" {
+				t.Fatal("adoption replaced the original transaction")
+			}
+			if scenario == "accepted-after-exit" || scenario == "accepted-after-reboot" || scenario == "already-in-repair" || scenario == "legacy-observation" {
+				if err != nil || got == nil || persisted.Phase != "repair" || persisted.ComponentStage != nil || persisted.RepairTarget == nil || persisted.RepairTarget.ReleaseID != "repair" || persisted.RepairTarget.AcceptanceDigest == "" {
+					t.Fatalf("explicit signed repair was not adopted: phase=%s target=%+v err=%v", persisted.Phase, persisted.RepairTarget, err)
+				}
+				stage := desktopupdate.NativeComponentStage{Status: "prepared", TransactionID: original.TransactionID, ComponentMode: "absent"}
+				if err := nativeCommand(t.Context(), root, "prepared", map[string]any{"transactionId": original.TransactionID, "stage": stage}); err != nil {
+					t.Fatalf("could not prepare the adopted target: %v", err)
+				}
+				staged, err := desktopupdate.ReadNativeRecord(root)
+				if err != nil || staged == nil || !reflect.DeepEqual(staged.ComponentStage, &stage) {
+					t.Fatalf("prepared repair stage did not survive readback: %+v %v", staged, err)
+				}
+			} else if err == nil || got != nil || !reflect.DeepEqual(persisted, original) {
+				t.Fatalf("unsafe repair accepted: %+v %v", got, err)
+			}
+			if scenario == "legacy-no-signed-permission" {
+				if _, err := os.Stat(fence); !os.IsNotExist(err) {
+					t.Fatal("unsigned repair armed a legacy reboot observation")
+				}
+			}
+		})
+	}
+}
+
+func previousRepairTestBoot(t *testing.T, current string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		// Existing Windows records use SHA-256 of the decimal UTC startup FILETIME.
+		return hexDigest([]byte("131000000000000000"))
+	}
+	const first = "darwin-session-v1:8be2b98a-e5ff-402a-8c70-1a4d836f24a3"
+	if current == first {
+		return "darwin-session-v1:6a47c786-d793-44f8-8ed0-1fea504f5047"
+	}
+	return first
+}
+
+func TestDesktopBootProofUsesThePlatformSession(t *testing.T) {
+	requirePackagedDesktopStorage(t)
+	read := func(tz string) string {
+		t.Helper()
+		t.Setenv("TZ", tz)
+		id, err := currentUpdateBootID(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a, b := read("UTC"), read("America/Los_Angeles")
+	if a != b {
+		t.Fatal("changing timezone altered the boot-session proof without a restart")
+	}
+	if runtime.GOOS == "windows" {
+		cmd := exec.CommandContext(t.Context(), "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTimeUtc()")
+		raw, err := cmd.Output()
+		if err != nil || !regexp.MustCompile(`^[0-9]+$`).Match(bytes.TrimSpace(raw)) || a != hexDigest(bytes.TrimSpace(raw)) {
+			t.Fatal("Windows proof changed the deployed UTC FILETIME contract")
+		}
+		return
+	}
+	raw, err := exec.CommandContext(t.Context(), "/usr/sbin/sysctl", "-n", "kern.bootsessionuuid").Output()
+	uuid := strings.ToLower(strings.TrimSpace(string(raw)))
+	if err != nil || !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`).MatchString(uuid) ||
+		uuid == "00000000-0000-0000-0000-000000000000" || a != "darwin-session-v1:"+uuid {
+		t.Fatal("macOS proof did not identify the current kernel boot session")
+	}
+}
+
+func repairTestActors(t *testing.T) (desktopupdate.ProcessIdentity, desktopupdate.ProcessIdentity) {
+	t.Helper()
+	live, err := desktopupdate.CurrentProcessIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command(os.Args[0], "-test.run=^TestNativeRepairExitedOwnerChild$")
+	child.Env = append(os.Environ(), "LAZYMIND_TEST_NATIVE_REPAIR_OWNER=1")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited, err := desktopupdate.IdentifyProcess(child.Process.Pid)
+	_ = child.Process.Kill()
+	_ = child.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return live, exited
+}
+
+func TestInterruptedInstallingCannotSkipHandoffOrStorageProof(t *testing.T) {
+	f := newUpdateStateFixtureLayout(t)
+	identity := desktopupdate.Config{TrustDomain: "fixture", Audience: "official", Channel: "stable",
+		SigningIdentity: "fixture-team", ReleaseID: "repair", Version: "1.2.0", Platform: "darwin", Arch: "arm64"}
+	live, exited := repairTestActors(t)
+	for _, phase := range []string{"repair", "installing"} {
+		for _, scenario := range []string{"source-alive", "handoff-alive", "storage-mismatch"} {
+			t.Run(phase+"/"+scenario, func(t *testing.T) {
+				record := &desktopupdate.NativeRecord{Phase: phase, TrustDomain: identity.TrustDomain, Audience: identity.Audience, Channel: identity.Channel,
+					SigningIdentity: identity.SigningIdentity, Platform: identity.Platform, Arch: identity.Arch,
+					RuntimeRoot: f.paths.RuntimeRoot, InstallationRoot: f.paths.ResourcesRoot, SourceActor: &exited, HandoffActor: &exited}
+				want := "handoff_state_unknown"
+				switch scenario {
+				case "source-alive":
+					record.SourceActor = &live
+				case "handoff-alive":
+					record.HandoffActor = &live
+				case "storage-mismatch":
+					want = "update_storage_mismatch"
+				}
+				got, err := adoptNativeRepair(t.Context(), f.cfg, f.paths, identity, record, t.TempDir())
+				if got != nil || desktopupdate.ErrorCode(err) != want {
+					t.Fatalf("got %v, want %s", err, want)
+				}
+			})
+		}
+	}
+}
 
 func TestNativeRepairCommittedReceiptReachedFromNormalUp(t *testing.T) {
 	f := newUpdateStateFixture(t)

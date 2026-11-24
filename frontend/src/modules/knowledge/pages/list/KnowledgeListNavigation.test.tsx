@@ -42,6 +42,7 @@ vi.mock("@/components/ui", () => ({
     {props.dataSource.length === 0 ? props.locale?.emptyText : null}
     {props.dataSource.map((row: any) => <div key={row.dataset_id || row.id} {...props.onRow?.(row)}>
       {props.columns[0].render(row[props.columns[0].dataIndex], row)}
+      {props.columns.find((column: any) => (column.dataIndex ?? column.key) === "processing_level")?.render(row.processing_level, row)}
       {props.columns.find((column: any) => column.key === "action")?.render(row)}
     </div>)}
     {props.pagination && <>
@@ -592,7 +593,9 @@ describe("knowledge list URL and data restoration", () => {
     expect(router.state.location.search).toBe(`?showcase_entry=${mode}`);
   });
   it("returns from an installed official knowledge base with the original filters", async () => {
+    mocks.list.mockResolvedValue({ data: { datasets: [{ dataset_id: "official-id", processing_level: "parsed" }] } });
     const router = await mount("?source=official&keyword=手册&officialTag=团队&sort=most_used");
+    expect(await screen.findByText(t("knowledge.processingParsed"))).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "官方手册" }));
     await screen.findByText("知识库详情");
     expect(router.state.location.pathname).toBe("/lib/knowledge/detail/official-id");
@@ -607,6 +610,7 @@ describe("knowledge list URL and data restoration", () => {
   it("requests the restored local page and opens exactly one detail entry from the name button", async () => {
     const router = await mount("?keyword=手册&tag=团队&page=3&pageSize=20&sort=recent_used");
     await screen.findByRole("button", { name: "本地手册" });
+    expect(screen.getByText(t("knowledge.processingIndexed"))).toBeVisible();
     expect(manualCalls()).toHaveLength(1);
     expect(manualCalls()[0][0]).toMatchObject({ keyword: "手册", tags: ["团队"], pageSize: 20, orderBy: "recent_used" });
     expect(pageOffset(manualCalls()[0][0])).toBe(40);

@@ -439,6 +439,117 @@ func TestCommittedUpdateStorageChildRejectsForeignOwner(t *testing.T) {
 	}
 }
 
+func legacyDesktopStartupFixture(t *testing.T) (RuntimeConfig, RuntimePaths, RuntimeState) {
+	t.Helper()
+	f := newUpdateStateFixtureLayout(t)
+	recipe := filepath.Join(f.paths.ResourcesRoot, "config", "update-format-v2.json")
+	if err := os.MkdirAll(filepath.Dir(recipe), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recipe, updateFormatRecipe, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	segments := filepath.Join(t.TempDir(), "custom-segments.db")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", segments)
+	cfg, paths, err := newRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "desktop", OwnerToken: f.cfg.OwnerToken, RepoRoot: f.cfg.RepoRoot,
+		ResourcesRoot: f.paths.ResourcesRoot, RuntimeRoot: f.paths.RuntimeRoot,
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UpdateStorage == nil || cfg.UpdateStorage.Version != 2 {
+		t.Fatal("fixture must enable packaged v2 storage")
+	}
+	legacy := defaultRuntimeState(f.cfg, 0, paths.RunDirTokenFile)
+	legacy.OverallStatus = "stopped"
+	legacy.Config.UpdateStorage = nil // Older Desktop state omitted this field.
+	return cfg, paths, legacy
+}
+
+func TestDesktopV2StartupWithoutStoredUpdateStorage(t *testing.T) {
+	t.Run("committed-receipt", func(t *testing.T) {
+		cfg, paths, state := legacyDesktopStartupFixture(t)
+		state.Config.NativeCommittedTx = strings.Repeat("a", 32)
+		state.Config.NativeCommittedReleaseID = "target"
+		if err := writeRuntimeState(paths.StateFile, state); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(paths.StateFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runner := &fakeRunner{t: t}
+		m := NewRuntimeManager(runner, "fixture-manager")
+		m.probeAPI = func(int, time.Duration) bool {
+			t.Fatal("probed service with incomplete committed storage")
+			return false
+		}
+		if err := m.Up(t.Context(), cfg, paths); desktopupdate.ErrorCode(err) != "update_storage_mismatch" {
+			t.Fatalf("got %v, want update_storage_mismatch", err)
+		}
+		runner.assertCommandCount(0)
+		after, err := os.ReadFile(paths.StateFile)
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatal("startup rewrote incomplete committed state")
+		}
+	})
+
+	for _, name := range []string{"existing-v2-snapshot", "ordinary-legacy-state"} {
+		t.Run(name, func(t *testing.T) {
+			cfg, paths, state := legacyDesktopStartupFixture(t)
+			if name == "existing-v2-snapshot" {
+				state.Config.UpdateStorage = cloneUpdateStorage(cfg.UpdateStorage)
+			}
+			if err := writeRuntimeState(paths.StateFile, state); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(paths.ProcessComposeBin), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(paths.ProcessComposeBin, []byte("fake runner"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]string{
+				"core": paths.CoreDBPath, "auth": paths.AuthServiceDBPath, "lazyllm": paths.LazyLLMDBPath,
+				"segments": os.Getenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH"), "channel": paths.ChannelGatewayDBPath, "scan": paths.ScanDBPath,
+				"core-state": filepath.Join(paths.CoreStateDir, "core_state.db"),
+				"auth-state": filepath.Join(paths.AuthServiceStateDir, "auth_state.db"),
+				"scan-state": filepath.Join(paths.ScanControlPlaneStateDir, "scan_state.db"),
+			}
+			stop := errors.New("stopped at fake supervisor startup")
+			m := NewRuntimeManager(&committedStorageRunner{run: func(cmd Command) (CommandResult, error) {
+				if !slices.Contains(cmd.Args, "up") {
+					return CommandResult{}, nil
+				}
+				state, err := readRuntimeState(paths.StateFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				storage := state.Config.UpdateStorage
+				if storage == nil || storage.Version != 2 || storage.SegmentStore != "SQLiteStore" || !reflect.DeepEqual(storage.Databases, want) {
+					t.Fatalf("startup storage = %+v, want v2 with databases %v", storage, want)
+				}
+				vector := state.Config.ModeProfile.VectorStore
+				if vector.Engine != cfg.ModeProfile.VectorStore.Engine || vector.DBPath != cfg.ModeProfile.VectorStore.DBPath {
+					t.Errorf("started with unexpected vector storage: %s %s", vector.Engine, vector.DBPath)
+				}
+				if state.Config.UpdateBootstrap != nil || state.Config.NativeCommittedTx != "" || state.Config.NativeCommittedReleaseID != "" {
+					t.Error("ordinary legacy startup acquired an update transaction")
+				}
+				return CommandResult{}, stop
+			}}, "fixture-manager")
+			m.probeAPI = func(int, time.Duration) bool { return false }
+			m.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return false }
+			m.processScanner = func(RuntimePaths) ([]LocalProcessRecord, error) { return nil, nil }
+			m.relocatePythonVenvs = func(RuntimeConfig, RuntimePaths) error { return nil }
+			if err := m.Up(t.Context(), cfg, paths); !errors.Is(err, stop) {
+				t.Fatalf("legacy state did not reach supervisor startup: %v", err)
+			}
+		})
+	}
+}
+
 func requirePackagedDesktopStorage(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {

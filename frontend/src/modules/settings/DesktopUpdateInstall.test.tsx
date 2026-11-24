@@ -33,6 +33,17 @@ it("reopening requires explicit continue and never updates on mount",async()=>{
   expect(screen.getByRole("button",{name:"desktopUpdates.check"})).toBeDisabled();fireEvent.click(screen.getByRole("button",{name:"desktopUpdates.continueUpdate"}));
   await waitFor(()=>expect(install).toHaveBeenCalledWith("fixture-r2"));
 });
+it.each(["settings", "notice"])("can clear a withdrawn pending update from %s", async surface => {
+  current = { revision: 2, phase: "checking", currentVersion: "1.0.0", pendingUpdate: true, canInstall: true };
+  later.mockResolvedValue({ ...current, revision: 4, phase: "idle", pendingUpdate: false });
+  render(<MemoryRouter>{surface === "settings" ? <DesktopUpdateSettings /> : <DesktopUpdateNotice />}</MemoryRouter>);
+  await screen.findByRole("button", { name: "desktopUpdates.later" });
+  act(() => listener({ ...current, revision: 3, phase: "up_to_date" }));
+  fireEvent.click(screen.getByRole("button", { name: "desktopUpdates.later" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "desktopUpdates.later" })).not.toBeInTheDocument());
+  expect(later).toHaveBeenCalledOnce();
+  expect(install).not.toHaveBeenCalled();
+});
 it("uncertain installation exposes the retained package and repair instructions without retrying install",async()=>{
   current={...base,phase:"repair",packageAvailable:true,reason:"update_incomplete"};render(<DesktopUpdateSettings/>);
   expect(await screen.findByText("desktopUpdates.repair")).toBeInTheDocument();expect(screen.getByRole("alert")).toHaveTextContent("desktopUpdates.reasons.update_incomplete");
@@ -52,4 +63,15 @@ it("component incompatibility explains the block and permits checking without of
   expect(screen.queryByRole("button",{name:"desktopUpdates.install"})).not.toBeInTheDocument();
   expect(screen.queryByRole("button",{name:"desktopUpdates.continueUpdate"})).not.toBeInTheDocument();
   expect(screen.queryByText("desktopUpdates.repair")).not.toBeInTheDocument();
+});
+
+it.each(["settings", "notice"])("offers only a cancellation retry for unfinished cleanup in %s", async surface => {
+  current = { ...base, phase: "error", reason: "update_record_write", pendingUpdate: true, pendingCancellation: true };
+  render(<MemoryRouter>{surface === "settings" ? <DesktopUpdateSettings /> : <DesktopUpdateNotice />}</MemoryRouter>);
+  const retry = await screen.findByRole("button", { name: "desktopUpdates.cancelUpdate" });
+  expect(screen.queryByRole("button", { name: "desktopUpdates.continueUpdate" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "desktopUpdates.install" })).not.toBeInTheDocument();
+  fireEvent.click(retry);
+  await waitFor(() => expect(later).toHaveBeenCalledTimes(1));
+  expect(install).not.toHaveBeenCalled();
 });

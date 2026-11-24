@@ -181,6 +181,21 @@ class PublicationTests(unittest.TestCase):
         self.publish()
         self.assertEqual([name for action, name in self.events if action == 'upload'], ['updates/stable.json'])
 
+    def test_failed_publication_reports_the_stage_without_external_error_text(self):
+        for destination, stage in [
+            ('updates/releases/r2/package.zip', 'Uploading immutable package.zip'),
+            ('updates/stable.json', 'Uploading signed policy'),
+        ]:
+            with self.subTest(destination=destination):
+                self.remote.clear()
+                self.fail_upload = destination
+                with self.assertLogs('desktop-update-publication', level='INFO') as logs:
+                    with self.assertRaises(RuntimeError):
+                        self.publish()
+                self.assertEqual(logs.records[-1].getMessage(), stage)
+                self.assertNotIn(self.base, '\n'.join(logs.output))
+                self.assertNotIn('upload failure', '\n'.join(logs.output))
+
 
 if __name__ == '__main__':
     unittest.main()

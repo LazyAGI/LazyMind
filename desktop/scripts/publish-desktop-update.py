@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,7 @@ from urllib.request import HTTPRedirectHandler, build_opener
 
 
 MAX_POLICY_BYTES = 1024 * 1024
+log = logging.getLogger('desktop-update-publication')
 
 
 class PinnedRedirects(HTTPRedirectHandler):
@@ -65,6 +67,7 @@ def digest(stream, expected):
 
 def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, validate=None, validator=None,
             expected_policy_sha256=None):
+    log.info('Validating publication inputs')
     directory = Path(directory).resolve()
     config = json.loads(Path(config_path).read_text())
     envelope = Path(policy_path).read_bytes()
@@ -107,6 +110,7 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
             if error.code == 404:
                 return False
             raise
+    log.info('Checking the published policy')
     old = read_remote_policy(fetch, policy_url)
     if expected_policy_sha256 is not None:
         actual = 'absent' if old is None else hashlib.sha256(old).hexdigest()
@@ -117,6 +121,7 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
         if envelope != old and policy['policySequence'] <= previous['policySequence']:
             raise ValueError('Policy sequence regression or conflict')
     # Validate every local file and destination before the first remote mutation.
+    log.info('Verifying local release artifacts')
     items, seen = [], set()
     for release in policy['releases']:
         rid = release['releaseId']
@@ -139,6 +144,7 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
                 with local.open('rb') as stream:
                     digest(stream, artifact)
             items.append((artifact, target, local))
+    log.info('Verifying existing remote release artifacts')
     missing = []
     for artifact, target, local in items:
         if not remote_exists(artifact):
@@ -155,10 +161,13 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
         api.upload_file(repo_id=repo, repo_type='dataset', path_or_fileobj=str(source), path_in_repo=target,
                         revision='master', commit_message='Publish desktop update artifact')
     for artifact, target, local in missing:
+        log.info('Uploading immutable %s', local.name)
         upload(local, target)
+        log.info('Reading back immutable %s', local.name)
         if not remote_exists(artifact):
             raise ValueError('Uploaded artifact is not publicly downloadable')
     # Workflows serialize this operation. Detect intervening external publishers too.
+    log.info('Rechecking the previous policy')
     if read_remote_policy(fetch, policy_url) != old:
         raise ValueError('Remote policy changed during publication; retry with a new plan')
     if envelope == old:
@@ -166,7 +175,9 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
     with tempfile.TemporaryDirectory(prefix='lm-policy-publish-') as temp:
         snapshot = Path(temp) / 'policy.json'
         snapshot.write_bytes(envelope)
+        log.info('Uploading signed policy')
         upload(snapshot, policy_destination)
+    log.info('Reading back signed policy')
     if read_remote_policy(fetch, policy_url) != envelope:
         raise ValueError('Published policy readback mismatch')
 
@@ -180,6 +191,8 @@ if __name__ == '__main__':
     parser.add_argument('--validator', type=Path, required=True)
     parser.add_argument('--expected-policy-sha256', help="Required prior policy SHA-256, or 'absent' for the first release")
     args = parser.parse_args()
+    log.setLevel(logging.INFO)
+    log.addHandler(logging.StreamHandler())
     try:
         publish(args.directory, args.policy, args.config, args.repo, validator=args.validator.resolve(),
                 expected_policy_sha256=args.expected_policy_sha256)

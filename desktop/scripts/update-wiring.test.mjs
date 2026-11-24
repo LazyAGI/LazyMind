@@ -21,6 +21,29 @@ test("the actual Electron entrypoint starts the updater and binds current window
   assert.doesNotMatch(residentClose, /desktopUpdater\.(?:cancel|dispose)/);
 });
 
+test("repair tells the user when the previous installer requires a system restart", async () => {
+  const source = readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
+  const entry = source.slice(source.indexOf("app.whenReady().then"), source.indexOf('  app.on("window-all-closed"'));
+  for (const reason of ["handoff_restart_required", "repair_target_not_accepted"]) {
+    let ready, message, exitCode;
+    vm.runInNewContext(entry, {
+      app: { whenReady: () => ({ then(fn) { ready = fn; } }), exit(code) { exitCode = code; } },
+      isPackaged: true, currentVersion: "1.2.0", currentReleaseId: "repair", ownerToken: "fixture", runSidecar() {},
+      prepareDesktopStartup: async () => ({ allowed: false, repair: true }),
+      adoptDesktopRepair: async () => { throw Object.assign(new Error(reason), { code: reason }); },
+      dialog: { showMessageBox: async () => ({ response: 0 }), showErrorBox(_title, body) { message = body; } },
+    });
+    await ready();
+    assert.equal(exitCode, 1);
+    if (reason === "handoff_restart_required") {
+      assert.match(message, /restart your computer/i);
+      assert.match(message, /verify this version/i);
+    } else {
+      assert.match(message, /supported repair version/i);
+    }
+  }
+});
+
 test("focusing a ready main window discovers a new release after 25 minutes without a click", async t => {
   const app = new EventEmitter(), mainWindow = {};
   const source = readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");

@@ -175,6 +175,44 @@ test("later waits for ongoing preparation and never advances to native handoff",
   assert.ok(!f.calls.includes("install"));
 });
 
+for (const writeSucceeds of [true, false]) {
+  test("v2 closes cancellation before committing the installation intent; write succeeds=" + writeSucceeds, async t => {
+    const f = fixture(t);
+    const write = f.store.write;
+    let releaseWrite;
+    const pendingWrite = new Promise(resolve => { releaseWrite = resolve; });
+    t.after(releaseWrite);
+    let writing = false;
+    f.store.write = value => {
+      if (value.phase !== "installing") return write(value);
+      writing = true;
+      return pendingWrite.then(() => {
+        if (!writeSucceeds) throw new Error("fixture: storage unavailable");
+        write(value);
+      });
+    };
+
+    await f.begin();
+    await f.countdown();
+    assert.ok(writing);
+    const phaseDuringWrite = f.updater.getState().phase;
+    const lateClick = f.updater.later().then(() => "accepted", error => error.code);
+    assert.ok(!f.calls.includes("stop"));
+    assert.ok(!f.calls.includes("install"));
+    releaseWrite();
+    assert.equal(await lateClick, "update_incomplete");
+    assert.equal(phaseDuringWrite, "installing");
+    await settle();
+    assert.ok(!f.calls.includes("clear"));
+    assert.equal(f.calls.includes("stop"), writeSucceeds);
+    assert.equal(f.calls.includes("install"), writeSucceeds);
+    if (!writeSucceeds) {
+      assert.ok(f.calls.includes("resume"));
+      assert.equal(f.updater.getState().reason, "update_record_write");
+    }
+  });
+}
+
 test("actual native handoff unknown cannot resume ordinary admission", async t => {
   const f = fixture(t, { legacy: true, unknownHandoff: true });
   await f.begin();

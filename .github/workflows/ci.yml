@@ -313,6 +313,16 @@ jobs:
       - name: Test Local Runtime Manager
         working-directory: local/local-runtime-manager
         run: go test ./... -count=1 -v
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Linux'
+        with:
+          python-version: '3.11'
+      - name: Test signed update history and manual publication
+        if: runner.os == 'Linux'
+        run: >-
+          python -m unittest -v
+          desktop/scripts/test_update_public_baseline.py
+          desktop/scripts/test_published_test_baseline.py
       - name: Test LazyMind Agent Connector
         if: runner.os != 'Windows'
         working-directory: local/lazymind-cli
@@ -411,6 +421,24 @@ jobs:
           desktop/scripts/test_update_evidence_artifacts.py
           desktop/scripts/test_update_historical_evidence.py
 
+  test-desktop-index-compatibility:
+    needs: [lint, doc_check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: algorithm/requirements-local.txt
+      - name: Test the desktop reader against a persisted Milvus Lite index
+        run: |
+          python -m pip install -r algorithm/requirements-local.txt
+          python -c 'import milvus_lite'
+          python -m unittest -v desktop/scripts/test_update_native_index_probe.py
 
   test-auth-service:
     needs: [lint, doc_check]

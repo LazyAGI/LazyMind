@@ -99,7 +99,7 @@ Both installer workflows have an `enable_updates` input (default `false`). Confi
 | `LAZYMIND_MAC_UPDATE_MINIMUM_SYSTEM_VERSION` / `LAZYMIND_WINDOWS_UPDATE_MINIMUM_SYSTEM_VERSION` | Supported OS minimum as `major.minor.patch` |
 | `LAZYMIND_DESKTOP_UPDATES_ENABLED` | Optional `true` to enable update artifact generation in the tag release workflow |
 | `LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED` | Explicit `true` to enable automatic policy publication after the tag builds |
-| `LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID` | Successful run ID holding the currently published A artifacts. Leave empty for the first publication at a new policy URL. |
+| `LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID` | Optional successful build run containing the currently published source artifacts. CI can recover the latest compatible source from the signed public policy when artifacts have expired. |
 
 macOS `signing_mode` accepts `auto`, `developer-id`, or `adhoc`. `auto` signs/notarizes
 requested tags and uses ad-hoc signing for branches, irrespective of repository name.
@@ -122,6 +122,9 @@ through the existing RAG workflow before users install those components.
 With automatic publication enabled and `updaterProtocol` set to `2`, `Desktop Release`
 uses its current signed artifacts and the configured source build to verify native
 A-to-B compatibility, extend the previous signed history, and publish the new policy.
+With no available source artifact, each native runner verifies the previous public
+policy, downloads its pinned source package and component catalog, checks their hashes
+and runs the same compatibility probe. A new channel starts only after a public 404.
 The separate **Publish desktop update policy** manual workflow also accepts an explicit
 plan with successful build run IDs from the current repository. Configure its
 `desktop_updates` environment with approval/branch protection appropriate to the publisher:
@@ -152,6 +155,12 @@ only A with no edges. Subsequent plans retain the supported history. Example v1 
   "revoked": []
 }
 ```
+
+For a manual v2 plan, include the successful build runs for its releases.
+Each upgrade or repair needs the native report for that source and target
+from the **target build run**, in its macOS or Windows evidence artifact.
+The workflow resolves the report paths before signing. The offline signer
+still accepts local report paths when you invoke it directly.
 
 A data profile is measured from the actual supported runtime state, not inferred from
 version numbers or a build manifest. Authorize an edge only after verifying compatible
@@ -201,12 +210,31 @@ under the dataset's `/resolve/master/updates/unsigned-test/` and set
 `LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_MINIMUM_SYSTEM_VERSION` to the minimum macOS version
 for this test, using `major.minor.patch`.
 
-Use **macOS Desktop Installer** with `enable_unsigned_update_test` and a `test_version`.
-For an initial build, leave `source_build_run_id` empty and use a fresh test policy URL.
-Download `package.zip` from the first build and install `LazyMind Test.app` in
-`~/Applications`. Run the same workflow with a higher `test_version` and the successful
-A run as `source_build_run_id`. When publication finishes, check for updates from A.
-The test bundle has its own app identity, data, components and update policy.
+In **macOS Desktop Installer**, enable `enable_unsigned_update_test` and enter the
+version for build A. Choose **new** for `test_round` and leave `source_build_run_id`
+empty. The workflow creates `round-<A-run-id>/` under the configured test base,
+derives its trust domain and prints the policy URL in the build summary. Each round
+can start with the same version. Install A's `LazyMind Test.app` from `package.zip`
+in `~/Applications`.
+
+To build B, choose **continue**, set a higher `test_version` and enter A's successful
+run ID. After publication, check for updates from A. To build C, use B's successful
+run ID. The workflow reads the selected artifact's identity and verifies it against
+the published policy. Packages, Python components and policy stay in A's round.
+Previously published test baselines can continue at the original configured address.
+Keep the template's public keys, origins and identity settings stable while continuing
+a round. Older API callers can omit `test_round` and select continuation by supplying
+`source_build_run_id`.
+
+If the source run failed after publishing, or its artifacts expired, choose **continue**
+and enter a public baseline locator in `source_build_run_id`. Use `published:legacy`
+for the policy URL in the configured template, or `published:<first-run-id>` for a
+round created with **new**. To continue the legacy `0.5.224` published by run
+`45142962628`, keep its template configuration, enter `published:legacy` and build
+`0.5.225`. CI uses the configured test keys to verify the existing policy and checks
+that the target version is newer before packaging. The native job verifies the
+policy again and checks the public source bytes. Save the first run ID or policy URL
+from each new round's build summary for later recovery.
 
 ### Component compatibility during updates
 
@@ -220,6 +248,23 @@ changes are blocked with the current application still running. Component/data
 migration is not implemented by this check. Existing clients must first receive
 an updater with this check through a compatible same-tag bridge release; do not
 publish unsupported cross-tag edges to older clients.
+
+Starting with a source client that supports v1 component handoff, the last idle
+check is followed by a one-time receipt for the signed target and the installed
+component selections. Target startup checks that receipt before retaining those
+selections. Manual version changes and older source clients without a receipt use
+the existing component cleanup path.
+
+If the source app closes during v1 preparation, reopen it to continue or
+postpone the update. The runtime checks the saved attempt and the previous
+process identity before allowing either action. Once it has authorized the
+native installer, reopening the source app cannot start another installation.
+
+When repairing an interrupted macOS v2 update, LazyMind can ask you to restart
+your computer if an older transaction has no conclusive installer-process
+information. Restart macOS, reopen the supported repair version, and select
+**Verify this version**. The app checks the boot session and signed repair
+permission again before resuming.
 
 macOS:
 

@@ -23,8 +23,10 @@ def verify_pairs(plan, current, baseline, output, platform, unsigned_test):
                        '--output', str(reports / (source + '.json'))]
             if unsigned_test:
                 command.extend(['--unsigned-test', '--target-components-dir', str(current / 'python-components')])
-            if pair['baseline']:
-                command.extend(['--source', str(baseline / source)])
+            local_source = baseline / source
+            use_build_artifact = pair['baseline'] and (local_source / 'release.json').is_file()
+            if use_build_artifact:
+                command.extend(['--source', str(local_source)])
                 if unsigned_test:
                     command.extend(['--source-components-dir', str(baseline / 'python-components')])
             else:
@@ -33,8 +35,10 @@ def verify_pairs(plan, current, baseline, output, platform, unsigned_test):
                 command.extend(['--published-source', str(published), '--source-record-output', str(source_record)])
             print(f'Verifying {source} -> {target}', flush=True)
             subprocess.run(command, check=True)
-            if pair['baseline']:
-                shutil.copyfile(baseline / source / 'release.json', source_record)
+            if pair['baseline'] and json.loads((reports / (source + '.json')).read_text(encoding='utf-8')).get('passed') is not True:
+                raise ValueError('The latest published source must pass native compatibility verification')
+            if use_build_artifact:
+                shutil.copyfile(local_source / 'release.json', source_record)
     shutil.copyfile(plan / 'expected-policy-sha256', output / (platform + '-policy-sha256'))
 
 

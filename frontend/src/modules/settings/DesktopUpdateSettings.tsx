@@ -65,17 +65,17 @@ export default function DesktopUpdateSettings({ headingRef }: { headingRef?: Ref
         <Button icon={<ReloadOutlined />} loading={state.phase === "checking"} disabled={transferring || busy || state.pendingDownload || state.pendingUpdate || state.updating || state.phase === "repair" || state.phase === "downloaded" || state.phase === "disabled"}
           onClick={() => void perform(desktopUpdateCheck)} aria-label={t("desktopUpdates.check")}>{t("desktopUpdates.check")}</Button>
       </div>
-      {(state.nextVersion || state.pendingDownload) && <div className="settings-detail-row"><div>
+      {(state.nextVersion || state.pendingDownload || state.pendingUpdate) && <div className="settings-detail-row"><div>
         {state.nextVersion && <strong>{t("desktopUpdates.nextVersion", { version: state.nextVersion })}</strong>}
-        {(state.pendingDownload || state.pendingUpdate) && <p role="status">{t(state.pendingUpdate ? "desktopUpdates.interruptedUpdate" : "desktopUpdates.interrupted")}</p>}
+        {(state.pendingDownload || state.pendingUpdate) && !state.pendingCancellation && <p role="status">{t(state.pendingUpdate ? "desktopUpdates.interruptedUpdate" : "desktopUpdates.interrupted")}</p>}
         {["preparing", "waiting", "countdown", "installing"].includes(state.phase) && <p role="status">{t(`desktopUpdates.${state.phase}`, { count: state.secondsRemaining })}</p>}
         {state.phase === "repair" && <p>{t("desktopUpdates.repair")}</p>}
         {(state.route?.length || 0) > 1 && <p>{t("desktopUpdates.bridge", { count: state.route!.length, version: state.targetVersion })}</p>}
         {state.totalBytes ? <p>{t("desktopUpdates.downloadSize", { size: byteSize(state.totalBytes) })}</p> : null}
       </div><Space wrap>
         {state.pendingUpdate && state.phase !== "repair" && <>
-          <Button type="primary" loading={busy} onClick={() => void perform(() => desktopUpdateInstall(state.releaseId))}>{t("desktopUpdates.continueUpdate")}</Button>
-          <Button onClick={() => void perform(desktopUpdateLater)}>{t("desktopUpdates.later")}</Button>
+          {!state.pendingCancellation && <Button type="primary" loading={busy || state.phase === "checking"} onClick={() => void perform(() => desktopUpdateInstall(state.releaseId))}>{t("desktopUpdates.continueUpdate")}</Button>}
+          <Button loading={busy} onClick={() => void perform(desktopUpdateLater)}>{t(state.pendingCancellation ? "desktopUpdates.cancelUpdate" : "desktopUpdates.later")}</Button>
         </>}
         {state.pendingDownload && !state.pendingUpdate && <>
           <Button type="primary" loading={busy || state.phase === "checking"} onClick={() => void perform(desktopUpdateResume)}>{t("desktopUpdates.resumeDownload")}</Button>
@@ -112,8 +112,8 @@ export function DesktopUpdateNotice() {
       : state.phase === "downloaded" ? t("desktopUpdates.noticeDownloaded")
         : state.phase === "cancelling" ? t("desktopUpdates.cancelling") : t("desktopUpdates.downloading"))}</span>
     <Space size={12} wrap>
-      {state.updating && state.phase !== "installing" && <Button size="small" loading={busy} onClick={() => void perform(desktopUpdateLater)}>{t("desktopUpdates.later")}</Button>}
-      {state.pendingUpdate && state.phase !== "repair" && <Button size="small" loading={busy} onClick={() => void perform(() => desktopUpdateInstall(state.releaseId))}>{t("desktopUpdates.continueUpdate")}</Button>}
+      {(state.updating || state.pendingUpdate) && state.phase !== "installing" && state.phase !== "repair" && <Button size="small" loading={busy} onClick={() => void perform(desktopUpdateLater)}>{t(state.pendingCancellation ? "desktopUpdates.cancelUpdate" : "desktopUpdates.later")}</Button>}
+      {state.pendingUpdate && !state.pendingCancellation && state.phase !== "repair" && <Button size="small" loading={busy || state.phase === "checking"} onClick={() => void perform(() => desktopUpdateInstall(state.releaseId))}>{t("desktopUpdates.continueUpdate")}</Button>}
       {state.pendingDownload && !state.pendingUpdate && <>
         <Button size="small" loading={busy || state.phase === "checking"} onClick={() => void perform(desktopUpdateResume)}>{t("desktopUpdates.resumeDownload")}</Button>
         <Button size="small" onClick={() => void perform(desktopUpdateCancel)}>{t("desktopUpdates.cancelUpdate")}</Button>

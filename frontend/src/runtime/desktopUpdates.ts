@@ -13,6 +13,7 @@ export interface DesktopUpdateState {
   canInstall: boolean;
   pendingDownload?: boolean;
   pendingUpdate?: boolean;
+  pendingCancellation?: boolean;
   updating?: boolean;
   packageAvailable?: boolean;
   secondsRemaining?: number;
@@ -39,7 +40,8 @@ function state(value: unknown): DesktopUpdateState {
   const candidate = value as Partial<DesktopUpdateState> | null;
   if (!candidate || !Number.isSafeInteger(candidate.revision) || (candidate.revision as number) < 0
     || !phases.has(candidate.phase || "") || typeof candidate.currentVersion !== "string" || typeof candidate.canInstall !== "boolean"
-    || (candidate.pendingDownload !== undefined && typeof candidate.pendingDownload !== "boolean")) throw new Error("desktop_update_invalid_state");
+    || (candidate.pendingDownload !== undefined && typeof candidate.pendingDownload !== "boolean")
+    || (candidate.pendingCancellation !== undefined && typeof candidate.pendingCancellation !== "boolean")) throw new Error("desktop_update_invalid_state");
   return candidate as DesktopUpdateState;
 }
 export async function desktopUpdateStatus(): Promise<DesktopUpdateState | null> {

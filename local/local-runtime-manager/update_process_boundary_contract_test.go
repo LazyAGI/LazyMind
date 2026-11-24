@@ -418,7 +418,7 @@ func TestUpdateBootstrapValidIntentBindsActualCLIToCustomStorageAndSealedPeers(t
 					}
 					if err == nil {
 						ragDisabled := persisted.Config.Algorithm.RAGDisabled
-						components, componentErr := measuredUpdateComponents(f.paths, ragDisabled, true)
+						components, componentErr := measuredUpdateComponents(f.paths, ragDisabled)
 						if componentErr != nil || ragDisabled == installed || (components["rag"] != "") != installed {
 							t.Errorf("target did not preserve RAG state: installed=%v disabled=%v components=%v error=%v", installed, ragDisabled, components, componentErr)
 						}
@@ -462,7 +462,7 @@ func TestUpdateBootstrapValidIntentBindsActualCLIToCustomStorageAndSealedPeers(t
 					if err := prepareDesktopPythonComponents(t.Context(), f.cfg, f.paths); err != nil {
 						t.Fatal(err)
 					}
-					components, err := measuredUpdateComponents(f.paths, false, true)
+					components, err := measuredUpdateComponents(f.paths, false)
 					if err != nil || components["rag"] == "" {
 						t.Fatalf("ordinary restart lost the installed RAG component: %v %v", components, err)
 					}

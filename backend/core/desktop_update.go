@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/doc"
+	"lazymind/core/learning"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/state"
@@ -167,6 +168,7 @@ func (c *desktopUpdateControl) wrap(next http.Handler) http.Handler {
 		websocketWork := strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && r.URL.Path != "/realtime/connect" && r.URL.Path != "/browser/extension/connect"
 		work := r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions || websocketWork
 		if work {
+			continuation := scheduler.ConsumeScheduledChatContinuation(r)
 			countRequest := true
 			if route := mux.CurrentRoute(r); route != nil && r.Method == http.MethodPost {
 				template, _ := route.GetPathTemplate()
@@ -175,7 +177,7 @@ func (c *desktopUpdateControl) wrap(next http.Handler) http.Handler {
 				countRequest = template != "/external-chat/hosts/{provider}/claim"
 			}
 			c.mu.Lock()
-			if c.epoch != 0 || c.bootstrapTx != "" {
+			if c.bootstrapTx != "" || c.epoch != 0 && !continuation {
 				c.mu.Unlock()
 				common.ReplyErr(w, "desktop update is preparing", http.StatusServiceUnavailable)
 				return
@@ -205,6 +207,7 @@ func desktopUpdateTaskCount(ctx context.Context, db, lazy *gorm.DB, ragEnabled b
 		return 0, err
 	}
 	total += resources
+	total += learning.ActivePreanalysisTasks()
 	queries := []*gorm.DB{
 
 		db.Model(&orm.AsyncJob{}).Where("status IN ?", []string{"pending", "running"}),
@@ -223,10 +226,11 @@ func desktopUpdateTaskCount(ctx context.Context, db, lazy *gorm.DB, ragEnabled b
 	}
 	// Locally submitted work includes the window before a LazyLLM row exists.
 	var tasks []orm.Task
-	if err := db.WithContext(ctx).Select("id, lazyllm_task_id, ext").Where("deleted_at IS NULL").Find(&tasks).Error; err != nil {
+	if err := db.WithContext(ctx).Select("id, doc_id, lazyllm_task_id, ext").Where("deleted_at IS NULL").Find(&tasks).Error; err != nil {
 		return 0, err
 	}
 	remoteIDs := []string{}
+	var localDocumentTasks []string
 	for _, task := range tasks {
 		if task.LazyllmTaskID != "" {
 			if ragEnabled {
@@ -250,8 +254,25 @@ func desktopUpdateTaskCount(ctx context.Context, db, lazy *gorm.DB, ragEnabled b
 		switch strings.ToUpper(ext.State) {
 		case "SUCCESS", "SUCCEEDED", "FAILED", "CANCELED", "CANCELLED", "SUSPENDED":
 		default:
-			total++
+			if task.DocID == "" {
+				total++
+			} else {
+				localDocumentTasks = append(localDocumentTasks, task.ID)
+			}
 		}
+	}
+	// Soft-deleted documents keep their local task history. Remote executions
+	// are counted independently below even if their source has been removed.
+	for start := 0; start < len(localDocumentTasks); start += 500 {
+		var n int64
+		ids := localDocumentTasks[start:min(start+500, len(localDocumentTasks))]
+		err := db.WithContext(ctx).Model(&orm.Task{}).Where("id IN ?", ids).
+			Where("NOT EXISTS (SELECT 1 FROM documents WHERE documents.id = tasks.doc_id AND documents.dataset_id = tasks.dataset_id AND documents.deleted_at IS NOT NULL)").
+			Count(&n).Error
+		if err != nil {
+			return 0, err
+		}
+		total += n
 	}
 	if ragEnabled {
 		if lazy == nil {

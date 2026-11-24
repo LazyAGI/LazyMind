@@ -7,7 +7,7 @@ import path from "node:path";
 const require = createRequire(import.meta.url);
 const { createDesktopUpdater } = require("../electron/src/update-controller");
 const { createDownloadIntentStore } = require("../electron/src/update-download-intent");
-const { createInstallIntentStore } = require("../electron/src/update-install-intent");
+const { createInstallIntentStore, createCLIInstallIntentStore } = require("../electron/src/update-install-intent");
 const { createUpdateRuntimeClient } = require("../electron/src/update-runtime-client");
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -96,6 +96,38 @@ test("pending update after shutdown is explicit continuation, with no automatic 
   assert.equal(second.getState().pendingUpdate, true); assert.equal(second.getState().phase, "interrupted"); assert.equal(f.calls.length, previous);
   await second.install(release.releaseId); await settle(); assert.equal(second.getState().phase, "waiting");
 });
+test("later after restart clears an installation reminder without announcing an undiscovered release", async t => {
+  const f = fixture(t, { active: 1 });
+  const first = await begin(f);
+  first.dispose();
+  const reopened = f.make();
+  await reopened.start();
+  assert.equal(reopened.getState().pendingUpdate, true);
+  await reopened.later();
+  assert.equal(reopened.getState().phase, "idle");
+  assert.equal(reopened.getState().pendingUpdate, false);
+  assert.equal(reopened.getState().releaseId, undefined);
+  assert.equal(f.store.read(), null);
+  assert.equal(f.calls.includes("stop"), false);
+});
+test("cancelling resumed installation while rediscovering never starts a new download", async t => {
+  const discovery = deferred();
+  const f = fixture(t, { discover: () => discovery.promise });
+  f.store.write({ version: 1, phase: "pending", sourceVersion: "1.0.0", nextVersion: release.version, releaseId: release.releaseId });
+  const updater = f.make();
+  await updater.start();
+  const continuing = updater.install(release.releaseId);
+  await settle();
+  assert.equal(updater.getState().phase, "checking");
+  await updater.later();
+  discovery.resolve(decision);
+  await continuing;
+  await settle();
+  assert.equal(f.store.read(), null);
+  assert.equal(updater.getState().pendingUpdate, false);
+  assert.equal(f.calls.includes("download"), false);
+  assert.equal(f.calls.includes("pause"), false);
+});
 test("startup confirms both new build identity and healthy compatible data before success", async t => {
   for (const options of [{}, { healthError: true }, { bootRelease: "wrong-release" }]) {
     const f = fixture(t, options); f.store.write({ version: 1, phase: "installing", sourceVersion: "1.0.0", nextVersion: "1.1.0", releaseId: release.releaseId, dataProfile: "same-v1", packagePath: f.packagePath });
@@ -104,6 +136,28 @@ test("startup confirms both new build identity and healthy compatible data befor
     assert.equal(f.calls.includes("install"), false); assert.equal(f.calls.includes("download"), false);
     assert.equal(f.store.read() === null, !Object.keys(options).length);
   }
+});
+test("an unrelated native completion cannot confirm a v2 install or clear a later pending transaction", async t => {
+  const f = fixture(t);
+  const record = { version: 2, phase: "installing", transactionId: "a".repeat(32), sourceVersion: "1.0.0",
+    nextVersion: release.version, releaseId: release.releaseId, dataProfile: "same-v1" };
+  let active = record;
+  const cancelled = [];
+  const store = createCLIInstallIntentStore(path.join(f.dir, "legacy.json"), {
+    invokeSync(action, transactionId) {
+      if (action === "inspect-store") return JSON.stringify(active);
+      assert.equal(action, "cancel");
+      cancelled.push(transactionId);
+      return '{"status":"cancelled"}';
+    },
+  });
+  const u = f.make({ currentVersion: release.version, installIntent: store });
+  u.completeNativeStartup("b".repeat(32));
+  active = { ...record, transactionId: "c".repeat(32), phase: "pending" };
+  await u.start();
+  assert.equal(u.getState().phase, "repair");
+  assert.deepEqual(cancelled, []);
+  assert.equal(f.calls.includes("verify"), false);
 });
 test("old version after installer handoff requires manual repair, never an automatic second handoff", async t => {
   const f = fixture(t); f.store.write({ version: 1, phase: "installing", sourceVersion: "1.0.0", nextVersion: "1.1.0", releaseId: release.releaseId, dataProfile: "same-v1", packagePath: f.packagePath });

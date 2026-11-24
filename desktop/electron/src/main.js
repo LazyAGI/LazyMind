@@ -3490,8 +3490,12 @@ if (!hasSingleInstanceLock) {
     if (window === mainWindow && !rendererReadyWait && !isQuitting) void desktopUpdater.checkOnFocus();
   });
   app.whenReady().then(async () => {
-    const startupParameters = { isPackaged, currentVersion, currentReleaseId, ownerToken,
-      invoke: runSidecar, onRuntimeStarted: () => startGuard() };
+    const startupParameters = { isPackaged, currentVersion, currentReleaseId, ownerToken, invoke: runSidecar,
+      onRuntimeStarted: (runtimeRoot) => {
+        if (!runtimeRoot || !path.isAbsolute(runtimeRoot)) throw new Error("update_storage_mismatch");
+        explicitRuntimeRoot = runtimeRoot;
+        return startGuard();
+      } };
     try {
       let startup = await prepareDesktopStartup(startupParameters);
       if (!startup.allowed) {
@@ -3503,8 +3507,12 @@ if (!hasSingleInstanceLock) {
       }
       if (startup.runtimeRoot && path.isAbsolute(startup.runtimeRoot)) explicitRuntimeRoot = startup.runtimeRoot;
       runtimePrestarted = startup.runtimeStarted;
+      if (startup.transactionId) desktopUpdater.completeNativeStartup(startup.transactionId);
     } catch (error) {
-      dialog.showErrorBox("LazyMind update needs repair", "The installed version could not be verified. Reopen the app or install a supported repair version.");
+      const message = error?.code === "handoff_restart_required"
+        ? 'Restart your computer, then reopen LazyMind and choose "Verify this version".'
+        : "The installed version could not be verified. Reopen the app or install a supported repair version.";
+      dialog.showErrorBox("LazyMind update needs repair", message);
       app.exit(1); return;
     }
     installScreenCapture({ session: session.defaultSession, desktopCapturer, Menu, getWindow: () => mainWindow,

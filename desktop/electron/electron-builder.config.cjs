@@ -155,14 +155,16 @@ function restoreEmbeddedRuntime(appOutDir) {
 
 function refreshSignedRuntimeChecksums(runtimeRoot) {
   const checksum = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const manifestPath = path.join(runtimeRoot, "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const executableSuffix = manifest.platform === "windows" ? ".exe" : "";
   const bin = path.join(runtimeRoot, "bin");
   // CLI identity pins refer to signed bytes. Refresh them before hashing the
   // manifest's entire tracked set, which also contains these pin files.
   for (const name of fs.readdirSync(bin).filter((name) => name.endsWith(".sha256"))) {
-    fs.writeFileSync(path.join(bin, name), `${checksum(path.join(bin, name.slice(0, -7)))}\n`);
+    const executable = name.slice(0, -".sha256".length) + executableSuffix;
+    fs.writeFileSync(path.join(bin, name), `${checksum(path.join(bin, executable))}\n`);
   }
-  const manifestPath = path.join(runtimeRoot, "manifest.json");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   for (const name of Object.keys(manifest.checksums)) {
     manifest.checksums[name] = checksum(path.join(runtimeRoot, name));
   }
@@ -353,6 +355,10 @@ async function signAndStageEmbeddedRuntime(context) {
 }
 
 async function restoreRuntimeAndFinalizeSignature(context) {
+  if (context.electronPlatformName === "win32") {
+    refreshSignedRuntimeChecksums(path.join(context.appOutDir, "resources", "runtime"));
+    return;
+  }
   if (context.electronPlatformName !== "darwin" || macSigningMode !== "developer-id") {
     return;
   }

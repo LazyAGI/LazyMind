@@ -191,7 +191,13 @@ func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 }
 
 func applyStateConfig(cfg RuntimeConfig, state RuntimeState) RuntimeConfig {
-	cfg.UpdateStorage = cloneUpdateStorage(state.Config.UpdateStorage)
+	// Older runtime state predates storage snapshots. Up validates any native
+	// transaction against its persisted storage before merging the configuration.
+	storage := state.Config.UpdateStorage
+	if storage == nil {
+		storage = cfg.UpdateStorage
+	}
+	cfg.UpdateStorage = cloneUpdateStorage(storage)
 	if cfg.UpdateBootstrap == nil {
 		cfg.UpdateBootstrap = state.Config.UpdateBootstrap
 	}

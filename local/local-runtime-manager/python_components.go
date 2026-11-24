@@ -45,6 +45,11 @@ func prepareDesktopPythonComponents(ctx context.Context, cfg RuntimeConfig, path
 	if cfg.Profile != "desktop" || version == "" {
 		return nil
 	}
+	if cfg.UpdateBootstrap == nil {
+		if retained, err := consumeV1ComponentHandoff(ctx, paths, version); err != nil || retained {
+			return err
+		}
+	}
 	catalog, err := loadPythonComponentCatalog(paths)
 	if err != nil || catalog == nil {
 		return err

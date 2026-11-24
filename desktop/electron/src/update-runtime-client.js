@@ -1,5 +1,6 @@
 const path = require("node:path");
 const failure = code => Object.assign(new Error(code), { code });
+const v1HandoffTimeoutMs = 180_000;
 
 function targetComponentRevisions(plan) {
   if (typeof plan?.sourceHadRAG !== "boolean" || plan.componentMode !== (plan.sourceHadRAG ? "sync-target" : "absent")) return null;
@@ -44,6 +45,39 @@ function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAu
       return value;
     } catch { throw failure(action === "stop" ? "runtime_stop_failed" : "task_state_unknown"); }
   }
+  async function componentCheck(args, timeout = v1HandoffTimeoutMs) {
+    let value;
+    try {
+      const raw = await runSidecar("update-components-check", args, { timeout });
+      if (typeof raw !== "string" || Buffer.byteLength(raw) > 4096) throw new Error();
+      value = JSON.parse(raw);
+    } catch { throw failure("data_unknown"); }
+    if (value?.status === "blocked") throw failure(/^[a-z_]{1,64}$/.test(value.reason || "") ? value.reason : "data_unknown");
+    return value;
+  }
+  const validAttempt = id => typeof id === "string" && /^[a-f0-9]{32}$/.test(id);
+  const validPrepared = value => value?.status === "prepared" && validAttempt(value.attemptId)
+    && (value.previousAttemptId === undefined || (validAttempt(value.previousAttemptId) && value.previousAttemptId !== value.attemptId));
+  async function verifyV1(release, receipt, mode, attemptId) {
+    const artifact = release?.components, filename = receipt?.componentsPath;
+    if (typeof filename !== "string" || !path.isAbsolute(filename) || filename.includes("\0")
+      || !/^[a-f0-9]{64}$/.test(artifact?.sha256 || "") || !Number.isSafeInteger(artifact?.size)
+      || artifact.size <= 0 || artifact.size > 1024 * 1024) throw failure("component_update_incompatible");
+    const args = ["--components", filename, "--sha256", artifact.sha256, "--size", String(artifact.size)];
+    if (mode) args.push(mode, release.releaseId, "--package", receipt.packagePath);
+    if (attemptId !== undefined) {
+      if (!validAttempt(attemptId)) throw failure("update_transaction_conflict");
+      args.push("--attempt-id", attemptId);
+    }
+    const value = await componentCheck(args, mode ? v1HandoffTimeoutMs : 30_000);
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(value?.dataProfile || "")) throw failure("data_unknown");
+    if (mode === "--prepare-handoff") {
+      if (!validPrepared(value) || value.releaseId !== release.releaseId) throw failure("data_unknown");
+      if (value.previousAttemptId !== undefined && value.attemptId !== attemptId && value.previousAttemptId !== attemptId) throw failure("update_transaction_conflict");
+    } else if (value.status !== "compatible") throw failure("data_unknown");
+    if (mode === "--handoff" && value.attemptId !== undefined && value.attemptId !== attemptId) throw failure("update_transaction_conflict");
+    return value;
+  }
   return {
     async prepareComponents(release, receipt) {
       const value = await bootstrap("prepare-components", ["--release-id", release.releaseId,
@@ -54,25 +88,31 @@ function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAu
       return value;
     },
     async cancelPreparation() { preparation?.stdin?.end("cancel\n"); },
-    async verifyComponents(release, receipt) {
+    async verifyComponents(release, receipt, handoff, attemptId) {
       if (transactionId) {
         const result = await bootstrap("verify-components");
         if (result?.status !== "compatible" || !/^[A-Za-z0-9._-]{1,128}$/.test(result.dataProfile || "")) throw failure("component_state_unknown");
         return result;
       }
-      const artifact = release?.components, filename = receipt?.componentsPath;
-      if (typeof filename !== "string" || !path.isAbsolute(filename) || filename.includes("\0")
-        || !/^[a-f0-9]{64}$/.test(artifact?.sha256 || "") || !Number.isSafeInteger(artifact?.size)
-        || artifact.size <= 0 || artifact.size > 1024 * 1024) throw failure("component_update_incompatible");
-      let value;
-      try {
-        const raw = await runSidecar("update-components-check", ["--components", filename, "--sha256", artifact.sha256, "--size", String(artifact.size)], { timeout: 30000 });
-        if (typeof raw !== "string" || Buffer.byteLength(raw) > 4096) throw new Error();
-        value = JSON.parse(raw);
-      } catch { throw failure("data_unknown"); }
-      if (value?.status === "blocked" && /^[a-z_]{1,64}$/.test(value.reason || "")) throw failure(value.reason);
-      if (value?.status !== "compatible" || !/^[A-Za-z0-9._-]{1,128}$/.test(value.dataProfile || "")) throw failure("data_unknown");
+      if (handoff === "prepare") return verifyV1(release, receipt, "--prepare-handoff", attemptId);
+      if (handoff !== undefined && (handoff !== "authorize" || !validAttempt(attemptId))) throw failure("update_transaction_conflict");
+      const value = await verifyV1(release, receipt, handoff ? "--handoff" : undefined, attemptId);
       return { dataProfile: value.dataProfile };
+    },
+    async inspectV1Handoff() {
+      const value = await componentCheck(["--inspect-handoff"]);
+      if (value?.status === "absent" && Object.keys(value).length === 1) return value;
+      if (!validPrepared(value) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.releaseId || "")) throw failure("update_incomplete");
+      return value;
+    },
+    async discardV1Handoff(releaseId, attemptId) {
+      const args = ["--discard-handoff", releaseId];
+      if (attemptId !== undefined) {
+        if (!validAttempt(attemptId)) throw failure("update_transaction_conflict");
+        args.push("--attempt-id", attemptId);
+      }
+      const result = await componentCheck(args);
+      if (result?.status !== "compatible") throw failure("update_record_write");
     },
     async status() { const remote = await invoke("status"); if (remote.paused) throw failure("task_state_unknown"); return { ...remote, active: remote.active + localWork() }; },
     async pause(value) {

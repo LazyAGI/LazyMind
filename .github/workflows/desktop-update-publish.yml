@@ -40,7 +40,7 @@ concurrency:
 jobs:
   verify:
     name: Verify ${{ matrix.platform }} upgrade paths
-    if: inputs.use_current_run && inputs.source_build_run_id != ''
+    if: inputs.use_current_run
     strategy:
       fail-fast: false
       matrix:
@@ -60,23 +60,38 @@ jobs:
         with:
           name: desktop-update-${{ matrix.platform }}-${{ github.run_id }}
           path: publication/current
-      - name: Download the successful source build
+      - name: Download the source build when available
+        if: inputs.source_build_run_id != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           SOURCE_RUN: ${{ inputs.source_build_run_id }}
           PLATFORM: ${{ matrix.platform }}
+          UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
         run: |
           set -euo pipefail
+          if [[ "${SOURCE_RUN}" =~ ^published:(legacy|[1-9][0-9]{0,19})$ ]]; then
+            [[ "${UNSIGNED_TEST}" == true ]]
+            exit 0
+          fi
           [[ "${SOURCE_RUN}" =~ ^[0-9]+$ && "${SOURCE_RUN}" != "${GITHUB_RUN_ID}" ]]
-          test "$(gh run view "${SOURCE_RUN}" --json conclusion --jq .conclusion)" = success
-          gh run download "${SOURCE_RUN}" --name "desktop-update-${PLATFORM}-${SOURCE_RUN}" --dir publication/source
+          if [[ "$(gh run view "${SOURCE_RUN}" --json conclusion --jq .conclusion)" == success ]]; then
+            staging="$(mktemp -d "${RUNNER_TEMP}/source-artifact.XXXXXXXX")"
+            if gh run download "${SOURCE_RUN}" --name "desktop-update-${PLATFORM}-${SOURCE_RUN}" --dir "${staging}"; then
+              mv "${staging}" publication/source
+            else
+              echo "Source artifact unavailable; verifying the signed public release."
+            fi
+          else
+            echo "No successful source run available; verifying the signed public release."
+          fi
       - name: Verify the published source and the actual target runtime
         shell: bash
         env:
           UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
           PLATFORM: ${{ matrix.platform }}
+          SOURCE_RUN: ${{ inputs.source_build_run_id }}
         run: |
           set -euo pipefail
           validator="${RUNNER_TEMP}/update-publisher.exe"
@@ -87,9 +102,15 @@ jobs:
             plan_flags=(--unsigned-test)
           fi
           (cd local/local-runtime-manager && go build "${build_flags[@]+"${build_flags[@]}"}" -o "${validator}" ./cmd/update-publisher)
+          history=()
+          if [[ -d publication/source ]]; then history=(--history publication/source); fi
           uv run --no-project --python 3.11 python desktop/scripts/prepare-update-ci-plan.py \
-            --verify-source-only --current publication/current --history publication/source \
+            --verify-source-only --current publication/current "${history[@]+"${history[@]}"}" \
             --validator "${validator}" --output-dir "${RUNNER_TEMP}/source-verification" "${plan_flags[@]+"${plan_flags[@]}"}"
+          if [[ -n "${SOURCE_RUN}" && "$(cat "${RUNNER_TEMP}/source-verification/expected-policy-sha256")" == absent ]]; then
+            echo "::error::A continuation requires an existing signed public policy"
+            exit 1
+          fi
           uv run --no-project --python 3.11 python desktop/scripts/verify-update-ci-pairs.py \
             --plan "${RUNNER_TEMP}/source-verification" --current publication/current --baseline publication/source \
             --platform "${PLATFORM}" --output verification "${plan_flags[@]+"${plan_flags[@]}"}"
@@ -101,7 +122,7 @@ jobs:
 
   publish:
     needs: verify
-    if: ${{ !cancelled() && !failure() && (!inputs.use_current_run || inputs.source_build_run_id == '' || needs.verify.result == 'success') }}
+    if: ${{ !cancelled() && !failure() && (!inputs.use_current_run || needs.verify.result == 'success') }}
     environment: ${{ inputs.unsigned_update_test && 'desktop_updates_test' || 'desktop_updates' }}
     runs-on: ${{ inputs.unsigned_update_test && 'macos-15' || 'ubuntu-latest' }}
     timeout-minutes: 120
@@ -125,12 +146,12 @@ jobs:
           name: desktop-update-windows-${{ github.run_id }}
           path: publication/current-windows
       - uses: actions/download-artifact@v8
-        if: inputs.use_current_run && inputs.source_build_run_id != ''
+        if: inputs.use_current_run
         with:
           name: desktop-format-evidence-macos-${{ github.run_id }}
           path: verification
       - uses: actions/download-artifact@v8
-        if: inputs.use_current_run && !inputs.unsigned_update_test && inputs.source_build_run_id != ''
+        if: inputs.use_current_run && !inputs.unsigned_update_test
         with:
           name: desktop-format-evidence-windows-${{ github.run_id }}
           path: verification
@@ -140,14 +161,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           BUILD_RUN_IDS: ${{ inputs.build_run_ids }}
+          UPDATE_PLAN: ${{ inputs.plan }}
         run: |
           set -euo pipefail
           [[ "${BUILD_RUN_IDS}" =~ ^[0-9]+(,[0-9]+)*$ ]]
           IFS=',' read -ra run_ids <<< "${BUILD_RUN_IDS}"
+          shopt -s nullglob
           for run_id in "${run_ids[@]}"; do
             test "$(gh run view "${run_id}" --json conclusion --jq .conclusion)" = success
-            gh run download "${run_id}" --pattern 'desktop-update-*' --dir "publication/${run_id}"
+            gh run download "${run_id}" --dir "publication/${run_id}" \
+              --pattern "desktop-update-macos-${run_id}" --pattern "desktop-update-windows-${run_id}" \
+              --pattern "desktop-format-evidence-macos-${run_id}" --pattern "desktop-format-evidence-windows-${run_id}"
+            for proof in "publication/${run_id}"/desktop-format-evidence-*; do
+              mkdir -p "verification/${run_id}"
+              mv "${proof}" "verification/${run_id}/"
+            done
           done
+          printf '%s' "${UPDATE_PLAN}" | python3 desktop/scripts/bind-manual-update-evidence.py > "${RUNNER_TEMP}/update-plan.json"
       - name: Build the offline update publisher
         env:
           UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
@@ -159,7 +189,6 @@ jobs:
       - name: Prepare plan from actual releases and signed history
         if: inputs.use_current_run
         env:
-          SOURCE_RUN: ${{ inputs.source_build_run_id }}
           UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
           UPDATE_REPO: ${{ vars.LAZYMIND_UPDATE_MODELSCOPE_REPO }}
         run: |
@@ -167,20 +196,17 @@ jobs:
           test -n "${UPDATE_REPO}"
           historical=()
           plan_flags=()
-          if [[ -n "${SOURCE_RUN}" ]]; then historical=(--history verification/records --evidence verification/evidence); fi
+          if [[ "$(cat verification/macos-policy-sha256)" != absent ]]; then historical=(--history verification/records --evidence verification/evidence); fi
           if [[ "${UNSIGNED_TEST}" == true ]]; then plan_flags=(--unsigned-test); fi
           uv run --no-project --python 3.11 python desktop/scripts/prepare-update-ci-plan.py \
             --current publication "${historical[@]+"${historical[@]}"}" --validator "${RUNNER_TEMP}/update-publisher" --repo "${UPDATE_REPO}" \
             --output-dir "${RUNNER_TEMP}/update-ci-plan" "${plan_flags[@]+"${plan_flags[@]}"}"
-          if [[ -n "${SOURCE_RUN}" ]]; then
-            cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" verification/macos-policy-sha256
-            if [[ "${UNSIGNED_TEST}" != true ]]; then
-              cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" verification/windows-policy-sha256
-            fi
+          cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" verification/macos-policy-sha256
+          if [[ "${UNSIGNED_TEST}" != true ]]; then
+            cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" verification/windows-policy-sha256
           fi
       - name: Assemble and sign explicit update policy
         env:
-          UPDATE_PLAN: ${{ inputs.plan }}
           UPDATE_PRIVATE_KEY: ${{ secrets.LAZYMIND_UPDATE_POLICY_PRIVATE_KEY }}
           UPDATE_KEY_ID: ${{ vars.LAZYMIND_UPDATE_POLICY_KEY_ID }}
           USE_CURRENT_RUN: ${{ inputs.use_current_run }}
@@ -203,7 +229,6 @@ jobs:
             fi
           else
             plan="${RUNNER_TEMP}/update-plan.json"
-            printf '%s' "${UPDATE_PLAN}" > "${plan}"
           fi
           "${RUNNER_TEMP}/update-publisher" sign \
             --records "${records}" --plan "${plan}" "${signing_history[@]+"${signing_history[@]}"}" \
@@ -215,15 +240,16 @@ jobs:
           MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}
           UPDATE_REPO: ${{ vars.LAZYMIND_UPDATE_MODELSCOPE_REPO }}
           TEST_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
+          LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON }}
         run: |
           set -euo pipefail
           test -n "${MODELSCOPE_API_TOKEN}"
           test -n "${UPDATE_REPO}"
-          assets_prefix="${TEST_BASE_URL#*/resolve/master/}"
+          component_prefix="$(node desktop/scripts/resolve-unsigned-test-round.mjs --component-prefix "${RUNNER_TEMP}/update-config.json")"
           uv run --no-project --python 3.11 --with modelscope-hub==0.4.6 \
             python desktop/scripts/publish-python-components.py \
             --directory publication/current-macos/python-components --repo "${UPDATE_REPO}" \
-            --signing-mode adhoc --prefix "${assets_prefix%/}/RAG"
+            --signing-mode adhoc --prefix "${component_prefix}"
       - name: Publish and verify files before policy
         env:
           MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}

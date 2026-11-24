@@ -552,7 +552,7 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("X-User-Id", userID)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := dispatchScheduledChat(req, taskID, body)
 	if err != nil {
 		fmt.Printf("[Scheduler] sendScheduledChatRequest: HTTP error for task %s: %v\n", taskID, err)
 		failScheduledTask(db, taskID, scheduledRequestFailureReason(err))

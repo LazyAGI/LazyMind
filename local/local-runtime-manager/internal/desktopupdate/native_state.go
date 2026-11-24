@@ -161,6 +161,14 @@ func (r *NativeRepairTarget) components() map[string]ComponentDescriptor {
 }
 func NativeRecordPath(root string) string { return filepath.Join(root, "native-v2", "active.json") }
 
+func writeNativeRecord(root string, r *NativeRecord) error {
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	return atomicWrite(NativeRecordPath(root), raw)
+}
+
 func validateNativeRecord(r *NativeRecord) error {
 	bad := func() error { return failure("update_request_invalid", nil) }
 	if r.Version != 2 || len(r.TransactionID) != 32 || !digestPattern.MatchString(r.TransactionID+r.TransactionID) || !identifier.MatchString(r.SourceReleaseID) || !identifier.MatchString(r.TargetReleaseID) || r.SourceDataProfile == "" || r.SourceDataProfile != r.TargetDataProfile {
@@ -427,8 +435,12 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 			return blocked("update_transaction_busy")
 		}
 		defer releaseLock(component)
-		raw, _ := json.Marshal(candidate)
-		if atomicWrite(NativeRecordPath(root), raw) != nil {
+		// An older target can complete without knowing about the sidecar.
+		// A new transaction never inherits an observation from a reused ID.
+		if removeBootObservation(root, candidate.TransactionID) != nil {
+			return blocked("update_record_write")
+		}
+		if writeNativeRecord(root, &candidate) != nil {
 			return blocked("update_record_write")
 		}
 		return result("pending", "")
@@ -460,7 +472,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		if r.Phase != "pending" {
 			return blocked("native_handoff_unknown")
 		}
-		if os.Remove(NativeRecordPath(root)) != nil || syncDirectory(filepath.Dir(NativeRecordPath(root))) != nil {
+		if removeNativeRecord(root, r.TransactionID) != nil {
 			return blocked("update_record_write")
 		}
 		releaseNativeComponentFiles(r, nil)
@@ -480,6 +492,18 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		}
 		r.Phase = "installing"
 		r.BootID = req.BootID
+		if r.Platform == "windows" && req.BootID != "" && !digestPattern.MatchString(req.BootID) {
+			return blocked("handoff_state_unknown")
+		}
+		if r.Platform == "darwin" && req.BootID != "" {
+			if !validDarwinSession(req.BootID) {
+				return blocked("handoff_state_unknown")
+			}
+			if err := writeBootObservation(root, r.TransactionID, req.BootID); err != nil {
+				return blocked("update_record_write")
+			}
+			r.BootID = "" // Old readers compare any nonempty value to an unversioned hash.
+		}
 		status = "installing"
 	case "activated":
 		if r.Phase == "pending" || req.ReleaseID != effective || req.DataProfile != profile || req.ComponentMode != r.ComponentMode || !matchesComponents() {
@@ -498,7 +522,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		r.Reason = req.Reason
 		status = "repair"
 	case "adopt-repair":
-		if r.Phase != "repair" || req.SourceID != r.SourceReleaseID || req.FailedID != r.TargetReleaseID || !digestPattern.MatchString(req.AcceptanceDigest) || !req.HandoffTerminated || req.RepairTarget == nil || req.RepairTarget.DataProfile != r.SourceDataProfile {
+		if (r.Phase != "repair" && r.Phase != "installing") || req.SourceID != r.SourceReleaseID || req.FailedID != r.TargetReleaseID || !digestPattern.MatchString(req.AcceptanceDigest) || req.RepairTarget == nil || req.RepairTarget.DataProfile != r.SourceDataProfile {
 			return blocked("repair_target_not_accepted")
 		}
 		if !identifier.MatchString(req.RepairTarget.ReleaseID) || !digestPattern.MatchString(req.RepairTarget.PackageSHA256) || !digestPattern.MatchString(req.RepairTarget.ComponentsSHA256) {
@@ -522,6 +546,15 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 				return blocked("repair_target_not_accepted")
 			}
 		}
+		if !req.HandoffTerminated {
+			if req.BootID == "" {
+				return blocked("repair_target_not_accepted")
+			}
+			if err := verifyRepairBoot(root, r, req.BootID); err != nil {
+				return blocked(ErrorCode(err))
+			}
+		}
+		r.Phase = "repair"
 		r.RepairTarget = req.RepairTarget
 		r.RepairTarget.AcceptanceDigest = req.AcceptanceDigest
 		r.ComponentStage = nil
@@ -546,7 +579,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 				return blocked("update_startup_failed")
 			}
 		}
-		if os.Remove(NativeRecordPath(root)) != nil || syncDirectory(filepath.Dir(NativeRecordPath(root))) != nil {
+		if removeNativeRecord(root, r.TransactionID) != nil {
 			return blocked("update_record_write")
 		}
 		releaseNativeComponentFiles(r, targets)
@@ -554,8 +587,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 	default:
 		return blocked("update_request_invalid")
 	}
-	raw, _ := json.Marshal(r)
-	if err := atomicWrite(NativeRecordPath(root), raw); err != nil {
+	if err := writeNativeRecord(root, r); err != nil {
 		return blocked("update_record_write")
 	}
 	return result(status, "")

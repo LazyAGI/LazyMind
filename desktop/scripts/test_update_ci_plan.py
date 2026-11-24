@@ -118,6 +118,17 @@ class HistoricalReleasePlanTests(unittest.TestCase):
             self.assertEqual(edge['componentTransitions']['rag']['sourceClasses'], report['sourceClasses'])
         self.assertCountEqual(plan['releaseIds'], [*sources, target_id])
 
+    def test_source_run_must_contain_the_latest_release_from_verified_history(self):
+        baseline = self.root / 'history' / self.b['release']['releaseId'] / 'release.json'
+        baseline.unlink()  # A is present, but the published baseline is now B.
+        with self.assertRaisesRegex(ci_plan.PlanError, 'Source release record does not match published policy'):
+            self.prepare(verify_source_only=True)
+        substituted = release_record(self.b['config']['version'])
+        substituted['release']['package']['sha256'] = 'f' * 64
+        write_json(baseline, substituted)
+        with self.assertRaisesRegex(ci_plan.PlanError, 'Source release record does not match published policy'):
+            self.prepare(verify_source_only=True)
+
     def assert_plan_rejected(self):
         with self.assertRaises(ci_plan.PlanError):
             self.prepare()

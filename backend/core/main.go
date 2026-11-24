@@ -1175,7 +1175,9 @@ func run(ctx context.Context) error {
 		r.Handle("/internal/mcp/knowledge-management", capabilityRuntime.KnowledgeMCP).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)
 		handleAPI(r, "POST", "/knowledge-management/confirmations/{confirmation_id}/decision", []string{"document.write"}, capabilityRuntime.KnowledgeDecision)
 	}
-	if err := doc.InitializeDocumentVisibility(ctx, store.DB(), store.LazyLLMDB()); err != nil {
+	if err := initializeWriteStage(func() error {
+		return doc.InitializeDocumentVisibility(ctx, store.DB(), store.LazyLLMDB())
+	}); err != nil {
 		return &startupError{msg: "initialize document visibility", err: err}
 	}
 	handleAPI(r, "POST", "/documents:filterActive", []string{"document.read"}, doc.FilterDocumentVisibilityHTTP)

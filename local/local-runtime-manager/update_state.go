@@ -189,7 +189,7 @@ func measureDesktopUpdateState(ctx context.Context, cfg RuntimeConfig, paths Run
 		}
 		shapes[family] = shape
 	}
-	components, err := measuredUpdateComponents(paths, persisted.Config.Algorithm.RAGDisabled, storage.Version == 2)
+	components, err := measuredUpdateComponents(paths, persisted.Config.Algorithm.RAGDisabled)
 	if err != nil {
 		return empty, err
 	}
@@ -334,15 +334,15 @@ func inspectUpdateSQLite(ctx context.Context, file string, core bool) (updateDat
 	return result, false, nil
 }
 
-func measuredUpdateComponents(paths RuntimePaths, ragDisabled, allowAdditional bool) (map[string]string, error) {
+func measuredUpdateComponents(paths RuntimePaths, ragDisabled bool) (map[string]string, error) {
 	catalog, err := loadPythonComponentCatalogForUpdate(paths)
 	if err != nil {
 		return nil, updateStateFailure("component_state_unknown")
 	}
-	return measuredComponentsFromCatalog(paths, ragDisabled, allowAdditional, catalog)
+	return measuredComponentsFromCatalog(paths, ragDisabled, catalog)
 }
 
-func measuredComponentsFromCatalog(paths RuntimePaths, ragDisabled, allowAdditional bool, catalog *pythonComponentCatalog) (map[string]string, error) {
+func measuredComponentsFromCatalog(paths RuntimePaths, ragDisabled bool, catalog *pythonComponentCatalog) (map[string]string, error) {
 	result := map[string]string{}
 	if catalog == nil {
 		if !ragDisabled {
@@ -356,7 +356,7 @@ func measuredComponentsFromCatalog(paths RuntimePaths, ragDisabled, allowAdditio
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		if !desktopupdate.IsUpdateComponent(id) || (id != "rag" && !allowAdditional) {
+		if !desktopupdate.IsUpdateComponent(id) {
 			return nil, updateStateFailure("component_state_unknown")
 		}
 		entry := catalog.Components[id]
