@@ -823,19 +823,6 @@
       "sizeBytes": 32890,
       "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-poster-design-3f144d8524cd7bd4.zip"
     },
-    "ppt-workflow/1.1.0": {
-      "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-ppt-workflow-350838b4df5b5757.zip",
-      "filename": "lazymind-featured-ppt-workflow-350838b4df5b5757.zip",
-      "files": {
-        "ppt-workflow/1.1.0/ed00a30482ad-AI-PPT-demo.html": {
-          "sha256": "ed00a30482ad2118f63b8ae81a95b666ed7c6fb25c80e19afa92056b5afd69ee",
-          "sizeBytes": 8192651
-        }
-      },
-      "sha256": "f14cca253934d880edc4310b4d84661b90bc5d50520eca70e93bd49084c2bfa3",
-      "sizeBytes": 6163906,
-      "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/featured-assets/lazymind-featured-ppt-workflow-350838b4df5b5757.zip"
-    },
     "proactive-agent/0.1.0": {
       "fallbackUrl": "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/main/featured-assets/lazymind-featured-proactive-agent-ca487b5562a3b834.zip",
       "filename": "lazymind-featured-proactive-agent-ca487b5562a3b834.zip",
@@ -1394,10 +1381,6 @@
     "poster-design/1.0.1/98fff15e12a2-cover.jpg": {
       "sha256": "98fff15e12a2a72052280a340bae44a5a81487b446a069b375f95f2d35b5c21c",
       "sizeBytes": 18849
-    },
-    "ppt-workflow/1.1.0/b742a407fc94-cover.jpg": {
-      "sha256": "b742a407fc9470a60891a46a56fa8460126e65b1aa956682cde44dc62f09556a",
-      "sizeBytes": 19871
     },
     "proactive-agent/0.1.0/33c6bc09bf5d-cover.jpg": {
       "sha256": "33c6bc09bf5d3eee58c1a1a18d1f55209afd0e45e084baa8749c3d9ab7e4a462",
