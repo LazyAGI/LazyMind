@@ -223,34 +223,44 @@ func acquireLockedPackage(ctx context.Context, catalogPath string, entry Catalog
 		return Package{}, catalogFailure("create builtin Skill cache: %v", err)
 	}
 	sources, attemptTimeout := packageSources(entry)
-	return acquireFromSources(ctx, catalogPath, entry, cacheRoot, client, sources, attemptTimeout)
+	pkg, _, err := acquireFromSources(ctx, catalogPath, entry, cacheRoot, client, sources, attemptTimeout)
+	return pkg, err
 }
 
-func acquireFromSources(ctx context.Context, catalogPath string, entry CatalogSkill, cacheRoot string, client *http.Client, sources []packageSource, attemptTimeout time.Duration) (Package, error) {
+// AcquireLockedMirror tries the published mirrors for a locked final package.
+func AcquireLockedMirror(ctx context.Context, entry CatalogSkill, cacheRoot string, client *http.Client) (Package, string, error) {
+	sources, attemptTimeout := packageSources(entry)
+	if sources[1].url == "" {
+		return Package{}, "", errMirrorUnpublished
+	}
+	return acquireFromSources(ctx, "", entry, cacheRoot, client, sources[1:], attemptTimeout)
+}
+
+func acquireFromSources(ctx context.Context, catalogPath string, entry CatalogSkill, cacheRoot string, client *http.Client, sources []packageSource, attemptTimeout time.Duration) (Package, string, error) {
 	failures := make([]SourceFailure, 0, len(sources))
 	causes := make([]error, 0, len(sources))
 	for _, source := range sources {
 		if err := ctx.Err(); err != nil {
-			return Package{}, err
+			return Package{}, "", err
 		}
 		attempt, cancel := context.WithTimeout(ctx, attemptTimeout)
 		pkg, err := acquireFromSource(attempt, catalogPath, entry, cacheRoot, client, source)
 		cancel()
 		if err == nil {
-			return pkg, nil
+			return pkg, source.name, nil
 		}
 		if err := ctx.Err(); err != nil {
-			return Package{}, err
+			return Package{}, "", err
 		}
 		var localError *os.PathError
 		var renameError *os.LinkError
 		if errors.As(err, &localError) || errors.As(err, &renameError) {
-			return Package{}, err
+			return Package{}, "", err
 		}
 		failures = append(failures, source.failure(err))
 		causes = append(causes, fmt.Errorf("%s: %w", source.name, err))
 	}
-	return Package{}, &PackageDownloadError{Failures: failures, cause: errors.Join(causes...)}
+	return Package{}, "", &PackageDownloadError{Failures: failures, cause: errors.Join(causes...)}
 }
 
 func acquireFromSource(ctx context.Context, catalogPath string, entry CatalogSkill, cacheRoot string, client *http.Client, source packageSource) (Package, error) {

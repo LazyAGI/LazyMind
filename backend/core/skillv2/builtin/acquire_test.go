@@ -188,7 +188,7 @@ func TestAcquireLockedPackageSourceFallback(t *testing.T) {
 				{name: modelScopeSource, url: server.URL + "/ms"},
 				{name: huggingFaceSource, url: server.URL + "/hf"},
 			}
-			pkg, err := acquireFromSources(context.Background(), "", entry, cache, server.Client(), sources, 500*time.Millisecond)
+			pkg, _, err := acquireFromSources(context.Background(), "", entry, cache, server.Client(), sources, 500*time.Millisecond)
 			mu.Lock()
 			got := slices.Clone(requested)
 			mu.Unlock()
@@ -224,7 +224,7 @@ func TestPackageSourcesRequireMatchingLockedArtifact(t *testing.T) {
 	entry := CatalogSkill{UID: uid, ArchiveSHA256: snapshot.Packages[uid].ArchiveSHA256}
 	const filename = "/Skills/project-tender-lead-discovery__" + uid + ".zip"
 	sources, timeout := packageSources(entry)
-	if timeout != MirrorDownloadTimeout || sources[0].name != originSource ||
+	if timeout != mirroredSourceTimeout || sources[0].name != originSource ||
 		sources[1].url != modelScopeMirrorBase+snapshot.ModelScopeRevision+filename ||
 		sources[2].url != huggingFaceMirrorBase+snapshot.HuggingFaceRevision+filename {
 		t.Fatalf("unexpected pinned sources: %+v", sources)

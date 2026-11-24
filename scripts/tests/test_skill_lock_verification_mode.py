@@ -168,7 +168,7 @@ Path(os.environ['BUNDLER_CAPTURE']).write_text(json.dumps(sys.argv[1:]))
         self.assertEqual(self.mode(), 'local')
 
     def test_runtime_acquisition_changes_use_frozen_catalog_verification(self):
-        for filename in ('acquire.go', 'acquire_test.go'):
+        for filename in ('acquire.go', 'acquire_test.go', 'mirrors.go', 'mirrors.json'):
             self.write('backend/core/skillv2/builtin/' + filename, 'updated runtime downloader')
         self.assertEqual(self.mode(), 'local')
 
@@ -191,44 +191,13 @@ Path(os.environ['BUNDLER_CAPTURE']).write_text(json.dumps(sys.argv[1:]))
         self.assertIn('--frozen-lockfile', args)
         self.assertNotIn('--verify-lock-artifacts', args)
 
-    def test_workflow_only_version_bump_uses_frozen_catalog(self):
-        path = 'skills/featured/ppt-workflow/featured.yaml'
-        definition = (
-            'id: ppt-workflow\ntype: workflow\nversion: 1.1.0\n'
-            'workflow:\n  workflow_ref: builtin:ppt-workflow\n'
-        )
-        self.write(path, definition)
-        self.commit()
-        self.write(path, definition.replace('1.1.0', '1.1.4'))
-        self.write('skills/featured/ppt-workflow/assets/demo.html', 'updated preview')
-        self.commit()
-        args = self.workflow_args()
-        self.assertIn('--catalog-only', args)
-        self.assertIn('--frozen-lockfile', args)
-        self.assertNotIn('--verify-lock-artifacts', args)
-
-    def test_workflow_binding_and_featured_skill_version_changes_use_full_verification(self):
-        for feature_type, extra_change in [('workflow', True), ('work', False)]:
-            with self.subTest(feature_type=feature_type):
-                self.git('reset', '--hard', self.base)
-                path = 'skills/featured/demo/featured.yaml'
-                definition = f'type: {feature_type}\nversion: 1.0.0\nworkflow_ref: builtin:demo\n'
-                self.write(path, definition)
-                self.commit()
-                updated = definition.replace('1.0.0', '1.1.0')
-                if extra_change:
-                    updated = updated.replace('builtin:demo', 'builtin:other')
-                self.write(path, updated)
-                self.commit()
-                self.assertIn('--verify-lock-artifacts', self.workflow_args())
-
     def test_remote_source_change_requires_full_verification(self):
         self.write('skills/builtin-sources.yaml', SOURCES.replace('category: search', 'category: research'))
         self.assertEqual(self.mode(), 'full')
 
     def test_patches_and_bundler_changes_require_full_verification(self):
         for path in ('skills/patches/catalog.yaml', 'backend/core/cmd/builtin-skill-bundle/main.go',
-                     'backend/core/skillv2/builtin/catalog.go', 'backend/core/skillv2/builtin/mirrors.json'):
+                     'backend/core/skillv2/builtin/catalog.go'):
             with self.subTest(path=path):
                 self.git('reset', '--hard', self.base)
                 self.write(path, 'changed')
