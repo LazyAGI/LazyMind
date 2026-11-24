@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { message } from "antd";
 
 import {
@@ -15,11 +15,16 @@ import zhCN from "@/i18n/locales/zh-CN";
 import { getTranslationServiceStatus, translateSelectionText } from "@/modules/knowledge/api/translation";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
 import EnvInputCard, { type EnvironmentInputResult } from "../EnvInputCard";
+import MessageList from "../newChatContainer/components/MessageList";
+import { RoleTypes } from "@/modules/chat/constants/common";
+import { askDraftStore } from "@/modules/chat/store/askAnswerDraft";
 
 // AntD's static messages mount outside RTL's root. Flush their destruction while
 // jsdom still exists so delayed notice timers cannot update a disposed window.
 afterEach(async () => {
   cleanup();
+  askDraftStore.clear();
+  sessionStorage.clear();
   await act(async () => { message.destroy(); });
 });
 
@@ -135,7 +140,7 @@ vi.mock("react-i18next", () => ({
     type: "3rdParty",
     init: () => undefined,
   },
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en-US" } }),
+  useTranslation: () => ({ t: (key: string, values?: { model?: string }) => values?.model ? `${key}: ${values.model}` : key, i18n: { language: "en-US" } }),
 }));
 
 vi.mock("@/modules/chat/store/workflowPanel", () => ({
@@ -364,7 +369,7 @@ describe("AssistantMessage cancellation", () => {
     );
 
     const summary = screen.getByLabelText(
-      reason === "fixed" ? "chat.modelRouteFixedLabel" : "chat.modelRouteAutoLabel",
+      `${reason === "fixed" ? "chat.modelRouteFixedLabel" : "chat.modelRouteAutoLabel"}: Fast · fast-free`,
     );
     expect(summary).toBeInTheDocument();
     fireEvent.mouseOver(summary);
@@ -647,21 +652,24 @@ describe("environment deletion confirmation", () => {
   it.each([false, true])("does not optimistically consume a card when stream startup returns %s", async (started) => {
     const updateMessage = vi.fn();
     const sendMessage = vi.fn().mockResolvedValue(started);
-    render(<AssistantMessage
+    const card = <AssistantMessage
       index={0} length={1} renderText={() => null} regenerate={vi.fn()}
       stopGeneration={vi.fn()} updateMessage={updateMessage} sendMessage={sendMessage}
       item={{ role: "assistant", history_id: "delete-history", ask_pending: {
         ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" },
         questions: [{ text: "Delete?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
       } }}
-    />);
+    />;
+    const view = render(card);
     fireEvent.click(screen.getByRole("button", { name: "common.no" }));
-    await waitFor(() => expect(updateMessage).toHaveBeenCalled());
-    updateMessage.mockClear();
+    expect(updateMessage).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByRole("button", { name: "common.no" })).toBeEnabled());
     expect(updateMessage).not.toHaveBeenCalled();
+    view.unmount();
+    render(card);
+    expect(screen.getByRole("button", { name: "chat.askCardSubmit" })).toBeEnabled();
   });
 });
 
@@ -1138,5 +1146,184 @@ describe("ask draft navigation", () => {
       { history_id: "history", ask_id: "still-valid", answers: { 0: { type: "text", value: "Friday" } } },
       expect.any(Object)));
     patch.mockRestore();
+  });
+});
+
+describe("ask answer drafts", () => {
+  const pending = { ask_id: "draft-ask", questions: [
+    { id: "topic", text: "Topic?", type: "text", required: false },
+    { id: "audience", text: "Audience?", type: "text", required: false },
+  ] };
+  const item = { role: RoleTypes.ASSISTANT, history_id: "draft-history", delta: "Questions", ask_pending: pending };
+  const props = { index: 0, length: 1, sessionId: "draft-conversation", item,
+    sendMessage: vi.fn().mockResolvedValue(false), regenerate: vi.fn(), stopGeneration: vi.fn(),
+    renderText: () => null, updateMessage: vi.fn() };
+  const answer = (value: string) => ({ type: "text", value });
+
+  let saveAskAnswers: MockInstance<typeof axiosInstance.patch>;
+  const saveRequest = (conversation: string, history: string, ask: string, answers: object) => [
+    expect.stringContaining(`${conversation}:ask-answers`),
+    { history_id: history, ask_id: ask, answers },
+    expect.objectContaining({ silentError: true }),
+  ];
+  beforeEach(() => {
+    askDraftStore.clear();
+    saveAskAnswers = vi.spyOn(axiosInstance, "patch").mockResolvedValue({ data: {} });
+    props.sendMessage.mockClear();
+    props.updateMessage.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+    askDraftStore.clear();
+    saveAskAnswers.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("keeps rapid typing out of the conversation render tree and debounces a complete draft", async () => {
+    vi.useFakeTimers();
+    const renderText = vi.fn(() => null);
+    const update = vi.fn();
+    let parentRenders = 0;
+    function Harness() {
+      const [messages, setMessages] = useState(Array.from({ length: 10 }, (_, index) => ({
+        ...item, history_id: `history-${index}`, ask_pending: index === 9 ? pending : undefined,
+      })));
+      parentRenders++;
+      return <MessageList {...props} messageList={messages} renderText={renderText}
+        updateAssistantMessage={(next, _id, index) => {
+          update(next);
+          setMessages(previous => previous.map((message, i) => i === index ? next : message));
+        }} />;
+    }
+    render(<Harness />);
+    const before = parentRenders;
+    renderText.mockClear();
+    const input = screen.getByRole("textbox");
+    const text = "abcdefghijklmnopqrstuvwxyz快速输入";
+    for (let i = 1; i <= text.length; i++) fireEvent.change(input, { target: { value: text.slice(0, i) } });
+    expect(input).toHaveValue(text);
+    expect(parentRenders).toBe(before);
+    expect(renderText).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Developers" } });
+    expect(saveAskAnswers).not.toHaveBeenCalled();
+    await act(async () => { vi.advanceTimersByTime(600); });
+    expect(saveAskAnswers).toHaveBeenCalledTimes(1);
+    expect(saveAskAnswers).toHaveBeenCalledWith(
+      ...saveRequest(props.sessionId, "history-9", pending.ask_id, { 0: answer(text), 1: answer("Developers") }),
+    );
+    expect(renderText).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await act(async () => {});
+    expect(props.sendMessage.mock.calls[0][2].ask_answers_structured.questions.map((question: any) => question.answer))
+      .toEqual([answer(text), answer("Developers")]);
+  });
+
+  it("flushes on navigation and restores independent drafts before the server save completes", () => {
+    vi.useFakeTimers();
+    saveAskAnswers.mockImplementationOnce(() => new Promise(() => {}));
+    const view = render(<AssistantMessage {...props} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Conversation A" } });
+    const other = { ...props, sessionId: "conversation-b", item: { ...item, history_id: "history-b" } };
+    view.rerender(<AssistantMessage {...other} />);
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(saveAskAnswers).toHaveBeenCalledWith(...saveRequest(props.sessionId, item.history_id, pending.ask_id, { 0: answer("Conversation A") }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Conversation B" } });
+    view.rerender(<AssistantMessage {...props} item={{ ...item, ask_saved_answers: { 0: answer("Stale server draft") } }} />);
+    expect(screen.getByRole("textbox")).toHaveValue("Conversation A");
+    view.unmount();
+    render(<AssistantMessage {...other} />);
+    expect(screen.getByRole("textbox")).toHaveValue("Conversation B");
+  });
+
+  it("does not reuse a draft for a replacement ask or override accepted answers", () => {
+    const view = render(<AssistantMessage {...props} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Unsubmitted" } });
+    view.rerender(<AssistantMessage {...props} item={{ ...item, ask_pending: { ...pending, ask_id: "replacement-ask" } }} />);
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    view.rerender(<AssistantMessage {...props} item={{ ...item, ask_answered: true, ask_saved_answers: { 0: answer("Accepted") } }} />);
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardExpand/ }));
+    expect(screen.getByDisplayValue("Accepted")).toBeDisabled();
+    expect(askDraftStore.getAnswers(JSON.stringify([props.sessionId, item.history_id, pending.ask_id]))).toBeUndefined();
+  });
+
+  it("restores the last edit and question after pagehide and resumes an unsent autosave", async () => {
+    vi.useFakeTimers();
+    const view = render(<AssistantMessage {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Before immediate reload" } });
+    expect(saveAskAnswers).not.toHaveBeenCalled();
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    view.unmount();
+    askDraftStore.clear();
+    saveAskAnswers.mockClear();
+    render(<AssistantMessage {...props} />);
+    expect(screen.getByText("Audience?")).toBeVisible();
+    expect(screen.getByRole("textbox")).toHaveValue("Before immediate reload");
+    await act(async () => { vi.advanceTimersByTime(600); });
+    expect(saveAskAnswers).toHaveBeenCalledWith(...saveRequest(props.sessionId, item.history_id, pending.ask_id,
+      { 1: answer("Before immediate reload") }));
+  });
+
+  it("retains and saves the draft when submission is rejected", async () => {
+    vi.useFakeTimers();
+    const view = render(<AssistantMessage {...props} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep this" } });
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await act(async () => {});
+    expect(props.updateMessage).not.toHaveBeenCalled();
+    await act(async () => { vi.advanceTimersByTime(600); });
+    expect(saveAskAnswers).toHaveBeenCalledWith(...saveRequest(props.sessionId, item.history_id, pending.ask_id, { 0: answer("Keep this") }));
+    view.unmount();
+    render(<AssistantMessage {...props} />);
+    expect(screen.getByText("Audience?")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardPrev/ }));
+    expect(screen.getByRole("textbox")).toHaveValue("Keep this");
+  });
+
+  it("commits accepted answers to history and removes the draft", async () => {
+    vi.useFakeTimers();
+    const sendMessage = vi.fn().mockResolvedValue(true);
+    render(<AssistantMessage {...props} sendMessage={sendMessage} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Final answer" } });
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await act(async () => {});
+    expect(props.updateMessage).toHaveBeenCalledTimes(1);
+    expect(props.updateMessage).toHaveBeenCalledWith({ ...item, ask_answered: true,
+      ask_saved_answers: { 0: answer("Final answer"), 1: null } });
+    expect(askDraftStore.getAnswers(JSON.stringify([props.sessionId, item.history_id, pending.ask_id]))).toBeUndefined();
+    await act(async () => { vi.advanceTimersByTime(600); });
+    expect(saveAskAnswers).not.toHaveBeenCalled();
+  });
+
+  it("does not clear or cancel a new card's draft after a late submission acknowledgement", async () => {
+    vi.useFakeTimers();
+    let resolve!: (started: boolean) => void;
+    const sendMessage = vi.fn(() => new Promise<boolean>(done => { resolve = done; }));
+    const view = render(<AssistantMessage {...props} sendMessage={sendMessage} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Old answer" } });
+    fireEvent.click(screen.getByRole("button", { name: /chat.askCardNext/ }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    view.rerender(<AssistantMessage {...props} item={{ ...item, ask_pending: { ...pending, ask_id: "new-ask" } }} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "New answer" } });
+    await act(async () => { resolve(true); });
+    expect(screen.getByRole("textbox")).toHaveValue("New answer");
+    expect(props.updateMessage).not.toHaveBeenCalled();
+    await act(async () => { vi.advanceTimersByTime(600); });
+    expect(saveAskAnswers).toHaveBeenLastCalledWith(...saveRequest(props.sessionId, item.history_id, "new-ask", { 0: answer("New answer") }));
+    expect(askDraftStore.getAnswers(JSON.stringify([props.sessionId, item.history_id, "new-ask"]))).toEqual({ 0: answer("New answer") });
+  });
+});
+
+describe("chat supplier label", () => {
+  it.each(["fixed", "auto"])("shows the supplier rather than adapter in %s mode", (mode) => {
+    render(<AssistantMessage item={{ role: "assistant", delta: "answer", model_route: {
+      mode, provider_name: "OpenAI", provider_display_name: "DoubaoAgentPlan", model_name: "DeepSeek-V4-Flash",
+    } }} index={0} length={1} sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()} />);
+    expect(screen.getByText(/Volcengine · Agent Plan · DeepSeek-V4-Flash/)).toBeVisible();
+    expect(screen.queryByText(/OpenAI · DeepSeek-V4-Flash/)).not.toBeInTheDocument();
   });
 });

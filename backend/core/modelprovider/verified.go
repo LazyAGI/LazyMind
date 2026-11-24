@@ -24,9 +24,14 @@ func isSelectableProviderGroup(ctx context.Context, db *gorm.DB, defaultProvider
 	if err := db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", defaultProviderID).Take(&catalog).Error; err != nil {
 		return false
 	}
-	return catalog.Category == "translation" &&
-		strings.Contains(","+catalog.Capabilities+",", ",keyless_translation,") &&
+	return isKeylessCatalogCapability(catalog.Category, catalog.Capabilities) &&
 		normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(catalog.BaseURL)
+}
+
+func isKeylessCatalogCapability(category, capabilities string) bool {
+	caps := "," + capabilities + ","
+	return (category == "translation" && strings.Contains(caps, ",keyless_translation,")) ||
+		(category == "search" && strings.Contains(caps, ",keyless_search,"))
 }
 
 type verifiedGroupItem struct {

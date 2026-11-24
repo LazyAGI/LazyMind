@@ -178,3 +178,43 @@ func TestPluginReconnectRequiresCurrentAccount(t *testing.T) {
 		t.Fatal("signed-out reconnect attempted to restart the desktop")
 	}
 }
+
+func TestPluginReconnectAfterNodeReplacement(t *testing.T) {
+	adapter, store, _ := newPluginReconnectTestAdapter(t)
+	before, err := codexplugin.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(before.Node); err != nil {
+		t.Fatal(err)
+	}
+	replacement := writeExecutable(t, t.TempDir(), "node", "#!/bin/sh\necho v24.22.3\n")
+	replacement, err = filepath.EvalSymlinks(replacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_NODE_BIN", replacement)
+	found, err := codexplugin.FindNode(t.Context())
+	if err != nil || found != replacement {
+		t.Fatalf("new Node not ready: %q %v", found, err)
+	}
+	status := adapter.Connect(t.Context())
+	account, err := store.AccountScope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, _, err := codexhost.Load(adapter.home, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != agentintegration.Enabled {
+		t.Fatalf("reconnect failed: %+v", status)
+	}
+	updated, err := codexplugin.Read()
+	if err != nil || updated.Node != replacement {
+		t.Fatalf("installation retained old Node: %+v %v", updated, err)
+	}
+	if config.Node != replacement {
+		t.Fatalf("reconnect retained stale Node path instead of detected replacement")
+	}
+}

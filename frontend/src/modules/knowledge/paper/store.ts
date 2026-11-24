@@ -64,6 +64,7 @@ async function mutation(dataset: string, method: 'post' | 'patch', path: string,
 export function patchLibraryPaper(dataset: string, paper: PaperRecord, changes: {
     metadata?: PaperMetadata;
     status?: PaperRecord['status'];
+    status_if_unread?: boolean;
     tags?: string[];
     primary_attachment_id?: string;
 }) { return mutation(dataset, 'patch', `library/papers/${encodeURIComponent(paper.id)}`, { revision: paper.revision, ...changes, ...(changes.metadata ? { metadata: writableMetadata(changes.metadata) } : {}) }); }

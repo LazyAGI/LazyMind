@@ -1,0 +1,7 @@
+# Research topic
+
+Understand the actual research objective, field, supplied observations and evidence gaps. Compare plausible formulations internally and choose one primary research question. Do not confuse a workflow instruction, filename or product name with a research subject. If no subject can be determined, ask for missing material rather than inventing one.
+
+Read the available papers and distinguish abstract-only, excerpt and full-text coverage. Explain the problem, motivation, related approaches, proposed contribution, scope, testable hypotheses and falsification conditions, research approach and evaluation needs. Keep hypotheses, proposed innovations and future experiments explicitly unverified. No papers means literature evidence is missing, not that novelty is established. Do not invent findings to fill sections.
+
+Return output.question as one Markdown document with one H1 and a single primary research-question section. Use the user's requested language and scope; otherwise use concise Chinese. Approximately 2,000 characters is a default topic brief, not a whole-paper target. Cite real bound source IDs only, never call-local M1 markers or generated references. Check consistency between question, evidence, claims and proposed validation before candidate preparation. Output only the question business field; intermediate extraction and reading notes are your own working method.

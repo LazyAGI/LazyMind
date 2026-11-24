@@ -186,7 +186,7 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 	if err != nil {
 		return formulaExplanation{}, "", formulaExplanationFailure{500, "Cannot read the PDF structure. Retry later."}
 	}
-	if state.Status != "ready" || state.Document == nil {
+	if state.Document == nil {
 		return formulaExplanation{}, "", formulaExplanationFailure{409, "Parse the original PDF before requesting a formula explanation."}
 	}
 	if state.Document.Version != 1 || state.Document.CoordinateSpace != "normalized_top_left" {

@@ -14,12 +14,14 @@ type ModelRuntimeEvent struct {
 }
 
 type ModelSwitchIdentity struct {
-	CandidateID     string `json:"candidate_id"`
-	Source          string `json:"source"`
-	ModelID         string `json:"model_id"`
-	ProviderGroupID string `json:"provider_group_id"`
-	ProviderName    string `json:"provider_name,omitempty"`
-	ModelName       string `json:"model_name,omitempty"`
+	ProviderDisplayName string `json:"provider_display_name,omitempty"`
+	ProviderIsCustom    bool   `json:"provider_is_custom,omitempty"`
+	CandidateID         string `json:"candidate_id"`
+	Source              string `json:"source"`
+	ModelID             string `json:"model_id"`
+	ProviderGroupID     string `json:"provider_group_id"`
+	ProviderName        string `json:"provider_name,omitempty"`
+	ModelName           string `json:"model_name,omitempty"`
 }
 type ModelSwitchedData struct {
 	SwitchIndex        int                 `json:"switch_index"`

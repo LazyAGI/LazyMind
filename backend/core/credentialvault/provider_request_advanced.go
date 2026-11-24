@@ -8,8 +8,8 @@ import (
 
 const MaximumRequestAdvancedLength = 6 * 1024
 
-// ProviderRequestAdvanced is portable only inside an encrypted credential
-// payload. Its values can contain private gateway credentials.
+// ProviderRequestAdvanced is stored as plaintext supplier configuration.
+// Credential backups still encrypt the enclosing payload, including API keys.
 type ProviderRequestAdvanced struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 	Query     map[string]string `json:"query,omitempty"`

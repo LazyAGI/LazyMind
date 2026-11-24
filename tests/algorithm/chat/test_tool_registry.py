@@ -34,6 +34,21 @@ def test_capability_denial_does_not_leak_across_positive_clause():
     ) is False
 
 
+@pytest.mark.parametrize('constraint', ['不要修改资料库', '不要删除知识库', '禁止修改资料库'])
+def test_read_only_library_request_keeps_content_tools(constraint):
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'selected-kb'}}
+    configs = filter_tools(DEFAULT_TOOLS, user_query=f'读取已选择资料库的论文。{constraint}')
+    assert 'kb' in {cfg.name for cfg in configs}
+
+
+def test_selected_library_ids_are_available_to_metadata_tool_calls():
+    kb_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'kb')
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': ['library-one', 'library-two']}}
+    appendices = collect_system_prompt_appendices([kb_config])
+    policy = '\n'.join(appendices.get('tool_policy', []))
+    assert 'library-one' in policy and 'library-two' in policy
+
+
 @pytest.fixture(autouse=True)
 def reset_dynamic_tool_auth():
     old_auth = lazyllm.globals.config['dynamic_tool_auth']
@@ -55,9 +70,9 @@ def _tool_group(name: str) -> dict:
     return next(group for group in get_all_tool_groups() if group['name'] == name)
 
 
-def test_web_search_requires_at_least_one_search_key():
-    assert 'web_search' not in _active_tool_names()
-    assert _tool_group('web_search')['active'] is False
+def test_web_search_is_available_without_a_search_key():
+    assert 'web_search' in _active_tool_names()
+    assert _tool_group('web_search')['active'] is True
 
     lazyllm.globals.config['dynamic_tool_auth'] = {'bing': 'bing-token'}
 
@@ -79,7 +94,7 @@ def test_wikipedia_remains_available_without_web_provider():
     lazyllm.globals.config['dynamic_tool_auth'] = {}
     lazyllm.globals['agentic_config'] = {'query': 'AI 视频是什么'}
 
-    assert 'web_search' not in _active_tool_names()
+    assert 'web_search' in _active_tool_names()
     assert 'wikipedia' in _active_tool_names()
 
 
@@ -303,7 +318,7 @@ def test_search_tool_descriptions_distinguish_open_web_from_encyclopedic_lookup(
     wikipedia_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'wikipedia')
     policy = '\n'.join(collect_system_prompt_appendices([web_config])['tool_policy'])
 
-    assert 'Wikipedia' not in policy
+    assert 'Wikipedia fallback is background evidence only' in policy
     assert 'current information' in web_config.tool['desc']
     assert 'stable encyclopedic background' in wikipedia_config.description_en
     assert 'not for news' in wikipedia_config.description_en
@@ -714,7 +729,10 @@ def test_search_credentials_do_not_survive_an_unconfigured_request():
     inject_tool_config({'tavily': 'test-token'})
     assert 'web_search' in _active_tool_names()
     inject_tool_config({})
-    assert 'web_search' not in _active_tool_names()
+    assert not (lazyllm.globals.config['dynamic_tool_auth'] or {}).get('tavily')
+    assert 'web_search' in _active_tool_names()
+    assert any(method['name'] == 'KeenableSearch' and method['active']
+               for method in _tool_group('web_search')['methods'])
 
 
 def test_management_group_is_separate_from_native_read_kb_and_requires_core_scope():

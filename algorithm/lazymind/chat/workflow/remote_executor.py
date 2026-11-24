@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import inspect
 import json
 import logging
@@ -204,6 +205,19 @@ class RemoteWorkflowExecutor:
                 # Native tool bindings remain in the task; they do not replace
                 # the package's shared business instructions.
                 execution = context.get('execution') or {}
+                if execution.get('output_validator') == 'paper-agent-v1':
+                    params['_paper_execution'] = {
+                        'session_id': context['session_id'], 'attempt_id': context['attempt_id'],
+                        'revision': context['workflow_revision'], 'step_id': context['step_id'],
+                        'bindings': context.get('inputs') or {},
+                        'request': context.get('user_request') or '',
+                        'launch_request': context.get('launch_request') or '',
+                        'lease_hash': hashlib.sha256(lease.encode()).hexdigest(), 'check_liveness': True,
+                        'knowledge_scope': context.get('knowledge_scope'),
+                        'available_tools': [tool['name'] for tool in execution.get('tools', [])
+                                            if tool.get('source') == 'package'],
+                    }
+
                 shared_instructions = [str(value) for value in execution.get('constraints', [])]
                 for skill in execution.get('skill_files', []):
                     shared_instructions.append(
@@ -449,9 +463,8 @@ class RemoteWorkflowExecutor:
     ) -> None:
         """Run pinned deterministic checks without starting another SubAgent.
 
-        The package policy maps function parameters to artifacts produced by the
-        current step. Results are mirrored as ordinary tool events so Chat can
-        render configuration cards and retain an exact failure reason.
+        The package maps function parameters to bound inputs and current step outputs.
+        Chat receives ordinary tool events for the results and failure reasons.
         """
         policy = params.get('workflow_runtime') or {}
         checks = policy.get('post_step_checks') if isinstance(policy, dict) else []
@@ -496,6 +509,13 @@ class RemoteWorkflowExecutor:
                         f'deterministic post-step check input is missing: {material_id}'
                     )
                 arguments[str(parameter)] = values[material_id]
+            inputs = params.get('remote_inputs') or {}
+            for parameter, material in (check.get('input_arguments') or {}).items():
+                if parameter in arguments:
+                    raise RuntimeError(f'duplicate post-step check argument: {parameter}')
+                if material not in inputs:
+                    raise RuntimeError(f'deterministic post-step check input is not bound: {material}')
+                arguments[parameter] = inputs[material]
             artifacts_argument = str(check.get('artifacts_argument') or '').strip()
             if artifacts_argument:
                 if artifacts_argument in arguments:

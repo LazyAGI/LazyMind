@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from 'react';
 import { AgentAppsAuth } from '@/components/auth';
 import { starReturnIntent } from '@/modules/githubStar/intent';
+import GitHubStarSupport from '@/modules/githubStar/GitHubStarSupport';
 import GitHubConnectionSection from "../components/GitHubConnectionSection";
 import { useCloudDocumentProviders } from "../hooks/useCloudDocumentProviders";
 import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
@@ -30,5 +31,6 @@ export default function GitHubAccountPage() {
     <GitHubConnectionSection vm={vm} management
       preferExistingCredentials={Boolean(intent && !cancelled)} onConnectCancelled={() => setCancelled(true)}
       logo={<span className="model-provider-cloud-doc-resource-logo"><GithubOutlined /></span>} />
+    <GitHubStarSupport />
   </div>;
 }

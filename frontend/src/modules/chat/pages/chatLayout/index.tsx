@@ -73,6 +73,7 @@ import SideChatPanel, {
 } from "@/modules/chat/components/SideChatPanel";
 import {
   CONVERSATION_RELATION_SIDECHAT,
+  canStartSidechat,
   getConversationRelation,
   type ConversationRelation,
 } from "@/modules/chat/utils/conversationRelation";
@@ -627,6 +628,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           i18n.resolvedLanguage || i18n.language,
         ),
         ...(workflowContext ? { workflow_context: workflowContext } : {}),
+        ...(extras?.display_query ? { display_query: extras.display_query } : {}),
         ...(extras?.workflow_control ? { workflow_control: extras.workflow_control } : {}),
         ...(workflowUIState ? { workflow_ui_state: workflowUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
@@ -993,7 +995,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     canChat &&
     Boolean(sessionId) &&
     !isRestoringConversation &&
-    !conversationRelation;
+    canStartSidechat(conversationRelation);
 
   return (
     <ArtifactPreviewContext.Provider value={artifactPreview}>

@@ -22,7 +22,7 @@ describe("conversation relation helpers", () => {
       parentDisplayName: "主会话",
       relationType: CONVERSATION_RELATION_SIDECHAT,
     });
-    expect(canStartSidechat(conversation)).toBe(false);
+    expect(canStartSidechat(getConversationRelation(conversation))).toBe(false);
   });
 
   it("keeps fork distinct and allows a root conversation to start sidechat", () => {
@@ -34,7 +34,8 @@ describe("conversation relation helpers", () => {
     ).toEqual(
       expect.objectContaining({ relationType: CONVERSATION_RELATION_FORK }),
     );
-    expect(canStartSidechat({})).toBe(true);
+    expect(canStartSidechat(null)).toBe(true);
+    expect(canStartSidechat(getConversationRelation({parent_conversation_id: "parent", relation_type: "fork"}))).toBe(true);
   });
 
   it("keeps an unknown relation generic but still blocks nested sidechat", () => {
@@ -49,6 +50,6 @@ describe("conversation relation helpers", () => {
       parentDisplayName: "主会话",
       relationType: null,
     });
-    expect(canStartSidechat(conversation)).toBe(false);
+    expect(canStartSidechat(getConversationRelation(conversation))).toBe(false);
   });
 });

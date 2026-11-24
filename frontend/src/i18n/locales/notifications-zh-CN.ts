@@ -133,6 +133,7 @@ export default {
   "connected": "已连接",
   "connecting": "连接中",
   "connectingHint": "正在建立连接，状态将自动更新，请稍候。",
+  "connectionFailed": "连接未能建立，请检查账号状态后重试。",
   "disconnected": "已断开",
   "chooseAccount": "选择账号",
   "chooseRecipient": "选择接收对象",

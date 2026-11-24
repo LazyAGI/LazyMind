@@ -242,7 +242,8 @@ func ordinaryAttemptStatus(row orm.WorkflowSessionStep) string {
 	}
 	switch row.Status {
 	case "queued", "claimed":
-		return "pending"
+		// Admission starts user-visible execution, including queueing and setup.
+		return "running"
 	case "cancelled":
 		return "canceled"
 	}
@@ -251,6 +252,8 @@ func ordinaryAttemptStatus(row orm.WorkflowSessionStep) string {
 
 func applyOrdinaryAttemptEvents(view *taskdisplay.OrdinaryTaskView, row orm.WorkflowSessionStep, events []orm.WorkflowEvent) {
 	steps := map[string]taskdisplay.PublicProcessStep{}
+	paperOrders := map[string]int{}
+	automaticPaper := false
 	for _, step := range view.ProcessSteps {
 		steps[step.StepID] = step
 	}
@@ -268,6 +271,11 @@ func applyOrdinaryAttemptEvents(view *taskdisplay.OrdinaryTaskView, row orm.Work
 				if taskdisplay.ValidateProcessStep(step) != nil {
 					continue
 				}
+				if strings.HasPrefix(step.StepID, "paper-") {
+					if _, exists := paperOrders[step.StepID]; !exists {
+						paperOrders[step.StepID] = len(paperOrders)
+					}
+				}
 				previous, exists := steps[step.StepID]
 				if !exists || step.Revision > previous.Revision {
 					steps[step.StepID] = step
@@ -278,10 +286,12 @@ func applyOrdinaryAttemptEvents(view *taskdisplay.OrdinaryTaskView, row orm.Work
 			}
 		case "attempt.patch", "attempt.progress":
 			var patch struct {
-				Status string `json:"status"`
+				Status  string                 `json:"status"`
+				Display *attempt.PublicDisplay `json:"public_display"`
 			}
 			_ = json.Unmarshal(event.PayloadJSON, &patch)
 			if event.EventType == "attempt.progress" {
+				automaticPaper = automaticPaper || patch.Display != nil && patch.Display.EventKey == attempt.PaperAutoEventKey
 				patch.Status = "running"
 			}
 			if patch.Status == "running" && view.Timing.StartedAt == nil {
@@ -296,6 +306,9 @@ func applyOrdinaryAttemptEvents(view *taskdisplay.OrdinaryTaskView, row orm.Work
 	}
 	view.ProcessSteps = []taskdisplay.PublicProcessStep{}
 	for _, step := range steps {
+		if order, exists := paperOrders[step.StepID]; automaticPaper && exists {
+			step.Order = order
+		}
 		view.ProcessSteps = append(view.ProcessSteps, step)
 	}
 	sort.Slice(view.ProcessSteps, func(i, j int) bool {

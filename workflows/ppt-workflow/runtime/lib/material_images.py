@@ -18,7 +18,12 @@ _IMG_SRC = re.compile(r"(<img\b[^>]*?\bsrc\s*=\s*)([\"'])(.*?)\2", re.I)
 
 
 def _key(value: str) -> str:
-    key = unquote(unescape(str(value))).replace('\\', '/')
+    text = unescape(str(value))
+    # Signed URL paths/queries are opaque identities; decoding percent escapes
+    # could alias two distinct remote resources to the same local image.
+    if text.startswith(('http://', 'https://')):
+        return text
+    key = unquote(text).replace('\\', '/')
     if key.lower().startswith('file://'):
         key = key[len('file://'):]
         # Windows as_uri() adds a slash before the drive; native aliases do not.
@@ -56,6 +61,7 @@ def _materials(deck: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
         canonical = aliases.get(_key(target))
         if canonical:
             aliases[_key(alias)] = canonical
+            aliases[str(alias)] = canonical
     return aliases, hashes
 
 
@@ -68,10 +74,10 @@ def _basename_aliases(aliases: dict[str, str]) -> dict[str, str]:
 
 def _resolve(source: str, aliases: dict[str, str], hashes: dict[str, list[str]]) -> str | None:
     key = _key(source)
-    if key.lower().startswith(('http:', 'https:', 'data:', '//')):
-        return None
     if key in aliases:
         return aliases[key]
+    if key.lower().startswith(('http:', 'https:', 'data:', '//')):
+        return None
     # Core input snapshots carry a content-hash suffix. This also recognizes
     # prior attempts after their workspace was removed, without opening a path
     # supplied by the model or guessing a material from its display filename.
@@ -132,6 +138,16 @@ def bind_prompt_materials(
             + r""")(?=$|[\s"'\x60<>),;，。]|\.(?=\s|$))"""
         )
         pattern = re.compile(_LOCAL_IMAGE.pattern + '|' + bare_pattern, re.I)
+    # Match only registered remote origins, not arbitrary citation links. The
+    # complete URL (including query) identifies the downloaded bytes; matching
+    # a basename or URL prefix can bind a different image from the same host.
+    remote = [key for key in aliases if key.startswith(('http://', 'https://'))]
+    if remote:
+        urls = '|'.join(re.escape(key) for key in sorted(remote, key=len, reverse=True))
+        pattern = re.compile(
+            r'(?<![\w/])(?-i:' + urls + r""")(?=$|[\s"'`<>),;，。]|\.(?=\s|$))"""
+            + '|' + pattern.pattern, re.I,
+        )
     return pattern.sub(replace, brief), required
 
 
@@ -182,7 +198,7 @@ def record_material_aliases(deck: Path, sources: list[dict], input_dir: Path | N
             if target:
                 for key in ('path', 'origin'):
                     source = item.get(key)
-                    if source and not str(source).startswith(('http:', 'https:', 'data:')):
+                    if source and not str(source).startswith('data:'):
                         saved[str(source)] = target
     if input_dir and input_dir.is_dir():
         for path in input_dir.iterdir():

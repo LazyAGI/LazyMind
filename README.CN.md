@@ -2,6 +2,8 @@
 
 **[English](README.md)** | **中文**
 
+> **外部 Agent CI 首次运行提醒：** 请先按[配置说明](scripts/agent_e2e.md#首次运行请配置自己的模型和密钥)填写自己的模型和 Key。本地密钥保存在仓库外；GitHub 使用 Actions Secrets，勿提交密钥或登录配置。
+
 <img width="1672" height="600" alt="LazyMind 标志" src="docs/assets/lazymind-banner.png" />
 
 > **LazyMind: Keep AI-Agent under your control.**
@@ -322,6 +324,7 @@ make local-win-up
 
 - 在**模型供应商**中添加供应商凭证与 API Key，再到**系统默认设置**中选择默认的大模型、向量模型和重排序模型；多模态向量、图文、语音、图片、视频和自进化模型均可按需配置。
 - 在**工具**中按需配置服务凭证，包括用于文档解析的 MinerU 或 PaddleOCR、网页与学术搜索引擎，以及其他集成。使用 MinerU 在线服务时，无需再通过环境变量配置 API Key。
+- 网页搜索默认使用无需 API Key 的 Keenable 公共接口；用户已配置的搜索服务优先。公共服务不可用时，Wikipedia 仅补充百科背景。默认搜图可从 Wikimedia Commons 获取真实图片候选，保留来源和署名/许可信息，使用前仍须校验。PPT 会标注缺失素材；必需素材无法获取时，按配置提示设置搜索服务后返回原任务继续。
 
 <table>
   <tr>

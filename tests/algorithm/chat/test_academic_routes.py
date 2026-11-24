@@ -331,6 +331,45 @@ def test_search_registry_preserves_sciverse_pages_and_web_parameters(monkeypatch
     assert calls[-1] == {'query': 'retrieval', 'count': 2, 'date_restrict': ''}
 
 
+def test_default_web_search_bridge_preserves_wikipedia_fallback_envelope(monkeypatch):
+    import httpx
+    from lazyllm.tools.tools.search import WikipediaSearch
+    from lazymind.chat.engine.tools import keenable_search
+
+    monkeypatch.setattr(ar, 'require_internal_token', lambda _: None)
+    monkeypatch.setattr(keenable_search, '_PUBLIC_RETRY_AT', 0.0)
+    monkeypatch.setattr(httpx, 'request', lambda method, url, **kwargs: httpx.Response(
+        503, request=httpx.Request(method, url),
+    ))
+    monkeypatch.setattr(WikipediaSearch, 'search', lambda *a, **k: [
+        {'title': 'Background', 'url': 'https://en.wikipedia.org/wiki/Test', 'source': 'wikipedia'},
+        {'title': 'Another', 'url': 'https://en.wikipedia.org/wiki/Other', 'source': 'wikipedia'},
+    ])
+    result = asyncio.run(ar.academic_search(ar.AcademicSearchRequest(source='web', query='paper', limit=1), 'token'))
+    assert len(result['items']) == 1
+    assert result['items'][0]['source'] == 'wikipedia'
+    assert result['status'] == 'partial'
+    assert result['fallback'] == 'wikipedia'
+    assert '背景' in result['limitations']
+
+
+@pytest.mark.parametrize('upstream,status', [(401, 401), (402, 402), (429, 429), (503, 502)])
+def test_default_web_search_bridge_keeps_outages_distinct_from_empty_results(monkeypatch, upstream, status):
+    import httpx
+    from lazyllm.tools.tools.search import WikipediaSearch
+    from lazymind.chat.engine.tools import keenable_search
+
+    monkeypatch.setattr(ar, 'require_internal_token', lambda _: None)
+    monkeypatch.setattr(keenable_search, '_PUBLIC_RETRY_AT', 0.0)
+    monkeypatch.setattr(httpx, 'request', lambda method, url, **kwargs: httpx.Response(
+        upstream, request=httpx.Request(method, url), headers={'Retry-After': '60'},
+    ))
+    monkeypatch.setattr(WikipediaSearch, 'search', lambda *a, **k: [])
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(ar.academic_search(ar.AcademicSearchRequest(source='web', query='paper', limit=1), 'token'))
+    assert error.value.status_code == status
+
+
 def test_search_bridge_preserves_cooldown_and_key_pool_failures(monkeypatch):
     import httpx
     from lazyllm.common import AllKeysExhaustedError

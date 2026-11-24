@@ -207,6 +207,78 @@ describe('shared workflow compact layout', () => {
     expect(within(screen.getByRole('tabpanel', { name: /可选步骤/ })).getByText('本次流程的分支决策跳过了此步骤，无需等待执行结果。')).toBeVisible();
   });
 
+  it('reveals the full Writer path only after preparation has a committed route', async () => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/writer-workflow/workflow.yaml'), 'utf8')) as object;
+    fixture.ui = hydrateWorkflowUI({ ...spec, source_type: 'builtin' });
+    fixture.session = { ...fixture.session, workflow_id: 'writer-workflow', workflow_mode: 'dynamic',
+      status: 'active', current_step_id: 'prepare', steps: [], slots: [], projection: {
+        display: { status: 'running', reason: 'running', approval_step_id: '' }, current: ['prepare'],
+      } };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: /Preparation/ });
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    // Finishing preparation does not mean its outgoing choice is committed yet.
+    fixture.session = { ...fixture.session, projection: { ...fixture.session.projection, current: [], past: ['prepare'] } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    // Reveal the whole chosen path, including steps with no execution attempt.
+    fixture.session = { ...fixture.session, projection: {
+      ...fixture.session.projection, decided_routes: ['prepare'], pruned: ['write_flat_document'],
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['1Preparation', '2Outline', '3Final Document']);
+    fixture.session = { ...fixture.session, projection: { ...fixture.session.projection, decided_routes: [], pruned: [] } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+  });
+
+  it.each([
+    ['write_document', 'write_flat_document', 'outline', 'draft_document'],
+    ['write_flat_document', 'write_document', 'prepare', 'flat_draft_document'],
+  ])('keeps the future Writer %s stage visible, hides the skipped branch, and shows its own output', async (stepId, otherId, previousId, slotId) => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/writer-workflow/workflow.yaml'), 'utf8')) as object;
+    fixture.ui = hydrateWorkflowUI({ ...spec, source_type: 'builtin' });
+    const resultTab = fixture.ui.tabs!.find(tab => tab.step_id === stepId)!;
+    const otherTab = fixture.ui.tabs!.find(tab => tab.step_id === otherId)!;
+    const base = { validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable' };
+    fixture.session = { ...fixture.session, workflow_id: 'writer-workflow', workflow_mode: 'dynamic',
+      status: 'active', current_step_id: previousId, steps: [], slots: [], projection: {
+        display: { status: 'running', reason: 'running', approval_step_id: '' },
+        decided_routes: ['prepare'],
+        current: [previousId], nodes: {
+          [previousId]: { ...base, execution: 'running', branch: 'active' },
+          [stepId]: { ...base, execution: 'none', branch: 'active' },
+          [otherId]: { ...base, execution: 'none', branch: 'pruned' },
+        },
+      } };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: new RegExp(fixture.ui.tabs!.find(tab => tab.step_id === previousId)!.label), selected: true });
+    expect(screen.getByRole('tab', { name: new RegExp(resultTab.label) })).toBeVisible();
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, current_step_id: stepId, projection: {
+      ...fixture.session.projection, current: [stepId], past: [previousId], nodes: {
+        ...fixture.session.projection!.nodes,
+        [previousId]: { ...base, execution: 'succeeded', branch: 'active' },
+        [stepId]: { ...base, execution: 'running', branch: 'active' },
+      },
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: new RegExp(resultTab.label), selected: true });
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+    expect(screen.queryByText('已跳过')).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, status: 'completed', projection: {
+      ...fixture.session.projection, completed: true, current: [], past: [previousId, stepId],
+      display: { status: 'completed', reason: 'completed', approval_step_id: '' },
+      nodes: { ...fixture.session.projection!.nodes, [stepId]: { ...base, execution: 'succeeded', branch: 'active' } },
+    }, slots: [{ slot_id: slotId, slot: slotId, step_id: stepId, selected: true, revision: 1, artifact_value: { text: '正文' } }] as WorkflowSession['slots'] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    const panel = screen.getByRole('tabpanel', { name: new RegExp(resultTab.label) });
+    expect(within(panel).getByText(`正文 ${slotId}`)).toBeVisible();
+    expect(screen.queryByRole('tab', { name: new RegExp(otherTab.label) })).not.toBeInTheDocument();
+  });
+
   it('replaces the UI for a new pinned version of the same workflow without displaying the old tabs', async () => {
     fixture.session.pinned_revision_id = 'v1';
     const view = render(<WorkflowPanel conversationId='layout-test' />);
@@ -606,6 +678,7 @@ describe('shared workflow compact layout', () => {
   it.each(['completed', 'failed'] as const)('binds the %s rerun to Chat and still saves before rerunning', async (status) => {
     fixture.session.status = status;
     fixture.session.projection!.display!.status = status;
+    fixture.ui.stepLabels = { prepare: '整理验收清单', write_document: 'write_document' };
     const send = vi.fn();
     // Let the asynchronous UI load and editor-action registration settle before
     // asserting the save-before-rerun contract.
@@ -613,9 +686,9 @@ describe('shared workflow compact layout', () => {
     await screen.findByRole('button', { name: '发布' });
     const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
     expect(shortcuts).toBeVisible();
-    expect(within(shortcuts).getByRole('button', { name: '写作准备' })).toBeVisible();
+    expect(within(shortcuts).getByRole('button', { name: '整理验收清单' })).toBeVisible();
     fireEvent.click(within(shortcuts).getByRole('button', { name: '成稿' }));
-    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 write_document', {
+    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 成稿', {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     }));
     expect(fixture.flush).toHaveBeenCalledOnce();
@@ -1035,7 +1108,7 @@ describe('shared workflow compact layout', () => {
     const button = await waitForCompletedContinueButton();
     await act(async () => fireEvent.click(button));
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
-    expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}write_document`, {
+    expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}成稿`, {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     });
   });
@@ -1108,6 +1181,7 @@ describe('shared workflow compact layout', () => {
   });
 
   it('shows a successful dynamic yield without failed or approval controls', async () => {
+    fixture.session.workflow_mode = 'dynamic';
     fixture.session.status = 'waiting';
     fixture.session.projection!.display = { status: 'waiting', reason: 'next_step_required', approval_step_id: '' };
     fixture.session.projection!.current = [];
@@ -1115,9 +1189,15 @@ describe('shared workflow compact layout', () => {
     fixture.session.projection!.nodes = { write_document: {
       execution: 'succeeded', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '',
     } };
-    render(<WorkflowPanel conversationId='layout-test' onSendMessage={vi.fn()} />);
+    const send = vi.fn(async () => true);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
     await screen.findByRole('tab', { name: '成稿' });
     expect(screen.getByText('等待下一步')).toBeInTheDocument();
+    const proceed = screen.getByRole('button', { name: '继续' });
+    expect(proceed).toBeEnabled();
+    await act(async () => fireEvent.click(proceed));
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('继续', undefined);
     expect(screen.queryByText('执行失败')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
@@ -2147,4 +2227,46 @@ it('does not approve obsolete results when saving edits invalidates the checkpoi
   expect(await screen.findByText('等待重新生成')).toBeVisible();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新生成' })));
   expect(send).toHaveBeenCalledWith('继续', { session_id: 'layout-test', kind: 'continue', expected_state_version: 1 });
+});
+
+
+it.each([false, true])('shows the scientific plan, code and error instead of tool rows (external=%s)', async external => {
+  fixture.ui = { tabs: [{ id: 'data_analysis', step_id: 'data_analysis', label: '数据分析', layout: 'list', slots: [] }] };
+  fixture.session = { ...fixture.session, workflow_id: 'paper-writing', status: 'active', current_step_id: 'data_analysis',
+    projection: { current: ['data_analysis'] }, slots: [],
+    steps: [{ id: 'analysis-attempt', session_id: 'layout-test', step_id: 'data_analysis', task_id: 'owner',
+      attempt: 2, status: 'running', created_at: '', updated_at: '' }] };
+  const base = { order: 1, started_at: null, finished_at: null, elapsed_ms: null };
+  fixture.getPaperProgress.mockResolvedValue({ data: { task_id: 'owner', execution_id: 'agent-run', revision: 10,
+    status: 'failed', process_steps: [
+      { ...base, step_id: 'f4-agent-1', title: '分析方案 · 第 1 次', status: 'succeeded', summary: '比较真实样本的平均得分。' },
+      { ...base, step_id: 'f4-agent-2', title: '统计代码 · 第 1 次', status: 'succeeded',
+        output: { text: 'def analyze(tables, plan, rng): return missing_value', format: 'python', mode: 'complete', estimated_tokens: 12 } },
+      { ...base, step_id: 'f4-agent-3', title: '统计执行与结果校验 · 第 1 次', status: 'failed', summary: 'NameError: missing_value' },
+    ], timing: { started_at: null, finished_at: null, measured_at: '' } } });
+  useTaskCenterStore.getState().upsertTask('layout-test', { task_id: 'owner', status: 'running', execution_log: [
+    { type: 'tool_calls', content: '', tool_calls: [{ id: 'analysis', name: 'paper_analyze', args: {} }] }] });
+  render(<WorkflowPanel conversationId='layout-test' controlAdapter={external ? { execute: vi.fn() } : undefined} />);
+  expect(await screen.findByText('本次分析未完成', { selector: '[role="status"]' })).toBeVisible();
+  fireEvent.click(screen.getByText('查看执行记录'));
+  expect(screen.getByText('比较真实样本的平均得分。')).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('NameError: missing_value');
+  expect(screen.getByText('查看本轮代码')).toBeVisible();
+  expect(screen.getByText('def analyze(tables, plan, rng): return missing_value')).toBeInTheDocument();
+  expect(screen.queryByText('paper_analyze')).not.toBeInTheDocument();
+  expect(screen.queryByText(/次工具调用/)).not.toBeInTheDocument();
+});
+
+it('places the analysis empty state outside the narrow timeline marker column', async () => {
+  fixture.ui = { tabs: [{ id: 'data_analysis', step_id: 'data_analysis', label: '数据分析', layout: 'list', slots: [] }] };
+  fixture.session = { ...fixture.session, workflow_id: 'paper-writing', status: 'active', current_step_id: 'data_analysis',
+    projection: { current: ['data_analysis'] }, slots: [],
+    steps: [{ id: 'analysis-attempt', session_id: 'layout-test', step_id: 'data_analysis', task_id: 'owner',
+      attempt: 1, status: 'running', created_at: '', updated_at: '' }] };
+  fixture.getPaperProgress.mockResolvedValue({ data: { task_id: 'owner', execution_id: 'pending', revision: 0,
+    status: 'running', process_steps: [], timing: { started_at: null, finished_at: null, measured_at: '' } } });
+  render(<WorkflowPanel conversationId='layout-test' />);
+  const empty = await screen.findByText('当前任务尚无可展示的执行记录。');
+  expect(empty.tagName).toBe('P');
+  expect(empty.closest('li')).toBeNull();
 });

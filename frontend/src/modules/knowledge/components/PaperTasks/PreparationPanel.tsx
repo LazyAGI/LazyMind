@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react';
 import { Alert, Button, Input, Spin, Tag, Typography } from 'antd';
 import { ArrowRightOutlined, ExportOutlined, FileTextOutlined, LockOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
@@ -57,7 +58,7 @@ function DirectionEvidence({ direction }: { direction: ExpansionPreparation['dir
       <ul>{papers.map(paper => {
         const url = [paper.paper_url, paper.doi && `https://doi.org/${paper.doi}`, paper.arxiv_id && `https://arxiv.org/abs/${paper.arxiv_id}`, paper.pdf_url].map(safePaperUrl).find(Boolean);
         const title = paper.title || paper.paper_id;
-        return <li key={paper.paper_id}><FileTextOutlined aria-hidden />{url ? <a href={url} target="_blank" rel="noopener noreferrer">{title}<ExportOutlined aria-hidden /></a> : <span>{title}</span>}</li>;
+        return <li key={paper.paper_id}><FileTextOutlined aria-hidden />{url ? <ExternalLink href={url} target="_blank" rel="noopener noreferrer">{title}<ExportOutlined aria-hidden /></ExternalLink> : <span>{title}</span>}</li>;
       })}</ul>
     </div></details>
   </div>;

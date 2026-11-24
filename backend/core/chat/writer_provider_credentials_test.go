@@ -35,7 +35,7 @@ type writerCredentialFixture struct {
 
 func newWriterCredentialFixture(t *testing.T, entry, provider string) *writerCredentialFixture {
 	t.Helper()
-	db := orm.MigrateTestDB(t, &orm.DocumentPublicationOperation{}, &orm.DocumentPublicationBinding{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.SubAgentArtifact{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserSelectedProvider{})
+	db := orm.MigrateTestDB(t, &orm.DocumentPublicationOperation{}, &orm.DocumentPublicationBinding{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.SubAgentArtifact{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}, &orm.UserSelectedModel{}, &orm.UserSelectedProvider{})
 	store.Init(db.DB, db.DB, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	f := &writerCredentialFixture{db: db, entry: entry, provider: provider, slot: "draft_document"}
@@ -371,8 +371,12 @@ func TestWriterScopedCredentialsSuccess(t *testing.T) {
 							t.Errorf("credential reads were not scoped: lists=%v token count=%d", lists, len(tokens))
 						}
 					}
-					if f.privateReads.Load() != 0 {
-						t.Errorf("unrelated search/academic/model credential reads=%d", f.privateReads.Load())
+					var wantPrivateReads int32
+					if entry == "writeback" && provider == "wechat" {
+						wantPrivateReads = 2 // Cover generation checks own and shared default model selections.
+					}
+					if f.privateReads.Load() != wantPrivateReads {
+						t.Errorf("private credential reads=%d, want %d", f.privateReads.Load(), wantPrivateReads)
 					}
 					var selected orm.WorkflowSlotRevision
 					if err := f.db.Where("session_id = ? AND slot_id = ? AND selected = ?", "credential-session", f.slot, true).First(&selected).Error; err != nil {

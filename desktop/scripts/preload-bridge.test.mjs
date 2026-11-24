@@ -39,6 +39,7 @@ test("maps bridge methods to their exact IPC channels and arguments", async () =
   const ipc = fakeIPC();
   const bridge = createDesktopBridge(ipc);
   const cases = [
+    ["openExternal", ["https://example.org"], "lazymind:openExternal", ["https://example.org"]],
     ["recordingInputPermission", [], "lazymind:recordingInputPermission", []],
     ["recordingInputSettings", [], "lazymind:recordingInputSettings", []],
     ["recordingInputStart", [1000], "lazymind:recordingInputStart", [1000]],

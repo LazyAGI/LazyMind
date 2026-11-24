@@ -30,15 +30,18 @@ func TestStartClarificationMCPRoundTrip(t *testing.T) {
 			}
 			requests[key] = string(body)
 			if values, ok := input["clarification_values"].(map[string]any); ok {
-				if input["revision_id"] != "revision-5" || values["topic"] != "Genshin" || values["slide_count"] != "9" || values["generate_background_images"] != "disabled" || values["template_mode"] != "none" {
+				if input["revision_id"] != "revision-5" || values["topic"] != "Genshin" || values["slide_count"] != "9" || values["generate_background_images"] != "disabled" || values["template_mode"] != "none" || values["presentation_output_format"] != "native_pptx" {
 					t.Errorf("lost confirmed answers or pinned revision: %v", input)
 				}
 				response = map[string]any{"preparation_id": "ready", "status": "ready", "workflow_revision": "revision-5"}
 			} else {
 				response = map[string]any{"preparation_id": "pending", "status": "needs_input", "workflow_id": "ppt-workflow", "workflow_revision": "revision-5",
-					"missing_inputs": []string{}, "missing_clarification_fields": []string{"topic", "slide_count", "generate_background_images"},
+					"missing_inputs": []string{}, "missing_clarification_fields": []string{"topic", "slide_count", "presentation_output_format", "generate_background_images"},
 					"clarification_values": map[string]any{"template_mode": "none"},
-					"questions":            []any{map[string]any{"id": "topic", "text": "Presentation topic?", "type": "text", "required": true, "validation": map[string]any{"min_length": 1}}}}
+					"questions": []any{
+						map[string]any{"id": "topic", "text": "Presentation topic?", "type": "text", "required": true, "validation": map[string]any{"min_length": 1}},
+						map[string]any{"id": "presentation_output_format", "text": "Format?", "type": "single", "choices": []string{"Interactive HTML", "Native PPTX"}, "recommended_choice": "Interactive HTML"},
+					}}
 			}
 		case "/api/core/workflow-preparations/ready:consume":
 			consumeCalls++
@@ -79,18 +82,23 @@ func TestStartClarificationMCPRoundTrip(t *testing.T) {
 			t.Fatalf("uncreated run exposes panel/session state %q: %s", field, encoded)
 		}
 	}
-	if !reflect.DeepEqual(pending["missing_clarification_fields"], []any{"topic", "slide_count", "generate_background_images"}) || len(pending["questions"].([]any)) != 1 || pending["clarification_values"].(map[string]any)["template_mode"] != "none" {
+	if !reflect.DeepEqual(pending["missing_clarification_fields"], []any{"topic", "slide_count", "presentation_output_format", "generate_background_images"}) || len(pending["questions"].([]any)) != 2 || pending["clarification_values"].(map[string]any)["template_mode"] != "none" {
 		t.Fatalf("lost questions/defaults: %s", encoded)
 	}
 	question := pending["questions"].([]any)[0].(map[string]any)
 	if question["validation"].(map[string]any)["min_length"] != float64(1) {
 		t.Fatalf("lost question validation: %s", encoded)
 	}
-	if !strings.Contains(pending["agent_instruction"].(string), "new idempotency_key") {
+	formatQuestion := pending["questions"].([]any)[1].(map[string]any)
+	if formatQuestion["recommended_choice"] != "Interactive HTML" || !reflect.DeepEqual(formatQuestion["choices"], []any{"Interactive HTML", "Native PPTX"}) {
+		t.Fatalf("lost the recommendation or changed the choices: %s", encoded)
+	}
+	instruction := pending["agent_instruction"].(string)
+	if !strings.Contains(instruction, "new idempotency_key") || !strings.Contains(instruction, "present that choice first") {
 		t.Fatalf("missing safe answer-submission guidance: %s", encoded)
 	}
 	args["revision_id"] = pending["revision_id"]
-	args["clarification_values"] = map[string]any{"topic": "Genshin", "slide_count": "9", "generate_background_images": "disabled", "template_mode": "none"}
+	args["clarification_values"] = map[string]any{"topic": "Genshin", "slide_count": "9", "presentation_output_format": "native_pptx", "generate_background_images": "disabled", "template_mode": "none"}
 	conflict := inputToolCall(t, session, "workflow.start", args)
 	conflictJSON, _ := json.Marshal(conflict)
 	if !conflict.IsError || !strings.Contains(string(conflictJSON), "IDEMPOTENCY_CONFLICT") || consumeCalls != 0 {
@@ -167,7 +175,8 @@ func TestGetExposesDeclaredStartupInputsWithoutExecutionGraph(t *testing.T) {
 			"material_types":{"uploaded_materials":"file","brief":"text","topic":"text","structured_input":"json"},
 			"material_cardinalities":{"uploaded_materials":"list","brief":"single","topic":"single","structured_input":"single"},
 			"input_expressions":{"prepare":{"all":[{"material":"brief"},{"any":[{"material":"topic"},{"material":"structured_input"}]}]}},
-			"runtime":{"clarification_fields":[{"id":"topic","type":"text","required":true}],"input_contracts":{
+			"runtime":{"clarification_fields":[{"id":"topic","type":"text","required":true},
+				{"id":"presentation_output_format","type":"single","choices":["Interactive HTML","Native PPTX"],"recommended_choice":"Interactive HTML"}],"input_contracts":{
 				"structured_input":{"description":"Optional business JSON","schema":{"type":"object","additionalProperties":false,"properties":{"topic":{"type":"string"}}}}}}}}`))
 	})
 	session := inputToolSession(t, client)
@@ -202,5 +211,8 @@ func TestGetExposesDeclaredStartupInputsWithoutExecutionGraph(t *testing.T) {
 	if byID["structured_input"]["description"] != "Optional business JSON" ||
 		byID["structured_input"]["schema"].(map[string]any)["additionalProperties"] != false || contract["input_requirements"] == nil {
 		t.Fatalf("lost input schema or source alternatives: %s", encoded)
+	}
+	if format := contract["clarification_fields"].([]any)[1].(map[string]any); format["recommended_choice"] != "Interactive HTML" {
+		t.Fatalf("startup discovery lost the recommended format: %s", encoded)
 	}
 }

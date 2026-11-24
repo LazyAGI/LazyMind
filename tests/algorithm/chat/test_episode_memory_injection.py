@@ -48,6 +48,7 @@ def _export_prompt(
     document_context: dict | None = None,
     observed_plans: list | None = None,
     observed_reader_schemas: list | None = None,
+    filters: dict | None = None,
 ):
     monkeypatch.setattr(chat_service, 'AutoModel', lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
@@ -93,7 +94,7 @@ def _export_prompt(
             'user_id': user_id,
             'surface': 'knowledge_document_preview' if document_context else None,
         },
-        retrieval={'filters': {}},
+        retrieval={'filters': filters or {}},
         document_context=document_context,
         workspace_context=workspace_context,
         runtime={
@@ -452,3 +453,23 @@ def test_no_rag_document_preview_plan_pins_actual_reader(monkeypatch):
     plan = plans[0]
     assert 'KBToolkit_read_document' in plan.execution_options.required_tool_names
     assert [d['function']['name'] for d in schemas] == ['KBToolkit_read_document']
+
+
+def test_selected_library_read_only_turn_keeps_reader_and_scope(monkeypatch):
+    tools, configs = [], []
+    result = _export_prompt(
+        monkeypatch, query='读取已选择资料库的论文，不要修改资料库',
+        history=[], use_memory=False,
+        filters={'kb_id': 'selected-library'},
+        observed_tool_types=tools, observed_configs=configs,
+    )
+    assert configs[0]['filters']['kb_id'] == 'selected-library'
+    assert 'KBToolkit' in tools[0]
+    assert 'selected-library' in result['prompt_markdown']
+    assert 'Active Document Contract' not in result['prompt_markdown']
+
+
+def test_incomplete_preview_identity_does_not_claim_an_active_document(monkeypatch):
+    result = _export_prompt(monkeypatch, query='Explain the paper', history=[], use_memory=False,
+                            document_context={'dataset_id': 'papers'})
+    assert 'Active Document Contract' not in result['prompt_markdown']

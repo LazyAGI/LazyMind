@@ -2,6 +2,8 @@
 
 **[中文](README.CN.md)** | **English**
 
+> **External Agent CI setup:** Configure your own model access and keys using the [setup guide](scripts/agent_e2e.md). Keep local credentials outside the repository and use GitHub Actions Secrets for CI. Never commit keys or login files.
+
 <img width="1672" height="600" alt="LazyMind logo" src="docs/assets/lazymind-banner.png" />
 
 > **LazyMind: Keep AI-Agent under your control.**
@@ -318,6 +320,7 @@ After login, open **Settings** in the frontend:
 
 - Add provider credentials and API keys under **Model Providers**, then select the default LLM, embedding, and reranker under **System Defaults**. Multimodal embedding, VLM, speech, image, video, and evolution models are optional.
 - Configure service credentials under **Tools** when needed, including MinerU or PaddleOCR for document parsing, web and academic search engines, and other integrations. No environment variable is required for a hosted MinerU API key.
+- Web search uses keyless Keenable by default; your configured search service takes priority. If public search fails, Wikipedia supplies encyclopedic background only. Default image discovery can use real Wikimedia Commons files, retaining source and attribution/license metadata; candidates still require validation. PPT output discloses missing materials. For indispensable sources, follow the setup prompt and continue the original task after configuring search.
 
 <table>
   <tr>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from lazymind.common.token_estimation import estimate_tokens
@@ -15,6 +16,13 @@ INTERNAL_MESSAGE_FIELDS = frozenset({
     'history_seq',
     TOOL_OBSERVATION_KEY,
 })
+
+_LEADING_REASONING = re.compile(r'\A\s*(?:<think\b[^>]*>.*?</think>\s*)+', re.I | re.S)
+
+
+def strip_leading_reasoning(text: str) -> str:
+    """Remove complete reasoning prefixes while preserving tags inside the answer."""
+    return _LEADING_REASONING.sub('', text).strip()
 
 
 def model_response_text(response: Any) -> str:

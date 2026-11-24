@@ -1,0 +1,184 @@
+name: LazyMind Agent E2E (GitHub-hosted)
+
+on:
+  workflow_call:
+    inputs:
+      git_ref:
+        description: Immutable main snapshot selected by the scheduler
+        required: true
+        type: string
+      agent:
+        type: string
+        default: all
+      case:
+        type: string
+        default: all
+      platform:
+        type: string
+        default: all
+      probe_only:
+        type: boolean
+        default: false
+      approve_test_reviews:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: Agent to run on each fresh GitHub VM
+        type: choice
+        options: [all, codex, workbuddy, deepseek-harness]
+        default: all
+      case:
+        description: Business workflow to run
+        type: choice
+        options: [all, ppt, paper, meme]
+        default: all
+      platform:
+        description: Operating systems to verify
+        type: choice
+        options: [all, macos-15-intel, windows-2025]
+        default: all
+      probe_only:
+        description: Only call the genuine Agent MCP workflow catalog
+        type: boolean
+        default: false
+      approve_test_reviews:
+        description: Approve only this run's fixed paper and image test fixtures
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-e2e-hosted-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.platform == 'all' && '["macos-15-intel","windows-2025"]' || format('["{0}"]', inputs.platform)) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      UV_CONSTRAINT: ${{ github.workspace }}/scripts/ci-agent-tools/python-constraints.txt
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
+          persist-credentials: false
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.14'
+          cache-dependency-path: |
+            local/local-runtime-manager/go.sum
+            local/lazymind-cli/go.sum
+            backend/core/go.sum
+            scripts/agent_e2e_hosted.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.0.0'
+          run_install: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.10'
+      - name: Install test supervisor dependencies
+        run: python -m pip install Pillow==12.0.0 PyYAML==6.0.3
+      - name: Verify required private provider configuration
+        shell: bash
+        env:
+          LAZYMIND_CI_LLM_API_KEY: ${{ secrets.LAZYMIND_CI_LLM_API_KEY }}
+          LAZYMIND_CI_IMAGE_API_KEY: ${{ secrets.LAZYMIND_CI_IMAGE_API_KEY }}
+          LAZYMIND_CI_LLM_BASE_URL: ${{ vars.LAZYMIND_CI_LLM_BASE_URL }}
+          LAZYMIND_CI_LLM_MODEL: ${{ vars.LAZYMIND_CI_LLM_MODEL }}
+          LAZYMIND_CI_LLM_API: ${{ vars.LAZYMIND_CI_LLM_API }}
+          LAZYMIND_CI_IMAGE_BASE_URL: ${{ vars.LAZYMIND_CI_IMAGE_BASE_URL }}
+          LAZYMIND_CI_IMAGE_MODEL: ${{ vars.LAZYMIND_CI_IMAGE_MODEL }}
+          LAZYMIND_CI_IMAGE_API: ${{ vars.LAZYMIND_CI_IMAGE_API }}
+          TEST_CASE: ${{ inputs.probe_only && 'ppt' || inputs.case }}
+        run: python scripts/agent_e2e.py config-check --providers-config scripts/agent_e2e.providers.example.json --case "$TEST_CASE"
+      - name: Start a fresh source-built LazyMind and authenticate normally
+        run: python scripts/agent_e2e_hosted.py start
+      - name: Install all three genuine pinned Agent CLIs
+        run: python scripts/agent_e2e_hosted.py install-agents
+      - name: Prepare PPT exporter and Chromium
+        if: ${{ !inputs.probe_only && (inputs.case == 'ppt' || inputs.case == 'all') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/lazymind-ci-browsers"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          cd workflows/ppt-workflow/runtime/scripts/export_pptx
+          npm ci --ignore-scripts --no-audit --no-fund
+          node node_modules/playwright/cli.js install chromium
+          node --input-type=module -e 'import {chromium} from "playwright"; const b=await chromium.launch({headless:true}); console.log("Chromium",b.version()); await b.close();'
+      - name: Run sequential cases with independent results and isolated model routes
+        shell: bash
+        env:
+          TEST_AGENT: ${{ inputs.agent }}
+          TEST_CASE: ${{ inputs.case }}
+          PROBE_ONLY: ${{ inputs.probe_only }}
+          APPROVE_TEST_REVIEWS: ${{ inputs.approve_test_reviews }}
+          LAZYMIND_CI_LLM_API_KEY: ${{ secrets.LAZYMIND_CI_LLM_API_KEY }}
+          LAZYMIND_CI_IMAGE_API_KEY: ${{ secrets.LAZYMIND_CI_IMAGE_API_KEY }}
+          LAZYMIND_CI_LLM_BASE_URL: ${{ vars.LAZYMIND_CI_LLM_BASE_URL }}
+          LAZYMIND_CI_LLM_MODEL: ${{ vars.LAZYMIND_CI_LLM_MODEL }}
+          LAZYMIND_CI_LLM_API: ${{ vars.LAZYMIND_CI_LLM_API }}
+          LAZYMIND_CI_IMAGE_BASE_URL: ${{ vars.LAZYMIND_CI_IMAGE_BASE_URL }}
+          LAZYMIND_CI_IMAGE_MODEL: ${{ vars.LAZYMIND_CI_IMAGE_MODEL }}
+          LAZYMIND_CI_IMAGE_API: ${{ vars.LAZYMIND_CI_IMAGE_API }}
+        run: |
+          set -euo pipefail
+          options=(run --agent "$TEST_AGENT" --case "$TEST_CASE" --timeout 1800
+            --home "$LAZYMIND_HOME" --server "$LAZYMIND_SERVER_URL"
+            --output "$HOSTED_ROOT/results" --private-profile-root "$HOSTED_ROOT/profiles"
+            --providers-config scripts/agent_e2e.providers.example.json --managed-models)
+          if [[ "$PROBE_ONLY" == true ]]; then options+=(--probe); fi
+          if [[ "$APPROVE_TEST_REVIEWS" == true ]]; then options+=(--approve-test-reviews); fi
+          python scripts/agent_e2e.py "${options[@]}"
+      - name: Write test reports
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${HOSTED_ROOT:-}" && -d "$HOSTED_ROOT/results" ]]; then
+            status=0
+            python scripts/agent_e2e.py report --output "$HOSTED_ROOT/results" || status=$?
+            cat "$HOSTED_ROOT/results/report.md" >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
+      - name: Diagnose setup failure
+        if: failure()
+        run: python scripts/agent_e2e_hosted.py diagnose
+      - name: Stop the disposable runtime
+        if: always()
+        run: python scripts/agent_e2e_hosted.py stop
+      - name: Upload reports and actual generated deliverables
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosted-agent-e2e-${{ matrix.os }}-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/lazymind-hosted/results/report.md
+            ${{ runner.temp }}/lazymind-hosted/results/junit.xml
+            ${{ runner.temp }}/lazymind-hosted/results/hosted-runtime.json
+            ${{ runner.temp }}/lazymind-hosted/results/installed-agents.json
+            ${{ runner.temp }}/lazymind-hosted/results/*/failure-diagnostics.json
+            ${{ runner.temp }}/lazymind-hosted/results/*/generated-base.png
+            ${{ runner.temp }}/lazymind-hosted/results/*/artifacts/*.pptx
+            ${{ runner.temp }}/lazymind-hosted/results/*/artifacts/*.png
+            ${{ runner.temp }}/lazymind-hosted/results/*/artifacts/*.md

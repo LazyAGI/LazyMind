@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import yaml
 import pytest
@@ -20,6 +23,131 @@ def _load_ppt_tools():
     return module
 
 
+def test_feishu_wiki_images_use_current_connection_and_feed_ppt_materials(monkeypatch, tmp_path):
+    import lazyllm
+    import requests
+    from PIL import Image, ImageDraw
+    from lazyllm.common.globals import new_session
+    from lazymind.chat.engine.tool_auth import inject_tool_config
+
+    tools = _load_ppt_tools()
+    image = Image.new('RGB', (128, 128), 'white')
+    ImageDraw.Draw(image).rectangle((10, 10, 90, 90), fill='blue')
+    buffer = io.BytesIO()
+    image.save(buffer, format='PNG')
+    original = buffer.getvalue()
+    requests_made = []
+
+    def provider(_session, method, url, **options):
+        assert method == 'GET' and options['headers']['Authorization'] == 'Bearer test-feishu-access'
+        assert options['stream'] and options['allow_redirects'] is False
+        assert url.startswith('https://open.feishu.cn/open-apis/')
+        requests_made.append(url)
+        response = requests.Response()
+        response.status_code = 200
+        if url.endswith('/wiki/v2/spaces/get_node'):
+            payload = {'node': {'obj_type': 'docx', 'obj_token': 'DocExample'}}
+        elif url.endswith('/docx/v1/documents/DocExample/blocks/DocExample/children'):
+            assert options['params']['with_descendants'] == 'true'
+            payload = {'items': [
+                {'block_id': 'root', 'block_type': 1},
+                {'block_id': 'block-1', 'block_type': 27, 'image': {'token': 'image-ok'}},
+                {'block_id': 'block-2', 'block_type': 27, 'image': {'token': 'image-denied'}},
+                {'block_id': 'block-3', 'block_type': 23, 'file': {'token': 'file-token'}},
+            ]}
+        elif url.endswith('/drive/v1/medias/image-ok/download'):
+            response.raw = io.BytesIO(original)
+            return response
+        elif url.endswith('/drive/v1/medias/image-denied/download'):
+            response.status_code = 403
+            payload = {}
+        else:
+            pytest.fail(f'Unexpected provider request {url}')
+        response.raw = io.BytesIO(json.dumps({'data': payload}).encode())
+        return response
+
+    monkeypatch.setattr(requests.Session, 'request', provider)
+    monkeypatch.setattr(tools, '_material_root', lambda: tmp_path)
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: 'vlm')
+    monkeypatch.setattr(tools, '_inspect_material_image', lambda *a: {'status': 'inspected', 'description': '图一'})
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda _: [])
+    published = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **item: published.append(item) or {'ok': True})
+
+    document = 'https://example.feishu.cn/wiki/WikiExample'
+    with new_session('ppt-feishu-material-test'):
+        lazyllm.globals.config['dynamic_fs_auth'] = {}
+        with pytest.raises(tools.ToolExecutionError, match='Connect a Feishu account'):
+            tools.ppt_download_feishu_images(document)
+        assert not requests_made
+        inject_tool_config({'feishu': 'test-feishu-access'})
+        listed = tools.ppt_download_feishu_images(document + '?from=share#anchor')
+        assert listed['document'] == document
+        assert [file['image_token'] for file in listed['images']] == ['image-ok', 'image-denied']
+        with pytest.raises(tools.ToolExecutionError, match='Select tokens from image blocks'):
+            tools.ppt_download_feishu_images(document, ['file-token'])
+        assert not any('/medias/' in url for url in requests_made)
+        result = tools.ppt_download_feishu_images(document, ['image-ok', 'image-denied', 'image-ok'])
+    assert result['count'] == 1
+    assert 'HTTP 403' in result['errors'][0]['error']
+    assert sum(url.endswith('/image-ok/download') for url in requests_made) == 1
+    path = Path(result['images'][0]['local_path'])
+    assert path.suffix == '.png' and path.read_bytes() == original
+    assert not published
+
+    inspected = tools.ppt_inspect_material_images(result['images'])
+    registered = tools.ppt_register_material_images(inspected['images'])
+    assert registered['count'] == registered['ui_published'] == 1
+    assert published[0]['key'] == 'material_images' and published[0]['content_type'] == 'image'
+    assert tools._load_material_manifest()['images'][0]['origin'] == document
+
+
+@pytest.mark.parametrize('response_kind', ['image', 'html', 'forbidden'])
+def test_remote_registration_downloads_and_validates_bytes_before_publishing(monkeypatch, tmp_path, response_kind):
+    import requests
+    from PIL import Image, ImageDraw
+
+    tools = _load_ppt_tools()
+    image = Image.new('RGB', (128, 128), 'white')
+    ImageDraw.Draw(image).rectangle((10, 10, 90, 90), fill='blue')
+    buffer = io.BytesIO()
+    image.save(buffer, format='PNG')
+    data = buffer.getvalue() if response_kind == 'image' else b'<html>Access denied</html>' * 10
+    response = requests.Response()
+    response.status_code = 403 if response_kind == 'forbidden' else 200
+    response.raw = io.BytesIO(data)
+    response.close = Mock(wraps=response.close)
+    # Exercise a long, extension-mismatched signed URL in the path field, too.
+    origin = 'https://example.org/photo.jpg?token=' + 'x' * 1000
+    requested = []
+
+    def get(url, **options):
+        requested.append((url, options))
+        return response
+
+    monkeypatch.setattr(tools.requests, 'get', get)
+    monkeypatch.setattr(tools, '_material_root', lambda: tmp_path)
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: 'vlm')
+    monkeypatch.setattr(tools, '_inspect_material_image', lambda path, role: {
+        'status': 'inspected', 'description': 'A blue figure',
+    })
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda slot: [])
+    published = []
+    monkeypatch.setattr(tools, '_save_artifact', lambda **item: published.append(item) or {'ok': True})
+    if response_kind != 'image':
+        with pytest.raises(tools.ToolExecutionError):
+            tools.ppt_register_material_images([{'path': origin}])
+        assert published == [] and not tools._material_manifest_path().exists()
+    else:
+        result = tools.ppt_register_material_images([{'path': origin}])
+        assert result['count'] == result['ui_published'] == 1
+        path = Path(published[0]['value'])
+        assert path.suffix == '.png' and path.read_bytes() == data
+        assert tools._load_material_manifest()['images'][0]['origin'] == origin
+    assert requested[0][0] == origin and requested[0][1]['stream'] is True
+    response.close.assert_called_once()
+
+
 def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
     ppt = yaml.safe_load(
         (_repo_root() / 'workflows' / 'ppt-workflow' / 'workflow.yaml').read_text(
@@ -33,12 +161,8 @@ def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
     assert ppt_slot == {
         **image_slot,
         'label': 'Material Images',
-        'exposed': False,
+        'user_visible': True,
     }
-
-    materials_tab = next(tab for tab in ppt['ui']['tabs'] if tab['id'] == 'materials')
-    assert materials_tab['layout'] == 'list'
-    assert materials_tab['slots'] == [{'id': 'material_summary'}]
     assert all(slot['id'] != 'academic_brief' for slot in ppt['slots'])
 
 
@@ -78,6 +202,10 @@ def test_ppt_material_images_are_optional_and_search_failure_can_continue():
             encoding='utf-8'))
 
     collect = state['steps']['collect_materials']
+    assert {'cloud_files', 'ppt_download_feishu_images', 'ppt_register_material_images'} <= set(collect['tools'])
+    manifest = yaml.safe_load((_repo_root() / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
+    declared_tools = {name for item in manifest['tool_scripts'] for name in item['functions']}
+    assert 'ppt_download_feishu_images' in declared_tools
     outputs = {
         output['material']: output.get('required', True)
         for output in collect['outputs']
@@ -244,12 +372,15 @@ def test_visual_call_sends_actual_image_to_selected_role(monkeypatch, tmp_path, 
     tools = _load_ppt_tools()
     picture = tmp_path / 'figure.png'
     picture.write_bytes(b'image')
-    model = Mock(return_value='Visible flow diagram')
+    model = Mock(return_value='<think>image analysis</think>Visible flow diagram')
+    model.share.return_value = model
     factory = Mock(return_value=model)
     monkeypatch.setattr(lazyllm, 'AutoModel', factory)
     monkeypatch.setattr(tools, 'select_vision_model_role', lambda: role)
     assert tools._agent_vlm_call('Inspect', 'Explain the flow', [str(picture)]) == 'Visible flow diagram'
     factory.assert_called_once_with(model=role, type='vlm')
+    formatter = model.share.call_args.kwargs['format']
+    assert formatter({'content': 'Visible flow diagram', 'reasoning_content': 'image analysis'}) == 'Visible flow diagram'
     from lazyllm.components.formatter import decode_query_with_filepaths
     query = decode_query_with_filepaths(model.call_args.args[0])
     assert query['files'] == [str(picture.resolve())]

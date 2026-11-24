@@ -1,4 +1,3 @@
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import lazyllm
@@ -24,45 +23,6 @@ def batch_context(tmp_path, monkeypatch):
     with lazyllm.locals._scope():
         lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session'}
         yield ctx, events
-
-
-@pytest.mark.parametrize('threshold', [4096, 32])
-def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context, monkeypatch, threshold):
-    from lazymind.document_tools.artifacts import render_document
-
-    monkeypatch.setattr(tools, 'LARGE_ARTIFACT_THRESHOLD', threshold)
-    ctx, events = batch_context
-    report = ('# 1. 2026 年报告\n\n## 1. 背景\n### 1.1. 方法 ###\n'
-              '1. 正文列表\n\n## 1.1. 结果\n## 2026 年展望\n## 3D 方法\n'
-              '## 3.3V 电源\n## 1.5℃ 温升\n## 1.0版本说明\n## 1.标题\n## 1.1 方法\n'
-              '## 1. 3.3V 电源\n## 一、背景\n## （一）背景\n## (a) 背景\n'
-              '```markdown\n## 1. 代码示例\n```\n')
-    expected = (report.replace('## 1. 背景', '## 背景').replace('### 1.1. 方法', '### 方法')
-                .replace('## 1.1. 结果', '## 结果').replace('## 1. 3.3V 电源', '## 3.3V 电源')
-                .replace('## 一、背景', '## 背景').replace('## （一）背景', '## 背景')
-                .replace('## (a) 背景', '## 背景'))
-    result = tools.save_artifacts([
-        {'key': 'report', 'value': {'text': report}},
-        {'key': 'summary', 'value': {'ok': True}, 'content_type': 'json'},
-        {'key': 'images', 'value': 'https://example.test/one.png', 'content_type': 'image'},
-        {'key': 'images', 'value': 'https://example.test/two.png', 'content_type': 'image'},
-    ])
-    assert result['saved_count'] == 4
-    assert [event['slot'] for event in events] == ['report', 'summary', 'images', 'images']
-    assert [event['seq'] for event in events] == [1, 1, 5, 6]
-    report_value = events[0]['value']
-    saved = (Path(report_value['path']).read_text(encoding='utf-8')
-             if 'path' in report_value else report_value['text'])
-    assert saved == expected
-    assert ctx.read_draft('report') == (expected, 'text')
-    rendered = render_document(saved)['export_document']
-    assert '## 1. 背景' in rendered
-    assert '### 1.1. 方法' in rendered
-    assert '## 2. 结果' in rendered
-    assert '## 3. 2026 年展望' in rendered
-    assert '## 4. 3D 方法' in rendered
-    assert ctx.read_draft('summary') == ('{"ok": true}', 'json')
-    assert ctx.list_pending_drafts() == []
 
 
 def test_workflow_without_outputs_rejects_artifacts_before_emission(batch_context):

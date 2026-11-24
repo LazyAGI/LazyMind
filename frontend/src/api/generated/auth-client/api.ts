@@ -263,6 +263,90 @@ export const GitHubStarBodyConfirmedEnum = {
 
 export type GitHubStarBodyConfirmedEnum = typeof GitHubStarBodyConfirmedEnum[keyof typeof GitHubStarBodyConfirmedEnum];
 
+export interface GitHubStarDeferredAccepted {
+    'repository': string;
+    'intent': GitHubStarIntent;
+    'accepted': GitHubStarDeferredAcceptedAcceptedEnum;
+}
+
+export const GitHubStarDeferredAcceptedAcceptedEnum = {
+    True: true
+} as const;
+
+export type GitHubStarDeferredAcceptedAcceptedEnum = typeof GitHubStarDeferredAcceptedAcceptedEnum[keyof typeof GitHubStarDeferredAcceptedAcceptedEnum];
+
+export interface GitHubStarDeferredAccount {
+    'connection_id': string;
+    'account_id': string;
+    'login': string;
+}
+export interface GitHubStarDeferredBody {
+    'confirmed': GitHubStarDeferredBodyConfirmedEnum;
+    'source': GitHubStarDeferredBodySourceEnum;
+    'connection_id'?: string | null;
+    'expected_account_id'?: string | null;
+}
+
+export const GitHubStarDeferredBodyConfirmedEnum = {
+    True: true
+} as const;
+
+export type GitHubStarDeferredBodyConfirmedEnum = typeof GitHubStarDeferredBodyConfirmedEnum[keyof typeof GitHubStarDeferredBodyConfirmedEnum];
+export const GitHubStarDeferredBodySourceEnum = {
+    Local: 'local',
+    Connection: 'connection'
+} as const;
+
+export type GitHubStarDeferredBodySourceEnum = typeof GitHubStarDeferredBodySourceEnum[keyof typeof GitHubStarDeferredBodySourceEnum];
+
+export interface GitHubStarDeferredResult {
+    'repository': string;
+    'intent': GitHubStarIntent;
+}
+export interface GitHubStarDeferredStatus {
+    'repository': string;
+    'can_receive': boolean;
+    'local_supported': boolean;
+    'accounts': Array<GitHubStarDeferredAccount>;
+    'intent': GitHubStarIntent | null;
+}
+export interface GitHubStarIntent {
+    'intent_id': string;
+    'status': GitHubStarIntentStatusEnum;
+    'source': GitHubStarIntentSourceEnum;
+    'connection_id': string | null;
+    'account_id': string | null;
+    'created_at': string;
+    'expires_at': string;
+    'attempt_count': number;
+    'next_attempt_at': string | null;
+    'rate_limit_not_before': string | null;
+    'reason': string;
+    'remote_state': GitHubStarIntentRemoteStateEnum;
+}
+
+export const GitHubStarIntentStatusEnum = {
+    Pending: 'pending',
+    NeedsAttention: 'needs_attention',
+    Succeeded: 'succeeded',
+    Cancelled: 'cancelled',
+    Exhausted: 'exhausted'
+} as const;
+
+export type GitHubStarIntentStatusEnum = typeof GitHubStarIntentStatusEnum[keyof typeof GitHubStarIntentStatusEnum];
+export const GitHubStarIntentSourceEnum = {
+    Local: 'local',
+    Connection: 'connection'
+} as const;
+
+export type GitHubStarIntentSourceEnum = typeof GitHubStarIntentSourceEnum[keyof typeof GitHubStarIntentSourceEnum];
+export const GitHubStarIntentRemoteStateEnum = {
+    Unknown: 'unknown',
+    Starred: 'starred'
+} as const;
+
+export type GitHubStarIntentRemoteStateEnum = typeof GitHubStarIntentRemoteStateEnum[keyof typeof GitHubStarIntentRemoteStateEnum];
+
 export interface GitHubStarLocalBody {
     'confirmed': GitHubStarLocalBodyConfirmedEnum;
 }
@@ -1858,6 +1942,120 @@ export const CloudOauthApiAxiosParamCreator = function (configuration?: Configur
         },
         /**
          *
+         * @summary Github Star Deferred Cancel
+         * @param {string} intentId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete: async (intentId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'intentId' is not null or undefined
+            assertParamExists('githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete', 'intentId', intentId)
+            const localVarPath = `/api/authservice/v1/cloud/github/star/deferred`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (intentId !== undefined) {
+                localVarQueryParameter['intent_id'] = intentId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Github Star Deferred Receive
+         * @param {GitHubStarDeferredBody} gitHubStarDeferredBody
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost: async (gitHubStarDeferredBody: GitHubStarDeferredBody, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'gitHubStarDeferredBody' is not null or undefined
+            assertParamExists('githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost', 'gitHubStarDeferredBody', gitHubStarDeferredBody)
+            const localVarPath = `/api/authservice/v1/cloud/github/star/deferred`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(gitHubStarDeferredBody, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Github Star Deferred Status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        githubStarDeferredStatusApiAuthserviceV1CloudGithubStarDeferredGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/authservice/v1/cloud/github/star/deferred`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Github Star Local
          * @param {GitHubStarLocalBody} gitHubStarLocalBody
          * @param {*} [options] Override http request option.
@@ -2605,6 +2803,44 @@ export const CloudOauthApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Github Star Deferred Cancel
+         * @param {string} intentId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete(intentId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<GitHubStarDeferredResult>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete(intentId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Github Star Deferred Receive
+         * @param {GitHubStarDeferredBody} gitHubStarDeferredBody
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost(gitHubStarDeferredBody: GitHubStarDeferredBody, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<GitHubStarDeferredAccepted>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost(gitHubStarDeferredBody, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Github Star Deferred Status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async githubStarDeferredStatusApiAuthserviceV1CloudGithubStarDeferredGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<GitHubStarDeferredStatus>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.githubStarDeferredStatusApiAuthserviceV1CloudGithubStarDeferredGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.githubStarDeferredStatusApiAuthserviceV1CloudGithubStarDeferredGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Github Star Local
          * @param {GitHubStarLocalBody} gitHubStarLocalBody
          * @param {*} [options] Override http request option.
@@ -2926,6 +3162,35 @@ export const CloudOauthApiFactory = function (configuration?: Configuration, bas
         },
         /**
          *
+         * @summary Github Star Deferred Cancel
+         * @param {CloudOauthApiGithubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete(requestParameters: CloudOauthApiGithubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<GitHubStarDeferredResult> {
+            return localVarFp.githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete(requestParameters.intentId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Github Star Deferred Receive
+         * @param {CloudOauthApiGithubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost(requestParameters: CloudOauthApiGithubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<GitHubStarDeferredAccepted> {
+            return localVarFp.githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost(requestParameters.gitHubStarDeferredBody, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Github Star Deferred Status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        githubStarDeferredStatusApiAuthserviceV1CloudGithubStarDeferredGet(options?: RawAxiosRequestConfig): AxiosPromise<GitHubStarDeferredStatus> {
+            return localVarFp.githubStarDeferredStatusApiAuthserviceV1CloudGithubStarDeferredGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Github Star Local
          * @param {CloudOauthApiGithubStarLocalApiAuthserviceV1CloudGithubStarLocalPutRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -3158,6 +3423,20 @@ export interface CloudOauthApiGetOauthAppCredentialsApiAuthserviceV1CloudProvide
  */
 export interface CloudOauthApiGithubStarApiAuthserviceV1CloudGithubStarPutRequest {
     readonly gitHubStarBody: GitHubStarBody
+}
+
+/**
+ * Request parameters for githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete operation in CloudOauthApi.
+ */
+export interface CloudOauthApiGithubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDeleteRequest {
+    readonly intentId: string
+}
+
+/**
+ * Request parameters for githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost operation in CloudOauthApi.
+ */
+export interface CloudOauthApiGithubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPostRequest {
+    readonly gitHubStarDeferredBody: GitHubStarDeferredBody
 }
 
 /**
@@ -3407,6 +3686,38 @@ export class CloudOauthApi extends BaseAPI {
      */
     public githubStarApiAuthserviceV1CloudGithubStarPut(requestParameters: CloudOauthApiGithubStarApiAuthserviceV1CloudGithubStarPutRequest, options?: RawAxiosRequestConfig) {
         return CloudOauthApiFp(this.configuration).githubStarApiAuthserviceV1CloudGithubStarPut(requestParameters.gitHubStarBody, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Github Star Deferred Cancel
+     * @param {CloudOauthApiGithubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete(requestParameters: CloudOauthApiGithubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDeleteRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).githubStarDeferredCancelApiAuthserviceV1CloudGithubStarDeferredDelete(requestParameters.intentId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Github Star Deferred Receive
+     * @param {CloudOauthApiGithubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost(requestParameters: CloudOauthApiGithubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPostRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).githubStarDeferredReceiveApiAuthserviceV1CloudGithubStarDeferredPost(requestParameters.gitHubStarDeferredBody, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Github Star Deferred Status
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public githubStarDeferredStatusApiAuthserviceV1CloudGithubStarDeferredGet(options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).githubStarDeferredStatusApiAuthserviceV1CloudGithubStarDeferredGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

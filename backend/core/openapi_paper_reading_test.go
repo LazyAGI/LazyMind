@@ -3,9 +3,8 @@ package main
 import "testing"
 
 func TestPaperReadingOpenAPIContract(t *testing.T) {
-	schemas := paperReadingOpenAPISchemas()
-	if schemas["PDFPaperGuide"] != nil {
-		t.Fatal("guide belongs to the separate paper-guide branch")
+	if paperGuideOpenAPISchemas()["PaperGuideStatus"] == nil {
+		t.Fatal("durable guide contract is required alongside local reading")
 	}
 	paths := paperReadingOpenAPIPaths()
 	for _, path := range []string{"/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation", "/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/translation"} {

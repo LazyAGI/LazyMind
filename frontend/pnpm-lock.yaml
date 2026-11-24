@@ -112,6 +112,9 @@ importers:
       monaco-editor:
         specifier: 0.52.2
         version: 0.52.2
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
       pdfjs-dist:
         specifier: ^5.5.207
         version: 5.5.207

@@ -19,6 +19,24 @@ def test_business_failed_status_is_not_a_tool_execution_failure():
     assert _tool_result_status({'status': 'failed', 'message': 'Task did not finish.'}) == 'ok'
 
 
+def test_hidden_reasoning_keeps_streamed_and_final_answer_text():
+    streamed = AgentEventFrameTranslator(query='q')
+    streamed.include_reasoning = False
+    frames = streamed.feed({'tag': 'think', 'delta': 'separate reasoning'})
+    frames += streamed.feed({'tag': 'subagent_think', 'think': 'tool agent reasoning'})
+    frames += streamed.feed({'tag': 'text', 'delta': '<thi'})
+    frames += streamed.feed({'tag': 'text', 'delta': 'nk>inline reasoning</think>answer'})
+    frames += streamed.finish('answer')
+    assert ''.join(frame.get('text') or '' for frame in frames) == 'answer'
+    assert not any(frame.get('think') for frame in frames)
+
+    final = AgentEventFrameTranslator(query='q')
+    final.include_reasoning = False
+    frames = final.finish({'think': 'separate reasoning', 'text': '<think>draft</think>answer'})
+    assert ''.join(frame.get('text') or '' for frame in frames) == 'answer'
+    assert not any(frame.get('think') for frame in frames)
+
+
 def test_translator_rewrites_citations_registered_by_tools():
     translator = AgentEventFrameTranslator(query='q')
     item = {

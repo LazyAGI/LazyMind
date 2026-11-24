@@ -1,0 +1,7 @@
+# Source CI uses CPython 3.11 on macOS Intel and Windows x64.
+# UMAP 0.6 / Numba 0.68 selects llvmlite 0.50, which currently needs a
+# failing source build on macOS Intel. These releases ship CPython 3.11
+# wheels on both CI platforms (and macOS arm64).
+umap-learn==0.5.7
+numba==0.61.2
+llvmlite==0.44.0

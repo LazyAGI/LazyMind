@@ -9,6 +9,7 @@ from lazyllm.module.llms.onlinemodule.base import ModelCallControl
 from lazyllm.module.servermodule import LLMBase
 
 from .cancellation import UserCancelledError
+from .model_calls import enable_tool_call_stream
 
 
 class CancellableLLM(ModuleBase, LLMBase):
@@ -35,6 +36,7 @@ class CancellableLLM(ModuleBase, LLMBase):
         view = self._llm.share(prompt=self._prompt, format=self._formatter, stream=self._stream)
         view._static_params = self._static_params
         view.used_by(self._used_by_moduleid or self._module_id)
+        enable_tool_call_stream(view)
         result = view(*args, call_control=control, **kwargs)
         control.check()
         return result

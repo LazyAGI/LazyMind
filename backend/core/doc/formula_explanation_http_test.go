@@ -273,7 +273,7 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	handler.loadModel = savedLoader
 	policy := readingpolicy.Defaults()
 	policy.Preset = "custom"
-	policy.Modes[readingpolicy.Formula] = readingpolicy.Disabled
+	policy.Modes[readingpolicy.AIStudy] = readingpolicy.Disabled
 	if _, err := readingpolicy.Save(context.Background(), db.DB, "owner", policy); err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"time"
 
-	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/localfile"
 )
@@ -92,8 +91,6 @@ func runProbe(ctx context.Context, home string, c Config, args ...string) (bool,
 	}
 	cmd := backgroundCommand(ctx, c.Node, append([]string{script, "--cdp-port", strconv.Itoa(c.Port)}, args...)...)
 	cmd.WaitDelay = time.Second
-	// No ambient Node preloads may execute inside the trusted read-only probe.
-	cmd.Env = agentexec.SafeEnvironment()
 	body, err := cmd.Output()
 	if err != nil {
 		code := "runtime_unavailable"

@@ -411,7 +411,8 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 			} else if err != nil {
 				return err
 			}
-		} else if conversation.DeletedAt != nil {
+		}
+		if canParentSidechat(conversation) && conversation.DeletedAt != nil {
 			var childIDs []string
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
 				Where(
@@ -490,7 +491,7 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 	}
 
 	family := []orm.Conversation{root}
-	if root.ParentConversationID == nil {
+	if canParentSidechat(root) {
 		var children []orm.Conversation
 		if err := ctxDB.Where(
 			"parent_conversation_id = ? AND create_user_id = ? AND relation_type = ?", root.ID, userID, conversationRelationSidechat,
@@ -537,7 +538,7 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 		}
 		var lockedFamily []orm.Conversation
 		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("create_user_id = ?", userID)
-		if lockedRoot.ParentConversationID == nil {
+		if canParentSidechat(lockedRoot) {
 			query = query.Where("id = ? OR (parent_conversation_id = ? AND relation_type = ?)", lockedRoot.ID, lockedRoot.ID, conversationRelationSidechat)
 		} else {
 			query = query.Where("id = ?", lockedRoot.ID)

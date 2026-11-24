@@ -132,3 +132,47 @@ it('saves a cleared heading with canonical styles and preserves its placeholder 
   expect(view.container).toHaveTextContent('Keep this paragraph.');
   expect(view.container.querySelector('[role="alert"]')).toBeNull();
 });
+
+
+it.each([false, true])('normalizes historical paper headings only in the paper workflow (paper=%s)', async paper => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const source = '# Review\n\n## 1. Prior work\n\nOriginal evidence.';
+  api.previewDocumentAction.mockResolvedValue({ data: { data: { representation: 'markdown',
+    document: source.replace('## 1.', '<a id="block-sec-1"></a>\n## 1.'),
+    numbering: { entries: { 'sec-1': { label: '1.', mode: 'ordered' } } } } } });
+  const slot = { artifact_id: 'review', slot_id: 'literature_review_document', revision: 1, draft_version: 1,
+    selected: true, artifact_value: { data: source },
+    document: { representation: 'markdown', editable: true, capabilities: ['save', 'numbering'] } } as SlotRevision;
+  const view = render(<SlotRenderer slot={slot} sessionId='review'
+    workflowSession={{ workflow_id: paper ? 'paper-writing' : 'other' } as never} />);
+  await waitFor(() => expect(view.container.querySelector('h2')).toHaveAttribute('data-writer-numbering-label', '1.'));
+  expect(view.container.querySelector('h2')).toHaveTextContent(paper ? /^Prior work$/ : /^1\. Prior work$/);
+  expect(view.container.querySelector('.workflow-slot--paper-document') !== null).toBe(paper);
+  expect(api.saveDocumentArtifact).not.toHaveBeenCalled();
+});
+
+
+it('resolves a paper outline placeholder in the editor and article image gallery', async () => {
+  // jsdom does not load image resources; let the real editor finish its image preload.
+  vi.stubGlobal('Image', class {
+    onload?: () => void;
+    set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+  });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  await i18n.changeLanguage('zh-CN');
+  const signed = '/static-files/means.svg?expires=4102444800&sig=test';
+  const slot = { artifact_id: 'paper-outline', slot_id: 'write_outline_document', revision: 1, draft_version: 1,
+    selected: true, artifact_value: { data: '# Outline\n\n![Observed scores](media-placeholder://means)' },
+    document: { representation: 'markdown', editable: true, capabilities: ['save'] } } as SlotRevision;
+  render(<SlotRenderer slot={slot} sessionId='paper-preview' workflowSession={{ workflow_id: 'paper-writing',
+    slots: [{ slot_id: 'analysis_chart', slot: 'analysis_chart', selected: true, revision: 1,
+      created_at: '', artifact_value: { filename: 'means.svg', url: signed } }],
+  } as never} />);
+  const image = await screen.findByRole('img', { name: 'Observed scores' });
+  await waitFor(() => expect(image.getAttribute('src')).toContain('/api/core/static-files/means.svg?'));
+  fireEvent.click(image);
+  const dialog = await screen.findByRole('dialog', { name: '文章图片' });
+  const preview = await within(dialog).findByRole('img', { name: 'Observed scores' });
+  expect(preview.getAttribute('src')).toContain('/api/core/static-files/means.svg?');
+  expect(api.saveDocumentArtifact).not.toHaveBeenCalled();
+});

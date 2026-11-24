@@ -123,7 +123,7 @@ export function NodeVisualPanel({ value, onChange, onReset, readonly = false, te
   const fill = value.fill;
   const border = value.border;
   return <div className="node-props-panel-body visual-props">
-    {!terminal && <VisualSection title="内容显示"><div className="visibility-grid">{visibilityFields.map(([key, label]) => <Row key={key} label={label}><Switch size="small" disabled={readonly} checked={visible[key] !== false} onChange={(checked) => update({ visible: { ...visible, [key]: checked } })} /></Row>)}</div></VisualSection>}
+    {!terminal && <VisualSection title="内容显示"><div className="visibility-grid">{visibilityFields.map(([key, label]) => <Row key={key} label={label}><Switch size="small" disabled={readonly} checked={visible[key] ?? (key !== 'stepId')} onChange={(checked) => update({ visible: { ...visible, [key]: checked } })} /></Row>)}</div></VisualSection>}
     <VisualSection title="位置与大小">
       <div className="visual-grid">
         {!batch&&<><Row label="X"><InputNumber disabled={readonly} value={Math.round(value.x)} onChange={(x) => update({ x: Number(x ?? 0) })} /></Row>

@@ -128,6 +128,9 @@ func testWorkflowToolDescriptions(t *testing.T, provider string) {
 			t.Fatalf("incorrect Codex presentation scope for %q: %q", provider, got["workflow.start"])
 		}
 	}
+	if !containsAll(got["workflow.worker.grant"], "Optional", "proxy declared tool calls through the controller", "keep the SubAgent") {
+		t.Fatalf("worker grant became a host requirement: %q", got["workflow.worker.grant"])
+	}
 	if !containsAll(got["workflow.get"], "startup_contract", "workflow.step.begin") {
 		t.Fatalf("workflow.get description=%q", got["workflow.get"])
 	}
@@ -172,8 +175,8 @@ func TestReadOnlyClassificationCoversEveryWorkflowTool(t *testing.T) {
 		"workflow.state": true, "workflow.session.list": true,
 		"workflow.artifact.list": true, "workflow.artifact.get": true, "workflow.tool.list": true,
 	}
-	if len(ToolNames) != 26 {
-		t.Fatalf("tool count=%d, want 26", len(ToolNames))
+	if len(ToolNames) != 28 {
+		t.Fatalf("tool count=%d, want 28", len(ToolNames))
 	}
 	for _, name := range ToolNames {
 		if IsReadOnlyTool(name) != readOnly[name] {

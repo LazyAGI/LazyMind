@@ -17,7 +17,9 @@ class StopReceiptRuntime:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('compact_objective', [False, True])
-async def test_native_executor_consumes_pinned_shared_skills_and_constraints(monkeypatch, tmp_path, compact_objective):
+@pytest.mark.parametrize('paper_contract', [False, True])
+async def test_native_executor_consumes_pinned_shared_skills_and_constraints(
+        monkeypatch, tmp_path, compact_objective, paper_contract):
     from unittest.mock import AsyncMock
     from lazymind.chat.engine.subagent import runner
 
@@ -41,6 +43,13 @@ async def test_native_executor_consumes_pinned_shared_skills_and_constraints(mon
             'objective': 'Preserve the supplied source facts.',
         })
         runtime.execution_spec.return_value['task']['objective'] = ''
+    if paper_contract:
+        runtime.context.return_value.update({
+            'session_id': 'shared-session', 'attempt_id': 'shared-attempt', 'workflow_revision': 'frozen',
+            'step_id': 'write_outline', 'launch_request': 'Original paper request',
+            'user_request': 'Current paper request', 'knowledge_scope': {'dataset_ids': ['selected']},
+        })
+        runtime.context.return_value['execution']['output_validator'] = 'paper-agent-v1'
     worker.runtime = runtime
 
     async def stream(**kwargs):
@@ -51,6 +60,16 @@ async def test_native_executor_consumes_pinned_shared_skills_and_constraints(mon
         assert 'Keep the exact requested page count.' in task['objective']
         assert 'Pinned workflow Skill (scenario/execution.md):\nInspect the actual output.' in task['objective']
         assert task['params']['tools_only'] is True
+        if paper_contract:
+            import hashlib
+            identity = task['params']['_paper_execution']
+            assert identity['revision'] == 'frozen' and identity['attempt_id'] == 'shared-attempt'
+            assert identity['launch_request'] == 'Original paper request'
+            assert identity['request'] == 'Current paper request'
+            assert identity['knowledge_scope'] == {'dataset_ids': ['selected']}
+            assert identity['lease_hash'] == hashlib.sha256(b'lease').hexdigest()
+        else:
+            assert '_paper_execution' not in task['params']
         yield 'data: ' + json.dumps({'type': 'done', 'status': 'interrupted'}) + '\n\n'
 
     monkeypatch.setattr(runner, 'run_subagent_stream', stream)

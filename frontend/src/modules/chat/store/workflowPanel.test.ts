@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { load } from 'js-yaml';
+import { workflowUIForAudience } from '../components/WorkflowPanel/workflowAudience';
 
 import {
   filterWorkflowTabs,
@@ -90,6 +91,42 @@ describe('runtime skipped tab visibility', () => {
 });
 
 describe('hydrateWorkflowUI', () => {
+  it('keeps two distinct step labels even when both steps use the same tab', () => {
+    const panel = (label: string) => hydrateWorkflowUI({
+      ui: { tabs: [{ id: 'draft', label: 'Draft' }] },
+      steps: [{ id: 'write', label }, { id: 'proof', label: 'Proofread' }],
+    });
+    expect(panel('Write').stepLabels).toEqual({ write: 'Write', proof: 'Proofread' });
+    expect(panel('Rewrite').stepLabels).toEqual({ write: 'Rewrite', proof: 'Proofread' });
+  });
+
+  it('loads the material image gallery from the current PPT workflow YAML', () => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/ppt-workflow/workflow.yaml'), 'utf8'));
+    const ui = workflowUIForAudience(hydrateWorkflowUI(spec), false);
+    expect(ui.tabs?.find(tab => tab.id === 'materials')?.slots).toEqual([
+      expect.objectContaining({ id: 'material_summary' }),
+      expect.objectContaining({ id: 'material_images', type: 'image', cardinality: 'list',
+        user_visible: true, widget: { widgetType: 'image-gallery' } }),
+    ]);
+  });
+
+  it('restores the saved material image gallery only for older built-in PPT revisions', () => {
+    const spec = {
+      id: 'ppt-workflow', source_type: 'builtin',
+      slots: [
+        { id: 'material_summary', type: 'text' },
+        { id: 'material_images', label: '素材图片', type: 'image', cardinality: 'list', user_visible: false, exposed: false },
+      ],
+      ui: { tabs: [{ id: 'materials', step_id: 'collect_materials', slots: [{ id: 'material_summary' }] }] },
+    };
+    const builtIn = workflowUIForAudience(hydrateWorkflowUI(spec), false);
+    expect(builtIn.tabs?.[0].slots[1]).toMatchObject({ id: 'material_images', label: '素材图片',
+      user_visible: true, widget: { widgetType: 'image-gallery' } });
+    const user = workflowUIForAudience(hydrateWorkflowUI({ ...spec, source_type: 'user' }), false);
+    expect(user.tabs?.[0].slots.map(slot => slot.id)).toEqual(['material_summary']);
+    expect(spec.slots[1].user_visible).toBe(false);
+  });
+
   it('loads the academic workflow process-material rule from its package configuration', () => {
     const spec = load(readFileSync(resolve(process.cwd(), '../workflows/academic_research_pipeline/workflow.yaml'), 'utf8'));
     const ui = hydrateWorkflowUI(spec);

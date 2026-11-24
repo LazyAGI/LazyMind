@@ -1289,7 +1289,14 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           const event = UIUtils.jsonParser(raw);
           if (!event || !event.type) return;
           const { type, payload } = event;
-          if (type === "task_run_updated") { void get().loadConversationTasks(conversationId); return; }
+          if (type === "task_run_updated") {
+            void get().loadConversationTasks(conversationId);
+            // Chat completion can change the Workflow display without a step event.
+            if (useWorkflowStore.getState().sessionByConversation[conversationId]) {
+              scheduleWorkflowSessionRefresh(conversationId);
+            }
+            return;
+          }
           if (get().viewMode === "ordinary" && ["task_created", "task_updated"].includes(type)) {
             if (type === "task_created" && payload?.task_id) {
               liveTaskIdsCreatedDuringLoad.get(conversationId)?.add(payload.task_id);

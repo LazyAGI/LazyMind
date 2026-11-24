@@ -21,6 +21,7 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
 	"lazymind/agentconnector/internal/workflowhost"
@@ -110,15 +111,40 @@ func findNode(ctx context.Context, preferred string) (string, error) {
 		return node, nil
 	}
 	candidates := []string{preferred}
-	if path, err := agentexec.FindExecutable("", []string{"node"}); err == nil {
-		candidates = append(candidates, path)
-	}
+	// Validate every discovered installation: an old or broken Node earlier in
+	// PATH must not hide a compatible Homebrew or Windows installation.
+	candidates = append(candidates, agentexec.FindExecutables([]string{"node"})...)
 	if home, err := os.UserHomeDir(); err == nil {
+		if host := strings.TrimSpace(os.Getenv("LAZYMIND_HOST_HOME")); host != "" {
+			home = host
+		}
 		name := "node"
 		if runtime.GOOS == "windows" {
 			name += ".exe"
 		}
 		candidates = append(candidates, filepath.Join(home, ".lazymind", "deps", "node", "bin", name))
+		// Compatibility with Node installed in the runtime service HOME.
+		root := ""
+		switch runtime.GOOS {
+		case "darwin":
+			root = filepath.Join(home, "Library", "Application Support", "LazyMind")
+		case "windows":
+			root = os.Getenv("LOCALAPPDATA")
+			if root == "" {
+				root = filepath.Join(home, "AppData", "Local")
+			}
+			root = filepath.Join(root, "LazyMind")
+		default:
+			root = os.Getenv("XDG_DATA_HOME")
+			if root == "" {
+				root = filepath.Join(home, ".local", "share")
+			}
+			root = filepath.Join(root, "LazyMind")
+		}
+		if state := connectorconfig.Value("LAZYMIND_RUNTIME_STATE_FILE"); state != "" {
+			root = filepath.Dir(filepath.Dir(state))
+		}
+		candidates = append(candidates, filepath.Join(root, "data", "homes", "services", ".lazymind", "deps", "node", "bin", name))
 	}
 	return agentexec.CompatibleNode(ctx, candidates...)
 }
@@ -126,6 +152,10 @@ func findNode(ctx context.Context, preferred string) (string, error) {
 // Install uses the personal marketplace. The marker prevents replacing a
 // different plugin; atomic writes preserve other personal marketplace entries.
 func Install(ctx context.Context, home, self, binary, profile, hostID string) (Installation, error) {
+	launcher, err := connectorlauncher.Publish(ctx, home, self)
+	if err != nil {
+		return Installation{}, err
+	}
 	root, marketPath, err := Paths()
 	if err != nil {
 		return Installation{}, err
@@ -166,7 +196,7 @@ func Install(ctx context.Context, home, self, binary, profile, hostID string) (I
 	if err != nil {
 		return Installation{}, err
 	}
-	record := Installation{BuildID: BuildID(), Home: home, Self: self, Profile: profile, Binary: binary, Node: node,
+	record := Installation{BuildID: BuildID(), Home: home, Self: launcher, Profile: profile, Binary: binary, Node: node,
 		Marketplace: market["name"].(string), ConnectorID: pair.ConnectorID,
 		PairingFile: filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json")}
 	configPath, err := connectorconfig.Save(connectorconfig.Config{Home: home, Provider: "codex", HostID: hostID, Profile: profile, PairingFile: record.PairingFile, Controlled: true})
@@ -175,7 +205,7 @@ func Install(ctx context.Context, home, self, binary, profile, hostID string) (I
 	}
 	env := connectorconfig.Environment(configPath)
 	mcp := map[string]any{"mcpServers": map[string]any{"lazymind": map[string]any{
-		"command": self, "args": []string{"mcp", "codex-workflow"}, "env": env}}}
+		"command": launcher, "args": []string{"mcp", "codex-workflow"}, "env": env}}}
 	mcpBytes, _ := json.MarshalIndent(mcp, "", "  ")
 
 	manifestBytes, _ := assets.ReadFile("assets/lazymind-workflow/.codex-plugin/plugin.json")
@@ -316,9 +346,32 @@ func Registered(home string) bool {
 		return false
 	}
 	self, err := os.Executable()
-	if err != nil || !agentexec.SameExecutable(self, record.Self) {
+	if err != nil || (filepath.Clean(record.Self) != connectorlauncher.Path(home) && !agentexec.SameExecutable(self, record.Self)) {
 		return false
 	}
 	enabled, err := Enabled(record.Profile, record.Marketplace)
 	return err == nil && enabled
+}
+
+// RefreshNode revalidates the runtime even when the plugin build is unchanged.
+func RefreshNode(ctx context.Context) (Installation, error) {
+	record, err := Read()
+	if err != nil {
+		return record, err
+	}
+	node, err := findNode(ctx, record.Node)
+	if err != nil {
+		return record, err
+	}
+	if record.Node != node {
+		record.Node = node
+		root, _, err := Paths()
+		if err != nil {
+			return record, err
+		}
+		if err := writeJSON(filepath.Join(root, ".lazymind-installation.json"), record); err != nil {
+			return record, err
+		}
+	}
+	return record, nil
 }

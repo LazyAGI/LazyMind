@@ -37,11 +37,15 @@ type pdfIRPayload struct {
 type pdfIRResult struct {
 	IRPath  string `json:"ir_path"`
 	RawPath string `json:"raw_path"`
+	// Held only for the guide request that selected this shared archive.
+	archive []byte
 }
 type pdfIRResponse struct {
+	Artifact     pdfIRResult     `json:"-"`
 	Status       string          `json:"status"`
 	SourceSHA256 string          `json:"source_sha256,omitempty"`
 	ErrorMessage string          `json:"error_message,omitempty"`
+	ErrorCode    string          `json:"error_code,omitempty"`
 	Document     *pdfir.Document `json:"document,omitempty"`
 }
 
@@ -67,11 +71,51 @@ func pdfIRHash(ext documentExt) (string, error) {
 	return pdfir.SourceHash(p)
 }
 func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRResponse, error) {
+	return pdfIRStatusWithProjection(ctx, row, hash, true)
+}
+func pdfIRStatusWithProjection(ctx context.Context, row orm.Document, hash string, upgrade bool) (pdfIRResponse, error) {
 	s := pdfIRResponse{Status: "not_requested", SourceSHA256: hash}
-	var jobs []orm.AsyncJob
-	if e := store.DB().WithContext(ctx).Where("job_type = ? AND resource_type = ? AND resource_id = ?", pdfIRJobType, "document_pdf_ir", pdfIRResource(row.DatasetID, row.ID)).Order("created_at DESC").Find(&jobs).Error; e != nil {
-		return s, e
+	jobs, err := pdfIRJobs(ctx, row)
+	if err != nil {
+		return s, err
 	}
+	return pdfIRStatusFromJobsWithProjection(row, hash, jobs, upgrade), nil
+}
+
+func pdfIRJobs(ctx context.Context, row orm.Document) ([]orm.AsyncJob, error) {
+	var jobs []orm.AsyncJob
+	err := store.DB().WithContext(ctx).Where("job_type = ? AND resource_type = ? AND resource_id = ?", pdfIRJobType, "document_pdf_ir", pdfIRResource(row.DatasetID, row.ID)).Order("created_at DESC").Find(&jobs).Error
+	return jobs, err
+}
+
+func pdfIRStatusFromJobs(row orm.Document, hash string, jobs []orm.AsyncJob) pdfIRResponse {
+	return pdfIRStatusFromJobsWithProjection(row, hash, jobs, true)
+}
+
+func pdfIRStatusFromJobsWithProjection(row orm.Document, hash string, jobs []orm.AsyncJob, upgrade bool) pdfIRResponse {
+	s := pdfIRResponse{Status: "not_requested", SourceSHA256: hash}
+	var ext documentExt
+	_ = json.Unmarshal(row.Ext, &ext)
+	source := pdfIRSource(ext)
+	var shared *pdfir.Document
+	if source != "" {
+		if raw, d, incomplete, artifact := lookupPDFIRSharedArtifact(source, hash, upgrade); raw != nil {
+			encoded, err := json.Marshal(d)
+			if err == nil && int64(len(encoded)) <= pdfIRMaxArtifactBytes {
+				shared = &d
+				if !upgrade {
+					artifact.archive = raw
+				}
+				s.Artifact = artifact
+			} else {
+				s.Status, s.ErrorMessage, s.ErrorCode = "failed", pdfIRTooLargeMessage, pdfIRTooLargeCode
+			}
+		} else if incomplete {
+			s.ErrorMessage = "Existing MinerU result lacks usable structure. Parse this PDF to add reading structure."
+		}
+	}
+	latest := true
+jobsLoop:
 	for _, j := range jobs {
 		var p pdfIRPayload
 		if json.Unmarshal(j.PayloadJSON, &p) != nil || p.SourceSHA256 != hash || p.Revision != pdfir.Revision {
@@ -79,48 +123,146 @@ func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRRespo
 		}
 		switch j.Status {
 		case "pending":
-			s.Status = "queued"
+			if latest {
+				s.Status = "queued"
+				if j.ErrorCode == readingpolicy.QuotaErrorCode {
+					s.ErrorMessage = j.ErrorMessage
+					s.ErrorCode = j.ErrorCode
+				}
+			}
 		case "running":
-			s.Status = "running"
+			if latest {
+				s.Status = "running"
+			}
 		case "failed", "canceled":
-			s.Status = "failed"
-			s.ErrorMessage = "PDF parsing failed or was canceled. Retry parsing."
-			if j.ErrorCode == pdfIRTooLargeCode {
-				s.ErrorMessage = pdfIRTooLargeMessage
+			if latest {
+				s.Status = "failed"
+				s.ErrorMessage = "PDF parsing failed or was canceled. Retry parsing."
+				if j.ErrorCode == pdfIRTooLargeCode {
+					s.ErrorMessage = pdfIRTooLargeMessage
+				} else if j.ErrorCode == readingpolicy.QuotaErrorCode {
+					s.ErrorMessage = j.ErrorMessage
+					s.ErrorCode = j.ErrorCode
+				}
 			}
 		case "succeeded":
-			var result pdfIRResult
-			var d pdfir.Document
-			if json.Unmarshal(j.ResultJSON, &result) != nil {
-				return s, nil
-			}
-			f, e := os.Open(result.IRPath)
-			if e != nil {
+			d, artifact, message := readPDFIRJobResult(j, hash, upgrade)
+			if d != nil {
+				if latest {
+					s.Status = "ready"
+					s.ErrorMessage = ""
+				}
+				if shared == nil || shared.Parser.Model != "vlm" && d.Parser.Model == "vlm" {
+					shared = d
+					s.Artifact = artifact
+				}
+			} else if latest {
 				s.Status = "failed"
-				s.ErrorMessage = "PDF IR artifact is missing; retry parsing"
-				return s, nil
+				s.ErrorMessage = message
 			}
-			if info, statErr := f.Stat(); statErr == nil && info.Size() > pdfIRMaxArtifactBytes {
-				f.Close()
-				s.Status = "failed"
-				s.ErrorMessage = pdfIRTooLargeMessage
-				return s, nil
+			if d != nil {
+				break jobsLoop
 			}
-			e = json.NewDecoder(io.LimitReader(f, pdfIRMaxArtifactBytes)).Decode(&d)
-			f.Close()
-			if e != nil || d.SourceSHA256 != hash {
-				s.Status = "failed"
-				s.ErrorMessage = "PDF IR artifact is invalid; retry parsing"
-				return s, nil
-			}
-			upgradePDFIRProjection(&d, result)
-			s.Status = "ready"
-			s.Document = &d
+		default:
+			continue
 		}
-		return s, nil
+		latest = false
 	}
-	return s, nil
+	s.Document = shared
+	if shared != nil && s.Status == "not_requested" {
+		s.Status, s.ErrorMessage = "ready", ""
+	}
+	return s
 }
+
+// Keep shared archive provenance available to the guide precision projection.
+// Read-only guide requests must not promote legacy cache files.
+func lookupPDFIRSharedArtifact(source, hash string, upgrade bool) ([]byte, pdfir.Document, bool, pdfIRResult) {
+	incomplete := false
+	for _, model := range []string{"vlm", "pipeline"} {
+		path := pdfir.CachePath(source, hash, model)
+		if path == "" {
+			continue
+		}
+		for _, candidate := range sharedArchivePaths(source, path) {
+			f, err := os.Open(candidate)
+			if err != nil {
+				continue
+			}
+			raw, err := io.ReadAll(io.LimitReader(f, pdfir.MaxArchiveBytes+1))
+			f.Close()
+			incomplete = true
+			if err != nil || int64(len(raw)) > pdfir.MaxArchiveBytes {
+				continue
+			}
+			d, err := pdfir.AdaptSharedZIP(raw, hash, model)
+			if err == nil {
+				if upgrade && candidate != path && os.MkdirAll(filepath.Dir(path), 0700) == nil {
+					_ = os.Link(candidate, path)
+				}
+				return raw, d, false, pdfIRResult{IRPath: filepath.Join(filepath.Dir(candidate), hash+"-"+model+".json"), RawPath: candidate}
+			}
+		}
+	}
+	return nil, pdfir.Document{}, incomplete, pdfIRResult{}
+}
+
+func sharedArchivePaths(source, path string) []string {
+	legacy := filepath.Join(filepath.Dir(source), ".lazymind-artifacts", "mineru-cache-v1", filepath.Base(path))
+	if legacy == path {
+		return []string{path}
+	}
+	return []string{path, legacy}
+}
+
+func readPDFIRJobResult(j orm.AsyncJob, hash string, upgrade bool) (*pdfir.Document, pdfIRResult, string) {
+	var result pdfIRResult
+	if json.Unmarshal(j.ResultJSON, &result) != nil {
+		return nil, result, "PDF IR artifact is invalid; retry parsing"
+	}
+	f, err := os.Open(result.IRPath)
+	if err != nil {
+		return nil, result, "PDF IR artifact is missing; retry parsing"
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err == nil && info.Size() > pdfIRMaxArtifactBytes {
+		return nil, result, pdfIRTooLargeMessage
+	}
+	var d pdfir.Document
+	if err := json.NewDecoder(io.LimitReader(f, pdfIRMaxArtifactBytes)).Decode(&d); err != nil || d.SourceSHA256 != hash {
+		return nil, result, "PDF IR artifact is invalid; retry parsing"
+	}
+	if upgrade {
+		upgradePDFIRProjection(&d, result)
+	}
+	return &d, result, ""
+}
+
+type pdfStructureStatus = pdfir.StructureStatus
+
+// Called after the endpoint has established access to this exact source. Keep
+// reading structure separate from the retrieval tasks managed by EnsureParsed.
+func observePDFStructure(ctx context.Context, dataset, document string) *pdfStructureStatus {
+	row, ext, err := loadDocumentFileMeta(ctx, dataset, document)
+	if err != nil {
+		return nil
+	}
+	hash, err := pdfIRHash(ext)
+	if err != nil {
+		return nil
+	}
+	state, err := pdfIRStatus(ctx, row, hash)
+	if err != nil {
+		return &pdfStructureStatus{Status: "unknown", SourceSHA256: hash}
+	}
+	result := &pdfStructureStatus{Status: state.Status, SourceSHA256: hash, ErrorMessage: state.ErrorMessage, ErrorCode: state.ErrorCode}
+	if state.Document != nil {
+		result.Available = true
+		result.Model = state.Document.Parser.Model
+	}
+	return result
+}
+
 func GetPDFIR(w http.ResponseWriter, r *http.Request) {
 	row, ext, _, ok := loadPDFDocument(r, false)
 	if !ok {
@@ -164,7 +306,7 @@ func CreatePDFIR(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "PDF IR status unavailable", 500)
 		return
 	}
-	if s.Status == "running" || s.Status == "queued" || s.Status == "ready" && !req.Force {
+	if s.Status == "running" || s.Status == "queued" && s.ErrorCode != readingpolicy.QuotaErrorCode || s.Status == "ready" && !req.Force {
 		common.ReplyOK(w, s)
 		return
 	}
@@ -182,7 +324,7 @@ func CreatePDFIR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resource := pdfIRResource(row.DatasetID, row.ID)
-	job, e := asyncjob.Enqueue(r.Context(), store.DB(), asyncjob.EnqueueRequest{JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: resource, IdempotencyKey: pdfir.Digest(resource + hash + pdfir.Revision), Payload: pdfIRPayload{Force: req.Force, DatasetID: row.DatasetID, DocumentID: row.ID, SourceSHA256: hash, Revision: pdfir.Revision}, MaxAttempts: 2, SkipSucceeded: true, CreateUserID: store.UserID(r)})
+	job, e := enqueuePDFIR(r.Context(), store.DB(), asyncjob.EnqueueRequest{JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: resource, IdempotencyKey: pdfir.Digest(resource + hash + pdfir.Revision), Payload: pdfIRPayload{Force: req.Force, DatasetID: row.DatasetID, DocumentID: row.ID, SourceSHA256: hash, Revision: pdfir.Revision}, MaxAttempts: 2, SkipSucceeded: true, CreateUserID: store.UserID(r)}, false)
 	if e != nil {
 		common.ReplyErr(w, "enqueue PDF parsing failed", 500)
 		return
@@ -232,14 +374,6 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 	if err := readingpolicy.Check(ctx, store.DB(), job.CreateUserID, readingpolicy.PDFParse); err != nil {
 		return asyncjob.Result{Permanent: true}, err
 	}
-	cfg, e := loadReadingParser(ctx, job.CreateUserID)
-	if e != nil {
-		return fail(errors.New("MinerU configuration unavailable"))
-	}
-	client, e := pdfir.FromConfig(cfg)
-	if e != nil {
-		return asyncjob.Result{Permanent: true}, e
-	}
 	dir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", p.DocumentID, "pdf-ir", job.ID, fmt.Sprintf("attempt-%d", job.AttemptCount))
 	if e = os.MkdirAll(dir, 0700); e != nil {
 		return fail(errors.New("create PDF IR artifact directory failed"))
@@ -282,34 +416,41 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 			}
 		}
 	}()
-	// Recheck under the same flock used by ingestion, and hold through cache
-	// publication. Force intentionally bypasses any completed shared archive.
-	unlock, e := pdfir.LockCachedArchive(runCtx, pdfIRSource(ext), hash, client.Model)
+	// Recheck under ingestion's lock before occupying quota or calling MinerU.
+	source := pdfIRSource(ext)
+	unlock, e := pdfir.LockCachedArchive(runCtx, source, hash, "vlm")
 	if e != nil {
 		return fail(e)
 	}
+	defer unlock()
 	var raw []byte
 	var d pdfir.Document
-	func() {
-		defer unlock()
-		if !p.Force {
-			raw = pdfir.ReadCachedArchive(pdfIRSource(ext), hash, client.Model)
+	if !p.Force {
+		raw, d = pdfir.ReadSharedArchive(source, hash)
+	}
+	if raw == nil {
+		cfg, err := loadReadingParser(runCtx, job.CreateUserID)
+		if err != nil {
+			return fail(errors.New("MinerU configuration unavailable"))
 		}
-		if raw == nil {
-			raw, e = client.Parse(runCtx, snapshot)
-			if e != nil {
-				return
+		client, err := pdfir.FromConfig(cfg)
+		if err != nil {
+			return asyncjob.Result{Permanent: true}, err
+		}
+		if err := readingpolicy.Claim(runCtx, store.DB(), job.CreateUserID, readingpolicy.PDFParse, hash); err != nil {
+			if errors.Is(err, readingpolicy.ErrQuotaExceeded) {
+				return asyncjob.Result{ErrorCode: readingpolicy.QuotaErrorCode, RetryAt: readingpolicy.NextDay(time.Now()), DeferAttempt: true}, err
 			}
+			return fail(err)
 		}
-		d, e = pdfir.AdaptZIP(raw, hash, client.Model)
+		raw, e = client.Parse(runCtx, snapshot)
 		if e != nil {
-			e = errors.New("MinerU result has invalid layout data")
-			return
+			return fail(e)
 		}
-		pdfir.SaveCachedArchive(pdfIRSource(ext), hash, client.Model, raw)
-	}()
-	if e != nil {
-		return fail(e)
+		d, e = pdfir.AdaptSharedZIP(raw, hash, client.Model)
+		if e != nil {
+			return fail(errors.New("MinerU result has invalid layout data"))
+		}
 	}
 	rawPath := filepath.Join(dir, "mineru-result.zip")
 	if e = os.WriteFile(rawPath, raw, 0600); e != nil {
@@ -328,6 +469,13 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 			return asyncjob.Result{Permanent: true, ErrorCode: pdfIRTooLargeCode}, e
 		}
 		return fail(errors.New("save PDF IR failed"))
+	}
+	// The shared archive replaces the previous result only after all validation
+	// and per-job artifact writes have succeeded.
+	if p.Force || pdfir.ReadCachedArchive(source, hash, d.Parser.Model) == nil {
+		if e := pdfir.SaveCachedArchive(source, hash, d.Parser.Model, raw); e != nil {
+			return fail(errors.New("publish shared MinerU archive failed"))
+		}
 	}
 	result, _ := json.Marshal(pdfIRResult{IRPath: irPath, RawPath: rawPath})
 	return asyncjob.Result{ResultJSON: result}, nil

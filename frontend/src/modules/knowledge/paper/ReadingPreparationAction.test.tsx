@@ -6,7 +6,7 @@ import ReadingPreparationAction from './ReadingPreparationAction';
 vi.mock('./PaperPreparationStatus', () => ({ default: () => <div>论文解析状态</div> }));
 const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 const api = vi.hoisted(() => ({ get: vi.fn(), prepare: vi.fn() }));
-vi.mock('../api/readingPreparation', () => ({ getReadingPreparation: api.get, prepareReading: api.prepare }));
+vi.mock('../api/readingPreparation', async original => ({ ...await original<typeof import('../api/readingPreparation')>(), getReadingPreparation: api.get, prepareReading: api.prepare }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http, getLocalizedErrorMessage: (e: Error) => e.message }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
 it('opens without paid work, explicitly submits chosen scopes, and polls to terminal failure', async () => {
@@ -18,10 +18,10 @@ it('opens without paid work, explicitly submits chosen scopes, and polls to term
   await act(async () => { await Promise.resolve(); });
   expect(api.prepare).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText('选择本篇准备内容'));
-  fireEvent.click(screen.getByRole('checkbox', { name: '公式研读' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'AI 论文精读' }));
   fireEvent.click(screen.getByRole('button', { name: /开始准备/ }));
   await act(async () => { await Promise.resolve(); });
-  expect(api.prepare).toHaveBeenCalledWith('ds', 'doc', ['pdf_parse', 'formula']);
+  expect(api.prepare).toHaveBeenCalledWith('ds', 'doc', ['pdf_parse', 'ai_study']);
   expect(screen.getByRole('button', { name: /开始准备/ })).toBeDisabled();
   await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
   expect(screen.getByText('服务暂时不可用')).toBeInTheDocument();
@@ -116,7 +116,7 @@ it('shows preparation choices without an expansion step', async () => {
  const view=render(<ConfigProvider theme={{token:{motion:false}}}><ReadingPreparationAction target={{dataset:'ds',document:'doc'}}/></ConfigProvider>);
  fireEvent.click(screen.getByRole('button',{name:'研读论文'}));
  await act(async()=>{});
- await waitFor(() => expect(screen.getByText('公式研读')).toBeVisible());
+ await waitFor(() => expect(screen.getByText('AI 论文精读')).toBeVisible());
  expect(view.baseElement.querySelector('details:not([open])')).toBeNull();
 });
 
@@ -132,4 +132,20 @@ it('ignores a delayed response from a different document while the dialog stays 
  await act(async()=>{resolveOld({status:'failed',error_message:'旧文档失败'});});
  expect(screen.queryByText('旧文档失败')).not.toBeInTheDocument();
  expect(screen.getByText('当前文档失败')).toBeInTheDocument();
+});
+
+it.each([
+  ['reading_quota_exhausted', 'AI 论文精读额度已用尽'],
+  ['reading_structure_required', '缺少 PDF 解析结果'],
+])('can submit a manual study while an automatic study is deferred (%s)', async (error_code, error_message) => {
+  api.get.mockReset().mockResolvedValue({ job_id: 'deferred', status: 'pending', error_code, error_message, scopes: ['formula', 'figure', 'table'] });
+  api.prepare.mockResolvedValueOnce({ job_id: 'manual', status: 'pending' });
+  render(<ConfigProvider theme={{token:{motion:false}}}><ReadingPreparationAction target={{ dataset: 'ds', document: 'doc' }} /></ConfigProvider>);
+  fireEvent.click(screen.getByRole('button', { name: '研读论文' }));
+  expect(await screen.findByText(error_message)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'PDF 解析' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'AI 论文精读' }));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: /开始准备/ })));
+  expect(api.prepare).toHaveBeenCalledOnce();
+  expect(api.prepare).toHaveBeenCalledWith('ds', 'doc', ['ai_study']);
 });

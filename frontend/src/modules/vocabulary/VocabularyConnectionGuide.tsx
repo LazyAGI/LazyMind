@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import type { CloudVocabularyProvider } from "./cloudApi";
@@ -11,13 +12,13 @@ export function CloudTokenSource({ provider }: { provider: CloudVocabularyProvid
   const { t } = useTranslation();
   return provider === "eudic" ? (
     <>
-      <a href={tokenSources.eudic} target="_blank" rel="noopener noreferrer">{t("vocabularyCloud.eudicTokenLink")}</a>
+      <ExternalLink href={tokenSources.eudic} target="_blank" rel="noopener noreferrer">{t("vocabularyCloud.eudicTokenLink")}</ExternalLink>
       {" "}{t("vocabularyCloud.eudicTokenHelp")}
     </>
   ) : (
     <>
       {t("vocabularyCloud.maimemoTokenHelp")}{" "}
-      <a href={tokenSources.maimemo} target="_blank" rel="noopener noreferrer">{t("vocabularyCloud.maimemoDocs")}</a>
+      <ExternalLink href={tokenSources.maimemo} target="_blank" rel="noopener noreferrer">{t("vocabularyCloud.maimemoDocs")}</ExternalLink>
     </>
   );
 }
@@ -34,12 +35,12 @@ export default function VocabularyConnectionGuide(
           <Typography.Paragraph type="secondary">{t("ankiSettings.guideAvailability")}</Typography.Paragraph>
           <ol>
             <li>
-              <a href="https://apps.ankiweb.net/" target="_blank" rel="noopener noreferrer">{t("ankiSettings.downloadAnki")}</a>
+              <ExternalLink href="https://apps.ankiweb.net/" target="_blank" rel="noopener noreferrer">{t("ankiSettings.downloadAnki")}</ExternalLink>
               {" "}{t("ankiSettings.launchGuide")}
             </li>
             <li>
               {t("ankiSettings.guideAddon", { code: props.addonCode })}{" "}
-              <a href={`https://ankiweb.net/shared/info/${props.addonCode}`} target="_blank" rel="noopener noreferrer">AnkiConnect</a>
+              <ExternalLink href={`https://ankiweb.net/shared/info/${props.addonCode}`} target="_blank" rel="noopener noreferrer">AnkiConnect</ExternalLink>
             </li>
             <li>{t("ankiSettings.guideEnable")}</li>
           </ol>

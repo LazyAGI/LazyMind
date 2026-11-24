@@ -1,3 +1,4 @@
+import ExternalLink from '@/components/ExternalLink';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Alert, Button, Checkbox, Input, Modal, Popover, Select, Spin, Tag } from 'antd';
 import { CheckCircleOutlined, CloudOutlined, CloudUploadOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -273,11 +274,15 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
             <Tag className='document-publication-result-status' bordered={false} color={statusColor} icon={status === 'succeeded' ? <CheckCircleOutlined aria-hidden='true' /> : undefined}>
               {status === 'succeeded' && item.provider === 'github' && (item.operation?.target_url || item.target_url)?.includes('/pull/') ? t('chat.publication.pullRequestCreated') : status ? statusLabel(status) : t('chat.publication.bound')}
             </Tag>
+            {item.operation?.stage && <span>
+              {t(`chat.publication.progress.${item.operation.stage}`)}
+              {!!item.operation.current && t('chat.publication.progress.imageIndex', { current: item.operation.current, total: item.operation.total })}
+            </span>}
             {item.last_success_hash && (dirty || item.last_success_hash !== state?.current_hash) && <Tag bordered={false} color='warning'>{t('chat.publication.newEdits')}</Tag>}
           </div>
         </div>
         <div className='document-publication-result-actions'>
-        {targetUrl && <a className='document-publication-open' href={targetUrl} target='_blank' rel='noopener noreferrer' aria-label={`${label(item.provider)} · ${t('chat.writerIR.openCloudDocument')}`} title={`${label(item.provider)} · ${t('chat.writerIR.openCloudDocument')}`}><ExportOutlined aria-hidden='true' /></a>}
+        {targetUrl && <ExternalLink className='document-publication-open' href={targetUrl} target='_blank' rel='noopener noreferrer' aria-label={`${label(item.provider)} · ${t('chat.writerIR.openCloudDocument')}`} title={`${label(item.provider)} · ${t('chat.writerIR.openCloudDocument')}`}><ExportOutlined aria-hidden='true' /></ExternalLink>}
         {item.operation?.actions.includes('cancel') && !readOnly && <Button size='small' onClick={async () => {
           if (lock.current) return; lock.current = true;
           try { await WorkflowSessionApi().cancelPublication(item.operation!.operation_id, { silentError: true }); await load(); }
@@ -291,6 +296,9 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
         </div>
         {item.provider === 'wechat' && status === 'succeeded' && !item.operation?.target_url && <p className='document-publication-result-note'>{t('chat.writerIR.wechatDraftLinkUnavailable')}</p>}
         {item.operation?.error_code && <p className='document-publication-error'>{documentPublicationErrorMessage(item.operation.error_code, item.provider)}</p>}
+        {item.operation?.warnings?.map(warning => <p className='document-publication-warning' key={warning}>
+          {t(`chat.publication.warnings.${warning}`, { defaultValue: warning })}
+        </p>)}
         {status === 'outcome_unknown' && <p className='document-publication-error'>{t('chat.publication.unknownHelp')}</p>}
       </li>;
       })}
@@ -326,7 +334,7 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
       okText={uncertain ? t('chat.publication.confirmAgain') : selected.length ? t('chat.publication.confirm', { platforms: selected.map(label).join('、') }) : t('chat.publication.selectPlatforms')}>
       <p className='document-publication-description'>{t('chat.publication.latestOnly')}</p>
       <div className='document-publication-scroll'>
-        {error && <Alert type='error' message={error} showIcon action={authorizationProvider && <a href={getCloudDocumentsUrl(authorizationProvider === 'feishu' || authorizationProvider === 'googledrive' || authorizationProvider === 'wechat' ? authorizationProvider : undefined)} target='_blank' rel='noopener noreferrer'>{t('chat.publication.configure')}</a>} />}
+        {error && <Alert type='error' message={error} showIcon action={authorizationProvider && <ExternalLink href={getCloudDocumentsUrl(authorizationProvider === 'feishu' || authorizationProvider === 'googledrive' || authorizationProvider === 'wechat' ? authorizationProvider : undefined)} target='_blank' rel='noopener noreferrer'>{t('chat.publication.configure')}</ExternalLink>} />}
         <div className='document-publication-section-heading'>
           <div><strong>{t('chat.publication.platforms')}</strong><span>{t('chat.publication.multipleAllowed')}</span></div>
           <Button type='text' size='small' icon={<ReloadOutlined aria-hidden='true' />} onClick={() => void refresh()} loading={loading} disabled={submitting || uncertain}>{t('common.refresh')}</Button>
@@ -357,10 +365,10 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
                   </span>
                 </span>
               </Checkbox>
-              {isObsidian && <a className='document-publication-authorize' aria-label={t('modelProvider.cloudDocuments.obsidianSetupGuideAction')}
-                href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target='_blank' rel='noopener noreferrer'>{t('modelProvider.cloudDocuments.obsidianSetupGuideShort')}</a>}
-              {authorizationNeeded && !submitting && !uncertain && <a className='document-publication-authorize' aria-label={t('chat.publication.authorizePlatform', { platform: label(provider.id) })}
-                href={getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)} target='_blank' rel='noopener noreferrer'>{t('chat.publication.authorize')}</a>}
+              {isObsidian && <ExternalLink className='document-publication-authorize' aria-label={t('modelProvider.cloudDocuments.obsidianSetupGuideAction')}
+                href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target='_blank' rel='noopener noreferrer'>{t('modelProvider.cloudDocuments.obsidianSetupGuideShort')}</ExternalLink>}
+              {authorizationNeeded && !submitting && !uncertain && <ExternalLink className='document-publication-authorize' aria-label={t('chat.publication.authorizePlatform', { platform: label(provider.id) })}
+                href={getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)} target='_blank' rel='noopener noreferrer'>{t('chat.publication.authorize')}</ExternalLink>}
               </div>;
             })}
           </div>

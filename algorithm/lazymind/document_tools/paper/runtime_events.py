@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 import logging
+import json
 import re
 from threading import RLock
 import time
@@ -10,6 +11,7 @@ import uuid
 
 from lazyllm.tools.writer.tools.base import WriterToolBase
 
+from ..artifacts import normalize_generated_markdown
 from ..writing import DraftMarkdownStreamEventEmitter
 from .model_response import normalize_response
 
@@ -73,8 +75,9 @@ class PaperRuntimeEvents:
     def _send(self, percent, phase, stages):
         self._sequence += 1
         event = {'type': 'progress', 'progress': percent, 'current_phase': phase,
-                 'public_display': {'schema_version': 1, 'event_key': f'paper-{self._sequence}',
+                 'public_display': {'schema_version': 1, 'event_key': 'paper:auto',
                                     'process_steps': stages}}
+        # Core assigns the persisted event key and stage order within the attempt.
         # One source supplies both the public timeline and legacy execution text.
         try:
             self._emit({'type': 'text', 'text': phase + '\n'})
@@ -266,6 +269,7 @@ def generate_markdown(model, prompt, *, bindings=None):
     ).strip()
     if re.match(r'^<think\b', text, re.I):
         raise ValueError('模型输出存在未闭合的思考内容。')
+    text = normalize_generated_markdown(text)
     if events and pending and not leading:
         events.delta(restore(pending))
     if events and not streaming:
@@ -294,3 +298,81 @@ def bind_runtime_events(emit, slot):
         raise
     finally:
         _current.reset(token)
+
+
+class AgentCandidatePreview:
+    """Project only public paper text from live candidate arguments; never publish drafts."""
+    FIELDS = {'research_topic': 'question', 'refine_topic': 'question',
+              'literature_review': 'evidence', 'write_outline': 'outline',
+              'write_document': 'manuscript', 'revise_document': 'manuscript',
+              'reading_reflection': 'reflection'}
+
+    def __init__(self, step):
+        self.field = self.FIELDS.get(step)
+        self.slot = step + '_document'
+        self.pending = []
+        self.events = PaperRuntimeEvents(self.pending.append, self.slot)
+        self.calls = {}
+        self.last_parse = 0.0
+
+    def drain(self):
+        events = self.pending[:]
+        self.pending.clear()
+        return events
+
+    def abort(self):
+        self.events.abort()
+        self.calls.clear()
+        emitted = self.drain()
+        self.events = PaperRuntimeEvents(self.pending.append, self.slot)
+        return emitted
+
+    def feed(self, event):
+        if not self.field:
+            return []
+        if (event.get('model_output') or {}).get('phase') == 'rollback':
+            return self.abort()
+        tag = event.get('tag')
+        if tag == 'tool_calls':
+            self.flush()
+            self.events.finish_preview()
+            self.calls.clear()
+        elif tag == 'tool_call_delta':
+            try:
+                fragments = json.loads(event.get('delta', ''))
+            except (TypeError, ValueError):
+                return []
+            for fragment in fragments if isinstance(fragments, list) else []:
+                if not isinstance(fragment, dict):
+                    continue
+                index = fragment.get('index', 0)
+                call = self.calls.setdefault(index, {'name': '', 'arguments': ''})
+                function = fragment.get('function') or {}
+                call['name'] += function.get('name') or ''
+                if call['name'] not in ('paper_submit_candidate', 'paper_prepare_candidate'):
+                    continue
+                if not call['arguments']:
+                    self.events.restart('')
+                    self.last_parse = 0.0
+                call['arguments'] += function.get('arguments') or ''
+                # A preview failure must not fail a usable manuscript.
+                if len(call['arguments']) > 4_000_000:
+                    call['name'] = 'preview_limit_reached'
+            if time.monotonic() - self.last_parse >= 0.2:
+                self.flush()
+        return self.drain()
+
+    def flush(self):
+        from json_repair import loads
+        self.last_parse = time.monotonic()
+        for call in self.calls.values():
+            if call['name'] not in ('paper_submit_candidate', 'paper_prepare_candidate') or not call['arguments']:
+                continue
+            try:
+                value = loads(call['arguments'], stream_stable=True)
+                output = value.get('output') if isinstance(value, dict) else None
+                text = output.get(self.field) if isinstance(output, dict) else None
+                if isinstance(text, str):
+                    self.events.preview(text)
+            except (ValueError, TypeError, IndexError):
+                continue

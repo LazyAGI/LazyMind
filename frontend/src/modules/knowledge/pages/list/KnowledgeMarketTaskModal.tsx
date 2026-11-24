@@ -118,7 +118,8 @@ export default function KnowledgeMarketTaskModal({ open, query, processingQuery,
   const columns: ColumnsType<TaskRow> = [
     { title: t("knowledge.taskName"), dataIndex: "name", ellipsis: true, render: (name: string, task) => {
       const label = name || (task.job_type === "knowledge_market_update_all" ? t("knowledge.taskTypeUpdateAll") : "-");
-      return task.dataset_id ? <Typography.Link className="market-task-name" title={label} href={`/lib/knowledge/detail/${encodeURIComponent(task.dataset_id)}`}>{label}</Typography.Link> : <span title={label}>{label}</span>;
+      if (task.dataset_deleted) return <span>{label} · {t("knowledge.deletedDataset")}</span>;
+      return query.canOpenDataset && task.dataset_id ? <Typography.Link className="market-task-name" title={label} href={`/lib/knowledge/detail/${encodeURIComponent(task.dataset_id)}`}>{label}</Typography.Link> : <span title={label}>{label}</span>;
     } },
     { title: t("knowledge.taskType"), dataIndex: "job_type", width: 96, render: (kind: string) => t(kind === "knowledge_market_install" ? "knowledge.taskTypeInstall" : kind === "knowledge_market_update" ? "knowledge.taskTypeUpdate" : "knowledge.taskTypeUpdateAll") },
     { title: t("knowledge.status"), width: 176, render: (_, task) => <span className={`market-task-state ${displayState(task)}`}>{t(`knowledge.taskState_${displayState(task)}`)}</span> },

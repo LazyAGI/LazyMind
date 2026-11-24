@@ -677,7 +677,9 @@ function installTailFollow(scroller, content, panel, initiallyFollowing, bottomB
 //#region src/presentation-view.ts
 /** Presentation identity comes from the committed main-chat view, never binds a run. */
 function readCodexView() {
-	const scrollers = Array.from(document.querySelectorAll("[data-app-action-timeline-scroll]")).filter((element) => element.getBoundingClientRect().width > 0 && !element.closest("[data-app-shell-tab-panel-controller]"));
+	const visibleMainScrollers = (selector) => Array.from(document.querySelectorAll(selector)).filter((element) => element.getBoundingClientRect().width > 0 && !element.closest("[data-app-shell-tab-panel-controller], [inert], [aria-hidden=\"true\"]"));
+	const timelineScrollers = visibleMainScrollers("[data-app-action-timeline-scroll]");
+	const scrollers = timelineScrollers.length > 0 ? timelineScrollers : visibleMainScrollers(".thread-scroll-container[data-mcp-app-scroll-host=\"true\"]");
 	if (scrollers.length !== 1) return null;
 	const scroller = scrollers[0];
 	const fiberKey = Object.keys(scroller).find((key) => key.startsWith("__reactFiber$"));
@@ -697,7 +699,7 @@ function readCodexView() {
 	const transcript = scroller.querySelector("[data-thread-user-message-navigation-content]");
 	const content = transcript?.parentElement;
 	if (!transcript || !content || content.parentElement !== scroller) return null;
-	const spacer = Array.from(content.children).find((element) => element !== transcript && element.classList.contains("sticky")) ?? null;
+	const spacer = content.querySelector(":scope > [aria-hidden=\"true\"][class*=\"--thread-scroll-padding-bottom\"]") ?? Array.from(content.children).find((element) => element !== transcript && element.classList.contains("sticky")) ?? null;
 	return {
 		session,
 		scroller,
@@ -710,7 +712,7 @@ function readCodexView() {
 function readPresentationSession(readView = readCodexView) {
 	const host = window;
 	const key = "__lazymindCodexPresentationSession";
-	const version = "codex-view-v2";
+	const version = "codex-view-v3";
 	if (host[key]?.version !== version) host[key]?.dispose();
 	if (!host[key]) {
 		let view = readView(), epoch = crypto.randomUUID(), queued = false;
@@ -1038,7 +1040,7 @@ function createCodexSurface(target, url, receive, changed) {
 //#region src/presentation.ts
 /** Serialized with its two helpers; mutates presentation only. */
 function mountPresentation(target, readView = readCodexView, followTail = installTailFollow, makeSurface = createCodexSurface) {
-	const host = window, key = "__lazymindCodexWorkflowTail", version = "codex-tail-v3-ready";
+	const host = window, key = "__lazymindCodexWorkflowTail", version = "codex-tail-v5-composer-spacer";
 	const gate = host.__lazymindCodexPresentationSession;
 	if (!gate || gate.read().epoch !== target.epoch || gate.read().session_id !== target.session_id) return { status: "stale" };
 	const previous = host[key];
@@ -1061,14 +1063,16 @@ function mountPresentation(target, readView = readCodexView, followTail = instal
 	if (!initial) return { status: "layout-unavailable" };
 	let scroller = initial.scroller;
 	const panel = document.createElement("section");
+	const bottomMargin = 24;
 	panel.dataset.lazymindWorkflowTail = target.session_id;
 	panel.setAttribute("aria-label", "LazyMind Workflow");
-	panel.style.cssText = "box-sizing:border-box;position:relative;flex:none;margin:16px auto 24px;width:calc(100% - 32px);max-width:var(--thread-body-max-width,var(--thread-content-max-width,760px));overflow:hidden;border:0;border-radius:12px;";
+	panel.style.cssText = `box-sizing:border-box;position:relative;flex:none;margin:16px auto ${bottomMargin}px;width:calc(100% - 32px);max-width:var(--thread-body-max-width,var(--thread-content-max-width,760px));overflow:hidden;border:0;border-radius:12px;`;
 	const surface = makeSurface(target, url, receive, () => sync());
 	panel.append(surface.element);
 	let disposed = false, expanded = false, collapsed = false, layoutReady = false, pageStatus = "loading", queued = false;
 	let follower, followedContent;
 	let observedShell;
+	let observedLayout = [];
 	function current() {
 		return gate.read().session_id === target.session_id;
 	}
@@ -1144,51 +1148,83 @@ function mountPresentation(target, readView = readCodexView, followTail = instal
 		layoutReady = true;
 		panel.hidden = false;
 		const following = follower && followedContent === view.content ? follower.status().following : view.scroller.scrollHeight - view.scroller.clientHeight - view.scroller.scrollTop <= 24;
-		if (panel.parentElement !== view.content || panel.nextElementSibling !== view.spacer) {
+		const anchor = view.spacer ?? view.content.querySelector(":scope > [data-thread-end-snap-target]");
+		if (panel.parentElement !== view.content || panel.nextElementSibling !== anchor) {
 			follower?.dispose();
 			const move = view.content.moveBefore;
-			if (panel.isConnected && typeof move === "function") move.call(view.content, panel, view.spacer);
-			else view.content.insertBefore(panel, view.spacer);
+			if (panel.isConnected && typeof move === "function") move.call(view.content, panel, anchor);
+			else view.content.insertBefore(panel, anchor);
 		}
 		if (!follower || follower.status().disposed || followedContent !== view.content) {
 			follower?.dispose();
 			followedContent = view.content;
 			follower = followTail(view.scroller, view.content, panel, following, "[data-thread-scroll-footer] button[class~=\"group/scroll-to-bottom\"]");
 		}
-		const shell = view.scroller.parentElement;
+		const shell = scroller.parentElement;
+		const footerSelector = "[data-thread-scroll-footer]";
+		const footer = scroller.querySelector(footerSelector) ?? shell.querySelector(footerSelector);
 		if (observedShell !== shell) {
 			observedShell = shell;
-			resize?.disconnect();
 			structure.disconnect();
-			resize?.observe(shell);
-			resize?.observe(view.transcript);
-			resize?.observe(panel);
 			structure.observe(shell, {
 				childList: true,
 				subtree: true
 			});
 		}
+		const layout = [
+			shell,
+			scroller,
+			view.transcript,
+			view.spacer,
+			footer
+		];
+		if (resize && layout.some((element, index) => element !== observedLayout[index])) {
+			resize.disconnect();
+			for (const element of layout) if (element) resize.observe(element);
+			observedLayout = layout;
+		}
+		const viewport = scroller.getBoundingClientRect();
+		const viewportTop = Math.max(0, viewport.top);
+		const viewportBottom = Math.max(viewportTop, Math.min(window.innerHeight, viewport.bottom));
+		const input = footer?.getBoundingClientRect();
+		const clipBottom = input && input.height > 0 && input.bottom > viewportTop ? Math.max(viewportTop, Math.min(viewportBottom, input.top)) : viewportBottom;
+		const nativeClearance = (view.spacer?.getBoundingClientRect().height ?? 0) + bottomMargin;
+		const extraClearance = Math.max(0, Math.ceil(viewport.bottom - clipBottom - nativeClearance));
+		const panelBottomAtEnd = viewport.bottom - nativeClearance - extraClearance;
+		const maxHeight = Math.max(0, Math.floor(panelBottomAtEnd - viewportTop));
+		const padding = `${extraClearance}px`;
+		const heightLimit = `${maxHeight}px`;
+		if (panel.style.paddingBottom !== padding || surface.element.style.maxHeight !== heightLimit) {
+			const scroll = follower.status();
+			const keepBottom = !scroll.dragging && scroll.distanceFromBottom <= 2;
+			panel.style.paddingBottom = padding;
+			surface.element.style.maxHeight = heightLimit;
+			if (keepBottom) scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+			else follower.align();
+		}
 		const placeholder = surface.element.getBoundingClientRect();
-		const viewport = view.scroller.getBoundingClientRect();
-		const footerHeight = view.scroller.querySelector("[data-thread-scroll-footer]")?.getBoundingClientRect().height ?? 0;
-		const rect = expanded ? bounds() : {
-			left: placeholder.left,
-			top: placeholder.top,
-			width: placeholder.width,
-			height: placeholder.height
-		};
-		const clip = expanded ? {
+		const expandedRect = expanded ? bounds() : null;
+		if (expanded && !expandedRect) {
+			setExpanded(false);
+			reply({
+				type: "lazymind.workflow.expansion",
+				expanded
+			});
+			return;
+		}
+		const rect = expandedRect ?? placeholder;
+		const clip = expandedRect ? {
 			x: rect.left,
 			y: rect.top,
 			width: rect.width,
 			height: rect.height
 		} : {
 			x: Math.max(0, viewport.left),
-			y: Math.max(0, viewport.top),
+			y: viewportTop,
 			width: viewport.width,
-			height: Math.max(0, Math.min(window.innerHeight, viewport.bottom - footerHeight) - Math.max(0, viewport.top))
+			height: clipBottom - viewportTop
 		};
-		const visible = rect.width > 0 && rect.height > 0 && rect.top + rect.height > clip.y && rect.top < clip.y + clip.height;
+		const visible = rect.width > 0 && rect.height > 0 && clip.height > 0 && rect.top + rect.height > clip.y && rect.top < clip.y + clip.height;
 		surface.sync({
 			x: rect.left,
 			y: rect.top,

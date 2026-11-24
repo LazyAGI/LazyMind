@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -143,39 +142,6 @@ func lookupSelectedDOIPDF(ctx context.Context, user, doi, title string, p *capab
 		}
 	}
 	return lookupOpenDOIPDF(ctx, doi)
-}
-
-func resolveSelectedTitle(ctx context.Context, user string, p capability.PaperSelection) (WorkInput, error) {
-	papers, _, err := externalPaperSearch(ctx, user, "openalex", p.Title, 10)
-	if err != nil {
-		return WorkInput{}, err
-	}
-	byIdentity := map[string]WorkInput{}
-	for _, candidate := range papers {
-		w := candidate.Work
-		if !selectionMetadataMatches(p, w.Title, w.Authors, w.Year) || !selectionVenueMatches(p.Venue, w.Venue) {
-			continue
-		}
-		key := firstNonEmpty(NormalizeDOI(w.DOI), w.ArxivID)
-		if key != "" {
-			byIdentity[key] = w
-		}
-	}
-	if len(byIdentity) != 1 {
-		var options []string
-		for _, w := range byIdentity {
-			options = append(options, fmt.Sprintf("%s (%d, %s; %s)", w.Title, w.Year, w.Venue, firstNonEmpty(w.DOI, w.ArxivID)))
-		}
-		slices.Sort(options)
-		if len(options) > 0 {
-			return WorkInput{}, fmt.Errorf("论文候选需要确认（%s）：%w", strings.Join(options, " / "), errPaperSelectionUnconfirmed)
-		}
-		return WorkInput{}, errPaperSelectionUnconfirmed
-	}
-	for _, w := range byIdentity {
-		return w, nil
-	}
-	return WorkInput{}, errPaperSelectionUnconfirmed
 }
 
 func resolveRequestedPaper(ctx context.Context, caller string, p capability.PaperSelection) (WorkInput, error) {

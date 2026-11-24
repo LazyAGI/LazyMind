@@ -49,7 +49,7 @@ def validate_environment():
         raise ContainerEnvironmentError('容器内执行需要 libseccomp2 和支持 Landlock ABI >= 3 的 Linux 内核') from exc
 
 
-def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
+def execute(payload, worker: Path, timeout: int, *, label: str, cancelled=None) -> dict:
     """Keep only stdin/stdout/stderr open; never inherit Chat credentials or Python state."""
     launcher = Path(__file__).with_name('sandbox.py').resolve()
     with tempfile.TemporaryDirectory(prefix='lazymind-paper-') as directory:
@@ -82,6 +82,9 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                                                cwd=scratch, close_fds=True, start_new_session=True)
                 deadline = time.monotonic() + timeout
                 while process.poll() is None:
+                    if cancelled is not None and cancelled():
+                        from concurrent.futures import CancelledError
+                        raise CancelledError(f'{label}已停止或执行授权失效')
                     if sys.platform == 'win32':
                         process.check_storage()
                     elif sys.platform == 'darwin':
@@ -124,7 +127,12 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                     process.close()
                 else:
                     try:
-                        os.killpg(process.pid, signal.SIGKILL)
+                        # Seatbelt forbids descendants; an exited macOS job has no group left to kill.
+                        if sys.platform != 'darwin' or process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+                    except PermissionError:
+                        if sys.platform != 'darwin' or process.poll() is None:
+                            raise
                     process.wait(timeout=5)

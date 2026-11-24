@@ -1,3 +1,4 @@
+import { externalLinkProps } from '@/runtime/externalNavigation';
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type Key } from 'react';
 import { createPortal } from 'react-dom';
 import { Alert, Button, Drawer, Dropdown, Input, List, Modal, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
@@ -96,6 +97,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const directReview = selectedReview && !expansionEnabled;
     const launchesExpansion = launch?.kind === 'expansion' || (launch?.kind === 'review' && !directReview);
     const eligibleReviewPapers = reviewSelection?.papers.filter(paper => reviewSelection.materials?.some(material => material.paper_id === paper.paper.paper_id && material.eligible)) || [];
+    const pendingReviewCount = reviewSelection?.materials?.filter(item => !item.eligible && pendingReviewMaterialStatuses.has(item.status)).length || 0;
     useEffect(() => {
         if (!directReview) { setReviewSelection(undefined); setSelectionLoading(false); return; }
         let active = true;
@@ -629,7 +631,11 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 </details>
                 {directReview && !reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.selectionPending', { count: selected.length })}</Typography.Paragraph>}
                 {directReview && selectionFailure && <Alert type="error" showIcon message={selectionFailure} action={<Button onClick={() => setSelectionRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
-                {directReview && !selectionLoading && !selectionFailure && eligibleReviewPapers.length < 2 && <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />}
+                {directReview && reviewSelection && !selectionFailure && eligibleReviewPapers.length < 2 && (
+                    eligibleReviewPapers.length + pendingReviewCount >= 2
+                        ? <Alert type="info" showIcon message={t('paperTasks.reviewPreparing')} />
+                        : <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />
+                )}
                 {directReview && reviewSelection && eligibleReviewPapers.length >= 2 && eligibleReviewPapers.length < reviewSelectedCount && <Alert type="warning" showIcon message={t('paperTasks.reviewSummary', { selected: reviewSelectedCount, count: eligibleReviewPapers.length, skipped: reviewSelectedCount - eligibleReviewPapers.length })} />}
             </section>}
             {launch && !launch.direction && !selectedReview && launch.kind !== 'expansion' && <div className="paper-task-launch-selection">
@@ -754,7 +760,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                                 try {
                                     const url = new URL(candidate);
                                     if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password) {
-                                        return <Typography.Link href={url.href} target="_blank" rel="noopener noreferrer">{title}</Typography.Link>;
+                                        return <Typography.Link {...externalLinkProps(url.href)} target="_blank" rel="noopener noreferrer">{title}</Typography.Link>;
                                     }
                                 } catch {
                                     // Keep looking for a valid paper destination.

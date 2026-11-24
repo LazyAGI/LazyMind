@@ -85,6 +85,14 @@ def test_stage_failure_and_retry_keep_independent_public_records():
     assert stages['paper-first']['finished_at'] and stages['paper-first']['elapsed_ms'] >= 0
 
 
+def test_paper_progress_requests_attempt_sequence():
+    emitted = []
+    with bind_runtime_events(emitted.append, 'literature_review_document') as events:
+        events.progress(10, '读取材料')
+    progress = next(event for event in emitted if event['type'] == 'progress')
+    assert progress['public_display']['event_key'] == 'paper:auto'
+
+
 def test_structured_preview_replaces_revised_fields_and_does_not_emit_raw_json():
     emitted = []
     with bind_runtime_events(emitted.append, 'peer_review_document') as events:

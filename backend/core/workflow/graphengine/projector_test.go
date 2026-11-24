@@ -264,3 +264,30 @@ func TestPrunedEntryKeepsFutureStepVisibleUntilItsRouteIsDecided(t *testing.T) {
 		t.Fatalf("finished branch must not retain revision: %+v", node)
 	}
 }
+
+func TestDecidedRoutesRequireEffectivePersistedChoices(t *testing.T) {
+	graph := &CompiledStateGraph{
+		Nodes: map[string]CompiledNode{
+			"prepare": {ID: "prepare", Route: "choice"},
+			"outline": {ID: "outline"},
+			"flat":    {ID: "flat"},
+		},
+		ControlEdges: []CompiledEdge{
+			{From: "prepare", To: "outline", When: "sectioned document"},
+			{From: "prepare", To: "flat", When: "short article"},
+		},
+	}
+	snapshot := RuntimeSnapshot{Attempts: []AttemptFact{{StepID: "prepare", Status: "succeeded", Validity: "effective"}}}
+	if p := Project(graph, snapshot); len(p.DecidedRoutes) != 0 {
+		t.Fatalf("candidate exits must not be presented as a committed route: %v", p.DecidedRoutes)
+	}
+	snapshot.Routes = []RouteFact{{From: "prepare", Activated: []string{"outline"}, Pruned: []string{"flat"}, Validity: "effective"}}
+	p := Project(graph, snapshot)
+	if len(p.DecidedRoutes) != 1 || p.DecidedRoutes[0] != "prepare" || p.Nodes["flat"].Branch != "pruned" || p.Nodes["outline"].Execution != "none" {
+		t.Fatalf("route must be known before its selected step starts: %+v", p)
+	}
+	snapshot.Routes[0].Validity = "stale"
+	if p := Project(graph, snapshot); len(p.DecidedRoutes) != 0 {
+		t.Fatalf("rewinding must invalidate the old route: %v", p.DecidedRoutes)
+	}
+}

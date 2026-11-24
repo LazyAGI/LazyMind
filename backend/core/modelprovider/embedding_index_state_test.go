@@ -239,3 +239,33 @@ func getEmbeddingIndexStatus(t *testing.T) EmbeddingIndexStatusResponse {
 	}
 	return envelope.Data
 }
+
+func TestEmbeddingSwitchIgnoresOnlyConfirmedClearedDocumentStates(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, version, artifact, fingerprint string
+		affected                                     int64
+	}{
+		{"cleared", "pending", "reembed:manual", "", "", 0},
+		{"cleared rebuild", "pending", "rebuild:manual", "", "", 0},
+		{"running", "running", "reembed:manual", "", "", 1},
+		{"failed", "failed", "reembed:manual", "", "", 1},
+		{"indexed", "succeeded", "reembed:manual", "", "", 1},
+		{"queued", "pending", "reembed:manual", "core-task:queued", "", 1},
+		{"retained vector", "pending", "rebuild:manual", "", "old-fingerprint", 1},
+		{"unknown", "pending", "", "", "", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, _ := setupProbeTest(t, &orm.EmbeddingIndexState{}, &orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{})
+			for _, row := range []any{&orm.Dataset{ID: "kb", ProcessingLevel: "indexed"}, &orm.Document{ID: "doc", DatasetID: "kb"},
+				&orm.DocumentProcessingState{DatasetID: "kb", DocumentID: "doc", IndexStatus: tc.status, EmbeddingVersion: tc.version, IndexArtifactRef: tc.artifact, IndexFingerprint: tc.fingerprint}} {
+				if err := db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			status := getEmbeddingIndexStatus(t)
+			if status.AffectedKnowledgeBases != tc.affected {
+				t.Fatalf("affected = %d, want %d", status.AffectedKnowledgeBases, tc.affected)
+			}
+		})
+	}
+}

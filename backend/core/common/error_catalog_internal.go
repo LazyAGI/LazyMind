@@ -438,6 +438,7 @@ func init() {
 	registerAdditionalError("marshal review request", http.StatusInternalServerError, 2001778)
 	registerAdditionalError("marshal sciverse check body", http.StatusInternalServerError, 2001779)
 	registerAdditionalError("marshal tavily check body", http.StatusInternalServerError, 2001780)
+	registerAdditionalError("marshal keenable check body", http.StatusInternalServerError, 2002761)
 	registerAdditionalErrorPattern("mcp rpc error %d", "MCP RPC returned an error", http.StatusBadGateway, 2001781)
 	registerAdditionalErrorPattern("mcp rpc returned %d", "MCP RPC request failed", http.StatusBadGateway, 2001782)
 	registerAdditionalError("mcp sse endpoint event not found", http.StatusNotFound, 2001783)
@@ -862,6 +863,17 @@ func init() {
 	for _, source := range []string{
 		"chat service returned no run terminal",
 		"invalid algorithm stream frame",
+		"algorithm stream interrupted chunked message",
+		"invalid algorithm chunk envelope",
+		"invalid algorithm chunk",
+		"invalid algorithm chunk metadata",
+		"algorithm chunk sequence must start at zero",
+		"algorithm chunk sequence mismatch",
+		"invalid algorithm chunk payload",
+		"invalid UTF-8 in algorithm chunked message",
+		"invalid reassembled algorithm frame",
+		"nested algorithm chunks are not supported",
+		"incomplete algorithm chunked message",
 		"read algorithm stream",
 		"algorithm emitted payload after run_finished",
 		"algorithm combined run_finished with business payload",

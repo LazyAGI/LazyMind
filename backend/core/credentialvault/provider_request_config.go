@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// ValidProviderRequestConfig bounds the optional encrypted supplier metadata.
+// ValidProviderRequestConfig bounds plaintext supplier request metadata.
 // Effective protocol is still carried by ProviderCatalogKey for old restores.
 func ValidProviderRequestConfig(raw string) bool {
 	if raw == "" {

@@ -85,10 +85,10 @@ def index_lock(*, exclusive=False):
 
 
 @contextmanager
-def index_operation(expected_generation=None):
+def index_operation(expected_generation=None, *, initializing=False):
     with index_lock():
         state = index_state()
-        if state['phase'] in ('clearing', 'cleanup_failed', 'cleared', 'detached'):
+        if not initializing and state['phase'] in ('clearing', 'cleanup_failed', 'cleared', 'detached'):
             raise IndexBusy('knowledge index is being cleared')
         if expected_generation is not None and expected_generation != state['generation']:
             raise IndexBusy('document task belongs to an earlier index generation')
@@ -118,6 +118,10 @@ def clear_chunks(generation, empty_only=False):
                     WHERE d.deleted_at IS NULL AND ds.deleted_at IS NULL
                       AND (d.document_type IS NULL OR d.document_type <> 'FOLDER')
                       AND (ds.processing_level NOT IN ('stored','parsed','chunked') OR s.index_status='succeeded')
+                      AND NOT (COALESCE(s.index_status, '')='pending'
+                        AND COALESCE(s.embedding_version, '') IN ('reembed:manual','rebuild:manual')
+                        AND COALESCE(s.index_artifact_ref, '')='' AND COALESCE(s.index_fingerprint, '')=''
+                        AND COALESCE(s.index_error_code, '')='' AND COALESCE(s.index_error_message, '')='')
                     """)).scalar_one()
                 if count:
                     raise IndexBusy('knowledge documents changed; confirmation is required')

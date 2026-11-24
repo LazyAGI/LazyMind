@@ -1,3 +1,8 @@
+DROP TABLE IF EXISTS paper_guide_progress;
+DROP TABLE IF EXISTS paper_guide_steps;
+DROP TABLE IF EXISTS paper_guide_revisions;
+DROP TABLE IF EXISTS paper_guides;
+
 -- +migrate Dialect postgres,sqlite
 DROP INDEX IF EXISTS idx_reading_job_source;
 DROP INDEX IF EXISTS idx_reading_job_enrollment;
@@ -971,3 +976,4 @@ DROP TABLE IF EXISTS user_github_star_prompts;
 DROP TABLE IF EXISTS embedding_index_states;
 
 DROP TABLE IF EXISTS workflow_action_jobs;
+DROP TABLE IF EXISTS reading_usage;

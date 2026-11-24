@@ -24,7 +24,7 @@ func TestWorkBuddyRelocatesOnlySameHostManagedEntry(t *testing.T) {
 	for _, mutate := range []func(*stdioMCPDefinition){
 		func(v *stdioMCPDefinition) { v.Env["LAZYMIND_AGENT_HOST_ID"] = "foreign" },
 		func(v *stdioMCPDefinition) { v.Env["LAZYMIND_HOME"] = "/other" },
-		func(v *stdioMCPDefinition) { v.Command = "/unrelated/lazymind" },
+		func(v *stdioMCPDefinition) { v.Args = []string{"mcp", "other"} },
 	} {
 		candidate := legacyTestStdio(old.Command, home, "host-test", WorkBuddy)
 		mutate(&candidate)
@@ -51,7 +51,7 @@ func TestWorkBuddyRelocatesOnlySameHostManagedEntry(t *testing.T) {
 	if string(backup) != string(original) {
 		t.Fatal("original config backup lost")
 	}
-	if err := removeManagedConfig(WorkBuddy, path); err != nil {
+	if err := removeManagedConfig(WorkBuddy, path, home, "host-test"); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeManagedConfig(WorkBuddy, path, self, home, "host-test", false); err != nil {

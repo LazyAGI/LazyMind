@@ -45,9 +45,10 @@ func upstreamTotalTimeout() time.Duration {
 }
 
 type ChatMessage struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	HistorySeq int    `json:"history_seq,omitempty"`
+	Role              string           `json:"role"`
+	Content           string           `json:"content"`
+	HistorySeq        int              `json:"history_seq,omitempty"`
+	CanonicalMessages []map[string]any `json:"canonical_messages,omitempty"`
 }
 
 type DatasetFilters struct {
@@ -465,6 +466,9 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			close(dataChan)
 			_ = resp.Body.Close()
 		}()
+		stopClose := context.AfterFunc(ctx, func() { _ = resp.Body.Close() })
+		defer stopClose()
+		var chunks streamChunkDecoder
 		// text
 		scanner.Buffer(nil, 512*1024)
 		for scanner.Scan() && ctx.Err() == nil {
@@ -472,9 +476,20 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			if text == "" {
 				continue
 			}
+			frame, chunkErr := chunks.accept([]byte(text))
+			if chunkErr != nil {
+				select {
+				case dataChan <- &LazyStreamData{Err: chunkErr, ErrKind: lazyStreamErrorProtocol}:
+				case <-ctx.Done():
+				}
+				return
+			}
+			if frame == nil {
+				continue
+			}
 			data := &LazyStreamData{}
 			var streamResp LazyChatResponse
-			if err := json.Unmarshal([]byte(text), &streamResp); err != nil {
+			if err := json.Unmarshal(frame, &streamResp); err != nil {
 				data.Err = fmt.Errorf("invalid algorithm stream frame: %w", err)
 				data.ErrKind = lazyStreamErrorProtocol
 			} else {
@@ -484,6 +499,12 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			case dataChan <- data:
 			case <-ctx.Done():
 				return
+			}
+		}
+		if chunks.id != "" && scanner.Err() == nil && ctx.Err() == nil {
+			select {
+			case dataChan <- &LazyStreamData{Err: fmt.Errorf("incomplete algorithm chunked message"), ErrKind: lazyStreamErrorProtocol}:
+			case <-ctx.Done():
 			}
 		}
 		if err := scanner.Err(); err != nil && ctx.Err() == nil {
@@ -845,6 +866,16 @@ func chatMessageFromMap(m map[string]any) ChatMessage {
 	role, _ := m["role"].(string)
 	content, _ := m["content"].(string)
 	msg := ChatMessage{Role: role, Content: content}
+	switch canonical := m["canonical_messages"].(type) {
+	case []map[string]any:
+		msg.CanonicalMessages = canonical
+	case []any:
+		for _, entry := range canonical {
+			if message, ok := entry.(map[string]any); ok {
+				msg.CanonicalMessages = append(msg.CanonicalMessages, message)
+			}
+		}
+	}
 	switch seq := m["history_seq"].(type) {
 	case int:
 		msg.HistorySeq = seq

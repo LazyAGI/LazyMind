@@ -20,6 +20,7 @@ export interface EpisodeRecord extends EpisodeListItem {
 }
 
 export interface EpisodeListPage {
+  supportsPageNumber?: boolean;
   items: EpisodeRecord[];
   nextPageToken: string;
   totalSize: number;
@@ -27,6 +28,7 @@ export interface EpisodeListPage {
 
 export interface ListEpisodesOptions {
   pageSize?: number;
+  page?: number;
   pageToken?: string;
 }
 
@@ -82,6 +84,7 @@ const normalizeEpisodeList = (
 
   return {
     items,
+    supportsPageNumber: value?.supports_page_number,
     nextPageToken: toStringValue(value?.next_page_token).trim(),
     totalSize: toNumberValue(value?.total_size),
   };
@@ -92,6 +95,7 @@ export async function listEpisodes(
 ): Promise<EpisodeListPage> {
   const response = await episodeApi.apiCoreMemoryEpisodesGet({
     pageSize: options.pageSize,
+    page: options.page,
     pageToken: options.pageToken || undefined,
   });
 

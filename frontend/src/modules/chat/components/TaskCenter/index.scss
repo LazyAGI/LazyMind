@@ -483,6 +483,11 @@
 }
 
 // ── Artifacts ─────────────────────────────────────────────────────────────────
+.task-artifacts-toggle.ant-btn {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
 .task-artifacts-inner {
   .task-artifacts-grid {
     display: flex;
@@ -1539,10 +1544,11 @@
     &::-webkit-progress-value { background: #2f6bff; transition: width 300ms ease; }
     &::-moz-progress-bar { background: #2f6bff; }
     &:indeterminate::-webkit-progress-bar { background: #edf1f7; }
-    &.is-indeterminate::-webkit-progress-bar {
+    &.is-indeterminate {
       background: linear-gradient(90deg, #edf1f7 25%, #2f6bff 50%, #edf1f7 75%);
       background-size: 200% 100%;
       animation: ordinary-plan-loading 1.5s linear infinite;
+      &::-webkit-progress-bar { background: transparent; }
     }
   }
 }
@@ -1582,7 +1588,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ordinary-plan-active-dot { animation: none; }
   .ordinary-plan-progress progress::-webkit-progress-value { transition: none; }
-  .ordinary-plan-progress progress.is-indeterminate::-webkit-progress-bar { animation: none; }
+  .ordinary-plan-progress progress.is-indeterminate { animation: none; }
 }
 
 .task-center--ordinary {
@@ -1634,4 +1640,22 @@
     &::-webkit-progress-value { background: status.$paused-accent; }
     &::-moz-progress-bar { background: status.$paused-accent; }
   }
+}
+
+.task-reference-sources .chat-source-panel {
+  width: 100%;
+  height: auto;
+  max-height: min(420px, 60vh);
+  overflow: auto;
+  border: 0;
+}
+
+.task-reference-sources .chat-source-list .chat-source-item {
+  height: auto;
+  min-height: 72px;
+}
+.task-reference-sources .chat-source-item-content {
+  display: -webkit-box;
+  height: 32px;
+  -webkit-line-clamp: 2;
 }

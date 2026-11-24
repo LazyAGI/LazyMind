@@ -246,6 +246,10 @@ func externalAgentOperation(method, path string) externallease.Operation {
 		(strings.HasSuffix(path, ":start") || strings.HasSuffix(path, ":finish")) {
 		return externallease.OperationInvocationWrite
 	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/workflow-sessions/") &&
+		strings.Contains(path, "/hosted-attempts/") && strings.HasSuffix(path, "/tools:list") {
+		return externallease.OperationWorkflowRead
+	}
 	if method == http.MethodGet && (path == "/workflow-runtime/v1/workflows" ||
 		strings.HasPrefix(path, "/workflow-runtime/v1/workflows/") || path == "/workflow-sessions" ||
 		strings.HasPrefix(path, "/workflow-input-resources/") || strings.HasPrefix(path, "/workflow-artifacts/") ||
@@ -262,7 +266,8 @@ func externalAgentOperation(method, path string) externallease.Operation {
 				strings.HasSuffix(path, ":advance-step-and-hand-off") ||
 				(strings.Contains(path, "/hosted-attempts/") &&
 					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit") ||
-						strings.HasSuffix(path, ":complete") || strings.HasSuffix(path, "/artifacts")))))) {
+						strings.HasSuffix(path, ":complete") || strings.HasSuffix(path, "/artifacts") ||
+						strings.HasSuffix(path, "/workers:grant") || strings.HasSuffix(path, "/preview") || strings.HasSuffix(path, "/tools:call")))))) {
 		return externallease.OperationWorkflowWrite
 	}
 	return ""
@@ -898,6 +903,7 @@ func run(ctx context.Context) error {
 	knowledge_market.RegisterAsyncJobs()
 	doc.RegisterPDFTranslationJobs()
 	doc.RegisterPDFIRJobs()
+	doc.RegisterPaperGuideJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflow.RegisterExternalWorkflowTaskJob()
 	workflow.RegisterDocumentPublicationJob()
@@ -945,6 +951,8 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
+		guideRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{doc.PaperGuideJobType}, RequireLiveLease: true, Concurrency: 2, SerializeResources: true, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+		backgroundDone = append(backgroundDone, guideRunner.Done())
 		readingRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{doc.ReadingPreparationJob}, Concurrency: 1, SerializeResources: true, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
 		backgroundDone = append(backgroundDone, readingRunner.Done(), doc.StartReadingPreparation(runtimeCtx, store.DB()))
 		paperChatRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})

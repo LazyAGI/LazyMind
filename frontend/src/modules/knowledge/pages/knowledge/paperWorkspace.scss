@@ -31,7 +31,7 @@
     width: 100%; margin: 0; padding: 4px; box-sizing: border-box;
     border: 0; border-radius: 0; background: transparent; gap: 0;
   }
-  .paper-reader-pane { border: 1px solid var(--paper-border); border-radius: 12px; background: var(--paper-surface); gap: 0; }
+  .paper-reader-pane { background: var(--paper-surface); gap: 0; }
   .paper-nav-pane { width: 236px; flex-basis: 236px; margin-right: 8px; border: 1px solid var(--paper-border); border-radius: 12px; overflow: hidden; }
   .paper-nav-pane.is-collapsed { display: none; }
   .paper-chat-pane { width: var(--paper-assistant-preview-width, var(--paper-assistant-width, 400px)); flex-basis: var(--paper-assistant-preview-width, var(--paper-assistant-width, 400px)); border: 1px solid var(--paper-border); border-radius: 12px; }
@@ -94,7 +94,13 @@
 .knowledge-container.is-document-reader {
   background: var(--paper-canvas);
   .knowledge-paper-workspace { padding-top: 4px; }
-  .paper-reader-pane { position: relative; border: 1px solid var(--paper-border); border-radius: 18px; overflow: hidden; }
+  .paper-reader-pane, .paper-reading-workspace.is-guide {
+    box-sizing: border-box;
+    position: relative;
+    border: 1px solid var(--color-border, #dfe6ef);
+    border-radius: 18px;
+    overflow: hidden;
+  }
   .paper-library-back { display: inline-flex; align-items: center; gap: 6px; padding-inline: 8px; color: var(--paper-muted); font-size: 14px; }
   .paper-workspace-header-actions { display: flex; gap: 0; align-items: center; }
   .paper-workspace-header-actions .ant-btn { width: 30px; padding: 0; color: var(--paper-muted); }
@@ -200,4 +206,451 @@
 .knowledge-container.is-document-reader .knowledge-paper-workspace[data-pane-resizing=true] {
   cursor: col-resize;
   user-select: none;
+}
+
+// Continuous guide and one mutually exclusive auxiliary pane.
+.paper-reading-workspace { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.paper-reading-panes { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.paper-reading-source { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.paper-reading-source > .paper-reader-pane { flex: 1; width: 100%; min-height: 0; }
+.paper-reading-auxiliary { display: flex; min-height: 0; }
+.paper-reading-workspace [hidden] { display: none !important; }
+.paper-guide-toolbar { position: relative; flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--paper-border); background: var(--paper-surface); }
+.paper-reading-workspace button, .paper-reading-workspace summary { cursor: pointer; }
+.paper-guide-toolbar button:not(.ant-btn), .paper-guide-empty button, .paper-guide-evidence button { min-height: 44px; border: 1px solid var(--paper-border); border-radius: 6px; padding: 6px 12px; background: var(--paper-surface); color: var(--paper-ink); }
+.paper-guide-toolbar button[aria-pressed=true] { color: var(--paper-accent); background: var(--paper-tint); }
+.paper-guide-toolbar button:disabled, .paper-guide-evidence button:disabled { opacity: .55; cursor: not-allowed; }
+.paper-guide-toolbar > div[role=group] { display: flex; }
+.paper-guide-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--paper-surface); }
+.paper-guide-status { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 20px; background: var(--paper-tint); }
+.paper-guide-reader { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
+.paper-guide-scroll { flex: 1; overflow: auto; min-width: 0; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.paper-guide-article { width: 100%; max-width: 800px; box-sizing: border-box; margin: 0 auto; padding: 28px 32px 100px; font-size: 17px; line-height: 1.8; overflow-wrap: anywhere; }
+.paper-guide-article h1 { font-size: clamp(23px,2.3vw,32px); line-height: 1.35; margin: 0 0 32px; }
+.paper-guide-article h2 { font-size: 23px; line-height: 1.5; margin: 32px 0 16px; scroll-margin-top: 24px; }
+.paper-guide-article h3 { font-size: 19px; scroll-margin-top: 24px; }
+.paper-guide-block { margin: 0 0 20px; }
+.paper-guide-block p { margin: 0; white-space: pre-wrap; }
+.paper-guide-block--callout { border-left: 3px solid var(--paper-accent); padding-left: 16px; }
+.paper-guide-attribution { font-size: 13px; color: var(--paper-muted); display: block; margin-bottom: 8px; }
+.paper-guide-block-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 32px; }
+.paper-guide-citation { color: var(--paper-accent); background: transparent; border: 0; min-height: 44px; padding: 4px; font-size: 13px; }
+.paper-guide-outline { flex: 0 0 200px; padding: 24px 12px; overflow-y: auto; border-right: 1px solid var(--paper-border); font-size: 14px; }
+.paper-guide-outline summary { padding: 10px; }
+.paper-guide-outline button { display: block; width: 100%; text-align: left; padding: 10px; min-height: 44px; border: 0; background: transparent; color: var(--paper-muted); }
+.paper-guide-outline .paper-guide-outline-subsection { padding-inline-start: 22px; overflow-wrap: anywhere; }
+.paper-guide-outline button[aria-current] { background: var(--paper-tint); color: var(--paper-accent); }
+.paper-guide-reader.is-comparing { flex-direction: column; }
+.paper-guide-reader.is-comparing .paper-guide-outline { flex: 0 0 auto; padding: 0 12px; border-right: 0; border-bottom: 1px solid var(--paper-border); max-height: 35%; }
+.paper-guide-empty { max-width: 740px; margin: 0 auto; padding: 40px 24px; overflow: auto; }
+.paper-guide-empty h1 { font-size: 26px; }.paper-guide-empty p { line-height: 1.8; }
+.paper-guide-warning { padding: 10px 20px; margin: 0; border-left: 3px solid var(--paper-accent); background: var(--paper-tint); font-size: 14px; }
+.paper-guide-evidence-overlay { position: absolute; inset: 12px; z-index: 130; background: #0005; display: grid; place-items: center; padding: 16px; }
+.paper-guide-evidence { box-sizing: border-box; max-width: 680px; width: 100%; max-height: 100%; overflow: auto; padding: 24px; background: var(--paper-surface); border: 1px solid var(--paper-border); border-radius: 10px; }
+.paper-guide-evidence > div:first-child { display: flex; align-items: center; justify-content: space-between; }
+.paper-guide-evidence blockquote { margin: 16px 0; line-height: 1.7; white-space: pre-wrap; }
+.paper-guide-asset { margin: 20px 0; min-height: 200px; }
+.paper-guide-asset > div[role=status] { min-height: 180px; display: grid; place-items: center; background: var(--paper-canvas); }
+.paper-guide-image-button { display: block; width: min(100%, calc(var(--guide-figure-height) * var(--guide-image-ratio))); border: 0; padding: 0; background: transparent; }
+.paper-guide-asset img { max-width: 100%; height: auto; object-fit: contain; }
+.paper-guide-asset figcaption { font-size: 13px; color: var(--paper-muted); }
+.paper-guide-lightbox { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; background: var(--paper-surface); padding: 16px; overflow: auto; }
+.paper-guide-lightbox button { align-self: flex-end; min-width: 44px; min-height: 44px; }.paper-guide-lightbox img { max-width: 100%; }
+.paper-reading-workspace.is-guide .paper-reading-auxiliary { flex: 1; min-width: 0; }
+.knowledge-container.is-document-reader .paper-reading-workspace.is-guide .paper-chat-pane { width: 100%; flex: 1; position: static; transform: none; max-height: none; border-radius: 0; }
+.paper-reading-workspace.is-guide[data-dual=true] .paper-guide-main { min-width: 480px; }
+.paper-reading-workspace.is-guide[data-dual=true] .paper-reading-source, .paper-reading-workspace.is-guide[data-dual=true] .paper-reading-auxiliary { min-width: 480px; flex: 1; }
+.paper-reading-workspace.is-guide[data-dual=false] .paper-reading-source, .paper-reading-workspace.is-guide[data-dual=false] .paper-reading-auxiliary { width: 100%; flex: 1; }
+@media(max-width:1100px) { .paper-guide-reader { flex-direction: column; }.paper-guide-outline { flex: 0 0 auto; padding: 0 12px; max-height: 30%; border-right: 0; }.paper-guide-outline details:not([open]) { padding: 0; }.paper-guide-article { padding: 20px 24px 80px; } }
+@media(max-width:600px) { .paper-guide-article { font-size: 16px; padding: 20px 16px 80px; }.paper-guide-toolbar { padding: 4px; gap: 4px; }.paper-guide-toolbar button:not(.ant-btn) { padding: 6px 10px; }.paper-guide-evidence-overlay { inset: 0; padding: 0; }.paper-guide-evidence { border-radius: 0; max-height: 100%; height: 100%; }}
+
+// Preserve the source reader's existing panel placement through its new wrapper.
+.knowledge-container.is-document-reader .knowledge-paper-workspace {
+  .paper-reading-workspace:not(.is-guide) .paper-reading-source { order: 2; }
+  .paper-reading-workspace:not(.is-guide) .paper-pane-divider { order: 3; }
+  .paper-reading-workspace:not(.is-guide) .paper-reading-auxiliary { order: 4; }
+  &[data-panel-layout=left] .paper-reading-workspace:not(.is-guide) {
+    .paper-reading-auxiliary { order: 0; }.paper-pane-divider { order: 1; }
+  }
+  &[data-compact=true] .paper-reading-workspace:not(.is-guide) .paper-reading-auxiliary,
+  &[data-panel-layout=floating] .paper-reading-workspace:not(.is-guide) .paper-reading-auxiliary,
+  &[data-panel-layout=fullscreen] .paper-reading-workspace:not(.is-guide) .paper-reading-auxiliary { flex: 0 0 0; }
+  &[data-compact=true] .paper-reading-workspace:not(.is-guide) .paper-chat-pane { position: absolute; z-index: 64; inset: 4px 4px 4px auto; width: min(420px,calc(100% - 8px)); }
+  &[data-panel-layout=floating][data-panel-open=true] .paper-reading-workspace:not(.is-guide) .paper-chat-pane {
+    position: absolute; z-index: 70; inset: auto;
+    top: clamp(8px,var(--paper-panel-y,56px),max(8px,calc(100% - 628px)));
+    left: clamp(8px,var(--paper-panel-x,32px),max(8px,calc(100% - var(--paper-assistant-width,400px) - 8px)));
+    width: min(var(--paper-assistant-preview-width,var(--paper-assistant-width,400px)),calc(100% - 16px));
+    height: min(620px,calc(100% - 16px)); border-radius: 16px; box-shadow: 0 12px 40px #18273a24;
+    .paper-chat-open-content { width: 100%; }.paper-chat-toolbar { cursor: grab; touch-action: none; }
+  }
+  &[data-panel-layout=fullscreen][data-panel-open=true] .paper-reading-workspace:not(.is-guide) {
+    .paper-reading-source { visibility: hidden; }
+    .paper-chat-pane { position: absolute; z-index: 75; inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); }
+    .paper-chat-open-content { width: 100%; }
+  }
+  .paper-reading-workspace.is-guide .paper-chat-open-content { width: 100%; }
+}
+.paper-guide-image-frame { --guide-figure-height: 320px; height: var(--guide-figure-height); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; overflow: hidden; }
+.paper-guide-page-link { min-height: 0; }
+.paper-guide-page-link .paper-guide-image-frame { height: auto; padding: 12px; }
+.paper-guide-image-frame > div[role=status] { padding: 20px; }
+.paper-guide-equation { max-width: 100%; overflow-x: auto; padding-block: 16px; }
+
+// Full PDF controls wrap within their source pane, independently of viewport
+// width. Translation's compact/navigation header keeps its existing layout.
+@container pdf-reader (max-width: 520px) {
+  .paper-reading-workspace .pdf-reader-header:not(.pdf-reader-header--compact) {
+    grid-template-columns: minmax(0, 1fr);
+    .pdf-reader-header-start { grid-column: 1; grid-row: 1; }
+    .pdf-reader-header-end {
+      grid-column: 1; grid-row: 2; width: 100%; min-width: 0;
+      justify-content: flex-start; flex-wrap: wrap;
+      > .pdf-reader-tools { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; }
+    }
+  }
+}
+
+// KaTeX vlist-s extends 2px past its nominal width; reserve that space instead of scrolling short inline math.
+.paper-guide-math { display: inline-block; max-width: 100%; box-sizing: border-box; overflow: auto hidden; vertical-align: middle; padding: 2px; }
+.paper-guide-math.is-display { display: block; margin-block: 1em; }
+.paper-guide-math .katex-display { margin: 0; }
+.paper-guide-coverage-warnings { padding-left: 20px; }
+.paper-guide-coverage-warnings li + li { margin-top: 8px; }
+
+.paper-guide-table-text { min-width: 0; }
+.paper-guide-table-prose, .paper-guide-table-fallback { white-space: pre-wrap; overflow-wrap: anywhere; }
+.paper-guide-table-scroll { width: 100%; max-width: 100%; min-width: 0; overflow: auto hidden; margin-block: 12px; }
+.paper-guide-table-scroll table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.6; }
+.paper-guide-table-scroll th, .paper-guide-table-scroll td { min-width: 96px; max-width: 320px; padding: 10px 12px; border: 1px solid var(--paper-border); vertical-align: top; overflow-wrap: anywhere; }
+.paper-guide-table-scroll th { font-weight: 600; background: var(--paper-tint); }
+.paper-guide-table-scroll:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: -2px; }
+
+// A stable, centered reading-mode pill, shared by the PDF and guide surfaces.
+.paper-reading-workspace .paper-guide-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  min-height: 52px;
+  padding: 6px 16px;
+  box-sizing: border-box;
+  gap: 8px;
+}
+.paper-guide-back { min-width: 0; justify-self: start; }
+.paper-reading-workspace .paper-guide-toolbar > div[role=group] {
+  grid-column: 2;
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 999px;
+  background: #f1f1f3;
+}
+.paper-reading-workspace .paper-guide-toolbar > div[role=group] button {
+  min-height: 32px;
+  min-width: 64px;
+  padding: 5px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #71717a;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 22px;
+}
+.paper-reading-workspace .paper-guide-toolbar > div[role=group] button[aria-pressed=true] {
+  color: #7c354d;
+  background: #fff;
+  box-shadow: 0 1px 3px #18181b18;
+}
+.paper-reading-workspace .paper-guide-toolbar > div[role=group] button:focus-visible {
+  outline: 2px solid #7c354d;
+  outline-offset: 2px;
+}
+
+// The PDF and guide use the same header slot; there is no second mode row.
+.paper-reading-workspace .pdf-reader-workspace .pdf-reader-header:has(.paper-mode-switch-slot) {
+  grid-template-columns: minmax(100px, 1fr) auto minmax(0, 1fr);
+  min-height: 52px;
+  .pdf-reader-header-start { grid-column: 1; grid-row: 1; }
+  .paper-mode-switch-slot { grid-column: 2; grid-row: 1; }
+  .pdf-reader-header-end { grid-column: 3; grid-row: 1; overflow-x: auto; }
+}
+.paper-mode-switch-slot > [role=group] { display: flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--paper-canvas); }
+.paper-reading-workspace .paper-mode-switch-slot button { min-height: 32px; min-width: 64px; padding: 5px 16px; border: 0; border-radius: 999px; background: transparent; color: var(--paper-muted); font-size: 13px; line-height: 22px; }
+.paper-reading-workspace .paper-mode-switch-slot button[aria-pressed=true] { background: var(--paper-surface); color: var(--paper-accent); box-shadow: 0 1px 3px #18181b18; }
+.paper-reading-workspace .paper-guide-toolbar > div[role=group] { background: var(--paper-canvas); }
+.paper-reading-workspace .paper-guide-toolbar > div[role=group] button[aria-pressed=true] { color: var(--paper-accent); background: var(--paper-surface); }
+.guide-generation-progress { flex: none; padding: 18px 24px; border-bottom: 1px solid var(--paper-border); background: var(--paper-surface); font-size: 13px; }
+.guide-generation-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 14px; }
+.guide-generation-progress ol { display: flex; gap: 24px; flex-wrap: wrap; list-style: none; padding: 0; margin: 16px 0; }
+.guide-generation-progress li { display: flex; align-items: center; gap: 8px; color: var(--paper-muted); }
+.guide-generation-progress li > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--paper-canvas); }
+.guide-generation-progress li[data-state=active] { color: var(--paper-accent); font-weight: 600; }
+.guide-generation-progress li[data-state=active] > span { background: var(--paper-tint); }
+.guide-generation-progress progress { width: 100%; height: 5px; accent-color: var(--paper-accent); }
+.guide-generation-progress p { margin: 6px 0 0; color: var(--paper-muted); }
+.guide-elapsed { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.paper-guide-preparing { width: min(800px, 100%); box-sizing: border-box; margin-inline: auto; padding: 32px; overflow: hidden; }
+.guide-chapter-placeholder { min-height: 440px; }
+.guide-chapter-placeholder > p { font-size: 14px; color: var(--paper-muted); }
+.guide-chapter-placeholder strong { color: var(--paper-accent); }
+.guide-skeleton { display: flex; flex-direction: column; gap: 14px; padding-block: 22px; }
+.guide-skeleton > span, .guide-skeleton-figure { display: block; height: 13px; border-radius: 5px; background: var(--paper-border); animation: guide-skeleton-pulse 1.8s ease-in-out infinite; }
+.guide-skeleton > span:nth-child(4n) { width: 72%; }
+.guide-skeleton > .guide-skeleton-heading { height: 24px; width: 42%; margin-bottom: 12px; }
+.guide-skeleton > .guide-skeleton-figure { height: 150px; margin-block: 12px; }
+.is-flashpapers .paper-guide-outline small[data-state=generating] { color: var(--paper-accent); opacity: 1; }
+.is-flashpapers .paper-guide-outline small { font-size: 12px; opacity: 1; }
+@keyframes guide-skeleton-pulse { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .guide-skeleton > * { animation: none; } }
+@container pdf-reader (max-width: 700px) {
+  .paper-reading-workspace .pdf-reader-workspace .pdf-reader-header:has(.paper-mode-switch-slot) {
+    grid-template-columns: auto auto minmax(0, 1fr); gap: 6px; padding-inline: 6px;
+    .pdf-reader-header-end { width: auto; flex-wrap: nowrap; }
+  }
+  .paper-reading-workspace .paper-mode-switch-slot button { min-width: 48px; padding-inline: 8px; min-height: 44px; }
+}
+@media(max-width:600px) { .guide-generation-progress { padding: 12px 16px; }.guide-generation-progress ol { gap: 12px; }.guide-generation-progress li { font-size: 12px; } }
+@media(min-width:721px) {
+  .paper-guide-reader.is-flashpapers:not(.is-comparing) { flex-direction: row; }
+  .paper-guide-reader.is-flashpapers:not(.is-comparing) .paper-guide-outline { flex: 0 0 216px; max-height: none; padding: 24px 12px; border-right: 1px solid var(--paper-border); }
+}
+
+// Fixed reader chrome: a quiet chapter rail and a single editorial column.
+.paper-reading-workspace .guide-section-icon { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 26px; height: 28px; color: inherit; border-radius: 7px; }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline {
+  background: var(--paper-canvas); border-right: 1px solid var(--paper-border);
+  padding: 28px 16px; box-sizing: border-box;
+}
+.paper-reading-workspace .is-flashpapers .paper-guide-outline summary { list-style: none; padding: 0 12px 12px; color: var(--paper-muted); font-size: 12px; font-weight: 600; letter-spacing: .08em; }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline summary::-webkit-details-marker { display: none; }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline button {
+  display: flex; align-items: center; gap: 10px; min-height: 44px;
+  padding: 10px 12px; margin: 3px 0; border-radius: 8px; line-height: 1.55;
+  font-size: 14px; font-weight: 500; color: var(--paper-muted); transition: background 140ms ease, color 140ms ease;
+}
+.paper-reading-workspace .is-flashpapers .paper-guide-outline button:hover { background: var(--paper-surface); color: var(--paper-ink); }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline button[aria-current] { color: var(--paper-accent); background: var(--paper-tint); font-weight: 600; }
+.guide-outline-label { min-width: 0; overflow-wrap: anywhere; }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline .guide-ready-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline small:not(.guide-ready-label) { margin-top: 3px; font-size: 12px; font-weight: 400; }
+.paper-reading-workspace .is-flashpapers .paper-guide-article { max-width: 960px; padding: 40px clamp(24px, 4vw, 64px) 100px; }
+.guide-article-kicker { display: flex; gap: 8px; align-items: center; margin-bottom: 18px; font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--paper-accent); }
+.paper-reading-workspace .is-flashpapers .paper-guide-article h1 { max-width: 24em; font-size: clamp(28px, 2.7vw, 40px); line-height: 1.35; margin-top: 0; letter-spacing: -.025em; }
+.paper-reading-workspace .is-flashpapers .flashpapers-subtitle { font-size: 17px; line-height: 1.8; margin-bottom: 36px; }
+.paper-reading-workspace .is-flashpapers .paper-guide-article h2 { display: flex; align-items: center; gap: 12px; font-size: 25px; padding-top: 32px; margin-top: 0; margin-bottom: 24px; }
+.paper-reading-workspace .is-flashpapers h2 .guide-section-icon { width: 32px; height: 32px; font-size: 21px; color: var(--paper-accent); background: var(--paper-tint); border-radius: 8px; }
+.paper-reading-workspace .is-flashpapers [data-guide-role=overview] > .paper-guide-block:first-of-type { padding: 20px 24px; border-left: 3px solid var(--paper-accent); border-radius: 0 12px 12px 0; background: var(--paper-tint); }
+.paper-reading-workspace .guide-playground { border-radius: 14px; }
+.paper-reading-workspace .guide-playground-toolbar { background: var(--paper-canvas); padding: 12px 18px; }
+.paper-reading-workspace .guide-generation-progress { margin: 16px 20px 0; border: 1px solid var(--paper-border); border-radius: 12px; background: var(--paper-surface); }
+.paper-reading-workspace .guide-chapter-placeholder { padding: 20px 24px; border: 1px solid var(--paper-border); border-radius: 12px; background: var(--paper-canvas); }
+.paper-reading-workspace .guide-chapter-placeholder > p { margin: 0; line-height: 1.7; }
+.paper-reading-workspace .paper-guide-empty { box-sizing: border-box; max-width: 740px; margin: auto; padding: 48px 40px; text-align: center; }
+.guide-empty-symbol { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 24px; border: 1px solid var(--paper-border); border-radius: 18px; color: var(--paper-accent); background: var(--paper-tint); }
+.paper-reading-workspace .guide-empty-symbol .guide-section-icon { font-size: 28px; width: 32px; height: 32px; }
+.paper-guide-empty .guide-article-kicker { justify-content: center; }
+.paper-reading-workspace .paper-guide-empty h1 { font-size: 23px; line-height: 1.5; overflow-wrap: anywhere; margin: 0 0 24px; }
+.paper-reading-workspace .paper-guide-empty h2 { font-size: 17px; font-weight: 500; margin-bottom: 12px; }
+.paper-reading-workspace .paper-guide-empty p { color: var(--paper-muted); font-size: 14px; line-height: 1.8; }
+.guide-empty-features { display: flex; justify-content: center; flex-wrap: wrap; gap: 20px; margin: 28px 0; color: var(--paper-muted); font-size: 13px; }
+.guide-empty-features > span { display: flex; align-items: center; gap: 7px; }
+.paper-reading-workspace .paper-guide-empty button { border-color: var(--paper-accent); color: var(--paper-surface); background: var(--paper-accent); padding: 10px 24px; border-radius: 9px; font-weight: 500; }
+.paper-reading-workspace .paper-guide-empty button:disabled { opacity: .5; cursor: not-allowed; }
+.paper-reading-workspace .guide-error-notice { display: flex; align-items: flex-start; gap: 10px; padding: 16px 20px; margin: 16px 20px 0; border: 1px solid var(--paper-border); border-radius: 12px; font-size: 14px; line-height: 1.7; }
+.paper-reading-workspace .paper-guide-status { gap: 12px; padding: 12px 20px; font-size: 13px; }
+.paper-reading-workspace .paper-guide-status button { border-radius: 8px; }
+@media(min-width:721px) { .paper-reading-workspace .paper-guide-reader.is-flashpapers:not(.is-comparing) .paper-guide-outline { flex-basis: 232px; padding: 28px 16px; } }
+@media(max-width:720px) {
+  .paper-reading-workspace .is-flashpapers .paper-guide-outline { padding: 12px; max-height: 30%; }
+  .paper-reading-workspace .is-flashpapers .paper-guide-outline summary { padding: 6px 12px; }
+  .paper-reading-workspace .is-flashpapers .paper-guide-article { padding: 28px 20px 72px; }
+  .paper-reading-workspace .paper-guide-empty { padding: 32px 20px; }
+  .paper-reading-workspace .guide-generation-progress { margin: 12px 12px 0; }
+}
+@media(prefers-reduced-motion:reduce) { .paper-reading-workspace .is-flashpapers .paper-guide-outline button { transition: none; } }
+
+.paper-reading-workspace { overflow: hidden; }
+.paper-reading-panes, .paper-guide-main { overflow: hidden; }
+.paper-guide-scroll { min-height: 0; }
+.paper-reading-workspace .paper-guide-toolbar { z-index: 2; }
+/* Generation controls stay outside the article flow. */
+.guide-toolbar-actions { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.paper-guide-toolbar .guide-status-trigger { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; border: 0; background: transparent; font-size: 13px; }
+.guide-status-trigger > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guide-progress-compact { display: flex; align-items: center; gap: 8px; color: var(--paper-ink); }
+.guide-progress-estimate, .guide-progress-elapsed { color: var(--paper-muted); font-size: 12px; }
+.guide-progress-elapsed { font-variant-numeric: tabular-nums; }
+.guide-progress-track {
+  display: inline-block; flex: none; width: 26px; height: 4px; border-radius: 4px;
+  overflow: hidden; background: var(--paper-border);
+  i { display: block; height: 100%; background: var(--paper-accent); transform-origin: left; transition: transform .3s ease-out; }
+  &.is-indeterminate i { width: 45%; animation: guide-progress-slide 1.4s ease-in-out infinite alternate; }
+}
+@keyframes guide-progress-slide { from { transform: translateX(0); } to { transform: translateX(120%); } }
+@media (prefers-reduced-motion: reduce) {
+  .guide-progress-track i, .guide-progress-track.is-indeterminate i { transition: none; animation: none; }
+}
+.guide-chapter-activity {
+  margin-block: 10px; font-size: 13px;
+  ul { margin: 6px 0; padding-inline-start: 18px; color: var(--paper-muted); }
+}
+.guide-toolbar-details { width: min(420px, calc(100vw - 48px)); max-height: 65vh; overflow-y: auto; color: var(--paper-ink); }
+.guide-error-details { margin: 8px 0; font-size: 13px; }
+.guide-error-details p { margin: 6px 0; }
+.guide-error-details code { user-select: all; }
+.guide-toolbar-details .guide-generation-progress { padding: 8px 0 12px; border: 0; margin: 0; }
+.guide-toolbar-details .guide-generation-progress ol { gap: 12px; }
+.guide-toolbar-details .paper-guide-status { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0; background: transparent; }
+.guide-toolbar-details .paper-guide-status > span { flex-basis: 100%; }
+.guide-toolbar-details .guide-error-notice, .guide-toolbar-details .paper-guide-warning { margin: 8px 0; padding: 8px; }
+@media(max-width: 1050px) { .guide-progress-estimate { display: none; } }
+@media(max-width: 720px) {
+  .paper-reading-workspace .paper-guide-toolbar { grid-template-columns: auto auto minmax(0, 1fr); padding-inline: 8px; }
+  .guide-progress-elapsed { display: none; }
+  .paper-guide-toolbar .guide-status-trigger { padding-inline: 6px; }
+}
+.guide-toolbar-details { overflow-x: hidden; overflow-wrap: anywhere; }
+.paper-reading-workspace .paper-guide-asset .paper-guide-image-frame img { display: block; width: 100%; height: auto; margin: 0; }
+
+.paper-reading-workspace .is-flashpapers .paper-guide-article { max-width: 1140px; font-size: 19px; line-height: 1.9; padding-inline: clamp(24px, 3vw, 48px); }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline button { font-size: 15px; }
+.paper-reading-workspace .is-flashpapers .flashpapers-subtitle { font-size: 20px; }
+.paper-reading-workspace .paper-guide-asset figcaption { font-size: 15px; line-height: 1.65; margin-top: 12px; text-align: center; }
+.paper-guide-block--formula .paper-guide-math.is-display { display: block; max-width: 100%; padding-block: 8px; }
+@media(max-width:720px) { .paper-reading-workspace .is-flashpapers .paper-guide-article { font-size: 18px; padding-inline: 20px; } }
+
+.guide-language-field { display: flex; align-items: center; gap: 16px; font-size: 15px; }
+.paper-guide-empty .guide-language-field { justify-content: center; margin: 24px 0 18px; }
+.guide-language-field .ant-select { min-width: 150px; }
+.guide-reading-language { width: 108px; }
+@media(max-width: 720px) {
+  .guide-toolbar-actions { gap: 4px; }
+  .guide-reading-language { min-width: 76px; }
+}
+
+// Chapter glyphs share one stroke family and never change layout on selection.
+.paper-reading-workspace .guide-section-icon svg { display: block; width: 22px; height: 22px; }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline button .guide-section-icon { background: color-mix(in srgb, currentColor 5%, transparent); }
+.paper-reading-workspace .is-flashpapers .paper-guide-outline button[aria-current] .guide-section-icon { background: var(--paper-surface); }
+.paper-reading-workspace .is-flashpapers h2 .guide-section-icon { width: 36px; height: 36px; border-radius: 10px; }
+.paper-reading-workspace .is-flashpapers h2 .guide-section-icon svg { width: 24px; height: 24px; }
+
+.guide-paper-swatch {
+  display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 1px solid #0003;
+  &.swatch-white { background: #fff; }
+  &.swatch-cream { background: #f6efde; }
+  &.swatch-sage { background: #e8f0e5; }
+}
+
+.paper-reading-workspace[data-guide-paper] {
+  color-scheme: light;
+  &[data-guide-light=night] { color-scheme: dark; }
+  --paper-surface: light-dark(#fff, #20242a);
+  --paper-ink: light-dark(#28313c, #e1e3e7);
+  --paper-accent: light-dark(#165ba5, #9dc7ff);
+  &[data-guide-paper=cream] {
+    --paper-surface: light-dark(#f6efde, #2b261f);
+    --paper-ink: light-dark(#3e352b, #eadfcd);
+    --paper-accent: light-dark(#865324, #edc18a);
+  }
+  &[data-guide-paper=sage] {
+    --paper-surface: light-dark(#e8f0e5, #202923);
+    --paper-ink: light-dark(#283c30, #d8e6da);
+    --paper-accent: light-dark(#326649, #9ed7b1);
+  }
+  --paper-muted: color-mix(in srgb, var(--paper-ink) 76%, var(--paper-surface));
+  --paper-border: color-mix(in srgb, var(--paper-ink) 22%, var(--paper-surface));
+  --paper-canvas: color-mix(in srgb, var(--paper-ink) 4%, var(--paper-surface));
+  --paper-tint: color-mix(in srgb, var(--paper-accent) 13%, var(--paper-surface));
+  color: var(--paper-ink);
+  .paper-guide-toolbar {
+    .guide-toolbar-cluster {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      min-width: 0;
+      padding: 3px;
+      border-radius: 999px;
+      background: var(--paper-canvas);
+      &:empty { display: none; }
+    }
+    .guide-toolbar-tools { flex: none; }
+    .guide-toolbar-cluster > .ant-btn,
+    .guide-status-trigger,
+    .guide-reading-language .ant-select-selector {
+      height: 32px;
+      min-height: 32px;
+      padding-inline: 10px;
+      border: 0;
+      border-radius: 999px;
+      box-shadow: none;
+      color: var(--paper-muted);
+      background: transparent;
+      font-size: 13px;
+      line-height: normal;
+    }
+    .guide-toolbar-tools > .ant-btn { width: 32px; padding: 0; }
+    .guide-reading-language { flex: 0 0 auto; width: 100px; }
+    .guide-reading-language .ant-select-arrow { color: var(--paper-muted); }
+    .guide-toolbar-cluster > button:enabled:hover,
+    .guide-toolbar-cluster > button.ant-dropdown-open,
+    .guide-status-trigger.ant-popover-open,
+    .guide-reading-language:not(.ant-select-disabled):is(:hover,.ant-select-open) .ant-select-selector {
+      background: var(--paper-surface);
+      color: var(--paper-ink);
+      box-shadow: 0 1px 3px #18181b18;
+    }
+    .paper-guide-back .paper-library-back:hover { color: var(--paper-ink); background: var(--paper-canvas); }
+    .guide-toolbar-cluster > button:focus-visible,
+    .paper-guide-back button:focus-visible,
+    .guide-reading-language:has(input:focus-visible) .ant-select-selector {
+      outline: 2px solid var(--paper-accent);
+      outline-offset: 1px;
+    }
+    .guide-toolbar-cluster > button:disabled { opacity: .55; }
+    @media (pointer: coarse) {
+      .guide-toolbar-cluster > button, .guide-reading-language,
+      .guide-reading-language .ant-select-selector { min-height: 44px; }
+      .guide-toolbar-tools > button { min-width: 44px; }
+    }
+  }
+  .paper-guide-toolbar > div[role=group] button { color: var(--paper-muted); }
+  .paper-guide-empty > button { color: var(--paper-surface); }
+}
+@media (max-width: 720px) {
+  .paper-reading-workspace[data-guide-paper] .guide-toolbar-actions {
+    grid-column: 1 / -1; justify-self: stretch; justify-content: flex-end; flex-wrap: wrap;
+  }
+}
+
+// Keep the library return target anchored to the first row when either toolbar wraps.
+.paper-reading-workspace {
+  --library-back-inset: 12px;
+  --library-back-height: 38px;
+  @media (max-width: 720px) { --library-back-inset: 8px; }
+  @media (pointer: coarse) { --library-back-height: 44px; }
+
+  .pdf-reader-workspace .pdf-reader-header:has(.paper-mode-switch-slot),
+  .paper-guide-toolbar {
+    padding-inline-start: var(--library-back-inset);
+    padding-block-start: 0;
+
+    :is(.pdf-reader-header-start, .paper-guide-back) {
+      align-self: start;
+      margin-block-start: calc((52px - var(--library-back-height)) / 2);
+    }
+    :is(.pdf-reader-header-start, .paper-guide-back) .paper-library-back {
+      box-sizing: border-box;
+      height: var(--library-back-height);
+      min-height: var(--library-back-height);
+      padding: 0 8px;
+      border: 0;
+      border-radius: 999px;
+      font-size: 14px;
+      line-height: 20px;
+      font-weight: 400;
+      background: transparent;
+      color: var(--paper-muted);
+    }
+  }
 }

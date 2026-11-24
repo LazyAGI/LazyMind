@@ -1260,6 +1260,10 @@ func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm
 		if err := db.WithContext(ctx).Where("session_id = ? AND selected = ? AND validity = ?", sessionID, true, "effective").Order("slot_id ASC, list_index ASC").Find(&rows).Error; err != nil {
 			return nil, err
 		}
+		rows, err := controlstore.PresentationSlots(db.WithContext(ctx), rows)
+		if err != nil {
+			return nil, err
+		}
 		return orderSlotRevisions(ctx, db, sessionID, rows), nil
 	}
 
@@ -1301,6 +1305,10 @@ func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm
 		seenIDs[row.ID] = true
 	}
 
+	result, err = controlstore.PresentationSlots(db.WithContext(ctx), result)
+	if err != nil {
+		return nil, err
+	}
 	return orderSlotRevisions(ctx, db, sessionID, result), nil
 }
 

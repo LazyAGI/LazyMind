@@ -30,6 +30,44 @@ LazyMind 不根据模型评分决定外部产物是否合格，不要求语义�
 
 更新工作流时应重新发布，再启动新运行测试共享契约。已有运行和已有 PPT 产物仍使用原来固定的 revision；打开历史结果不会触发重跑。
 
+## 论文 Agent 契约（paper-agent-v1）
+
+采用 `paper-agent-v1` 的论文 revision 使用下面的更严格规则；其他 Workflow 和历史固定 revision 保持各自原有协议。
+
+- 共享方法在同一包的 `scenario/execution.md` 和 `scenario/methods/`，随固定 revision 的完整步骤契约一起交接。原生 runner 将这些文件全文加入步骤目标，外部执行方读取完整契约文件。启动要求和本轮要求分别保留。
+- 原生由 LazyMind SubAgent 推理；外部由宿主原生步骤 SubAgent 推理。检索策略、材料筛选、证据解释、正文生成、审稿判断及有限修复由执行 Agent 完成。工具不索取模型响应，不调用 `run_paper_step` 或 generation 桥。
+- 论文步骤使用 `tools_only` 提供完整声明工具；原生大结果仅通过 `paper_read_result` 分页读取当前执行返回的 tool_spill 引用。`terminal_tools` 只指定原生提交出口。不能使用 `terminal_tools_only`，否则准备、检索和执行工具会被隐藏。
+- `paper_prepare_inputs` 返回紧凑的输入及业务 schema 索引。较大字段使用带 `material_id`、字符数和 SHA-256 的精确引用；通过 `paper_read_material` 分页读取 `input:<字段>` 或 `contract:<字段>`，拼接全部页后再解析 JSON。引用不能替代读取实际材料或 schema，服务端保留完整输入。原生和外部宿主使用相同索引与分页字节。已有数据准备优先提交真实表 ID，由服务端恢复原表，不在长 JSON 中重抄数据。正文要求先有大纲，正常运行中的审核由 Core 控制，不能自填批准。
+- `peer_review` 的目录与分页读取仅提供当前稿件、相关参考文献和已使用图表；上游分析、原始数据和未引用材料不可由材料 ID 绕过读取。数据附件不会仅因正文提及文件名而被作为参考文献提供。审稿不会修改稿件或授权修订。
+
+外部 Controller 领取步骤后调用 `workflow.worker.grant`，提供当前 session、execution、Controller handle、稳定 command_id 和 Connector 所在机器的私有 runtime 目录。Connector 返回私有 `grant_file` 及启动参数：
+
+```text
+lazymind mcp workflow-worker <grant_file>
+```
+
+该 stdio MCP 服务只暴露 `workflow.tool.list` 和 `workflow.tool.call`。session、attempt 和受限身份固定在连接中，模型参数不能替换。授权绑定原 Controller 租约、步骤和 revision；停止、完成、过期或重新领取会使旧 worker 失效。worker 不能审核、跳步、发布或完成步骤，也不能再授予其他 worker。连接凭据不进入业务契约和论文产物。
+
+宿主必须能为本会话原生子 Agent 接入该受限连接。工具动态更新不可用时，子 Agent 可以直接使用上述稳定入口；Controller 不逐次代调业务工具。若宿主既不继承工具也不能接入独立连接，应明确阻塞，不能静默回退模型转发或宣称 Codex 已通过验收。新建顶层会话或第二个 Codex 进程不能替代原生子 Agent。修改 Connector 源码不等于已运行的宿主连接加载了新版本。
+
+原生绘图工具额外提供其实际 PNG 的私有 workspace 路径，原生 Agent 可使用现有 multimodal/vision_extractor 宿主能力检查；所需视觉模型沿用原生配置。外部 Agent 使用自己的视觉能力，不会因此获得或依赖 LazyMind 的通用视觉模型服务。未实际检查像素时不得声称视觉验收通过。
+
+原生 callable 与 MCP 适配器调用 `document_tools/paper/agent_tools.py` 的同一组函数。Core 构造可信输入、来源版本和租约上下文；工具参数不能覆盖。选定知识库沿用 Core 的冻结范围与读取权限。Core 与 Runtime 必须配置相同的 `LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN`，用于内部接口认证和确定性回执签名，不能把该秘密交给 Agent。
+
+`paper_prepare_inputs` 同时返回真实表目录、分析代码和绘图代码的输入/返回 schema。已有数据准备可引用已绑定的 `table_id`，服务端恢复原始整表并检查数值不变。 未执行的已有数据步骤可将“无代码”空字符串规范化为空数组 `[]`；其他代码字符串仍拒绝，实际数据、schema 和执行回执照常校验。分析候选可用实际分析回执引用加 Agent 编写的 `summary`、`limitations`，图候选可用实际绘图回执引用；服务端恢复精确计算结果与图文件，Agent 无需复制全部统计值或 SVG。来源、统计和图回执以短引用交接，完整签名记录保留在服务端私有目录；回执仍绑定当前输入、步骤和租约。
+
+固定契约的 `execution.limits` 将轮次、时长和工具调用预算交给外部执行方；宿主负责模型轮次与整体时长。Core 对论文工具按 attempt 原子计数，重放同一幂等 command 不重复计数；达到工具预算后拒绝继续。原生 runner 沿用相同包中声明的预算。
+
+实验工具要求绑定的 `experiment_execution=allow_local`；已有数据分析不是新实验授权。模拟数据还要求 `paper_execution_policy.allow_simulation=true`。只使用附件或知识库时绑定 `paper_source_policy.allow_academic_search=false`。自然语言中的明确来源限制仍保留，不能被“继续”等后续请求抹掉。
+
+实际计算返回 `operation_id`，同一输入版本及相同代码/参数复用执行回执。断线后使用 `paper_execution_status`，可按 operation_id 或原始 tool_name/arguments 查询；结果未知不能自动重跑。`paper_cancel_execution` 请求取消本步骤的计算，运行中的进程轮询该信号和 Core 租约状态，实际退出后才有终态。Core 的停止、回退和重新领取仍使用原控制协议。运行回执缓存放在服务端 `LAZYLLM_HOME/paper-execution-receipts`，不作为业务产物或凭证共享。
+
+执行 Agent 生成候选，调用 `paper_prepare_candidate` 检查来源、schema、数值/绘图回执、修订范围和跨产物关系。该工具构造材料池历史并签署精确产物清单；签名不证明学术或视觉质量。原生通过 `paper_submit_candidate` 保存，外部返回完整文件清单，由 Controller 使用原有 publish/complete。两条路径在 Core 完成边界重新核对精确字节、输入版本和当前租约，并沿用事务性接受机制。候选修改后必须重新校验。
+
+仅重绘时使用冻结分析回执，保留统计结果，更新稿件中的图资源引用并作废旧审稿摘要；PNG/PDF/SVG 和统计执行记录一同发布。修订先用 `paper_preview_revision` 得到补丁应用、引用规范化后的精确文本，再由 Agent 提供针对该文本的全新审稿。修改计划与补丁限制到所选有效 issue 和计划范围；没有可接受修改时保留原稿。完成后需要进一步修改或重绘时，进入现有修订步骤或回退/重试流程，携带最新材料池；论文没有声明旧式 artifact generation action，不能套用 PPT 的逐次生成编辑通道。
+
+历史运行继续使用其固定旧包。发布新包或切换用户实例前，应分别验证原生真实模型和真实宿主子 Agent + MCP；单元测试、内存 MCP transport、源代码更新与单一大纲组件验证都不能代替双端完整路径验收。
+
 ## MCP 说明分层
 
 - 连接级 instructions：发现工作流、读取状态、执行共享契约、Controller 与可选 worker 的职责、宿主能力优先与工具回退原则。
@@ -127,11 +165,10 @@ MCP 工具名为 `workflow.input.answer`；HTTP 复用 `POST /workflow-sessions/
   "session_id": "<run>",
   "execution_id": "<attempt>",
   "execution_handle": "<current handle>",
-  "tool_name": "ppt_export_html",
+  "tool_name": "ppt_inspect_pptx",
   "source": "package",
   "arguments": {
-    "pages": [{"html": "<self-contained slide HTML>", "notes": "Speaker notes"}],
-    "filename": "summary.pptx"
+    "content_base64": "<PPTX bytes encoded in base64>"
   },
   "command_id": "<stable unique operation id>"
 }
@@ -154,7 +191,7 @@ HTTP body 对应 MCP 参数，路径中的 execution 使用 `attempt_id`；body 
 
 `package` 只运行服务明确注册的适配器，不动态执行来自 Workflow 包的 Python/JS。PPT 适配器通过固定 revision 的完整文件快照和 tree hash 调用内部 `/api/workflow/external-tools/list|call`；Core 校验 blob hash，Chat 再校验快照树与工具绑定。知识库和学术适配器在 Core 内复用已有数据服务，并校验固定 revision 中的审计标记文件。新增工具须增加适配器、严格参数 schema、资源限制和入口行为测试。
 
-PPT 的无模型工具包括 `ppt_prepare_page`、`ppt_compute_timing`、`ppt_order_papers`、`pdf_read_text`、`pdf_extract_images`，以及 `ppt_export_html`、`ppt_render_html`、`ppt_inspect_pptx`。后三项分别导出可编辑 PPTX、渲染 HTML 预览、检查实际 PPTX 页数/文本/备注。渲染和检查提供事实，不代替外部 worker 的视觉与语义判断。一页 PPTX 是合法请求，不额外生成封面。
+PPT 的无模型工具包括 `ppt_prepare_page`、`ppt_compute_timing`、`ppt_order_papers`、`pdf_read_text`、`pdf_extract_images`、`ppt_render_html` 和 `ppt_inspect_pptx`。渲染和检查工具分别提供 HTML 预览和 PPTX 的实际页数、文本及备注。HTML 路线发布幻灯片和讲稿，导出由用户从面板触发。原生路线发布 PPTX 文件。一页 PPTX 是合法请求，不额外生成封面。
 
 `ppt_prepare_page` 复用原生页面请求组装与 HTML 规范化，模板文字从当前固定 revision 读取。首次调用返回 `generation_request`；外部 Agent 按原样处理其中的 system/user prompt，再以相同页码、brief 和 `generation_responses: [{request_hash, text}]` 回传。返回 `ready` 后得到实际 HTML 文件；哈希不匹配会拒绝。它只完成确定性检查，视觉与语义检查由外部执行者完成。页面可并行生成，但通过检查的一页须立即发布，不能等待整套导出。计时与论文排序工具也复用原生实现。
 
@@ -238,7 +275,7 @@ PPT 工作流直接交付原生 runtime 的大纲、风格目录、页面生成�
 - `workflow.action.get` 读取当前请求；宿主将其中完整的 `system_prompt`、`user_prompt` 交给原生子代理。`workflow.action.respond` 提交文本及原样的 `version`、`request_hash`。请求哈希防止把其他选区或其他版本的模型回答复用到当前规划过程。
 - 若规划器需要下一次生成，返回新的 generation request；`ready` 表示预览就绪，外部 Agent 应结束该轮。MCP 不返回候选 HTML 和确认令牌，避免把大型产物重新灌入模型上下文。
 - 页面轮询同一请求并展示原来的差异预览；只有用户确认后才走原有 `:action-execute`。确认使用创建预览时固定的包版本，并检查产物 revision 和人工草稿版本。取消后禁止确认；相同响应重试幂等，不重复调用规划器。
-- 当前 PPT 包支持外部润色。存在 `native_pptx` 配套产物时，文本润色只对可唯一定位的原生文本做局部替换，保留其他 ZIP 部件（包括图表和字体），并将 HTML 与 PPTX 版本放在同一数据库事务中保存。无法唯一定位、多文本段结构变更或样式操作应转原生 PPTX 编辑器，不允许只改预览却留下旧下载文件。
+- HTML 选区编辑只生成和保存 HTML 候选。早期运行留下的 PPTX 保存在历史中。原生 PPTX 通过原生编辑入口修改。
 
 新增开发者接入只需实现已有通用 host action 交付及上述 MCP 工具，不需要复制 PPT 业务 Skill。其他工作流可复用 generation boundary，但必须在包内显式声明支持；不支持时返回升级工作流提示，不静默回退到 LazyMind 模型。
 

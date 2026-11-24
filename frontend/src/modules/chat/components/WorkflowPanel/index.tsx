@@ -1672,6 +1672,7 @@ function TabSlotGrid({
   tab,
   session,
   tasks,
+  allowExternalPreviews = true,
   onRefresh,
   onReference,
   onFocusSortOrder,
@@ -1680,6 +1681,7 @@ function TabSlotGrid({
   tab: TabDef;
   session: WorkflowSession;
   tasks: SubAgentTask[];
+  allowExternalPreviews?: boolean;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
@@ -1735,6 +1737,7 @@ function TabSlotGrid({
       getTabStepId(tab),
       slotDef.id,
       tasks,
+      allowExternalPreviews,
     )));
   };
   const isPaperReportTab = session.workflow_id === 'paper_expansion'
@@ -1751,11 +1754,11 @@ function TabSlotGrid({
     && step.validity !== 'stale' && (step.status === 'running' || step.status === 'pending'));
   const resultReady = process && !producerRunning
     && getTabSlotRevisions(session, tab, process.result_slot).some(revision => revision.selected)
-    && findWriterArtifactStream(session, getTabStepId(tab), process.result_slot, tasks)?.state !== 'streaming';
+    && findWriterArtifactStream(session, getTabStepId(tab), process.result_slot, tasks, allowExternalPreviews)?.state !== 'streaming';
   const processSlots = resultReady ? visibleSlots.filter(slot => slot.id !== process.result_slot && process.slots.includes(slot.id)) : [];
   const allHidden = visibleSlots.length === 0 || tab.composite_behavior?.hide_empty_columns !== false
     && visibleSlots.every(def => getTabSlotRevisions(session, tab, def.id).length === 0
-      && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks));
+      && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks, allowExternalPreviews));
   if (compactEmptyStates && allHidden) return <div className='workflow-panel__empty' role='status'>
     {t(workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)))}
   </div>;
@@ -1767,6 +1770,7 @@ function TabSlotGrid({
       getTabStepId(tab),
       slotDef.id,
       tasks,
+      allowExternalPreviews,
     );
     const hideEmpty = tab.composite_behavior?.hide_empty_columns !== false;
     if (hideEmpty && revisions.length === 0 && !artifactStream) {
@@ -2187,8 +2191,12 @@ export function WorkflowPanel({
     && !ui.task_presentation?.hidden_steps?.includes(step.step_id)
     && step.validity !== 'stale'
     && all.findIndex((candidate) => candidate.step_id === step.step_id && candidate.validity !== 'stale') === index) : [];
-  const stepLabel = (stepId: string) => tabs.find(tab => getTabStepId(tab) === stepId)?.label
-    ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
+  const stepLabel = (stepId: string) => {
+    const label = ui.stepLabels?.[stepId]?.trim();
+    if (label && label !== stepId) return label;
+    return tabs.find(tab => getTabStepId(tab) === stepId)?.label
+      ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
+  };
   const continueDisabled = (continueAction?.kind === 'advance' ? chatBusy || actionPending : buttonsDisabled) || currentStepStatus === 'failed';
 
   async function refreshBeforeAction() {
@@ -2231,7 +2239,7 @@ export function WorkflowPanel({
     if (!session || !isContinuationCurrent()) return;
     const sessionId = session.session_id;
     const message = completedContinueStepId
-      ? `${t('chat.workflowRollbackPrefix')}${completedContinueStepId}`
+      ? `${t('chat.workflowRollbackPrefix')}${stepLabel(completedContinueStepId)}`
       : t('chat.workflowContinue');
     void runFooterAction(async () => {
       if (!await refreshBeforeAction()) return;
@@ -2343,7 +2351,7 @@ export function WorkflowPanel({
           await controlAdapter.execute({ kind: 'rewind', stepId });
           return;
         }
-        await onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepId}`, {
+        await onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepLabel(stepId)}`, {
           session_id: sessionId, kind: 'rewind', step_id: stepId, expected_state_version: latest.state_version ?? 0,
         });
       } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
@@ -2645,6 +2653,7 @@ export function WorkflowPanel({
                     session={preview}
                     readOnly={previewing}
                     tasks={taskCenterTasks}
+                    allowExternalPreviews={!anySlotEditing}
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}

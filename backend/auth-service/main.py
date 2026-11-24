@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from api.auth import router as auth_router
 from api.authorization import router as authorization_router
 from api.cloud_oauth import router as cloud_oauth_router
+from api.cloud_oauth import github_star_deferred_service
 from api.mcp_oauth import router as mcp_oauth_router
 from api.group import router as group_router
 from api.role import router as role_router
@@ -331,10 +332,12 @@ async def _start_cloud_oauth_health_check():
         _callback_url()
     cloud_oauth_health.start()
     github_cli_auth_service.start_recovery()
+    github_star_deferred_service.start()
 
 
 @app.on_event('shutdown')
 async def _stop_cloud_oauth_health_check():
+    github_star_deferred_service.shutdown()
     await cloud_oauth_health.stop()
     github_cli_auth_service.shutdown()
 

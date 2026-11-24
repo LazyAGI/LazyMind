@@ -3,6 +3,7 @@ package paperlibrary
 import (
 	"encoding/json"
 	"lazymind/core/common/orm"
+	"lazymind/core/pdfir"
 	"strings"
 	"time"
 	"unicode"
@@ -63,23 +64,26 @@ type AcademicState struct {
 	Error      string `json:"error,omitempty"`
 }
 type Attachment struct {
-	AcademicState    *AcademicState `json:"academicState,omitempty"`
-	ID               string         `json:"id"`
-	PaperID          string         `json:"paperId"`
-	Name             string         `json:"name"`
-	Kind             string         `json:"kind"`
-	ContentRef       string         `json:"contentRef,omitempty"`
-	Source           string         `json:"source"`
-	ImportMethod     string         `json:"importMethod,omitempty"`
-	SourceProvider   string         `json:"sourceProvider,omitempty"`
-	SourceVersion    string         `json:"sourceVersion,omitempty"`
-	SourceURL        string         `json:"sourceUrl,omitempty"`
-	ContentHash      string         `json:"contentHash,omitempty"`
-	ExpansionID      string         `json:"expansionId,omitempty"`
-	ExpansionVersion int64          `json:"expansionVersion,omitempty"`
-	IsPrimary        bool           `json:"isPrimary"`
-	Available        bool           `json:"available"`
-	AddedAt          time.Time      `json:"addedAt"`
+	PDFStructure     *pdfir.StructureStatus `json:"pdf_structure,omitempty"`
+	Parse            string                 `json:"parse,omitempty"`
+	ProcessingError  string                 `json:"processingError,omitempty"`
+	AcademicState    *AcademicState         `json:"academicState,omitempty"`
+	ID               string                 `json:"id"`
+	PaperID          string                 `json:"paperId"`
+	Name             string                 `json:"name"`
+	Kind             string                 `json:"kind"`
+	ContentRef       string                 `json:"contentRef,omitempty"`
+	Source           string                 `json:"source"`
+	ImportMethod     string                 `json:"importMethod,omitempty"`
+	SourceProvider   string                 `json:"sourceProvider,omitempty"`
+	SourceVersion    string                 `json:"sourceVersion,omitempty"`
+	SourceURL        string                 `json:"sourceUrl,omitempty"`
+	ContentHash      string                 `json:"contentHash,omitempty"`
+	ExpansionID      string                 `json:"expansionId,omitempty"`
+	ExpansionVersion int64                  `json:"expansionVersion,omitempty"`
+	IsPrimary        bool                   `json:"isPrimary"`
+	Available        bool                   `json:"available"`
+	AddedAt          time.Time              `json:"addedAt"`
 }
 type Note struct {
 	ID        string      `json:"id"`

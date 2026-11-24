@@ -1763,8 +1763,12 @@ def test_run_subagent_stream_task_not_found(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("display_plan", [["Read inputs", "Analyze data", "Write result"], None])
-def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
-    db = _install_fake_db(monkeypatch)
+@pytest.mark.parametrize('workflow', [None, 'paper-writing', 'ppt-workflow', 'writer-workflow'])
+def test_run_subagent_stream_happy_path(monkeypatch, display_plan, workflow):
+    task = {**_DEFAULT_TASK, 'agent_type': 'workflow_step' if workflow else 'test'}
+    if workflow:
+        task['params'] = {**task.get('params', {}), 'workflow_ref': 'builtin:' + workflow}
+    db = _install_fake_db(monkeypatch, task)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
@@ -1802,7 +1806,7 @@ def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
 
     async def run():
         return await _collect(runner_mod.run_subagent_stream(
-            _DEFAULT_TASK_ID, task_spec={**_DEFAULT_TASK},
+            _DEFAULT_TASK_ID, task_spec=task,
         ))
 
     raw = asyncio.run(run())
@@ -1820,7 +1824,8 @@ def test_run_subagent_stream_happy_path(monkeypatch, display_plan):
         assert 'plan' not in types_out
 
     assert 'text' in types_out
-    assert 'progress' in types_out   # tool_results progress bump
+    progress = [event['progress'] for event in events_out if event['type'] == 'progress']
+    assert progress == [5, 20]
     assert 'done' in types_out
     assert raw.endswith('data: [DONE]\n\n')
 
@@ -1983,8 +1988,13 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch, argument_f
 # Test: text/think frames from AgentEventFrameTranslator appear in SSE
 # ---------------------------------------------------------------------------
 
-def test_run_subagent_stream_text_think_events(monkeypatch):
-    db = _install_fake_db(monkeypatch)
+@pytest.mark.parametrize('ppt', [False, True])
+def test_run_subagent_stream_text_think_events(monkeypatch, ppt):
+    task = {**_DEFAULT_TASK}
+    if ppt:
+        task['agent_type'] = 'workflow_step'
+        task['params'] = {**task['params'], 'workflow_ref': 'builtin:ppt-workflow'}
+    db = _install_fake_db(monkeypatch, task)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
@@ -1993,7 +2003,7 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
         {'tag': 'think', 'delta': 'reasoning...'},
         {'tag': 'text', 'delta': 'answer'},
     ]
-    _install_fake_drive(monkeypatch, events)
+    _install_fake_drive(monkeypatch, events, final_value='<think>final reasoning</think>answer')
 
     # Pre-populate saved key.
     def pre_save_ctx(ctx):
@@ -2002,14 +2012,17 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
 
     async def run():
         return await _collect(runner_mod.run_subagent_stream(
-            _DEFAULT_TASK_ID, task_spec={**_DEFAULT_TASK},
+            _DEFAULT_TASK_ID, task_spec=task,
         ))
 
     raw = asyncio.run(run())
     events_out = _sse_to_events(raw)
     types_out = [e['type'] for e in events_out]
-    assert 'think' in types_out
+    assert ('think' in types_out) is not ppt
+    assert any(step['role'] == 'think' for step in db.steps) is not ppt
     assert 'text' in types_out
+    if ppt:
+        assert next(event['summary'] for event in events_out if event['type'] == 'done') == 'answer'
 
 
 def test_run_subagent_stream_coalesces_tiny_text_deltas(monkeypatch):
@@ -2402,7 +2415,7 @@ def test_display_plan_preserves_current_step_contract_before_overall_request():
     assert len(steps) == 3
 
 
-def test_unconfigured_retrieval_is_not_exposed_by_subagent(monkeypatch):
+def test_default_search_is_exposed_without_exposing_unconfigured_kb(monkeypatch):
     import lazyllm
     original = lazyllm.globals.get('agentic_config')
     lazyllm.globals['agentic_config'] = {}
@@ -2411,8 +2424,14 @@ def test_unconfigured_retrieval_is_not_exposed_by_subagent(monkeypatch):
         lazyllm.globals.config['dynamic_tool_auth'] = {}
         try:
             monkeypatch.setattr(runner_mod, 'load_workflow_tools', lambda *_: {})
-            assert runner_mod._resolve_runtime_tools(['kb', 'web_search']) == []
+            resolved = runner_mod._resolve_runtime_tools(['kb', 'web_search'])
+            assert len(resolved) == 1
+            assert resolved[0]['name'] == 'WebSearchToolkit'
+            active = [provider.source_name for provider in resolved[0]['tools'] if provider.__key_source__()]
+            assert active == ['keenable']
             assert runner_mod.subagent_tools.list_knowledge_bases not in runner_mod._build_subagent_tools([])
+            lazyllm.globals['agentic_config'] = {'disabled_tools': ['web_search']}
+            assert runner_mod._resolve_runtime_tools(['kb', 'web_search']) == []
         finally:
             lazyllm.globals.config['dynamic_tool_auth'] = old_auth
     finally:
@@ -2789,6 +2808,54 @@ async def test_ppt_completion_preserves_page_generation_failure(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('recovered', [True, False])
+async def test_ppt_prompt_planning_preserves_provider_error_before_delivery_checks(monkeypatch, tmp_path, recovered):
+    reason = 'Page 2 prompt failed: 模型供应商响应超时，连续 90 秒未收到新的响应内容。'
+    events = [{'tag': 'tool_results', 'tool_results': [
+        {'name': 'ppt_plan_page_prompts', 'result': {'error': reason}},
+    ]}]
+    if recovered:
+        events.append({'tag': 'tool_results', 'tool_results': [
+            {'name': 'ppt_plan_page_prompts', 'result': {'page_count': 4, 'published_count': 3}},
+        ]})
+    _, output = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, MagicMock(), agent_type='workflow_step',
+        params={'workflow_id': 'ppt-workflow', 'step_id': 'plan_page_prompts',
+                'required_output_artifact_keys': ['slide_outline'] if not recovered else [],
+                'output_slot_types': {'slide_outline': 'text'}},
+        output_slots=['slide_outline'], artifacts=[], tool_events=events, final='本步骤已完成。',
+    )
+    terminal = _terminal(output)
+    assert terminal['status'] == ('succeeded' if recovered else 'failed')
+    if not recovered:
+        assert reason in terminal['summary']
+        assert terminal['current_phase'] == 'ppt_generation_incomplete'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('retry', [None, 'formatting', 'font'])
+async def test_missing_ppt_font_is_reported_before_delivery_check(monkeypatch, tmp_path, retry):
+    reason = '请求的字体不可用：微软雅黑'
+    tool_name = 'ppt_replace_deck_fonts'
+    events = [{'tag': 'tool_results', 'tool_results': [{'name': tool_name, 'result': {'ok': False, 'value': reason}}]}]
+    if retry:
+        events.append({'tag': 'tool_results', 'tool_results': [{'name': tool_name, 'result': {
+            'ok': True, 'value': {'target_font': 'PingFang SC' if retry == 'font' else None, 'published_count': 4},
+        }}]})
+    _, output = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, MagicMock(), agent_type='workflow_step',
+        params={'workflow_id': 'ppt-workflow', 'step_id': 'generate_ppt',
+                'required_output_artifact_keys': ['preview_html'] if retry != 'font' else []},
+        output_slots=['preview_html'], artifacts=[], tool_events=events, final='完成处理。',
+    )
+    terminal = _terminal(output)
+    assert terminal['status'] == ('succeeded' if retry == 'font' else 'failed')
+    if retry != 'font':
+        assert terminal['current_phase'] == 'ppt_font_edit_failed'
+        assert reason in terminal['summary'] and '安装或导入' in terminal['summary']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('saved', [True, False])
 async def test_workflow_refinements_preserve_record_acceptance(monkeypatch, tmp_path, saved):
     """A current-step amendment changes execution intent, not main's acceptance gate."""
@@ -2813,3 +2880,44 @@ async def test_workflow_refinements_preserve_record_acceptance(monkeypatch, tmp_
     if not saved:
         assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
     model.share.assert_not_called()
+
+
+
+def test_paper_candidate_preview_is_forwarded_before_tool_call_completes(monkeypatch):
+    task = {**_DEFAULT_TASK, 'agent_type': 'workflow_step', 'params': {
+        'workflow_id': 'paper-writing', 'step_id': 'write_outline',
+        'required_output_artifact_keys': ['write_outline_document']}}
+    _install_fake_db(monkeypatch, task)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    monkeypatch.setattr(runner_mod, 'set_context', lambda ctx: ctx.record_local_artifact(
+        'write_outline_document', 'text', {'text': '# Live outline'}, 1))
+    delivered = asyncio.Event()
+
+    class CandidateExecutor:
+        async def stream(self, llm, plan):
+            yield 'event', {'tag': 'tool_call_delta', 'delta': json.dumps([{
+                'index': 0, 'function': {'name': 'paper_submit_candidate',
+                    'arguments': '{"output":{"outline":"# Live outline'}}])}
+            await asyncio.wait_for(delivered.wait(), timeout=3)
+            yield 'event', {'tag': 'tool_call_delta', 'delta': json.dumps([{
+                'index': 0, 'function': {'arguments': '"},"receipts":[]}'}}])}
+            yield 'event', {'tag': 'tool_calls', 'tool_calls': [{
+                'id': 'candidate', 'name': 'paper_submit_candidate',
+                'args': {'output': {'outline': '# Live outline'}, 'receipts': []}}]}
+            yield 'event', {'tag': 'tool_results', 'tool_results': [{
+                'id': 'candidate', 'name': 'paper_submit_candidate', 'result': 'ok'}]}
+            yield 'final', 'done'
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', CandidateExecutor)
+    def on_chunk(chunk):
+        if any(event.get('type') == 'artifact_stream' for event in _sse_to_events(chunk)):
+            delivered.set()
+    async def run():
+        return await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, task_spec=task), on_chunk=on_chunk)
+    events = _sse_to_events(asyncio.run(run()))
+    types = [event.get('type') for event in events]
+    assert types.index('artifact_stream') < types.index('tool_calls')
+    assert ''.join(event.get('delta', '') for event in events if event.get('type') == 'artifact_stream') == '# Live outline'
+    assert all(event['task_id'] == _DEFAULT_TASK_ID for event in events if event.get('type', '').startswith('artifact_stream'))

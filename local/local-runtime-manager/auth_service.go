@@ -298,7 +298,7 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append([]string{
+	env := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_DATABASE_URL=" + cfg.AuthService.DatabaseURL,
 		"LAZYMIND_REDIS_URL=",
@@ -316,7 +316,13 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
 		"LAZYMIND_CHAT_UNLIKE_SWITCH=" + envText("LAZYMIND_CHAT_UNLIKE_SWITCH", "true"),
 		authServicePermissionsEnvVar + "=" + authServicePermissionsPath(paths),
 		authServiceOpenAPIExportEnvVar + "=0",
-	}, managedTempEnv(paths)...), nil
+	}
+	if cfg.Profile == "local" {
+		if binary := localGitHubCLIPath(paths); binary != "" {
+			env = append(env, "LAZYMIND_GITHUB_CLI_PATH="+binary)
+		}
+	}
+	return append(env, managedTempEnv(paths)...), nil
 }
 
 func waitForAuthDatabase(ctx context.Context, databaseURL string) error {

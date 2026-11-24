@@ -28,6 +28,8 @@ describe('step card authoring details', () => {
     render(<ReactFlowProvider><StepNodeRenderer {...props} /></ReactFlowProvider>);
     expect(screen.getByText('selfEvolutionRun.sgeNodeInputs: Notes、Backup')).toBeInTheDocument();
     expect(screen.getByText('selfEvolutionRun.sgeNodeUserConfirm')).toBeInTheDocument();
+    expect(screen.getByText('Review notes').closest('.step-node-header')).toBeInTheDocument();
+    expect(screen.queryByText('review')).not.toBeInTheDocument();
     expect(screen.getByText('Summary')).toBeInTheDocument();
   });
 
@@ -42,7 +44,7 @@ describe('step card authoring details', () => {
     render(<ReactFlowProvider><StepNodeRenderer {...props} data={customData} /></ReactFlowProvider>);
     expect(screen.queryByText('selfEvolutionRun.sgeNodeInputs: Notes、Backup')).not.toBeInTheDocument();
     expect(screen.queryByText('Summary')).not.toBeInTheDocument();
-    expect(screen.getByText('Review notes').parentElement).toHaveStyle({
+    expect(screen.getByText('Review notes').closest('.step-node')).toHaveStyle({
       background: '#ff0000', borderWidth: '4px', borderRadius: '20px', borderColor: '#0000ff', borderStyle: 'dashed',
     });
   });

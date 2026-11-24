@@ -31,6 +31,97 @@ afterEach(() => {
 });
 
 describe("conversation running status synchronization", () => {
+  it("marks the first snapshot as checking without assuming the conversation is running", async () => {
+    store.getState().watch("sidebar", ["a"]);
+    let resolve!: (value: ReturnType<typeof snapshot>) => void;
+    post.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    stop = startConversationRunningSync();
+    expect(store.getState().checkingIds).toEqual(["a"]);
+    await tick();
+    expect(store.getState().entries.a).toBeUndefined();
+    resolve(snapshot({ a: "running" }));
+    await tick();
+    expect(store.getState().checkingIds).toEqual([]);
+    expect(store.getState().entries.a.status).toBe("running");
+  });
+
+  it("checks an idle conversation immediately on activity and accepts an idle result", async () => {
+    store.getState().watch("sidebar", ["a"]);
+    post.mockResolvedValue(snapshot({ a: "idle" }));
+    stop = startConversationRunningSync();
+    await tick();
+    requestConversationStatusRefresh("a");
+    expect(store.getState().checkingIds).toEqual(["a"]);
+    expect(store.getState().entries.a.status).toBe("idle");
+    await tick(100);
+    expect(store.getState().checkingIds).toEqual([]);
+    expect(store.getState().entries.a.status).toBe("idle");
+  });
+
+  it("checks newly visible rows but does not repeatedly check inaccessible IDs", async () => {
+    post.mockResolvedValue(snapshot({}));
+    stop = startConversationRunningSync();
+    store.getState().watch("sidebar", ["missing"]);
+    expect(store.getState().checkingIds).toEqual(["missing"]);
+    await tick(100);
+    expect(store.getState().checkingIds).toEqual([]);
+    expect(store.getState().entries.missing).toBeUndefined();
+    let resolve!: (value: ReturnType<typeof snapshot>) => void;
+    post.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    await tick(5_000);
+    expect(store.getState().checkingIds).toEqual([]);
+    resolve(snapshot({}));
+    await tick();
+  });
+
+  it("ends checking on failure and recovers on the next successful snapshot", async () => {
+    store.getState().watch("sidebar", ["a"]);
+    post.mockRejectedValueOnce(new Error("unavailable")).mockResolvedValue(snapshot({ a: "running" }));
+    stop = startConversationRunningSync();
+    await tick();
+    expect(store.getState().checkingIds).toEqual([]);
+    expect(store.getState().entries.a.status).toBe("unknown");
+    await tick(5_000);
+    expect(store.getState().entries.a.status).toBe("running");
+  });
+
+  it("shows unavailable if a lifecycle confirmation fails instead of restoring stale idle", async () => {
+    store.getState().watch("sidebar", ["a"]);
+    post.mockResolvedValueOnce(snapshot({ a: "idle" })).mockRejectedValue(new Error("unavailable"));
+    stop = startConversationRunningSync();
+    await tick();
+    requestConversationStatusRefresh("a");
+    await tick(100);
+    expect(store.getState().checkingIds).toEqual([]);
+    expect(store.getState().entries.a.status).toBe("unknown");
+  });
+
+  it("keeps checking when an older idle snapshot is superseded by activity", async () => {
+    store.getState().watch("sidebar", ["a"]);
+    let resolve!: (value: ReturnType<typeof snapshot>) => void;
+    post.mockImplementationOnce(() => new Promise((done) => { resolve = done; }))
+      .mockResolvedValue(snapshot({ a: "running" }));
+    stop = startConversationRunningSync();
+    await tick();
+    requestConversationStatusRefresh("a");
+    resolve(snapshot({ a: "idle" }));
+    await tick();
+    expect(store.getState().checkingIds).toEqual(["a"]);
+    expect(store.getState().entries.a).toBeUndefined();
+    await tick(100);
+    expect(store.getState().checkingIds).toEqual([]);
+    expect(store.getState().entries.a.status).toBe("running");
+  });
+
+  it("does not leave initial status checking indefinitely while cloud is offline", () => {
+    online = false;
+    store.getState().watch("sidebar", ["a"]);
+    stop = startConversationRunningSync();
+    expect(store.getState().checkingIds).toEqual([]);
+    expect(store.getState().entries.a.status).toBe("unknown");
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("does not query again for unchanged IDs or a different display order", async () => {
     store.getState().watch("sidebar", ["a", "b"]);
     post.mockResolvedValue(snapshot({ a: "idle", b: "idle" }));
@@ -213,6 +304,7 @@ describe("conversation running status synchronization", () => {
     expect(store.getState().entries).toEqual({});
     expect(post).toHaveBeenCalledTimes(1);
     expect(post.mock.calls[0][2].signal.aborted).toBe(true);
+    expect(store.getState().checkingIds).toEqual([]);
   });
 });
 

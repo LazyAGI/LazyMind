@@ -1112,6 +1112,22 @@ describe("task center workflow events", () => {
     dispatchSpy.mockRestore();
   });
 
+  it("refreshes workflow display when Chat timing settles without a child event", async () => {
+    workflowState.sessionByConversation["conversation-1"] = { session_id: "waiting-workflow" };
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    emitConversationEvent({ type: "task_run_updated", payload: {} });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requestHarness.listConversationTasks).toHaveBeenCalled();
+    expect(workflowState.loadActiveSession).toHaveBeenCalledWith("conversation-1", { silentError: true });
+  });
+
+  it("does not load a workflow for an ordinary Chat timing event", async () => {
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    emitConversationEvent({ type: "task_run_updated", payload: {} });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(workflowState.loadActiveSession).not.toHaveBeenCalled();
+  });
+
   it("does not run a delayed workflow refresh after switching conversations", async () => {
     useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
     emitConversationEvent({

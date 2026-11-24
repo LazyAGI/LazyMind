@@ -83,18 +83,29 @@ func TestListTasks_FilterByStatus(t *testing.T) {
 	}
 }
 
-func TestListTasksFiltersConversationBeforePaginationAndCounts(t *testing.T) {
+func TestListTasksFiltersBeforePaginationAndCounts(t *testing.T) {
 	db := orm.MigrateTestDB(t,
 		&orm.TaskCenterTask{}, &orm.Conversation{}, &orm.UserSchedule{},
-		&orm.WorkflowSession{}, &orm.SubAgentTask{},
+		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.SubAgentTask{},
 	)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC()
+	sessions := []orm.WorkflowSession{
+		{ID: "target-session", CreateUserID: "owner", Status: "completed"},
+		{ID: "other-session", CreateUserID: "owner", Status: "failed"},
+		{ID: "foreign-session", CreateUserID: "another-user", Status: "completed"},
+		{ID: "historical-session", CreateUserID: "owner", ConversationID: "historical", Status: "completed", CreatedAt: now.Add(-3*time.Hour + time.Second), UpdatedAt: now.Add(-2 * time.Hour)},
+	}
+	if err := db.Create(&sessions).Error; err != nil {
+		t.Fatal(err)
+	}
+	finished := now.Add(-2 * time.Hour)
 	tasks := []orm.TaskCenterTask{
-		{ID: "target-old", UserID: "owner", ConversationID: "target", TaskType: "workflow_run", Status: "succeeded", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now},
-		{ID: "target-new", UserID: "owner", ConversationID: "target", TaskType: "workflow_run", Status: "failed", CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
-		{ID: "foreign", UserID: "another-user", ConversationID: "target", TaskType: "workflow_run", Status: "succeeded", CreatedAt: now, UpdatedAt: now},
+		{ID: "target-old", UserID: "owner", ConversationID: "target", WorkflowSessionID: &sessions[0].ID, TaskType: "workflow_run", Status: "succeeded", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now},
+		{ID: "target-new", UserID: "owner", ConversationID: "target", WorkflowSessionID: &sessions[1].ID, TaskType: "workflow_run", Status: "failed", CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+		{ID: "foreign", UserID: "another-user", ConversationID: "target", WorkflowSessionID: &sessions[2].ID, TaskType: "workflow_run", Status: "succeeded", CreatedAt: now, UpdatedAt: now},
+		{ID: "historical", UserID: "owner", ConversationID: "historical", TaskType: "background_chat", Status: "succeeded", CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: finished, FinishedAt: &finished},
 	}
 	for i := 0; i < 101; i++ {
 		tasks = append(tasks, orm.TaskCenterTask{
@@ -106,16 +117,23 @@ func TestListTasksFiltersConversationBeforePaginationAndCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		query string
-		id    string
-		total int
+		query     string
+		id        string
+		total     int
+		succeeded int
+		failed    int
 	}{
-		{"page=1", "target-new", 2},
-		{"page=2", "target-old", 2},
-		{"status=succeeded", "target-old", 1},
+		{"conversation_id=target&page=1", "target-new", 2, 1, 1},
+		{"conversation_id=target&page=2", "target-old", 2, 1, 1},
+		{"conversation_id=target&status=succeeded", "target-old", 1, 1, 1},
+		{"workflow_session_id=target-session", "target-old", 1, 1, 0},
+		{"workflow_session_id=historical-session", "historical", 1, 1, 0},
+		{"workflow_session_id=missing", "", 0, 0, 0},
+		{"workflow_session_id=foreign-session", "", 0, 0, 0},
+		{"conversation_id=other&workflow_session_id=target-session", "", 0, 0, 0},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/task-center/tasks?conversation_id=target&page_size=1&"+tc.query, nil)
+			req := httptest.NewRequest(http.MethodGet, "/task-center/tasks?page_size=1&"+tc.query, nil)
 			req.Header.Set("X-User-Id", "owner")
 			rec := httptest.NewRecorder()
 			ListTasks(rec, req)
@@ -130,11 +148,12 @@ func TestListTasksFiltersConversationBeforePaginationAndCounts(t *testing.T) {
 			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 				t.Fatal(err)
 			}
-			if len(response.Items) != 1 || response.Items[0].ID != tc.id || response.Total != tc.total {
+			if response.Total != tc.total || (tc.id == "" && len(response.Items) != 0) ||
+				(tc.id != "" && (len(response.Items) != 1 || response.Items[0].ID != tc.id)) {
 				t.Fatalf("unexpected filtered page: %+v", response)
 			}
-			if response.StatusCounts["all"] != 2 || response.StatusCounts["succeeded"] != 1 || response.StatusCounts["failed"] != 1 {
-				t.Fatalf("counts include another conversation or user: %+v", response.StatusCounts)
+			if response.StatusCounts["all"] != tc.succeeded+tc.failed || response.StatusCounts["succeeded"] != tc.succeeded || response.StatusCounts["failed"] != tc.failed {
+				t.Fatalf("counts include tasks outside the filters: %+v", response.StatusCounts)
 			}
 		})
 	}

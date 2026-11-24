@@ -37,12 +37,14 @@ vi.mock("./SkillManagementToolbar", () => ({
     onOrganizeSkills,
     onOrganizeCancelRun,
     onReviewDrafts,
+    pendingDraftCount,
   }: {
     organizeDisabled: boolean;
     organizeStatus: string;
     onOrganizeSkills: (mode: "light" | "deep") => void;
     onOrganizeCancelRun: () => void;
     onReviewDrafts?: () => void;
+    pendingDraftCount: number;
   }) => (
     <div>
       <button onClick={() => onOrganizeSkills("light")}>organize</button>
@@ -51,6 +53,7 @@ vi.mock("./SkillManagementToolbar", () => ({
       {onReviewDrafts ? (
         <button onClick={onReviewDrafts}>admin.memorySkillDraftReviewTitle</button>
       ) : null}
+      <output data-testid="pending-count">{pendingDraftCount}</output>
       <span data-testid="organize-status">{organizeStatus}</span>
       <span data-testid="organize-disabled">{String(organizeDisabled)}</span>
     </div>
@@ -122,6 +125,23 @@ describe("SkillManagementSection organize task recovery", () => {
       manualSkillReviewRunning: false,
       handleRunManualSkillReview: vi.fn(),
     });
+  });
+
+  it("includes organize proposals in the single pending review entry", async () => {
+    render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
+    await act(async () => {});
+    act(() => viewMocks.approval.onPendingCountChange(2));
+    expect(screen.getByTestId("pending-count")).toHaveTextContent("2");
+    expect(screen.queryByText("organize-approval")).toBeNull();
+    fireEvent.click(screen.getByRole("button", {name: "admin.memorySkillDraftReviewTitle"}));
+    expect(screen.getByText("organize-approval")).toBeVisible();
+    expect(screen.queryByText("draft-review")).toBeNull();
+    fireEvent.click(screen.getByText("admin.memorySkillDraftReviewTitle"));
+    expect(screen.getByText("draft-review")).toBeVisible();
+    expect(screen.queryByText("organize-approval")).toBeNull();
+    act(() => viewMocks.review.onClose());
+    expect(screen.queryByText("organize-approval")).toBeNull();
+    expect(screen.getByTestId("pending-count")).toHaveTextContent("2");
   });
 
   it("shows blocking skills from a 409 and opens existing draft review with refresh after acceptance", async () => {
@@ -221,6 +241,7 @@ describe("SkillManagementSection organize task recovery", () => {
     const signal = skillApiMocks.waitForSkillOrganize.mock.calls[0][1] as AbortSignal;
     fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
     await screen.findByText("admin.memorySkillOrganizeFailed");
+    expect(screen.queryByRole("link", { name: "admin.memorySkillOrganizeConfigureModel" })).not.toBeInTheDocument();
     expect(signal.aborted).toBe(false);
     expect(screen.getByTestId("organize-disabled")).toHaveTextContent("true");
     fireEvent.click(screen.getByRole("button", {name: "cancel-run"}));
@@ -228,11 +249,12 @@ describe("SkillManagementSection organize task recovery", () => {
     expect(signal.aborted).toBe(true);
   });
 
-  it("displays a typed failure reported by task polling", async () => {
+  it.each(["skill_organize_model_unavailable", "skill_organize_model_transport"])("offers model configuration for %s reported by task polling", async (errorCode) => {
     skillApiMocks.getRunningSkillOrganizeTask.mockResolvedValue({requestId: "failed-model", status: "organize_plan"});
-    skillApiMocks.waitForSkillOrganize.mockResolvedValue({status: "failed", errorCode: "skill_organize_model_transport", error: "provider unavailable"});
+    skillApiMocks.waitForSkillOrganize.mockResolvedValue({status: "failed", errorCode, error: "provider unavailable"});
     render(<MemoryRouter><SkillManagementSection /></MemoryRouter>);
     expect(await screen.findByText("admin.memorySkillOrganizeModelUnavailable")).toBeVisible();
+    expect(screen.getByRole("link", { name: "admin.memorySkillOrganizeConfigureModel" })).toHaveAttribute("href", "/settings?section=model_defaults");
   });
 
   it.each(["response", "polling"])("warns about retained drafts via %s without blocking other organize work", async (source) => {
@@ -335,8 +357,12 @@ describe("SkillManagementSection organize task recovery", () => {
     await waitFor(() => {
       expect(screen.getByTestId("organize-status")).toHaveTextContent("success");
       expect(screen.getByTestId("organize-disabled")).toHaveTextContent("false");
-      expect(screen.getByText("organize-approval")).toBeVisible();
+      expect(screen.queryByText("organize-approval")).toBeNull();
     });
+    act(() => viewMocks.approval.onPendingCountChange(2));
+    fireEvent.click(screen.getByRole("button", { name: "admin.memorySkillDraftReviewTitle" }));
+    expect(screen.getByText("organize-approval")).toBeVisible();
+    expect(screen.queryByText("draft-review")).toBeNull();
     expect(viewMocks.approval.hiddenRequestId).toBe("");
     expect(refreshSkillAssets).toHaveBeenCalledWith({ page: 1 });
   });

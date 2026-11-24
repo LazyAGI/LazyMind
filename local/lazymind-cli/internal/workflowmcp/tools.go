@@ -20,6 +20,7 @@ import (
 const maxLocalArtifactBytes = 20 << 20
 
 var ToolNames = []string{
+	"workflow.worker.grant",
 	"workflow.generation.claim", "workflow.generation.respond",
 	"workflow.action.get", "workflow.action.respond", "workflow.action.cancel", "workflow.edit.context", "workflow.edit.commit",
 	"workflow.list",
@@ -39,6 +40,7 @@ var ToolNames = []string{
 	"workflow.tool.list",
 	"workflow.tool.call",
 	"workflow.artifact.publish",
+	"workflow.artifact.preview",
 	"workflow.artifact.list",
 	"workflow.artifact.get",
 }
@@ -113,6 +115,8 @@ const workflowStartDescription = "Start a revision-bound Workflow with request_c
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	registerExecutionTools(server, client)
+	registerWorkerGrant(server, client)
+	registerPreview(server, client)
 	registerActionTools(server, client)
 	registerGenerationTools(server, client)
 	registerEditTools(server, client)
@@ -125,7 +129,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.get", Title: "Get a LazyMind Workflow",
-		Description: "Read a published Workflow revision and its startup_contract. Use exact input_materials IDs, package-declared JSON schemas and clarification_fields when starting. input_requirements preserves per-step all/any source alternatives. The current step contract is returned by workflow.step.begin/claim.", Annotations: readOnly},
+		Description: "Read a published Workflow revision and its startup_contract. Use exact input_materials IDs, package-declared JSON schemas and clarification_fields when starting. When asking a clarification with recommended_choice, present that option first as recommended and wait for the user's answer. input_requirements preserves per-step all/any source alternatives. The current step contract is returned by workflow.step.begin/claim.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input GetInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.Get(ctx, input.WorkflowID, input.RevisionID)
 			return nil, value, err

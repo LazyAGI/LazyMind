@@ -132,6 +132,7 @@ class AgentEventFrameTranslator:
         self._mail_drafts: dict[str, dict[str, Any]] = {}
         self._ordinary_ask: dict[str, Any] | None = None
         self.streamed_text = False
+        self.include_reasoning = True
         self.ask_pending_emitted = False
         self.capability_dependency_emitted = False
         self.tool_call_turns = 0
@@ -382,7 +383,8 @@ class AgentEventFrameTranslator:
             if delta:
                 self.run.semantic_output = True
                 self.metrics.mark_output()
-                frames.append(_stream_frame(think=delta))
+                if self.include_reasoning:
+                    frames.append(_stream_frame(think=delta))
             return frames
 
         if event_type == 'text':
@@ -397,7 +399,8 @@ class AgentEventFrameTranslator:
                 self.citation_plugin,
             ):
                 self.streamed_text = self.streamed_text or has_text
-                frames.append(self._export_frame(frame))
+                if self.include_reasoning or not frame.get('think'):
+                    frames.append(self._export_frame(frame))
             return frames
 
         if event_type in ('tool_calls', 'tool_results') and self.export_stream is not None:
@@ -469,7 +472,8 @@ class AgentEventFrameTranslator:
             think = str(event.get('think') or '')
             if think:
                 self.run.semantic_output = True
-                frames.append(_stream_frame(think=think))
+                if self.include_reasoning:
+                    frames.append(_stream_frame(think=think))
 
         return frames
 
@@ -533,7 +537,8 @@ class AgentEventFrameTranslator:
             self.citation_plugin,
         ):
             self.streamed_text = self.streamed_text or has_text
-            frames.append(self._export_frame(frame))
+            if self.include_reasoning or not frame.get('think'):
+                frames.append(self._export_frame(frame))
         return frames
 
     def _collect_sources(self) -> Any:
@@ -573,7 +578,7 @@ class AgentEventFrameTranslator:
 
         if not self.streamed_text:
             think = str(output.get('think') or '')
-            if think:
+            if think and self.include_reasoning:
                 for chunk in _iter_text_chunks(think, chunk_size):
                     frames.append(_stream_frame(think=chunk))
 

@@ -97,6 +97,7 @@ type ClarificationField struct {
 	AskWhen       string                   `json:"ask_when,omitempty" yaml:"ask_when,omitempty"`
 	Type          string                   `json:"type,omitempty" yaml:"type,omitempty"`
 	Choices       []string                 `json:"choices,omitempty" yaml:"choices,omitempty"`
+	Recommended   string                   `json:"recommended_choice,omitempty" yaml:"recommended_choice,omitempty"`
 	ChoicePolicy  string                   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
 	Attachment    *ClarificationAttachment `json:"attachment,omitempty" yaml:"attachment,omitempty"`
 	Reason        string                   `json:"reason,omitempty" yaml:"reason,omitempty"`
@@ -132,12 +133,14 @@ type ClarificationAttachment struct {
 // PostStepCheck is a deterministic package-owned function that a Host must run
 // after the named step has produced its artifacts, but before the Attempt may
 // be committed as successful. Arguments map function parameter names to
-// artifacts produced by that step. Unlike a Workflow node, this check never
-// starts another model/SubAgent turn.
+// artifacts produced by that step. InputArguments names inputs bound to the
+// same attempt. A check runs without starting another model/SubAgent turn.
 type PostStepCheck struct {
 	StepID    string            `json:"step_id" yaml:"step_id"`
 	Tool      string            `json:"tool" yaml:"tool"`
 	Arguments map[string]string `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	// InputArguments are read from the attempt's bound inputs.
+	InputArguments map[string]string `json:"input_arguments,omitempty" yaml:"input_arguments,omitempty"`
 	// ArtifactsArgument receives only this attempt's published artifacts, including list entries.
 	ArtifactsArgument string `json:"artifacts_argument,omitempty" yaml:"artifacts_argument,omitempty"`
 }
@@ -314,6 +317,8 @@ type Projection struct {
 	Edges      []ProjectedEdge           `json:"edges"`
 	EndReached bool                      `json:"end_reached"`
 	Completed  bool                      `json:"completed"`
+
+	DecidedRoutes []string `json:"decided_routes"`
 }
 
 type ProjectedEdge struct {

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Alert, Button, Drawer, Form, Input, Spin, Tag, message } from "antd";
+import type { CheckboxChangeEvent } from "antd/es/checkbox";
+import { Alert, Button, Checkbox, Drawer, Form, Input, Spin, Tag, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useSettingsFormDraft } from "@/modules/settings/SettingsNavigationGuard";
@@ -46,6 +47,7 @@ export function ProviderRequestConfigDrawer({
   const [config, setConfig] = useState<ProviderRequestConfig | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [replaceLegacyAdvanced, setReplaceLegacyAdvanced] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const requestSequence = useRef(0);
@@ -59,6 +61,7 @@ export function ProviderRequestConfigDrawer({
     setConfig(null);
     setLoadError(null);
     setSaving(false);
+    setReplaceLegacyAdvanced(false);
     form.resetFields();
     if (!open || !providerId) {
       setLoading(false);
@@ -102,7 +105,7 @@ export function ProviderRequestConfigDrawer({
   };
 
   const save = async (values: FormValues) => {
-    if (saving || loading || !config || loadError) return;
+    if (saving || loading || !config || loadError || (config.advanced_unavailable && !replaceLegacyAdvanced)) return;
     const sequence = requestSequence.current;
     const body: ProviderRequestConfigInput = {
       default_protocol: values.default_protocol,
@@ -146,7 +149,7 @@ export function ProviderRequestConfigDrawer({
     forceRender
     footer={<div className="provider-request-config-footer">
       <Button disabled={saving} onClick={close}>{text("cancel")}</Button>
-      <Button type="primary" loading={saving} disabled={loading || Boolean(loadError) || !config} onClick={() => form.submit()}>{text("save")}</Button>
+      <Button type="primary" loading={saving} disabled={loading || Boolean(loadError) || !config || (config.advanced_unavailable && !replaceLegacyAdvanced)} onClick={() => form.submit()}>{text("save")}</Button>
     </div>}
   >
     <div className="provider-request-config-content" aria-label={providerName}>
@@ -157,6 +160,8 @@ export function ProviderRequestConfigDrawer({
         description={loadError}
         action={<Button size="small" onClick={() => setRetry((value) => value + 1)}>{text("retry")}</Button>}
       /> : null}
+      {config?.advanced_unavailable ? <Alert type="warning" showIcon message={text("legacyAdvancedUnavailable")}
+        description={<Checkbox checked={replaceLegacyAdvanced} disabled={saving} onChange={(event: CheckboxChangeEvent) => setReplaceLegacyAdvanced(event.target.checked)}>{text("replaceLegacyAdvanced")}</Checkbox>} /> : null}
       <Spin spinning={loading}>
         <Form form={form} layout="vertical" onFinish={(values) => void save(values)} disabled={loading || saving || Boolean(loadError)}>
           <Form.Item name="default_protocol" hidden><Input /></Form.Item>

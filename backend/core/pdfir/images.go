@@ -23,7 +23,7 @@ func figureNumber(s string) string {
 	}
 	return strings.ToUpper(s[m[2]:m[3]])
 }
-func projectImages(d *Document, items []contentItem, layout []byte) {
+func projectImages(d *Document, items []contentItem, captions []tableCaption) {
 	perPage := map[int]int{}
 	for i, v := range items {
 		if v.Type != "image" {
@@ -36,7 +36,6 @@ func projectImages(d *Document, items []contentItem, layout []byte) {
 		}
 		d.Blocks[i].Image = im
 	}
-	captions := layoutCaptionsOfType(layout, "image_caption")
 	direction := 0
 	conflict := false
 	for _, c := range captions {

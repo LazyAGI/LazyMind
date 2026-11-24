@@ -124,7 +124,7 @@ export default function DefaultServicesPage({
         if (requestId !== latestRequest.current) return;
         setSetupAvailability((current) => ({ ...current, modelProvider: "error" }));
       });
-    const [parsingResult, searchResult, academicResult, translationResult] = await Promise.allSettled([
+    const [parsingResult, searchResult, academicResult, translationResult, selectedResult] = await Promise.allSettled([
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet(
         { category: "ocr" },
         silentSetupCheckOptions,
@@ -135,22 +135,28 @@ export default function DefaultServicesPage({
       ),
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "datasource" }, silentSetupCheckOptions),
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "translation" }, silentSetupCheckOptions),
+      modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet(silentSetupCheckOptions),
     ]);
     if (requestId !== latestRequest.current) return;
 
     const cloudParsing = parsingResult.status === "fulfilled"
       ? (unwrapModelProviderData<{ groups?: unknown[] }>(parsingResult.value.data).groups ?? []).length > 0 ? "ready" : "empty"
       : "error";
-    const searchEngine = searchResult.status === "fulfilled"
-      ? (unwrapModelProviderData<{ groups?: unknown[] }>(searchResult.value.data).groups ?? []).length > 0 ? "ready" : "empty"
-      : "error";
+    const searchEngine = searchResult.status === "fulfilled" ? "ready" : "error";
 
     setSetupAvailability((current) => ({ ...current, cloudParsing, searchEngine }));
     const serviceGroups: Partial<Record<ServiceCategory, { name?: string; provider_name?: string }[]>> = {};
     for (const [category, result] of [["parsing", parsingResult], ["search", searchResult], ["academic", academicResult], ["translation", translationResult]] as const) {
       if (result.status !== "fulfilled") continue;
       const groups = unwrapModelProviderData<{ groups?: { name?: string; provider_name?: string }[] }>(result.value.data).groups || [];
-      serviceGroups[category] = groups;
+      serviceGroups[category] = category === "search" && groups.length === 0 ? [{ name: "Keenable" }] : groups;
+    }
+    // Configured OCR credentials are alternatives, not concurrently active services.
+    serviceGroups.parsing = [];
+    if (selectedResult.status === "fulfilled") {
+      const selections = unwrapModelProviderData<{ selections?: { category: string; provider_name: string; group_name: string }[] }>(selectedResult.value.data).selections || [];
+      const parser = selections.find(item => item.category === "ocr");
+      if (parser) serviceGroups.parsing = [{ name: parser.provider_name, provider_name: parser.provider_name }];
     }
     setToolServiceGroups(serviceGroups);
   }, []);

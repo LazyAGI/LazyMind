@@ -51,7 +51,7 @@ function newPreviewConversationId() {
   return `pdf-${suffix}`.slice(0, 36);
 }
 
-function documentContextForSelection(
+export function documentContextForSelection(
   datasetId: string,
   documentId: string,
   fileName: string,

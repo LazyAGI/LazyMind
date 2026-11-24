@@ -28,7 +28,7 @@ func seedPaperImportPreparation(t *testing.T, scene, level, preset string) (*orm
 	policy := readingpolicy.Defaults()
 	policy.Preset = preset
 	if preset == "custom" {
-		policy.Modes[readingpolicy.ChatPrepare] = readingpolicy.Automatic
+		policy.Modes[readingpolicy.PDFParse] = readingpolicy.Automatic
 	}
 	if _, err := readingpolicy.Save(context.Background(), db.DB, "owner", policy); err != nil {
 		t.Fatal(err)
@@ -80,6 +80,9 @@ func TestPaperImportUsesOnlyBoundedReadingPreparation(t *testing.T) {
 					}
 					db.Model(&orm.AsyncJob{}).Count(&jobs)
 					want := int64(1)
+					if preset == "full" {
+						want = 2
+					}
 					if preset == "demand" {
 						want = 0
 					}

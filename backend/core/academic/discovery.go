@@ -77,6 +77,7 @@ type scholarlyLocation struct {
 	License    string `json:"license"`
 }
 type scholarlyWork struct {
+	Type        string `json:"type"`
 	ID          string `json:"id"`
 	Title       string `json:"title"`
 	DOI         string `json:"doi"`
@@ -128,6 +129,7 @@ func openAlexGet(ctx context.Context, path string, params url.Values, key string
 }
 func scholarlyPaper(item scholarlyWork) discoveredPaper {
 	work := WorkInput{Title: item.Title, Year: item.Year, DOI: NormalizeDOI(item.DOI), Provider: "openalex", ProviderWorkID: strings.TrimPrefix(item.ID, "https://openalex.org/"), CitationCount: item.Citations, Provenance: map[string]any{}, TrustedFulltext: true}
+	work.Provenance["work_type"] = item.Type
 	if item.PublishedAt != "" {
 		// An index's publication date may describe a later journal edition.
 		work.Provenance["publication_date"] = item.PublishedAt

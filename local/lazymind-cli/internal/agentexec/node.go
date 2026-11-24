@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -18,6 +20,14 @@ func CompatibleNode(ctx context.Context, candidates ...string) (string, error) {
 		node, err := ResolveExecutable(candidate)
 		if err != nil {
 			continue
+		}
+		// The dispatcher starts Node directly; a batch shim may pass Run's
+		// version probe through PowerShell but cannot be launched that way.
+		if runtime.GOOS == "windows" {
+			ext := strings.ToLower(filepath.Ext(node))
+			if ext == ".cmd" || ext == ".bat" {
+				continue
+			}
 		}
 		probe, cancel := context.WithTimeout(ctx, 5*time.Second)
 		version, err := Run(probe, node, "--version")

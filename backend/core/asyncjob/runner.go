@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
 )
@@ -296,11 +297,12 @@ func (r *Runner) claimOne(ctx context.Context, now time.Time) (*orm.AsyncJob, er
 func (r *Runner) runJob(ctx context.Context, row orm.AsyncJob) error {
 	handler, ok := lookupHandler(row.JobType)
 	reporter := &jobReporter{
-		db:           r.db,
-		jobID:        row.ID,
-		workerID:     r.opts.WorkerID,
-		attemptCount: row.AttemptCount,
-		lockTTL:      r.opts.LockTTL,
+		db:               r.db,
+		jobID:            row.ID,
+		workerID:         r.opts.WorkerID,
+		attemptCount:     row.AttemptCount,
+		lockTTL:          r.opts.LockTTL,
+		requireLiveLease: r.opts.RequireLiveLease,
 	}
 	var result Result
 	var err error
@@ -507,14 +509,16 @@ func stringsOrDefault(value, fallback string) string {
 }
 
 type jobReporter struct {
-	db           *gorm.DB
-	jobID        string
-	workerID     string
-	attemptCount int
-	lockTTL      time.Duration
+	requireLiveLease bool
+	db               *gorm.DB
+	jobID            string
+	workerID         string
+	attemptCount     int
+	lockTTL          time.Duration
 }
 
-var errJobLeaseLost = errors.New("async job lease lost")
+var ErrLeaseLost = errors.New("async job lease lost")
+var errJobLeaseLost = ErrLeaseLost
 
 func (r *jobReporter) SetProgress(ctx context.Context, current, total int64) error {
 	result := r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
@@ -535,8 +539,16 @@ func (r *jobReporter) SetProgress(ctx context.Context, current, total int64) err
 
 func (r *jobReporter) Heartbeat(ctx context.Context) error {
 	now := time.Now().UTC()
-	result := r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ? AND status = ? AND locked_by = ? AND attempt_count = ?", r.jobID, StatusRunning, r.workerID, r.attemptCount).
+	query := r.db.WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("id = ? AND status = ? AND locked_by = ? AND attempt_count = ?", r.jobID, StatusRunning, r.workerID, r.attemptCount)
+	if r.requireLiveLease {
+		leaseCondition := "lock_until > ?"
+		if r.db.Dialector.Name() == "sqlite" {
+			leaseCondition = "julianday(lock_until) > julianday(?)"
+		}
+		query = query.Where(leaseCondition, now)
+	}
+	result := query.
 		Updates(map[string]any{
 			"heartbeat_at": now,
 			"lock_until":   now.Add(r.lockTTL),
@@ -563,4 +575,17 @@ func finishCanceledAttempt(tx *gorm.DB, current, execution orm.AsyncJob, result 
 		updates["result_json"] = result.ResultJSON
 	}
 	return tx.Model(&orm.AsyncJob{}).Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", current.ID, StatusCanceled, execution.AttemptCount, execution.LockedBy).Updates(updates).Error
+}
+
+func (r *jobReporter) WithLease(ctx context.Context, checkpoint func(*gorm.DB) error) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, r.db, func(tx *gorm.DB) error {
+		var row orm.AsyncJob
+		if err := withUpdateLock(tx).Where("id = ?", r.jobID).Take(&row).Error; err != nil {
+			return err
+		}
+		if row.Status != string(StatusRunning) || row.LockedBy != r.workerID || row.AttemptCount != r.attemptCount || row.LockUntil == nil || !row.LockUntil.After(time.Now().UTC()) {
+			return ErrLeaseLost
+		}
+		return checkpoint(tx)
+	})
 }

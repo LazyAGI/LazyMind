@@ -8,7 +8,9 @@ import requests
 from lazymind.parsing.service import build_document
 
 
-def _response(payload=None, content=b'zip'):
+def _response(payload=None, content=None):
+    if content is None:
+        content = _structured_archive('fixture result')
     return SimpleNamespace(json=lambda: payload, content=content, status_code=200,
                            raise_for_status=lambda: None)
 
@@ -111,7 +113,7 @@ def test_mineru_certificate_failure_does_not_poll_for_an_hour(monkeypatch, tmp_p
     assert calls == {'submit': 1, 'upload': 1, 'poll': 1, 'download': 0}
 
 
-def test_mineru_reader_verifies_api_and_artifact_tls(monkeypatch, tmp_path):
+def test_mineru_reader_skips_api_tls_but_verifies_artifact_tls(monkeypatch, tmp_path):
     reader, _, _ = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
     seen = []
 
@@ -121,7 +123,7 @@ def test_mineru_reader_verifies_api_and_artifact_tls(monkeypatch, tmp_path):
 
     monkeypatch.setattr(requests, 'request', send)
     reader._http_execute('GET', 'https://mineru.net/api/v4/extract-results/batch/test', verify=False)
-    assert seen[0]['verify'] is True
+    assert seen[0]['verify'] is False
     assert seen[0]['allow_redirects'] is False
     assert reader._online_request_kwargs() == {'verify': True}
 
@@ -247,6 +249,7 @@ def test_mineru_retry_resumes_uploaded_batch_after_worker_restart(monkeypatch, t
     assert second._fetch_async(source)[0] == '[]'
     assert second_calls == {'submit': 0, 'upload': 0, 'poll': 1, 'download': 1}
 
+    second._archive_cache_path(str(source), second._source_digest(source), 'vlm').unlink()
     current_time = __import__('time').time()
     monkeypatch.setattr('time.time', lambda: current_time + 24 * 3600 + 1)
     later, source, later_calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
@@ -261,7 +264,7 @@ def test_mineru_completed_batch_is_reused_on_next_parse(monkeypatch, tmp_path):
 
     second, source, second_calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status('done'))
     assert second._fetch_async(source)[0] == '[]'
-    assert second_calls == {'submit': 0, 'upload': 0, 'poll': 1, 'download': 1}
+    assert second_calls == {'submit': 0, 'upload': 0, 'poll': 0, 'download': 0}
 
 
 def test_mineru_split_retry_reuses_a_completed_part(monkeypatch, tmp_path):
@@ -288,7 +291,7 @@ def test_mineru_split_retry_reuses_a_completed_part(monkeypatch, tmp_path):
         monkeypatch, tmp_path, lambda _: _status('done'))
     monkeypatch.setattr(retry, '_split_large_pdf', lambda _: splits)
     assert retry._fetch_async(source)[0] == '[]'
-    assert retry_calls == {'submit': 0, 'upload': 0, 'poll': 2, 'download': 2}
+    assert retry_calls == {'submit': 0, 'upload': 0, 'poll': 1, 'download': 1}
 
 
 def test_mineru_parallel_attempts_submit_the_same_pdf_once(monkeypatch, tmp_path):
@@ -640,7 +643,7 @@ def test_shared_archive_malformed_layout_falls_back(monkeypatch, tmp_path):
         zipped.writestr('layout.json', '[]')
     real_extract = LazyMindMineruPDFReader._extract_content_from_zip.__get__(reader)
     monkeypatch.setattr(reader, '_extract_content_from_zip',
-                        lambda data, task_dir=None: ('[]', task_dir) if data == b'zip'
+                        lambda data, task_dir=None: ('[]', task_dir) if data == _structured_archive('fixture result')
                         else real_extract(data, task_dir=task_dir))
     assert reader._fetch_async(source)[0] == '[]'
     assert calls['upload'] == 1
@@ -694,3 +697,90 @@ def test_windows_shared_cache_can_lock_and_publish_beyond_max_path(tmp_path):
         temporary.write_bytes(b'cached archive')
         temporary.replace(cache)
         assert cache.read_bytes() == b'cached archive'
+
+
+def _structured_archive(text):
+    import io
+    import json
+    import zipfile
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, mode="w") as archive:
+        archive.writestr(zipfile.ZipInfo("paper_content_list.json"), json.dumps([
+            {"type": "text", "text": text, "page_idx": 0, "bbox": [0, 0, 20, 20]},
+        ]))
+    return output.getvalue()
+
+
+def test_mineru_reuses_structured_legacy_pipeline_and_submits_only_vlm(monkeypatch, tmp_path):
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status("done"))
+    reader._backend = "pipeline"
+    digest = reader._source_digest(str(source))
+    legacy = source.parent / ".lazymind-artifacts" / "mineru-cache-v1" / (digest + "-pipeline.zip")
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(_structured_archive("old result"))
+    assert reader._fetch_async(source)[0] == "[]"
+    assert calls["submit"] == 0
+
+    submit = reader._submit_with_key
+
+    def check_model(method, url, **kwargs):
+        assert kwargs["json"]["model_version"] == "vlm"
+        return submit(method, url, **kwargs)
+
+    monkeypatch.setattr(reader, "_submit_with_key", check_model)
+    reader._fetch_async(source, use_cache=False)
+    assert calls["submit"] == 1
+
+
+def test_mineru_reuses_identical_source_across_dataset_paths(monkeypatch, tmp_path):
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status("done"))
+    monkeypatch.setitem(build_document._cfg._impl, "shared_upload_dir", str(tmp_path))
+    other_source = tmp_path / "another_dataset" / "other_name.pdf"
+    other_source.parent.mkdir()
+    other_source.write_bytes(source.read_bytes())
+    cache = source.parent / ".lazymind-artifacts" / "mineru-cache-v1" / (reader._source_digest(str(source)) + "-vlm.zip")
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(_structured_archive("already parsed"))
+    assert reader._fetch_async(other_source)[0] == "[]"
+    assert calls["submit"] == 0
+
+
+def test_mineru_dynamic_reader_does_not_mutate_original_before_parsing(monkeypatch, tmp_path):
+    reader, source, _ = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status("done"))
+    dynamic = build_document._build_pdf_reader()
+    monkeypatch.setattr(dynamic, "_get_reader", lambda *args: reader)
+    monkeypatch.setattr(dynamic, "_normalize_long_pdf", lambda path: path.write_bytes(b"mutated"))
+    monkeypatch.setattr(reader, "forward", lambda path, **kwargs: path.read_bytes())
+    result = dynamic._load_data(source, {"ocr_type": "mineru", "ocr_url": "https://mineru.net"})
+    assert result == b"fixture-pdf"
+    assert source.read_bytes() == b"fixture-pdf"
+
+
+def test_failed_forced_reparse_keeps_shared_archive(monkeypatch, tmp_path):
+    reader, source, _ = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status("done"))
+    previous = _shared_fixture(reader, source)
+    raw = previous.read_bytes()
+    monkeypatch.setattr(reader, "_download_result", lambda *args: b"bad response")
+    import zipfile
+    with pytest.raises(zipfile.BadZipFile):
+        reader._fetch_async(source, use_cache=False)
+    assert previous.read_bytes() == raw
+
+
+def test_mineru_publishes_full_original_archive_after_splitting(monkeypatch, tmp_path):
+    import json
+    import zipfile
+    from lazymind.parsing.engine.readers.mineru_online import LazyMindMineruPDFReader
+    reader, source, calls = _reader_with_batch(monkeypatch, tmp_path, lambda _: _status("done"))
+    parts = [tmp_path / "part-a.pdf", tmp_path / "part-b.pdf"]
+    for index, part in enumerate(parts):
+        part.write_bytes(f"part-{index}".encode())
+    monkeypatch.setattr(reader, "_split_large_pdf", lambda _: [(str(parts[0]), 0), (str(parts[1]), 200)])
+    monkeypatch.setattr(reader, "_extract_content_from_zip", LazyMindMineruPDFReader._extract_content_from_zip.__get__(reader))
+    response, _ = reader._fetch_async(source)
+    assert [item["page_idx"] for item in json.loads(response)] == [0, 200]
+    shared_path = reader._archive_cache_path(source, reader._source_digest(source), "vlm")
+    with zipfile.ZipFile(shared_path) as archive:
+        assert [item["page_idx"] for item in json.loads(archive.read("paper_content_list.json"))] == [0, 200]
+    assert json.loads(reader._fetch_async(source)[0]) == json.loads(response)
+    assert calls["submit"] == 2
