@@ -1,7 +1,7 @@
 # GitHub 托管的 macOS / Windows Agent CI
 
 目标工作流：`.github/workflows/agent-e2e-hosted.yml`（Actions 中的 **LazyMind Agent E2E (GitHub-hosted)**）。
-这条工作流使用 GitHub 提供的临时 macOS Intel 和 Windows x64 虚拟机。每个 Job 都从当前提交构建并启动 LazyMind，安装三个真实 Agent CLI，创建临时测试账号，通过正常的本地认证接口连接 MCP。无需在触发者电脑上安装 LazyMind 或 Agent，也无需保持个人电脑在线。
+这条工作流使用 GitHub 提供的临时 macOS Intel 和 Windows x64 虚拟机。每个 Job 都从当前提交构建并启动 LazyMind，安装该 Job 所需的真实 Agent CLI，创建临时测试账号，通过正常的本地认证接口连接 MCP。无需在触发者电脑上安装 LazyMind 或 Agent，也无需保持个人电脑在线。
 
 ## 首次配置
 

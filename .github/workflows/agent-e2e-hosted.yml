@@ -210,7 +210,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: hosted-agent-e2e-${{ matrix.os }}-${{ matrix.agent != (inputs.agent || 'all') && format('{0}-', matrix.agent) || '' }}${{ github.run_id }}
+          name: hosted-agent-e2e-${{ matrix.os }}-${{ matrix.agent != (inputs.agent || 'all') && format('{0}-', matrix.agent) || '' }}${{ github.run_id }}-attempt-${{ github.run_attempt }}
           if-no-files-found: warn
           retention-days: 7
           path: |
