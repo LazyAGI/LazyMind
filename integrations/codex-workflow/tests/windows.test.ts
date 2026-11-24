@@ -29,7 +29,7 @@ vi.mock('../../workflow-agent-core/node/cdp',()=>({CdpClient:class {
   if(expression.includes('mountPresentation')){
    const expected='"run_id":"run-'+target.id+'"'
    if(!expression.includes(expected))throw Error('wrong window/run')
-   model.calls.push({target:target.id,kind:'mount'});return{status:'mounted',page_status:'ready'}
+   model.calls.push({target:target.id,kind:'mount'});return{status:'mounted',page_status:target.id==='b'?'frontend-unavailable':'ready'}
   }
   return{session_id:'thread-'+target.id,epoch:'epoch-'+target.id}
  }
@@ -48,10 +48,11 @@ it('recognizes main and detached chat windows while excluding auxiliary windows'
 })
 it('mounts every window and discovers new/closed windows without duplicating the shared delivery worker',async()=>{
  const stop=new AbortController(),reports:any[]=[]
- const lookup=vi.fn(async(session:string)=>({session_id:session,run_id:'run-'+session.replace('thread-','')}))
+ const lookup=vi.fn(async(session:string)=>({status:'bound' as const,runId:'run-'+session.replace('thread-','')}))
  const running=presentationLoop(9334,lookup,'http://127.0.0.1:19091',stop.signal,status=>reports.push(status))
  try{
   await vi.waitFor(()=>expect(model.calls.filter(x=>x.kind==='mount').map(x=>x.target).sort()).toEqual(['a','b']))
+  expect(reports.at(-1)).toMatchObject({status:'mounted',page_status:'frontend-unavailable',window_count:2})
   model.targets=model.targets.filter(x=>x.id!=='a');model.targets.push({id:'c',type:'page',url:'app://-/index.html?initialRoute=%2Flocal%2F01a16196-3096-7dd3-8c20-33cd9250503c'})
   await vi.advanceTimersByTimeAsync(1100)
   expect(model.calls.some(x=>x.kind==='mount'&&x.target==='c')).toBe(true)

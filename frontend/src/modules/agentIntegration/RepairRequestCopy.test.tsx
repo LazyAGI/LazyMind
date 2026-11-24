@@ -35,10 +35,13 @@ describe("copying an Agent repair request", () => {
       diagnostic_context: { action: "inspect", stage: "control", current_cli: "/current/lazymind", app_version: "test-app-version",
         environment: { LAZYMIND_HOME: "~/LazyMind data", LAZYMIND_RUNTIME_PROFILE: "desktop",
           LAZYMIND_CONNECTOR_CONFIG: "", CODEX_HOME: "~/Codex profile", ACCESS_TOKEN: "private-environment-token" },
-        configuration: [{ config_path: "~/agent/config.json", configured_cli: "/previous/lazymind", connection_file: "~/private-connection.json" }] },
+        configuration: [{ config_path: "~/agent/config.json", configured_cli: "/previous/lazymind", connection_file: "~/private-connection.json" }],
+        connector: { state: "installed", version: "connector-version", loaded: true, loaded_revision: "loaded-hash",
+          record_path: "~/active/connector.json", entry_path: "~/active/main.mjs",
+          presentation_module_path: "~/active/presentation.mjs", control_module_path: "~/active/adapter.mjs" } },
       issue: { code: "capability_unavailable", operation_id: "old-operation", stage: "control" },
       connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: false,
-        control_ready: false, presentation_status: "host-offline" },
+        control_ready: false, presentation_status: "layout-unavailable" },
       message: "raw backend output must stay local",
       action: { kind: "open_url", url: "https://example.test/?token=private" },
     };
@@ -57,6 +60,17 @@ describe("copying an Agent repair request", () => {
     expect(copied).toContain('"LAZYMIND_CONNECTOR_CONFIG": ""');
     expect(copied).toContain('"CODEX_HOME": "~/Codex profile"');
     expect(copied).toContain(`${labels.configuredCLI}: /previous/lazymind`);
+    expect(copied).toContain(`${labels.version}: test-version`);
+    expect(copied).toContain(`${labels.connectorVersion}: connector-version`);
+    expect(copied).toContain(`${labels.connectorLoaded}: true`);
+    expect(copied).toContain(`${labels.connectorLoadedRevision}: loaded-hash`);
+    expect(copied).toContain(`${labels.connectorRecord}: ~/active/connector.json`);
+    expect(copied).toContain(`${labels.connectorEntry}: ~/active/main.mjs`);
+    expect(copied).toContain(`${labels.connectorPresentationModule}: ~/active/presentation.mjs`);
+    expect(copied).toContain(`${labels.connectorControlModule}: ~/active/adapter.mjs`);
+    expect(copied.split("\n")).toContain(`${labels.affectedCapabilities}: ${labels.capabilities.panelMount}`);
+    expect(copied).toContain(`${labels.reloadArguments}: internal workflow-connectors reload codex`);
+    expect(copied).toContain(labels.connectorRepair);
     expect(copied).not.toMatch(/old-operation|raw backend|token=private|private-connection|private-environment-token|ACCESS_TOKEN|agentIntegration\./);
 
     // A failed recheck must not send a previous successful/failed snapshot.
@@ -67,7 +81,7 @@ describe("copying an Agent repair request", () => {
     expect(copied).toContain(`${labels.diagnosticID}: ${labels.unknown}`);
     expect(copied).toContain(`${labels.stage}: notReady`);
     expect(copied).toContain(`${labels.checkEnvironment}: ${labels.unknown}`);
-    expect(copied).not.toMatch(/latest-check|host-offline|test-version|test-app-version|\/current\/lazymind|\/previous\/lazymind/);
+    expect(copied).not.toMatch(/latest-check|layout-unavailable|test-version|test-app-version|\/current\/lazymind|\/previous\/lazymind|~\/active\/|loaded-hash|workflow-connectors reload/);
   });
 
   it.each(["zh-CN", "en-US"])("does not turn an unavailable inspection into current evidence (%s)", async language => {
@@ -81,7 +95,8 @@ describe("copying an Agent repair request", () => {
       issue: { code: "host_unavailable", operation_id: "previous-operation" },
       diagnostic_context: { action: "inspect", stage: "inspect", current_cli: "/installed/lazymind",
         environment: { LAZYMIND_HOME: "~/installed-home", LAZYMIND_CONNECTOR_CONFIG: "" },
-        configuration: [{ config_path: "~/old-config", reason: "installation_mismatch" }] },
+        configuration: [{ config_path: "~/old-config", reason: "installation_mismatch" }],
+        connector: { state: "missing", loaded: false, entry_path: "~/old-entry.mjs", failure_path: "~/old-module.mjs" } },
       connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: false,
         presentation_status: "host-offline", runtime_state: "unavailable" },
     };
@@ -95,7 +110,39 @@ describe("copying an Agent repair request", () => {
     expect(copied).toContain("/installed/lazymind");
     expect(copied).toContain('"LAZYMIND_HOME": "~/installed-home"');
     expect(copied).toContain("~/logs/agent-setup.log");
-    expect(copied).not.toMatch(/previous-check|previous-operation|host_unavailable|host-offline|old-config|installation_mismatch/);
+    expect(copied).not.toMatch(/previous-check|previous-operation|host_unavailable|host-offline|old-config|installation_mismatch|old-entry.mjs|old-module.mjs|workflow-connectors reload/);
+  });
+
+  it.each(["zh-CN", "en-US"])("reports a missing WorkBuddy module without suggesting reload (%s)", async language => {
+    const i18n = createInstance();
+    await i18n.init({ lng: language, fallbackLng: false,
+      resources: { "zh-CN": { translation: zhCN }, "en-US": { translation: enUS } } });
+    const labels = (language === "zh-CN" ? zhCN : enUS).agentIntegration.repairRequest;
+    const status: DesktopAgentIntegrationStatus = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled",
+      diagnostic_context: { action: "inspect",
+        connector: { state: "missing", loaded: false, entry_path: "~/active/main.mjs", failure_path: "~/active/missing-module.mjs" } } };
+    render(<I18nextProvider i18n={i18n}><RepairRequestCopy agent="workbuddy" status={status} /></I18nextProvider>);
+    fireEvent.click(screen.getByRole("button", { name: labels.copyHint }));
+    await waitFor(() => expect(copied).toContain(`${labels.connectorState}: missing`));
+    expect(copied).toContain(`${labels.connectorLoaded}: false`);
+    expect(copied).toContain(`${labels.connectorEntry}: ~/active/main.mjs`);
+    expect(copied).toContain(`${labels.connectorFailurePath}: ~/active/missing-module.mjs`);
+    expect(copied).not.toContain("workflow-connectors reload");
+  });
+
+  it("reports session control and page failure separately for WorkBuddy", async () => {
+    const i18n = createInstance();
+    await i18n.init({ lng: "en-US", fallbackLng: false, resources: { "en-US": { translation: enUS } } });
+    const labels = enUS.agentIntegration.repairRequest;
+    const status: DesktopAgentIntegrationStatus = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled",
+      diagnostic_context: { action: "inspect", connector: { state: "installed", entry_path: "~/active/main.mjs" } },
+      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: false,
+        presentation_status: "mounted", page_status: "frontend-unavailable" } };
+    render(<I18nextProvider i18n={i18n}><RepairRequestCopy agent="workbuddy" status={status} /></I18nextProvider>);
+    fireEvent.click(screen.getByRole("button", { name: labels.copyHint }));
+    await waitFor(() => expect(copied.split("\n")).toContain(
+      `${labels.affectedCapabilities}: ${labels.capabilities.sessionControl}, ${labels.capabilities.panelPage}`));
+    expect(copied).toContain(`${labels.reloadArguments}: internal workflow-connectors reload workbuddy`);
   });
 
   const dsh: DesktopAgentIntegrationStatus = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready" };

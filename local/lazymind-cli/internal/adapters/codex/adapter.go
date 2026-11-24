@@ -20,6 +20,7 @@ import (
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -160,6 +161,8 @@ func (a *Adapter) status(context.Context) agentintegration.Status {
 		store, err := credentials.NewStore(a.home, "")
 		ready := false
 		presentation := "unavailable"
+		page := ""
+		status.Version = codexhost.CurrentVersion()
 		issue := "host_unavailable"
 		if err == nil {
 			scope, e := store.AccountScope()
@@ -168,10 +171,12 @@ func (a *Adapter) status(context.Context) agentintegration.Status {
 					issue = codexhost.StatusIssue(current)
 					ready = issue == ""
 					presentation = current.Presentation.Status
+					page = current.Presentation.PageStatus
+					status.ConnectorRuntime = current.Runtime
 				}
 			}
 		}
-		status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, MCPEnabled: true, MCPTrusted: true, ControlReady: ready, PresentationStatus: presentation}
+		status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, MCPEnabled: true, MCPTrusted: true, ControlReady: ready, PresentationStatus: presentation, PageStatus: page}
 		if !ready {
 			status.Issue = &agentintegration.Issue{Code: issue}
 			status.Message = "Codex control is disconnected. Open its installation guide in LazyMind; save current work before confirming a connection or restart."
@@ -234,6 +239,9 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 	account, err := store.AccountScope()
 	if err != nil {
 		return agentintegration.FailError(status, err)
+	}
+	if err := workflowconnector.Ensure(ctx, a.home, a.self, "codex"); err != nil {
+		return codexConnectionFailure(status, &codexhost.SetupError{Code: "runtime_unavailable", Err: err})
 	}
 	// Saved registration determines the switch state. Reusing the installation
 	// also requires an enabled pairing for the currently signed-in account.
@@ -334,6 +342,9 @@ func (a *Adapter) Refresh(ctx context.Context) (result agentintegration.Status) 
 	}
 	if err := a.prepareRuntime(ctx); err != nil {
 		return agentintegration.Fail(status, err.Error())
+	}
+	if err := workflowconnector.Ensure(ctx, a.home, a.self, "codex"); err != nil {
+		return agentintegration.FailError(status, err)
 	}
 	record, err = codexplugin.Install(ctx, a.home, a.self, a.binary, profile, a.hostID)
 	if err != nil {

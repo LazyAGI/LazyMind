@@ -3,11 +3,10 @@ package codexhost
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,7 +16,9 @@ import (
 	"strconv"
 	"time"
 
+	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/codexplugin"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -27,6 +28,7 @@ type Config struct {
 	Port        int    `json:"cdp_port"`
 }
 type Status struct {
+	workflowconnector.Runtime
 	Connector    string `json:"connector_id"`
 	CheckedAt    int64  `json:"checked_at"`
 	Ready        bool   `json:"ready"`
@@ -91,6 +93,15 @@ func ReadStatus(home, account string) (Status, error) {
 	}
 	return s, nil
 }
+func CurrentVersion() string {
+	application, err := startupApplication()
+	if err != nil {
+		return ""
+	}
+	version, _ := agentexec.ElectronVersion(application)
+	return version
+}
+
 func Ready(home, account string) bool { s, e := ReadStatus(home, account); return e == nil && s.Ready }
 
 var localChatRoute = regexp.MustCompile(`(?i)^/local/[a-f0-9-]{36}$`)
@@ -216,19 +227,21 @@ func waitForConnection(ctx context.Context, home string) error {
 	}
 }
 func Supervise(ctx context.Context, home, bridgeURL string, account func() (string, error)) {
-	var current *exec.Cmd
-	var cancel context.CancelFunc
-	var done chan error
-	var fingerprint string
+	var worker *workflowconnector.Worker
+	var done <-chan error
+	var running Config
+	var fingerprint, lastFailure string
 	stop := func() {
-		if cancel != nil {
-			cancel()
-			<-done
-			_ = CleanupPresentation(home)
+		if worker != nil {
+			graceful := worker.Stop()
+			_ = os.Remove(running.PairingFile + ".codex-status.json")
+			if !graceful {
+				if err := cleanupPresentation(home, running); err != nil {
+					log.Printf("Codex Connector cleanup: %v", err)
+				}
+			}
 		}
-		current = nil
-		cancel = nil
-		done = nil
+		worker, done = nil, nil
 	}
 	defer stop()
 	ticker := time.NewTicker(time.Second)
@@ -236,56 +249,48 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 	for {
 		scope, scopeErr := account()
 		c, p, err := Load(home, scope)
-		next := c.Node + "|" + c.PairingFile + "|" + strconv.Itoa(c.Port) + "|" + scope + "|" + p.Token
 		if scopeErr != nil || err != nil || !p.Enabled || !codexplugin.Registered(home) {
-			if current != nil {
-				stop()
-			}
+			stop()
+			lastFailure = ""
 		} else {
-			if current != nil && fingerprint != next {
+			installed, installErr := workflowconnector.Resolve(home, "codex")
+			reload := workflowconnector.ReloadRequest(home, "codex")
+			next := c.Node + "|" + c.PairingFile + "|" + strconv.Itoa(c.Port) + "|" + scope + "|" + p.Token + "|" + installed.Release + "|" + reload
+			if done != nil && (fingerprint != next || installErr != nil) {
 				stop()
 			}
-			if current == nil {
-				bundle, loadErr := codexplugin.DispatcherBundle()
-				if loadErr == nil {
-					sum := sha256.Sum256(bundle)
-					script := filepath.Join(home, "codex-workflow", "connector-"+hex.EncodeToString(sum[:8])+".mjs")
-					if os.MkdirAll(filepath.Dir(script), 0700) == nil && os.WriteFile(script, bundle, 0600) == nil {
-						_ = os.MkdirAll(filepath.Join(home, "logs"), 0700)
-						log, e := os.OpenFile(filepath.Join(home, "logs", "codex-workflow.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-						if e == nil {
-							child, closeChild := context.WithCancel(ctx)
-							cmd := backgroundCommand(child, c.Node, script, "--pairing-file", c.PairingFile, "--bridge-url", bridgeURL, "--cdp-port", strconv.Itoa(c.Port), "--parent-pid", strconv.Itoa(os.Getpid()))
-							cmd.Stdout, cmd.Stderr = log, log
-							cmd.WaitDelay = 3 * time.Second
-							if e = cmd.Start(); e == nil {
-								current = cmd
-								cancel = closeChild
-								done = make(chan error, 1)
-								ch := done
-								fingerprint = next
-								go func() { ch <- cmd.Wait(); log.Close() }()
-							} else {
-								closeChild()
-								log.Close()
-							}
-						}
-					}
+			if done == nil && installErr == nil {
+				worker, installErr = installed.StartWorker(ctx, home, reload, func(child context.Context, stopFile string) *exec.Cmd {
+					return backgroundCommand(child, c.Node, installed.EntryPath(), "--pairing-file", c.PairingFile, "--bridge-url", bridgeURL,
+						"--cdp-port", strconv.Itoa(c.Port), "--parent-pid", strconv.Itoa(os.Getpid()), "--stop-file", stopFile)
+				})
+				if worker != nil {
+					running, fingerprint, done = c, next, worker.Done
 				}
+			}
+			if installErr != nil && installErr.Error() != lastFailure {
+				lastFailure = installErr.Error()
+				log.Printf("Codex Connector: %v", installErr)
+			} else if installErr == nil {
+				lastFailure = ""
 			}
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-done:
-			cancel()
-			current = nil
-			cancel = nil
-			done = nil
+			_ = os.Remove(running.PairingFile + ".codex-status.json")
+			worker, done = nil, nil
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
 		case <-ticker.C:
 		}
 	}
 }
+
 func ConnectionError() error {
 	return fmt.Errorf("Codex CDP control is not ready; keep LazyMind and the original Codex chat open")
 }
@@ -297,21 +302,20 @@ func CleanupPresentation(home string) error {
 	if err != nil {
 		return nil
 	}
+	return cleanupPresentation(home, c)
+}
+
+func cleanupPresentation(home string, c Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ready, err := DesktopReady(ctx, c.Port)
 	if err != nil || !ready {
 		return err
 	}
-	bundle, err := codexplugin.DispatcherBundle()
+	installed, err := workflowconnector.Resolve(home, "codex")
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256(bundle)
-	script := filepath.Join(home, "codex-workflow", "connector-"+hex.EncodeToString(sum[:8])+".mjs")
-	if err := os.WriteFile(script, bundle, 0600); err != nil {
-		return err
-	}
-	command := backgroundCommand(ctx, c.Node, script, "--pairing-file", c.PairingFile, "--cdp-port", strconv.Itoa(c.Port), "--cleanup-only")
+	command := backgroundCommand(ctx, c.Node, installed.EntryPath(), "--pairing-file", c.PairingFile, "--cdp-port", strconv.Itoa(c.Port), "--cleanup-only")
 	return command.Run()
 }

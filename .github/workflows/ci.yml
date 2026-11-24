@@ -303,7 +303,22 @@ jobs:
         with:
           node-version: '24'
           cache: pnpm
-          cache-dependency-path: integrations/dsh-workflow/pnpm-lock.yaml
+          cache-dependency-path: |
+            integrations/dsh-workflow/pnpm-lock.yaml
+            integrations/codex-workflow/pnpm-lock.yaml
+            integrations/workbuddy-workflow/connector/pnpm-lock.yaml
+      - name: Test and stage the desktop Workflow Connectors
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          pnpm --dir integrations/codex-workflow install --frozen-lockfile
+          pnpm --dir integrations/codex-workflow typecheck
+          pnpm --dir integrations/codex-workflow test
+          pnpm --dir integrations/workbuddy-workflow/connector install --frozen-lockfile
+          pnpm --dir integrations/workbuddy-workflow/connector typecheck
+          pnpm --dir integrations/workbuddy-workflow/connector test
+          node integrations/workflow-agent-core/node/stage-connectors.mjs "$RUNNER_TEMP/workflow-cli/bin"
+          git diff --exit-code -- local/lazymind-cli/internal/workflowpresentation/assets/presentation.html
       - name: Test Local Proxy
         working-directory: local/local-proxy
         run: go test ./... -v

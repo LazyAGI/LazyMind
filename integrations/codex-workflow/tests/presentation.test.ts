@@ -200,6 +200,22 @@ it('rejects hidden or ambiguous main-chat layouts',()=>{
   other.getBoundingClientRect=()=>({width:0} as DOMRect)
   expect(readCodexView()?.session).toBe(threadA)
 })
+it('keeps the observed local chat when its transcript layout is missing, and distinguishes remote chats',()=>{
+  const f=fixture()
+  const content=document.querySelector('#content')!
+  content.remove()
+  expect(readCodexView()).toBeNull()
+  expect(readPresentationSession()).toMatchObject({session_id:threadA,epoch:f.target.epoch,available:true})
+  f.props.hostId='ssh-host'
+  expect(readPresentationSession()).toMatchObject({session_id:null,available:true})
+  expect(f.window.__lazymindCodexWorkflowTail).toBeUndefined()
+  f.props.hostId='local'
+  f.scroller.prepend(content)
+  const current=readPresentationSession()
+  expect(current.session_id).toBe(threadA)
+  expect(current.epoch).not.toBe(f.target.epoch)
+  expect(mountPresentation({...f.target,epoch:current.epoch},undefined,undefined,f.factory).status).toBe('mounted')
+})
 it('keeps the main workflow panel when a subagent chat is visible in a side tab',async()=>{
   const f=fixture(), side=document.createElement('div')
   side.dataset.appShellTabPanelController='right'

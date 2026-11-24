@@ -238,8 +238,8 @@ export class CodexNative {
   async read(threadId:string,signal:AbortSignal):Promise<NativeThread> {return (await this.locate(threadId,signal)).state}
   async visible(threadId:string,signal:AbortSignal):Promise<boolean> {
     const windows=await codexTargets(this.port,signal)
-    const results=await Promise.allSettled(windows.map(window=>windowCdp(this.port,window.id).evaluate<{session_id?:string}>(sessionExpression(),signal)))
-    return results.some(result=>result.status==='fulfilled'&&result.value?.session_id===threadId)
+    const results=await Promise.allSettled(windows.map(window=>windowCdp(this.port,window.id).evaluate<{session_id?:string;available?:boolean}>(sessionExpression(),signal)))
+    return results.some(result=>result.status==='fulfilled'&&result.value?.available!==false&&result.value?.session_id===threadId)
   }
   async presented(threadId:string,signal:AbortSignal):Promise<boolean> {
     const windows=await codexTargets(this.port,signal)

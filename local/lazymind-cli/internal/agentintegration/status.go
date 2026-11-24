@@ -3,6 +3,8 @@ package agentintegration
 import (
 	"fmt"
 	"strings"
+
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 type State string
@@ -40,35 +42,50 @@ type LoginStatus struct {
 }
 
 type Status struct {
-	DiagnosticReason  string             `json:"-"`
-	DiagnosticID      string             `json:"diagnostic_id,omitempty"`
-	DiagnosticLog     string             `json:"diagnostic_log,omitempty"`
-	DiagnosticContext *DiagnosticContext `json:"diagnostic_context,omitempty"`
-	Enabled           *bool              `json:"enabled,omitempty"`
-	Login             *LoginStatus       `json:"login,omitempty"`
-	Connection        *ConnectionStatus  `json:"connection,omitempty"`
-	RetryAction       string             `json:"retry_action,omitempty"`
-	Issue             *Issue             `json:"issue,omitempty"`
-	CanConnect        bool               `json:"can_connect,omitempty"`
-	CanDisconnect     bool               `json:"can_disconnect,omitempty"`
-	Profiles          []ProfileStatus    `json:"profiles,omitempty"`
-	Agent             string             `json:"agent"`
-	DisplayName       string             `json:"display_name"`
-	State             State              `json:"state"`
-	Requirements      []Requirement      `json:"requirements,omitempty"`
-	Action            *Action            `json:"action,omitempty"`
-	Message           string             `json:"message,omitempty"`
+	ConnectorRuntime  workflowconnector.Runtime `json:"-"`
+	Version           string                    `json:"version,omitempty"`
+	DiagnosticReason  string                    `json:"-"`
+	DiagnosticID      string                    `json:"diagnostic_id,omitempty"`
+	DiagnosticLog     string                    `json:"diagnostic_log,omitempty"`
+	DiagnosticContext *DiagnosticContext        `json:"diagnostic_context,omitempty"`
+	Enabled           *bool                     `json:"enabled,omitempty"`
+	Login             *LoginStatus              `json:"login,omitempty"`
+	Connection        *ConnectionStatus         `json:"connection,omitempty"`
+	RetryAction       string                    `json:"retry_action,omitempty"`
+	Issue             *Issue                    `json:"issue,omitempty"`
+	CanConnect        bool                      `json:"can_connect,omitempty"`
+	CanDisconnect     bool                      `json:"can_disconnect,omitempty"`
+	Profiles          []ProfileStatus           `json:"profiles,omitempty"`
+	Agent             string                    `json:"agent"`
+	DisplayName       string                    `json:"display_name"`
+	State             State                     `json:"state"`
+	Requirements      []Requirement             `json:"requirements,omitempty"`
+	Action            *Action                   `json:"action,omitempty"`
+	Message           string                    `json:"message,omitempty"`
 }
 
 // DiagnosticContext describes this status snapshot, not an inferred last repair.
 // It reuses allowlisted inspection data; no log contents or credentials are read.
 type DiagnosticContext struct {
-	Action        string            `json:"action"`
-	Stage         string            `json:"stage,omitempty"`
-	CurrentCLI    string            `json:"current_cli,omitempty"`
-	AppVersion    string            `json:"app_version,omitempty"`
-	Environment   map[string]string `json:"environment,omitempty"`
-	Configuration []Inspection      `json:"configuration,omitempty"`
+	Connector     *ConnectorDiagnostic `json:"connector,omitempty"`
+	Action        string               `json:"action"`
+	Stage         string               `json:"stage,omitempty"`
+	CurrentCLI    string               `json:"current_cli,omitempty"`
+	AppVersion    string               `json:"app_version,omitempty"`
+	Environment   map[string]string    `json:"environment,omitempty"`
+	Configuration []Inspection         `json:"configuration,omitempty"`
+}
+
+type ConnectorDiagnostic struct {
+	State                  string `json:"state"`
+	Version                string `json:"version,omitempty"`
+	RecordPath             string `json:"record_path"`
+	FailurePath            string `json:"failure_path,omitempty"`
+	EntryPath              string `json:"entry_path,omitempty"`
+	PresentationModulePath string `json:"presentation_module_path,omitempty"`
+	ControlModulePath      string `json:"control_module_path,omitempty"`
+	Loaded                 bool   `json:"loaded"`
+	LoadedRevision         string `json:"loaded_revision,omitempty"`
 }
 
 type ProfileStatus struct {

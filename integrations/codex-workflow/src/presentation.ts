@@ -1,18 +1,21 @@
 import { setTimeout as delay } from 'node:timers/promises'
+import type { LookupBinding, UIAdapter, WatchView } from '../../workflow-agent-core/src/adapter'
+import { runPresentation, type PresentationStatus as WindowStatus } from '../../workflow-agent-core/src/presentation'
 import { CdpClient } from '../../workflow-agent-core/node/cdp'
 import { installTailFollow } from '../../workflow-agent-core/renderer/tail-follow'
 import { codexTargets, windowCdp } from './windows'
-import { readCodexView, readPresentationSession } from './presentation-view'
+import { readCodexChat, readCodexView, readPresentationSession } from './presentation-view'
 import { prepareCodexBrowser, createCodexSurface } from './presentation-surface'
 
-export interface PresentationTarget { session_id: string; run_id: string; frame_url: string; mount_id: string; epoch: string }
-export interface PresentationStatus { status: string; page_status?: string; checked_at: number; native_session_id?: string; run_id?: string; target_id?: string; window_count?: number; windows?: PresentationStatus[] }
+export interface PresentationTarget { session_id: string | null; run_id: string; frame_url: string; mount_id: string; epoch: string }
+export interface PresentationStatus extends WindowStatus { target_id?: string; window_count?: number; windows?: PresentationStatus[] }
 
 /** Serialized with its two helpers; mutates presentation only. */
 export function mountPresentation(target: PresentationTarget, readView = readCodexView, followTail = installTailFollow, makeSurface = createCodexSurface) {
-  const host = window as any, key = '__lazymindCodexWorkflowTail', version = 'codex-tail-v5-composer-spacer'
+  const host = window as any, key = '__lazymindCodexWorkflowTail', version = 'codex-tail-v6-composer-spacer'
   const gate = host.__lazymindCodexPresentationSession
-  if (!gate || gate.read().epoch !== target.epoch || gate.read().session_id !== target.session_id) return { status: 'stale' }
+  const viewAtMount = gate?.read()
+  if (!viewAtMount?.available || viewAtMount.epoch !== target.epoch || viewAtMount.session_id !== target.session_id) return { status: 'stale' }
   const previous = host[key]
   if (!target.run_id) { previous?.dispose(); return { status: 'unbound' } }
   const url = new URL(target.frame_url)
@@ -20,25 +23,28 @@ export function mountPresentation(target: PresentationTarget, readView = readCod
     || url.username || url.password || url.pathname !== '/v1/codex/frame' || url.search || url.hash
     || !/^[a-zA-Z0-9_-]{1,256}$/.test(target.run_id) || !/^[a-zA-Z0-9-]{20,80}$/.test(target.mount_id)) throw Error('Invalid presentation target')
   if (previous?.version === version && previous.session === target.session_id && previous.run === target.run_id && previous.origin === url.origin) {
-    previous.sync(); return previous.status()
+    previous.sync()
+    const state = previous.status()
+    return state.status === 'mounted' ? { ...state, status: 'reused' } : state
   }
   previous?.dispose()
-  const locate = () => { const view = readView(); return view?.session === target.session_id ? view : null }
+  const locate = () => { const view = readView(); return view && view.session === target.session_id ? view : null }
   const initial = locate()
   if (!initial) return { status: 'layout-unavailable' }
   let scroller = initial.scroller
   const panel = document.createElement('section')
   const bottomMargin = 24
-  panel.dataset.lazymindWorkflowTail = target.session_id
+  panel.dataset.lazymindWorkflowTail = initial.session
   panel.setAttribute('aria-label', 'LazyMind Workflow')
   panel.style.cssText = `box-sizing:border-box;position:relative;flex:none;margin:16px auto ${bottomMargin}px;width:calc(100% - 32px);max-width:var(--thread-body-max-width,var(--thread-content-max-width,760px));overflow:hidden;border:0;border-radius:12px;`
-  const surface = makeSurface(target, url, receive, () => sync())
+  const surface = makeSurface({ ...target, session_id: initial.session }, url, receive, () => sync())
   panel.append(surface.element)
   let disposed = false, expanded = false, collapsed = false, layoutReady = false, pageStatus = 'loading', queued = false
   let follower: ReturnType<typeof installTailFollow> | undefined, followedContent: HTMLElement | undefined
   let observedShell: Element | undefined
   let observedLayout: Array<Element | null> = []
-  function current() { return gate.read().session_id === target.session_id }
+  function ownsSession() { return host.__lazymindCodexPresentationSession === gate && gate.read().session_id === target.session_id }
+  function current() { return ownsSession() && gate.read().available }
   function size() { surface.element.style.height = collapsed ? '64px' : 'clamp(360px, 60vh, 640px)' }
   function bounds() {
     const view = locate(), shell = view?.scroller.parentElement
@@ -56,7 +62,7 @@ export function mountPresentation(target: PresentationTarget, readView = readCod
   }
   function sync() {
     if (disposed) return
-    if (!current()) { dispose(); return }
+    if (!ownsSession()) { dispose(); return }
     const view = locate()
     if (!view) {
       layoutReady = false; panel.hidden = true; follower?.dispose(); surface.sync({x:0,y:0,width:0,height:0},{x:0,y:0,width:0,height:0},false)
@@ -155,7 +161,7 @@ export function mountPresentation(target: PresentationTarget, readView = readCod
     if (queued || disposed) return
     queued = true; queueMicrotask(() => { queued = false; sync() })
   })
-  const unsubscribe = gate.subscribe(() => { if (!current()) dispose() })
+  const unsubscribe = gate.subscribe(sync)
   function dispose() {
     if (disposed) return
     disposed = true; unsubscribe(); resize?.disconnect(); structure.disconnect(); follower?.dispose()
@@ -178,44 +184,53 @@ export function mountPresentation(target: PresentationTarget, readView = readCod
   return status()
 }
 
-export function sessionExpression() { return `(${readPresentationSession.toString()})(${readCodexView.toString()})` }
+export function sessionExpression() { return `(${readPresentationSession.toString()})(${readCodexChat.toString()})` }
 export function presentationExpression(target: PresentationTarget) {
-  return `(async()=>{await (${prepareCodexBrowser.toString()})();return (${mountPresentation.toString()})(${JSON.stringify(target)},${readCodexView.toString()},${installTailFollow.toString()},${createCodexSurface.toString()})})()`
+  const mount = `(${mountPresentation.toString()})(${JSON.stringify(target)},()=>(${readCodexView.toString()})(${readCodexChat.toString()}),${installTailFollow.toString()},${createCodexSurface.toString()})`
+  return target.run_id ? `(async()=>{await (${prepareCodexBrowser.toString()})();return ${mount}})()` : mount
 }
 export const cleanupPresentation = 'window.__lazymindCodexWorkflowTail?.dispose(); window.__lazymindCodexPresentationSession?.dispose()'
 
-export async function presentationWindowLoop(cdp: Pick<CdpClient,'evaluate'>, request: (session: string) => Promise<{session_id: string; run_id: string}>, bridgeURL: string,
-  signal: AbortSignal, report: (status: PresentationStatus) => void) {
-  while (!signal.aborted) {
-    let native_session_id: string | undefined, run_id: string | undefined, epoch: string | undefined, retryLayout = false
-    try {
-      const view = await cdp.evaluate<ReturnType<typeof readPresentationSession>>(sessionExpression(), signal)
-      epoch = view.epoch; native_session_id = view.session_id ?? undefined
-      if (!native_session_id) {
-        await cdp.evaluate('window.__lazymindCodexWorkflowTail?.dispose()', signal)
-        report({status:'waiting-session',checked_at:Date.now()})
-      } else {
-        const target = await request(native_session_id)
-        if (target.session_id !== native_session_id || typeof target.run_id !== 'string') throw Error('Invalid presentation response')
-        run_id = target.run_id || undefined
-        const mounted = await cdp.evaluate<{status: string; page_status?: string}>(presentationExpression({...target,epoch:epoch!,frame_url:new URL('/v1/codex/frame',bridgeURL).href,mount_id:crypto.randomUUID()}),signal)
-        retryLayout = ['layout-unavailable','stale'].includes(mounted.status)
-        report({...mounted,checked_at:Date.now(),native_session_id,run_id})
+function watchView(cdp: Pick<CdpClient, 'evaluate'>, reportIssue: (status: string) => void): WatchView {
+  return async (report, signal) => {
+    let epoch: string | undefined
+    while (!signal.aborted) {
+      try {
+        if (epoch) await cdp.evaluate(`window.__lazymindCodexPresentationSession?.wait(${JSON.stringify(epoch)})`, signal)
+        const view = await cdp.evaluate<ReturnType<typeof readPresentationSession>>(sessionExpression(), signal)
+        if (view?.available !== false && view?.epoch) {
+          epoch = view.epoch
+          report({ chatId: view.session_id, epoch })
+          continue
+        }
+        if (!signal.aborted) reportIssue('view-unavailable')
+      } catch {
+        if (!signal.aborted) reportIssue('host-offline')
       }
-    } catch (error) {
-      const denied = [401,403].includes((error as any)?.status)
-      if (denied) await cdp.evaluate('window.__lazymindCodexWorkflowTail?.dispose()',signal).catch(()=>{})
-      report({status:denied?'access-denied':'unavailable',checked_at:Date.now(),native_session_id,run_id})
       epoch = undefined
+      try { await delay(1000, undefined, { signal }) } catch { break }
     }
-    if (signal.aborted) break
-    try {
-      if (epoch && !retryLayout) await cdp.evaluate(`window.__lazymindCodexPresentationSession?.wait(${JSON.stringify(epoch)})`,signal)
-      else await delay(retryLayout?100:1000,undefined,{signal})
-    } catch { if (!signal.aborted) await delay(1000,undefined,{signal}).catch(()=>{}) }
   }
-  await cdp.evaluate(cleanupPresentation,AbortSignal.timeout(2000)).catch(()=>{})
-  report({status:'disabled',checked_at:Date.now()})
+}
+
+export async function presentationWindowLoop(cdp: Pick<CdpClient, 'evaluate'>, lookupBinding: LookupBinding, frameUrl: string,
+  signal: AbortSignal, report: (status: WindowStatus) => void) {
+  const ui: UIAdapter = {
+    async syncPanel(view, target, active) {
+      const result = await cdp.evaluate<{ status: string; page_status?: string }>(presentationExpression({
+        session_id: view.chatId, epoch: view.epoch, run_id: target?.runId ?? '', frame_url: target?.frameUrl ?? '', mount_id: crypto.randomUUID(),
+      }), active)
+      const status = result.status === 'unbound' ? 'unmounted' : result.status
+      return { status: status === 'unmounted' || status === 'mounted' || status === 'reused' || status === 'stale' ? status : 'layout-unavailable',
+        pageStatus: result.page_status }
+    },
+  }
+  try {
+    await runPresentation({ watchView: watchView(cdp, status => report({ status, checked_at: Date.now() })), lookupBinding, ui, frameUrl, signal, report })
+  } finally {
+    await cdp.evaluate(cleanupPresentation, AbortSignal.timeout(2000)).catch(() => {})
+    report({ status: 'disabled', checked_at: Date.now() })
+  }
 }
 
 export async function cleanupCodexPresentations(port:number,signal:AbortSignal) {
@@ -224,24 +239,32 @@ export async function cleanupCodexPresentations(port:number,signal:AbortSignal) 
 }
 
 /** One delivery worker; a separate presentation loop for every chat window. */
-export async function presentationLoop(port:number,request:(session:string)=>Promise<{session_id:string;run_id:string}>,bridgeURL:string,
+export async function presentationLoop(port:number,lookupBinding:LookupBinding,bridgeURL:string,
   signal:AbortSignal,report:(status:PresentationStatus)=>void) {
   const entries=new Map<string,{stop:AbortController;task:Promise<void>;status:PresentationStatus}>()
+  const closing=new Map<string,Promise<void>>()
+  const frameUrl = new URL('/v1/codex/frame', bridgeURL).href
   function publish() {
     const windows=[...entries.values()].map(entry=>entry.status)
-    const mounted=windows.find(window=>window.status==='mounted')
-    report({status:mounted?'mounted':windows[0]?.status??'waiting-window',checked_at:Date.now(),window_count:windows.length,windows})
+    const mounted=windows.filter(window=>window.status==='mounted')
+    const selected=mounted.find(window=>window.page_status==='frontend-unavailable'||window.page_status==='load-timeout')
+      ??mounted.find(window=>window.page_status==='ready')??mounted[0]??windows[0]
+    report({status:selected?.status??'waiting-window',page_status:selected?.page_status,checked_at:Date.now(),window_count:windows.length,windows})
   }
   try {
     while(!signal.aborted) {
       try {
         const targets=await codexTargets(port,signal),ids=new Set(targets.map(target=>target.id))
-        for(const [id,entry]of entries)if(!ids.has(id)){entry.stop.abort();entries.delete(id)}
+        for(const [id,entry]of entries)if(!ids.has(id)) {
+          entry.stop.abort()
+          entries.delete(id)
+          closing.set(id, entry.task.finally(() => { closing.delete(id) }))
+        }
         for(const target of targets) {
-          if(entries.has(target.id))continue
+          if(entries.has(target.id)||closing.has(target.id))continue
           const stop=new AbortController(),entry={stop,task:Promise.resolve(),status:{status:'starting',target_id:target.id,checked_at:Date.now()} as PresentationStatus}
           entries.set(target.id,entry)
-          entry.task=presentationWindowLoop(windowCdp(port,target.id),request,bridgeURL,AbortSignal.any([signal,stop.signal]),status=>{
+          entry.task=presentationWindowLoop(windowCdp(port,target.id),lookupBinding,frameUrl,AbortSignal.any([signal,stop.signal]),status=>{
             entry.status={...status,target_id:target.id}
             if(entries.get(target.id)===entry)publish()
           })
@@ -252,7 +275,7 @@ export async function presentationLoop(port:number,request:(session:string)=>Pro
     }
   }finally{
     for(const entry of entries.values())entry.stop.abort()
-    await Promise.allSettled([...entries.values()].map(entry=>entry.task))
+    await Promise.allSettled([...entries.values()].map(entry=>entry.task).concat([...closing.values()]))
     report({status:'disabled',checked_at:Date.now(),window_count:0,windows:[]})
   }
 }

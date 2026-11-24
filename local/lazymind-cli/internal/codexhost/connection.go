@@ -2,18 +2,14 @@ package codexhost
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"time"
 
-	"lazymind/agentconnector/internal/codexplugin"
-	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 const connectionGuide = "LazyMind will show a connection recovery window. Save current work before choosing Restart and connect. LazyMind will reopen the original conversation and hand off the saved operation automatically. END this turn and do not repeat the blocked Workflow request while waiting; follow the recovery handoff after restart."
@@ -57,7 +53,12 @@ func CheckConnection(ctx context.Context, home string) error {
 	}
 	ready, err := controlProbe(bounded, home, c)
 	if err != nil {
-		return connectionIssue("CODEX_CONTROL_UNAVAILABLE", "Unable to verify Codex session control; check the connection diagnostics.", false, err)
+		message := "Unable to verify Codex session control; check the connection diagnostics."
+		var pathError *workflowconnector.PathError
+		if errors.As(err, &pathError) {
+			message = "Codex Connector " + pathError.Item + " is unavailable at " + pathError.Path
+		}
+		return connectionIssue("CODEX_CONTROL_UNAVAILABLE", message, false, err)
 	}
 	if !ready {
 		return connectionIssue("CODEX_CONTROL_UNAVAILABLE", "Codex is reachable but its session-control interfaces are not ready or compatible; wait for Codex to finish loading and recheck.", false,
@@ -80,16 +81,11 @@ func runProbe(ctx context.Context, home string, c Config, args ...string) (bool,
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	bundle, err := codexplugin.DispatcherBundle()
+	installed, err := workflowconnector.Resolve(home, "codex")
 	if err != nil {
 		return false, setupError("runtime_unavailable", err)
 	}
-	sum := sha256.Sum256(bundle)
-	script := filepath.Join(home, "codex-workflow", "probe-"+hex.EncodeToString(sum[:8])+".mjs")
-	if err := localfile.Write(script, bundle, 0600); err != nil {
-		return false, setupError("configuration_failed", err)
-	}
-	cmd := backgroundCommand(ctx, c.Node, append([]string{script, "--cdp-port", strconv.Itoa(c.Port)}, args...)...)
+	cmd := backgroundCommand(ctx, c.Node, append([]string{installed.EntryPath(), "--cdp-port", strconv.Itoa(c.Port)}, args...)...)
 	cmd.WaitDelay = time.Second
 	body, err := cmd.Output()
 	if err != nil {

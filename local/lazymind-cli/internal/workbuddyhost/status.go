@@ -6,9 +6,12 @@ import (
 	"net/url"
 	"os"
 	"time"
+
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 type Status struct {
+	workflowconnector.Runtime
 	Issue        string             `json:"issue,omitempty"`
 	ConnectorID  string             `json:"connector_id"`
 	CheckedAt    int64              `json:"checked_at"`

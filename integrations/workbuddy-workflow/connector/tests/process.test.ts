@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 
-it('embedded worker polls independently, excludes a second worker and exits on disconnect', async () => {
+it('packaged worker polls independently, excludes a second worker and exits on disconnect', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'wb-connector-'))
   const pairingFile = join(directory, 'pair.json')
   const pairing = { provider: 'workbuddy', enabled: true, connector_id: 'host-' + 'a'.repeat(32), token: 'b'.repeat(64) }
@@ -22,7 +22,7 @@ it('embedded worker polls independently, excludes a second worker and exits on d
   })
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   const port = (server.address() as { port: number }).port
-  const entry = fileURLToPath(new URL('../../../../local/lazymind-cli/internal/workbuddyhost/assets/connector.mjs', import.meta.url))
+  const entry = fileURLToPath(new URL('../dist/connector/main.mjs', import.meta.url))
   const args = [entry, '--pairing-file', pairingFile, '--bridge-url', `http://127.0.0.1:${port}`, '--cdp-port', String(port)]
   const first = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
   const firstExit = new Promise<number | null>(resolve => first.once('exit', resolve))

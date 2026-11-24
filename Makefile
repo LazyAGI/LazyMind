@@ -557,7 +557,27 @@ local-runtime-manager-build:
 	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"
 	@cd local/local-runtime-manager && $(GO) build -buildvcs=false -o "$(LOCAL_RUNTIME_MANAGER_BIN)" .
 
-lazymind-cli-build:
+PNPM ?= pnpm
+.PHONY: workflow-connectors-build
+workflow-connectors-build:
+	@if command -v "$(PNPM)" >/dev/null 2>&1 && node -e 'const [major,minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || major === 22 && minor >= 19 ? 0 : 1)' 2>/dev/null; then \
+		"$(PNPM)" --dir integrations/codex-workflow install --frozen-lockfile --prefer-offline && \
+		"$(PNPM)" --dir integrations/codex-workflow build && \
+		"$(PNPM)" --dir integrations/workbuddy-workflow/connector install --frozen-lockfile --prefer-offline && \
+		"$(PNPM)" --dir integrations/workbuddy-workflow/connector build && \
+		node integrations/workflow-agent-core/node/stage-connectors.mjs "$(dir $(LAZYMIND_CLI_BIN))"; \
+	else \
+		$(_HOST_DOCKER_PREFIX) docker run --rm $(_HOST_DOCKER_USER_FLAG) \
+			-e COREPACK_HOME=/tmp/corepack -e npm_config_store_dir=/tmp/pnpm-store \
+			-v "$(CURDIR):/src" -w /src "$(DOCKER_MIRROR)node:22.22.2" sh -ec '\
+				corepack pnpm@10.0.0 --dir integrations/codex-workflow install --frozen-lockfile --prefer-offline; \
+				corepack pnpm@10.0.0 --dir integrations/codex-workflow build; \
+				corepack pnpm@10.0.0 --dir integrations/workbuddy-workflow/connector install --frozen-lockfile --prefer-offline; \
+				corepack pnpm@10.0.0 --dir integrations/workbuddy-workflow/connector build; \
+				node integrations/workflow-agent-core/node/stage-connectors.mjs /src/local/build/bin'; \
+	fi
+
+lazymind-cli-build: workflow-connectors-build
 	@mkdir -p "$(dir $(LAZYMIND_CLI_BIN))"
 	@if command -v "$(GO)" >/dev/null 2>&1; then \
 		cd local/lazymind-cli && $(_HOST_GO_BUILD) build -buildvcs=false -o "$(LAZYMIND_CLI_BIN)" ./cmd/lazymind; \
@@ -576,13 +596,9 @@ lazymind-cli-build:
 		exit 1; \
 	fi
 
-# Development entry point; released LazyMind installs the embedded plugin from
-# the existing Settings > External Agents > Codex connect button.
+# The desktop connect action and this development entry point share the installed Connector.
 .PHONY: codex-workflow-install
-codex-workflow-install:
-	pnpm --dir integrations/codex-workflow install --frozen-lockfile
-	pnpm --dir integrations/codex-workflow build
-	@$(MAKE) --no-print-directory assistant-bridge-start
+codex-workflow-install: assistant-bridge-start
 	@"$(LAZYMIND_CLI_BIN)" internal agent codex connect
 
 assistant-bridge-start: lazymind-cli-build

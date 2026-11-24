@@ -121,6 +121,17 @@ export interface DesktopAgentIntegrationStatus {
     app_version?: string;
     environment?: Record<string, string>;
     configuration?: Array<{ config_path: string; configured_cli?: string; connection_file?: string; reason?: string }>;
+    connector?: {
+      state?: "installed" | "missing" | "invalid";
+      version?: string;
+      loaded?: boolean;
+      loaded_revision?: string;
+      record_path?: string;
+      failure_path?: string;
+      entry_path?: string;
+      presentation_module_path?: string;
+      control_module_path?: string;
+    };
   };
   enabled?: boolean;
   login?: { state: "running" | "succeeded" | "failed" | "cancelled"; message?: string };

@@ -34,7 +34,7 @@ export class BridgeHealth {
     }
   }
 
-  async track<T>(source: Source, request: () => Promise<T>): Promise<T> {
+  async track<T>(source: Source, request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const state = this.sources[source], revision = state.revision
     const update = (issue: string, retry: number) => {
       const before = this.issue()
@@ -46,9 +46,10 @@ export class BridgeHealth {
     try {
       const result = await request()
       // An older request finishing late is not evidence of recovery after a failure.
-      if (state.revision === revision) { state.failures = 0; update('', 0) }
+      if (!signal?.aborted && state.revision === revision) { state.failures = 0; update('', 0) }
       return result
     } catch (error) {
+      if (signal?.aborted) throw error
       if (isHostAuthorizationError(error)) {
         state.revision++; update(pairingIssues[error.code] || 'lazymind_auth_required', 30_000)
       } else if (!(error instanceof BridgeError) || error.status >= 500) {

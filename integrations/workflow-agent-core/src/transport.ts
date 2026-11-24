@@ -1,4 +1,5 @@
 import type { WorkflowControl } from './protocol'
+import type { LookupBinding } from './adapter'
 
 export interface Pairing { connector_id: string; token: string }
 export interface HostAction {
@@ -40,8 +41,12 @@ export class HostBridge {
   }
 
   private async request<T>(path: string, signal: AbortSignal, body?: unknown, headers?: Record<string, string>): Promise<T> {
-    const response = await fetch(this.base + path, {
-      method: body === undefined ? 'GET' : 'POST', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    return this.requestURL<T>(this.base + path, signal, body, headers)
+  }
+
+  private async requestURL<T>(url: string | URL, signal: AbortSignal, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    const response = await fetch(url, {
+      method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
       headers: { ...headers, Authorization: `Bearer ${this.pairing.token}`, 'X-LazyMind-Connector-Id': this.pairing.connector_id,
         ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -78,5 +83,26 @@ export class HostBridge {
     await this.request(`/actions/${encodeURIComponent(id)}/settle`, signal, {
       instance_id: instanceId, dispatch_token: token, status, native_event_seq: seq, error,
     })
+  }
+
+  lookupBinding(provider: 'codex' | 'workbuddy', track: (request: () => Promise<string>, signal: AbortSignal) => Promise<string> = request => request()): LookupBinding {
+    return async (chatId, signal) => {
+      try {
+        const runId = await track(async () => {
+          const url = new URL(`/v1/${provider}/presentation`, this.base)
+          url.searchParams.set('session_id', chatId)
+          const response = await this.requestURL<{ session_id: unknown; run_id: unknown }>(url, signal)
+          if (response.session_id !== chatId || typeof response.run_id !== 'string'
+            || response.run_id !== '' && !/^[a-zA-Z0-9_-]{1,256}$/.test(response.run_id)) throw new Error('Invalid presentation response')
+          return response.run_id
+        }, signal)
+        signal.throwIfAborted()
+        return runId ? { status: 'bound', runId } : { status: 'unbound' }
+      } catch (error) {
+        signal.throwIfAborted()
+        return { status: error instanceof BridgeError && (error.status === 403 || isHostAuthorizationError(error))
+          ? 'access-denied' : 'unavailable' }
+      }
+    }
   }
 }

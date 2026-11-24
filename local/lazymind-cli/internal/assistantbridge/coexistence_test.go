@@ -389,3 +389,31 @@ func TestStartPreservesIncompatibleLegacyBridge(t *testing.T) {
 		})
 	}
 }
+
+func TestBridgeUpgradeOnlyMovesItsOwningDeployment(t *testing.T) {
+	current := ClientOptions{ID: "desktop:one", Home: "/one"}
+	browser := ClientOptions{ID: "browser:one", Home: "/one"}
+	foreignBrowser := ClientOptions{ID: "browser:two", Home: "/two"}
+	other := ClientOptions{ID: "compose:one", Home: "/one"}
+	for _, tc := range []struct {
+		name    string
+		clients []ClientOptions
+		owns    bool
+	}{
+		{"owner", []ClientOptions{current}, true},
+		{"owner and its browser", []ClientOptions{current, browser}, true},
+		{"other browser scope", []ClientOptions{current, foreignBrowser}, false},
+		{"other deployment in same scope", []ClientOptions{current, other}, false},
+		{"unregistered caller", []ClientOptions{other}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			persisted := map[string]ClientOptions{}
+			for _, client := range tc.clients {
+				persisted[client.ID] = client
+			}
+			if got := ownsBridgeUpgrade(persisted, current); got != tc.owns {
+				t.Fatalf("owns upgrade = %t, want %t", got, tc.owns)
+			}
+		})
+	}
+}

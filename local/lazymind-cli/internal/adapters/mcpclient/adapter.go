@@ -23,6 +23,7 @@ import (
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workbuddyhost"
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 type Kind string
@@ -270,6 +271,9 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 			}
 		}
 		operation.Enter("pairing")
+		if err := workflowconnector.Ensure(ctx, a.home, a.diagnosticExecutable(), "workbuddy"); err != nil {
+			return workBuddyFailure(status, &workbuddyhost.SetupError{Code: "runtime_unavailable", Err: err})
+		}
 		if err := workbuddyhost.Install(ctx, a.home, userPath(".workbuddy"), account); err != nil {
 			return workBuddyFailure(status, err)
 		}
@@ -473,6 +477,10 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 				status.Message = ""
 				if host, err := workbuddyhost.ReadStatus(config, pair.ConnectorID); err == nil {
 					issue := workbuddyhost.StatusIssue(host)
+					status.ConnectorRuntime = host.Runtime
+					if workbuddyhost.VersionIssue(host.Version) != "version_unreadable" {
+						status.Version = host.Version
+					}
 					status.Connection.ControlReady = issue == "" && host.Ready && host.Cancellation == "session"
 					if issue == "" && host.Presentation.Status == "capability_unavailable" {
 						issue = "capability_unavailable"
@@ -486,6 +494,9 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 				} else {
 					status.Issue = &agentintegration.Issue{Code: "host_unavailable"}
 					status.Message = workBuddyIssueMessage("host_unavailable")
+				}
+				if status.Version == "" {
+					status.Version = workbuddyhost.CurrentVersion()
 				}
 				// Persisted trust and enable choices are independent of CDP.
 				// Healthy control alone must never advertise a usable MCP connection.

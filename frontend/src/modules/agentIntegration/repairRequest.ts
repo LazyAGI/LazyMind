@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { DesktopAgent, DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
+import type { DesktopAgent, DesktopAgentConnectionStatus, DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 
 export const AGENT_REPAIR_DOCS_URL = "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/tree/master/docs";
 const AGENT_REPAIR_DOCS_LIST_URL = "https://modelscope.cn/api/v1/datasets/209835/repo/tree?Revision=master&Root=docs&Recursive=True&PageNumber=1&PageSize=100";
@@ -27,6 +27,20 @@ function recoveryHint(status?: DesktopAgentIntegrationStatus): string {
   return "diagnose";
 }
 
+function affectedCapabilities(connection: DesktopAgentConnectionStatus | undefined, text: (key: string) => string) {
+  if (!connection) return undefined;
+  const controlUnavailable = connection.mcp_configured && connection.mcp_enabled && connection.mcp_trusted
+    && connection.control_ready === false && connection.runtime_state !== "waiting" && connection.runtime_state !== "connection_required";
+  const mountUnavailable = ["capability_unavailable", "layout-unavailable", "detached", "renderer-unavailable", "binding-unavailable"]
+    .includes(connection.presentation_status);
+  const pageUnavailable = connection.page_status === "frontend-unavailable" || connection.page_status === "load-timeout";
+  return [
+    ...(controlUnavailable ? [text("capabilities.sessionControl")] : []),
+    ...(mountUnavailable ? [text("capabilities.panelMount")] : []),
+    ...(pageUnavailable ? [text("capabilities.panelPage")] : []),
+  ].join(", ");
+}
+
 // Copy allowlisted status fields and the displayed error, never the whole status
 // object (which can include raw messages and action URLs). This performs no I/O.
 export function buildAgentRepairRequest({ agent, status, error, stage }: AgentRepairContext, t: TFunction): string {
@@ -44,6 +58,22 @@ export function buildAgentRepairRequest({ agent, status, error, stage }: AgentRe
     status = undefined;
   }
   const connection = status?.connection;
+  const connector = status?.diagnostic_context?.connector;
+  const reloadArguments = connector?.state === "installed" && (agent === "codex" || agent === "workbuddy")
+    ? `internal workflow-connectors reload ${agent}` : undefined;
+  const connectorDetails = connector ? [
+    field("connectorState", connector.state),
+    field("connectorVersion", connector.version),
+    field("connectorLoaded", connector.loaded),
+    field("connectorLoadedRevision", connector.loaded_revision),
+    field("connectorRecord", connector.record_path),
+    ...(connector.failure_path ? [field("connectorFailurePath", connector.failure_path)] : []),
+    field("connectorEntry", connector.entry_path),
+    field("connectorPresentationModule", connector.presentation_module_path),
+    field("connectorControlModule", connector.control_module_path),
+    field("affectedCapabilities", affectedCapabilities(connection, text)),
+    ...(reloadArguments ? [field("reloadArguments", reloadArguments)] : []),
+  ] : [];
   const noErrorReported = status && !status.issue && !["error", "conflict", "action_required"].includes(status.state);
   const configuration = status?.issue?.code === "configuration_unreadable" ? text("configurationUnreadable")
     : status?.enabled === true ? text("configurationPresent")
@@ -87,9 +117,11 @@ export function buildAgentRepairRequest({ agent, status, error, stage }: AgentRe
     field("checkArguments", `internal agent ${agent} status`),
     field("checkEnvironment", Object.keys(environment).length ? JSON.stringify(environment, null, 2) : undefined),
     ...configurationDetails,
+    ...connectorDetails,
     "",
     field("firstAction", text(`hints.${recoveryHint(status)}`)),
     text("instructions"),
+    ...(reloadArguments ? [text("connectorRepair")] : []),
     text("handoff"),
     text("verification"),
   ].join("\n");

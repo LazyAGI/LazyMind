@@ -7,10 +7,10 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsdown src/main.ts --format esm --platform node --out-dir dist --no-dts && tsdown src/presentation.ts src/presentation-frame.ts --format esm --platform node --out-dir dist/diagnostics --no-dts && node scripts/embed.mjs",
+    "build": "tsdown src/main.ts --format esm --platform node --out-dir dist/connector --no-dts --unbundle && tsdown src/presentation.ts src/presentation-frame.ts --format esm --platform node --out-dir dist/diagnostics --no-dts && node scripts/embed-frame.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "start": "node dist/main.mjs"
+    "test": "pnpm build && vitest run",
+    "start": "node dist/connector/main.mjs"
   },
   "devDependencies": {
     "@types/jsdom": "21.1.7",

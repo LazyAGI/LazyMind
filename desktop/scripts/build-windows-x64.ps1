@@ -155,7 +155,7 @@ function Invoke-Doctor {
     Assert-Command 'git.exe' 'Install Git for Windows.'
     Assert-Command 'go.exe' 'Install Go 1.27.3 or newer.'
     Assert-Command 'uv.exe' 'Install uv.'
-    Assert-Command 'node.exe' 'Install Node.js 20 or newer.'
+    Assert-Command 'node.exe' 'Install Node.js 22.19 or newer.'
     Assert-Command 'pnpm.cmd' 'Install pnpm.'
     Write-Host 'Windows x64 Desktop build prerequisites are available (CGO is disabled).'
 }
@@ -539,8 +539,11 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'
     Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') $desktopManager -WindowsGUI
     Assert-WindowsGUISubsystem $desktopManager
-    Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot 'integrations\workbuddy-workflow\connector')
-    Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot 'integrations\workbuddy-workflow\connector')
+    foreach ($project in @('integrations\codex-workflow', 'integrations\workbuddy-workflow\connector')) {
+        Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot $project)
+        Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot $project)
+    }
+    Invoke-Native 'node.exe' @((Join-Path $repoRoot 'integrations\workflow-agent-core\node\stage-connectors.mjs'), (Join-Path $runtimeRoot 'bin')) $repoRoot
     Build-GoBinary (Join-Path $repoRoot 'local\lazymind-cli') (Join-Path $runtimeRoot 'bin\lazymind.exe') @('.\cmd\lazymind')
     Build-GoBinary (Join-Path $repoRoot 'local\local-proxy') (Join-Path $runtimeRoot 'bin\local-proxy.exe') @('.\cmd\local-proxy')
     Build-GoBinary (Join-Path $repoRoot 'backend\core') (Join-Path $runtimeRoot 'bin\core.exe')

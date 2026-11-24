@@ -1,5 +1,6 @@
 import { readFile, stat, writeFile, rename, unlink } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createDispatcher } from '../../../workflow-agent-core/src/dispatcher'
@@ -7,15 +8,15 @@ import { BridgeError, HostBridge, type Pairing } from '../../../workflow-agent-c
 import { dispatcherLock, DispatcherBusy } from '../../../workflow-agent-core/node/runtime-lock'
 import { WorkBuddyAdapter } from './adapter'
 import { Cdp } from './cdp'
-import { presentationLoop, type PresentationStatus } from './presentation'
+import { cleanupPresentation, presentationLoop, type PresentationStatus } from './presentation'
 import { createDiagnostics, diagnosedTransport } from './diagnostics'
 import { BridgeHealth } from './bridge-health'
 
 async function main() {
   const { values } = parseArgs({ options: {
     'pairing-file': { type: 'string' }, 'bridge-url': { type: 'string', default: 'http://127.0.0.1:19091' },
-    'cdp-port': { type: 'string', default: '9333' }, 'parent-pid': { type: 'string' },
-    'cleanup-only': { type: 'boolean', default: false },
+    'cdp-port': { type: 'string', default: '9333' }, 'parent-pid': { type: 'string' }, 'stop-file': { type: 'string' },
+    'cleanup-only': { type: 'boolean', default: false }, 'reload-cleanup': { type: 'boolean', default: false },
   } })
   const path = values['pairing-file']
   if (!path) throw new Error('pairing-file required')
@@ -24,8 +25,8 @@ async function main() {
   const pairing = JSON.parse(await readFile(path, 'utf8')) as Pairing & { provider: string; enabled: boolean }
   if (pairing.provider !== 'workbuddy' || (!pairing.enabled && !values['cleanup-only']) || !/^host-[a-f0-9]{32}$/.test(pairing.connector_id)
     || !/^[a-f0-9]{64}$/.test(pairing.token)) throw new Error('Invalid WorkBuddy pairing')
-  if (values['cleanup-only']) {
-    if (pairing.enabled) throw new Error('Disable the pairing before cleaning presentation')
+  if (values['cleanup-only'] || values['reload-cleanup']) {
+    if (values['cleanup-only'] && !values['reload-cleanup'] && pairing.enabled) throw new Error('Disable the pairing before cleaning presentation')
     const deadline = Date.now() + 5000
     let release: (() => Promise<void>) | undefined
     while (!release) {
@@ -36,8 +37,7 @@ async function main() {
       }
     }
     try {
-      await new Cdp(Number(values['cdp-port'])).evaluate(
-        'window.__lazymindWorkflowTail?.dispose(); window.__lazymindWorkflowPresentationSession?.dispose()', AbortSignal.timeout(2000))
+      await new Cdp(Number(values['cdp-port'])).evaluate(cleanupPresentation, AbortSignal.timeout(2000))
     } finally { await release() }
     return
   }
@@ -53,11 +53,17 @@ async function main() {
   const adapter = new WorkBuddyAdapter(cdp, log)
   const bridgeHealth = new BridgeHealth(issue => log('connector.warning', { kind: 'bridge-health', status: issue || 'connected' }))
   const transport = diagnosedTransport(bridge, log, bridgeHealth)
+  const lookupBinding = bridge.lookupBinding('workbuddy', async (request, active) => {
+    await bridgeHealth.wait('workbuddy', active)
+    return bridgeHealth.track('workbuddy', request, active)
+  })
   const instance = randomUUID()
   const unlock = await dispatcherLock(path, instance)
   // Parent is Assistant Bridge, never an MCP connection or iframe.
+  const stopFile = values['stop-file']
   const timer = setInterval(async () => {
     try {
+      if (stopFile && await stat(stopFile).then(info => info.isFile(), () => false)) return stop()
       if (parent) process.kill(parent, 0)
       const current = JSON.parse(await readFile(path, 'utf8'))
       if (!current.enabled || current.token !== pairing.token) stop()
@@ -65,6 +71,12 @@ async function main() {
   }, 1000)
   const statusPath = path + '.workbuddy-status.json'
   const temporaryStatus = statusPath + '.' + instance
+  const connector = {
+    connector_entry: fileURLToPath(import.meta.url),
+    connector_version: process.env.LAZYMIND_WORKFLOW_CONNECTOR_VERSION,
+    connector_revision: process.env.LAZYMIND_WORKFLOW_CONNECTOR_REVISION,
+    connector_reload: process.env.LAZYMIND_WORKFLOW_CONNECTOR_RELOAD,
+  }
   let presentation: PresentationStatus = { status: 'starting', checked_at: Date.now() }
   async function heartbeat() {
     while (!signal.aborted) {
@@ -74,7 +86,7 @@ async function main() {
         version = probe.version; issue = probe.issue || bridgeHealth.issue(); ready = !issue
       } catch { /* A transport failure is not evidence of an unsupported version. */ }
       try {
-        await writeFile(temporaryStatus, JSON.stringify({ connector_id: pairing.connector_id, checked_at: Date.now(),
+        await writeFile(temporaryStatus, JSON.stringify({ ...connector, connector_id: pairing.connector_id, checked_at: Date.now(),
           ready, version, issue, cancellation: adapter.cancellation, bridge_url: values['bridge-url'], presentation }), { mode: 0o600 })
         await rename(temporaryStatus, statusPath)
       } catch { /* Status failure never changes delivery receipts. */ }
@@ -122,7 +134,7 @@ async function main() {
   try {
     console.log('WorkBuddy connector started; session wake and interruption enabled')
     let lastPresentation = ''
-    await Promise.all([createDispatcher(adapter, adapter.control(signal), transport, instance, signal).poll(), identities(), heartbeat(), presentationLoop(cdp, request, values['bridge-url']!, signal, value => {
+    await Promise.all([createDispatcher(adapter, adapter.control(signal), transport, instance, signal).poll(), identities(), heartbeat(), presentationLoop(cdp, lookupBinding, values['bridge-url']!, signal, value => {
       presentation = value
       const fields = { status: value.status, page_status: value.page_status, run_id: value.run_id, native_session_id: value.native_session_id }
       const key = JSON.stringify(fields)

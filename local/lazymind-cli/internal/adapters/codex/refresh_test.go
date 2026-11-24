@@ -13,6 +13,7 @@ import (
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workflowconnector/connectortest"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -44,6 +45,7 @@ func TestPluginRefreshUpdatesFilesWithoutDesktopLifecycleOrPairingChange(t *test
 		t.Fatal(err)
 	}
 	self := writeExecutable(t, root, "lazymind", "#!/bin/sh\nexit 0\n")
+	connectortest.WriteMinimalPackage(t, self, "codex")
 	node := writeExecutable(t, root, "node", "#!/bin/sh\necho v22.23.0\n")
 	t.Setenv("LAZYMIND_NODE_BIN", node)
 	binary := writeExecutable(t, root, "codex", `#!/bin/sh

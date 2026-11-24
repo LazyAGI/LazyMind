@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -26,10 +27,11 @@ import (
 
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 // Older brokers still route some requests by their saved Desktop session.
-const bridgeProtocol = "v11"
+const bridgeProtocol = "v12"
 const bridgeProduct = "lazymind-assistant-bridge"
 const managementHeader = "X-LazyMind-Bridge-Control"
 const foregroundLauncherJobEnv = "LAZYMIND_CONNECTOR_LAUNCHER_JOB"
@@ -129,7 +131,17 @@ func stageBridgeExecutable(root string) (string, error) {
 	if _, err := io.Copy(hash, source); err != nil {
 		return "", err
 	}
+	packageID, err := workflowconnector.PackageIdentity(self)
+	if err != nil {
+		return "", err
+	}
+	hash.Write([]byte(packageID))
 	path := filepath.Join(root, "bridge", "bin", hex.EncodeToString(hash.Sum(nil)), filepath.Base(self))
+	if packageID != "" {
+		if err := workflowconnector.StagePackage(self, path); err != nil {
+			return "", err
+		}
+	}
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -189,7 +201,7 @@ func compatibleBridge(status map[string]any, home string, isolated bool) bool {
 func releasableBridge(status map[string]any, home string) bool {
 	// Older scoped brokers still support authenticated deployment release.
 	version := status["version"]
-	return (version == bridgeProtocol || version == "v10" || version == "v9") && bridgeMatchesScope(status, home, false)
+	return (version == bridgeProtocol || version == "v11" || version == "v10" || version == "v9") && bridgeMatchesScope(status, home, false)
 }
 
 func launchBridge(ctx context.Context, executable, home, address string, isolated bool) (map[string]any, error) {
@@ -278,6 +290,16 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 		}
 		seen[candidate] = true
 		status, healthErr := Health(ctx, candidate)
+		if healthErr == nil && status["version"] == "v11" && bridgeMatchesScope(status, root, false) {
+			// Only replace the old broker automatically for the current
+			// deployment when no other deployment relies on it.
+			if previous, err := readBridgeClients(root); err == nil && ownsBridgeUpgrade(previous, client) {
+				if err := ReleaseClient(ctx, options); err != nil {
+					return nil, err
+				}
+				status, healthErr = Health(ctx, candidate)
+			}
+		}
 		if healthErr == nil && !compatibleBridge(status, root, false) {
 			// Old bridges have no scoped sessions. A second listener sharing their
 			// legacy credential directory would not be safe isolation.
@@ -288,6 +310,15 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 				return nil, errors.New("an incompatible Assistant Bridge is using this environment; it was preserved. Stop its owning deployment before upgrading the shared bridge, then retry")
 			}
 			continue
+		}
+		// Deployment startup is the package upgrade boundary. Both current
+		// releases are prepared before an isolated environment can use them.
+		self, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		if err := workflowconnector.Provision(ctx, client.Home, self, true); err != nil {
+			log.Printf("Workflow Connector package: %v", err)
 		}
 		if healthErr != nil {
 			listener, err := net.Listen("tcp", candidate)
@@ -322,6 +353,19 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 		return status, nil
 	}
 	return nil, errors.New("Assistant Bridge unavailable: existing services are incompatible or ports are occupied; existing services were preserved. Close the obsolete bridge or configure a free loopback address and retry")
+}
+
+func ownsBridgeUpgrade(previous map[string]ClientOptions, client ClientOptions) bool {
+	if owner, ok := previous[client.ID]; !ok || owner.Home != client.Home {
+		return false
+	}
+	for id, owner := range previous {
+		if id == client.ID || (strings.HasPrefix(id, "browser:") && owner.Home == client.Home) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func manageBridge(ctx context.Context, address, token, action string, client ClientOptions, output any) error {

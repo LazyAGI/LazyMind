@@ -170,6 +170,25 @@ it('rejects old results even after switching away and back to the same session, 
   expect(mountPresentation({ ...f.target, epoch: current.epoch }).status).toBe('stale')
 })
 
+it('releases the panel and old SDK listener when the conversation SDK is replaced before it is ready', () => {
+  const f = fixture()
+  const original = f.window.wb.conversations
+  const unsubscribe = vi.fn()
+  original.onCurrentChange = vi.fn(() => unsubscribe)
+  const previous = readPresentationSession()!
+  expect(mountPresentation({ ...f.target, epoch: previous.epoch }).status).toBe('mounted')
+  f.window.wb.conversations = { currentId: 'native-1' }
+  expect(readPresentationSession()).toBeNull()
+  expect(document.querySelector('iframe')).toBeNull()
+  expect(f.window.__lazymindWorkflowPresentationSession).toBeUndefined()
+  expect(unsubscribe).toHaveBeenCalledTimes(2)
+  f.window.wb.conversations.onCurrentChange = vi.fn(() => () => {})
+  const current = readPresentationSession()!
+  expect(current.epoch).not.toBe(previous.epoch)
+  expect(mountPresentation({ ...f.target, epoch: previous.epoch }).status).toBe('stale')
+  expect(mountPresentation({ ...f.target, epoch: current.epoch }).status).toBe('mounted')
+})
+
 it('recovers a replaced timeline, reattaches following and keeps ordinary text updates in place', async () => {
   const f = fixture()
   const oldFollower = f.window.__lazymindWorkflowTail.tailFollow

@@ -67,6 +67,13 @@ if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
 # Never replace an in-use executable or stop another deployment's bridge.
 # The CLI negotiates reuse and stages the daemon independently of this launcher.
 $digest = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$sidecar = Join-Path (Split-Path -Parent $SourcePath) 'workflow-connectors'
+$hasSidecar = Test-Path -LiteralPath $sidecar -PathType Container
+if ($hasSidecar) {
+    $codex = (Get-FileHash -LiteralPath (Join-Path $sidecar 'codex\connector.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $workbuddy = (Get-FileHash -LiteralPath (Join-Path $sidecar 'workbuddy\connector.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $digest += '-' + $codex.Substring(0, 8) + $workbuddy.Substring(0, 8)
+}
 $versionDirectory = Join-Path $installDir $digest
 $installedBinary = Join-Path $versionDirectory 'lazymind.exe'
 New-Item -ItemType Directory -Force -Path $versionDirectory | Out-Null
@@ -78,6 +85,18 @@ try {
     }
 } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+}
+if ($hasSidecar) {
+    $installedSidecar = Join-Path $versionDirectory 'workflow-connectors'
+    if (-not (Test-Path -LiteralPath $installedSidecar -PathType Container)) {
+        $temporarySidecar = "$installedSidecar.$PID.tmp"
+        try {
+            Copy-Item -LiteralPath $sidecar -Destination $temporarySidecar -Recurse
+            Move-Item -LiteralPath $temporarySidecar -Destination $installedSidecar
+        } finally {
+            Remove-Item -LiteralPath $temporarySidecar -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 Set-Content -LiteralPath $receiptPath -Value $installedBinary -Encoding UTF8
 Invoke-Bridge $installedBinary (@('assistant', 'start') + $clientArguments) | Out-Null
