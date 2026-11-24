@@ -228,15 +228,6 @@ local/build/bin/lazymind internal agent codex refresh
 
 其他宿主同事需要完成：真实会话身份注入；可选的 subagent 调度与隔离、单 Agent 顺序执行；根代理工具代理；文件资源在宿主/Connector 之间传输；通知去重、取消与明确恢复；待审核时交还用户。连接控制协议见 [外部 Agent 与 Workflow 交互协议](../architecture/external-agent-workflow-protocol-draft.md)。不能通过新开顶层会话或第二个 Codex 进程替代本会话的 native worker。
 
-### 本机修复 Codex 或 WorkBuddy Connector
-
-Assistant Bridge 按当前 LazyMind 安装的记录加载 Connector。「设置 → 外部 Agent 集成」的「复制修复请求」列出安装记录、入口、面板和会话控制宿主模块，以及已安装版本和已加载修订。面板挂载、页面载入和会话控制分别有检测结果。页面服务异常时先检查包装页及 LazyMind 前端。
-
-1. 记录原聊天、原 run 和已加载修订，备份要修改的已安装文件。依据故障证据修改对应的宿主模块。
-2. 使用修复请求中的 CLI 和检测环境，执行 `lazymind internal workflow-connectors reload codex` 或 `lazymind internal workflow-connectors reload workbuddy`。该命令重载所选 Connector，日常重载沿用已安装文件。
-3. 执行同一环境下的 `lazymind internal agent <codex|workbuddy> status`，确认已加载修订。该修订来自启动时的文件内容，局部修改后已安装版本仍可能相同。在原聊天和原 run 复检受影响功能。面板问题可通过原 run 的 `workflow.state` 获取 `web_url`，以便单独检查页面。
-4. 回滚时恢复备份，重载同一个 Connector 并再次复检。正式安装或升级可能替换本地修复过的文件。
-
 ## 本地开发与回归入口
 
 遵守所在工作区的 `AGENTS.md`：仅启动本地 runtime。仓库标准构建/启动入口是 `make local-up`，停止使用 `make local-down`；工作区额外提供 `make local-start` 时，可用它复用已有构建。首次检出不要假设存在该快捷目标。不要手动运行 Core/Chat，也不要启动 Desktop。重启后检查前端 8090、Core 18001、Chat 18046，并执行经过认证的实际读取。
