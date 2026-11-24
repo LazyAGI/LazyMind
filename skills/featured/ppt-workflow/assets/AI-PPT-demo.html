@@ -232,7 +232,7 @@
   };
   function toast(t){$('#toast').textContent=t;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),2000)}
   function switchTab(id){activeTab=id;const tabs=$$('.wf-tab'),idx=tabs.findIndex(x=>x.dataset.tab===id);tabs.forEach((x,i)=>{x.classList.toggle('active',i===idx);x.classList.toggle('done',i<idx)});$$('.connector').forEach((x,i)=>x.classList.toggle('done',i<idx));$$('.tab-panel').forEach(x=>x.classList.toggle('active',x.id==='tab-'+id));if(id!=='slides')clearSelection()}
-  $$('.wf-tab').forEach(x=>x.addEventListener('click',()=>{switchTab(x.dataset.tab);toast('已模拟重试：'+x.querySelector('.label').textContent)}));
+  $$('.wf-tab').forEach(x=>x.addEventListener('click',()=>switchTab(x.dataset.tab)));
   $('#intent-btn').addEventListener('click',e=>{e.stopPropagation();clearSelection();$('#intent-pop').classList.toggle('show')});
   document.addEventListener('click',e=>{if(!e.target.closest('#intent-pop')&&!e.target.closest('#intent-btn'))$('#intent-pop').classList.remove('show');if(!e.target.closest('.hotspot')&&!e.target.closest('#inline-edit'))clearSelection();if(!e.target.closest('#export-pop')&&!e.target.closest('#export-trigger'))$('#export-pop').classList.remove('show')});
   $('#focus-btn').addEventListener('click',()=>{document.body.classList.toggle('focus');$('#focus-btn span').textContent=document.body.classList.contains('focus')?'缩小':'展开';toast(document.body.classList.contains('focus')?'已展开工作流':'已退出展开模式')});$('#collapse-wf').addEventListener('click',()=>{$('#workflow').classList.toggle('wf-collapsed');$('#collapse-wf').textContent=$('#workflow').classList.contains('wf-collapsed')?'⌃':'⌄'});

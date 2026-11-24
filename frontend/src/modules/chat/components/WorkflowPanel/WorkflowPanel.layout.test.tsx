@@ -695,20 +695,22 @@ describe('shared workflow compact layout', () => {
     expect(within(shortcuts).queryByRole('button', { name: 'stale_step' })).not.toBeInTheDocument();
   });
 
-  it.each(['completed', 'failed'] as const)('retries an executed PPT stage directly in a %s run', async status => {
+  it.each(['completed', 'failed'] as const)('lets users review a PPT stage before explicitly retrying it in a %s run', async status => {
     fixture.session.workflow_id = 'ppt-workflow';
     fixture.session.status = status;
     fixture.session.projection!.display!.status = status;
     const send = vi.fn();
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    const stage = await screen.findByRole('tab', { name: '写作准备 · 重试' });
+    const stage = await screen.findByRole('tab', { name: '写作准备' });
     expect(screen.queryByRole('group', { name: '回退到步骤：' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /执行图/ })).toBeVisible();
-    fireEvent.click(stage);
+    await act(async () => fireEvent.click(stage));
+    expect(stage).toHaveAttribute('aria-selected', 'true');
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重试写作准备' }));
     await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 写作准备', {
       session_id: 'layout-test', kind: 'rewind', step_id: 'prepare', expected_state_version: 0,
     }));
-    expect(fixture.flush).toHaveBeenCalledOnce();
   });
 
   it('routes a failed PPT stage retry to its external agent using the step label', async () => {
@@ -721,7 +723,7 @@ describe('shared workflow compact layout', () => {
     fixture.ui.stepLabels = { write_document: '生成演示文稿' };
     const send = vi.fn();
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    fireEvent.click(await screen.findByRole('tab', { name: /成稿 · 重试/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '重试成稿' }));
     await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 生成演示文稿'));
     expect(send).toHaveBeenCalledOnce();
   });
@@ -734,7 +736,7 @@ describe('shared workflow compact layout', () => {
     fixture.session.steps![1].status = 'failed';
     const execute = vi.fn(async () => {});
     render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={{ execute }} />);
-    await screen.findByRole('tab', { name: /成稿 · 重试/ });
+    await screen.findByRole('tab', { name: /^成稿/ });
     fireEvent.click(screen.getByRole('button', { name: '自由浏览' }));
     fireEvent.click(screen.getByRole('tab', { name: /^成稿/ }));
     expect(execute).not.toHaveBeenCalled();
@@ -747,9 +749,9 @@ describe('shared workflow compact layout', () => {
     fixture.flush.mockResolvedValue(false);
     const send = vi.fn();
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    const stage = await screen.findByRole('tab', { name: '写作准备 · 重试' });
+    const retry = await screen.findByRole('button', { name: '重试写作准备' });
     await screen.findByRole('button', { name: '发布' });
-    await act(async () => fireEvent.click(stage));
+    await act(async () => fireEvent.click(retry));
     expect(fixture.flush).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalled();
   });

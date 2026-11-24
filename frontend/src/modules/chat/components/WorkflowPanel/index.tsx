@@ -2562,7 +2562,6 @@ export function WorkflowPanel({
             const stepId = tab.step_id ?? tab.id;
             const retryKind = isPpt && (onSendMessage || controlAdapter)
               ? pptStageRetryKind(session, stepId) : undefined;
-            const retryOnTab = retryKind && view.mode === 'following';
             const isCurrentUnselectedTab = idx === runtimeTabIdx && idx !== visibleActiveTabIdx;
             return (
               <React.Fragment key={tab.id}>
@@ -2578,16 +2577,15 @@ export function WorkflowPanel({
                   aria-selected={idx === visibleActiveTabIdx}
                   aria-controls={`workflow-tab-panel-${tab.id}`}
                   className={`workflow-panel__tab${idx === visibleActiveTabIdx ? ' workflow-panel__tab--active' : ''}`}
-                  onClick={() => retryOnTab ? handleStageRetry(stepId, retryKind) : handleTabChange(idx, tab.id)}
-                  disabled={Boolean(retryOnTab) && buttonsDisabled}
-                  title={retryOnTab ? t('chat.workflowRetryStage', { stage: tab.label }) : stepStatusLabel}
+                  onClick={() => handleTabChange(idx, tab.id)}
+                  title={stepStatusLabel}
                   type='button'
                 >
                   {!ui.task_presentation?.grouped && (
                     <span className='workflow-panel__tab-badge' aria-hidden='true'>{idx + 1}</span>
                   )}
                   <span className='workflow-panel__tab-text'>
-                    <span className='workflow-panel__tab-label'>{tab.label}{retryOnTab && ` · ${t('chat.workflowRetry')}`}</span>
+                    <span className='workflow-panel__tab-label'>{tab.label}</span>
                     {isCurrentUnselectedTab && (
                       <span className='workflow-panel__tab-current' role='img'
                         aria-label={t('chat.workflowCurrentStep')} title={t('chat.workflowCurrentStep')} />
@@ -2601,7 +2599,7 @@ export function WorkflowPanel({
                     />
                   )}
                 </button>
-                {retryKind && !retryOnTab && (
+                {retryKind && (
                   <button type='button' className='workflow-panel__stage-retry' disabled={buttonsDisabled}
                     aria-label={t('chat.workflowRetryStage', { stage: tab.label })}
                     title={t('chat.workflowRetryStage', { stage: tab.label })}
