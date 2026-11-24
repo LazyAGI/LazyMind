@@ -112,3 +112,26 @@ it.each(['codex', 'workbuddy'] as const)('looks up %s presentations through auth
   expect(response.mock.calls[0][0]).toEqual(new URL(`http://127.0.0.1:19091/v1/${provider}/presentation?session_id=A`))
   expect(response.mock.calls[0][1]).toMatchObject({ redirect: 'error', headers: { Authorization: 'Bearer token', 'X-LazyMind-Connector-Id': 'connector' } })
 })
+
+it('mounts the panel on refresh when an open chat gets its first run binding', async () => {
+  vi.useFakeTimers()
+  const binding = vi.fn<LookupBinding>()
+    .mockResolvedValueOnce({ status: 'unbound' })
+    .mockResolvedValueOnce({ status: 'bound', runId: 'run-1' })
+  const syncPanel = vi.fn<UIAdapter['syncPanel']>(async (_view, target) => ({
+    status: target ? 'mounted' : 'unmounted',
+  }))
+  const loop = start(binding, { syncPanel })
+  const view = { chatId: 'A', epoch: 'one' }
+  try {
+    loop.view(view)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(binding.mock.calls.map(([chatId]) => chatId)).toEqual(['A'])
+    expect(syncPanel.mock.calls.map(([, target]) => target?.runId ?? null)).toEqual([null])
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(binding.mock.calls.map(([chatId]) => chatId)).toEqual(['A', 'A'])
+    expect(syncPanel.mock.calls.map(([, target]) => target?.runId ?? null)).toEqual([null, 'run-1'])
+    expect(syncPanel).toHaveBeenLastCalledWith(view, { runId: 'run-1', frameUrl }, expect.anything())
+  } finally { await loop.stop() }
+})
