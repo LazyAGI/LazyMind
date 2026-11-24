@@ -195,6 +195,7 @@ func (m *CoreServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 }
 
 func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
+	paths.authCredentialDatabaseURL = firstNonEmpty(cfg.AuthService.DatabaseURL, paths.authCredentialDatabaseURL)
 	modelKey, err := modelCredentialKeyForPaths(paths)
 	if err != nil {
 		return nil, fmt.Errorf("load model credential key: %w", err)

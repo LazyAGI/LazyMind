@@ -65,6 +65,13 @@ type commandOptions struct {
 	ExpandedPythonBytes   uint64
 	PayloadDir            string
 	Manifest              string
+	Uninstaller           string
+	InstallerPID          uint32
+	InstallVersion        string
+	ShortcutName          string
+	MenuDirectory         string
+	Publisher             string
+	EstimatedSize         uint64
 }
 
 func main() {
@@ -72,19 +79,42 @@ func main() {
 	if err != nil {
 		fatalf("%v", err)
 	}
-	root, err := localAppDataRoot()
-	if err != nil {
-		fatalf("resolve Local AppData: %v", err)
+	switch opts.Command {
+	case "commit-install", "rollback-install", "recover-install", "plan-uninstall", "remove-program", "unregister-uninstall", "verify-uninstalled":
+		var err error
+		switch opts.Command {
+		case "commit-install":
+			err = runInstallerFinish(opts, false)
+		case "rollback-install":
+			err = runInstallerRollback(opts)
+		case "recover-install":
+			err = recoverInterruptedInstallation()
+		case "plan-uninstall":
+			err = planUninstall(opts)
+		case "remove-program":
+			err = runInstallerRemoval(opts, forceStop, nil)
+		case "unregister-uninstall":
+			err = unregisterUninstall(opts)
+		case "verify-uninstalled":
+			err = verifyUninstalled()
+		}
+		if err != nil {
+			fatalf("%v", err)
+		}
+		return
 	}
-	if data, modern, resolveErr := storagepath.Resolve(""); resolveErr != nil {
-		fatalf("resolve installed storage: %v", resolveErr)
-	} else if modern {
-		root = data
+	root, err := resolveInstallerDataRoot()
+	if err != nil {
+		fatalf("%v", err)
 	}
 	switch opts.Command {
 	case "verify-payload":
 		if err := verifyPayload(opts); err != nil {
 			fatalf("verify installer payload: %v", err)
+		}
+	case "publish-install-payload":
+		if err := publishInstallPayload(opts); err != nil {
+			fatalf("publish fresh installer payload: %v", err)
 		}
 	case "plan-install":
 		layout, err := planInstallation(opts, false)
@@ -101,18 +131,6 @@ func main() {
 	case "mark-install":
 		if err := markInstallation(opts); err != nil {
 			fatalf("mark installation: %v", err)
-		}
-	case "remove-program":
-		if err := removeProgram(opts); err != nil {
-			fatalf("remove program: %v", err)
-		}
-	case "verify-uninstalled":
-		if err := verifyUninstalled(); err != nil {
-			fatalf("complete program removal: %v", err)
-		}
-	case "commit-install", "rollback-install":
-		if err := finishInstallation(opts, opts.Command == "rollback-install"); err != nil {
-			fatalf("%s: %v", opts.Command, err)
 		}
 	case "preflight":
 		if err := installerPreflight(opts); err != nil {
@@ -170,6 +188,66 @@ func main() {
 	}
 }
 
+func resolveInstallerDataRoot() (string, error) {
+	root, err := localAppDataRoot()
+	if err != nil {
+		return "", fmt.Errorf("resolve Local AppData: %w", err)
+	}
+	data, modern, err := storagepath.Resolve("")
+	if err != nil {
+		return "", fmt.Errorf("resolve installed storage: %w", err)
+	}
+	if modern {
+		return data, nil
+	}
+	return root, nil
+}
+
+func runInstallerRollback(opts commandOptions) error {
+	return runInstallerFinish(opts, true)
+}
+
+func runInstallerRemoval(opts commandOptions, stop func(string, string) ([]runningProcess, error), removeQuarantine func(string) error) error {
+	return withInstallRecoveryLock(func() error {
+		pending, err := readPendingUninstall()
+		if err != nil {
+			return err
+		}
+		if opts.Upgrade {
+			if pending.Stage != "" {
+				return errors.New("finish the pending uninstall before replacing the program")
+			}
+			if _, err := resolveInstallerDataRoot(); err != nil {
+				return err
+			}
+			return removeUpgradeProgram(opts, stop)
+		}
+		return runRecoverableUninstall(opts, pending, stop, removeQuarantine)
+	})
+}
+
+func runInstallerFinish(opts commandOptions, rollback bool) error {
+	return withInstallRecoveryLock(func() error {
+		pending, err := pendingFreshSession()
+		if err != nil {
+			return err
+		}
+		if pending.Stage != "" {
+			if !samePath(opts.StageDir, pending.Stage) || !samePath(opts.InstallDir, pending.app()) {
+				return errors.New("installation command does not match the pending installation")
+			}
+			return finishFreshInstallation(pending, rollback)
+		}
+		if _, err := resolveInstallerDataRoot(); err != nil {
+			return err
+		}
+		if err := finishInstallation(opts, rollback); err != nil {
+			return fmt.Errorf("%s: %w", opts.Command, err)
+		}
+		return nil
+	})
+}
+
 func parseCommandOptions(args []string) (commandOptions, error) {
 	if len(args) == 0 {
 		return commandOptions{}, errors.New("usage: lazymind-installer-maintenance preflight|check-stopped|force-stop|purge-local-data [options]")
@@ -192,7 +270,7 @@ func parseCommandOptions(args []string) (commandOptions, error) {
 			} else {
 				opts.ExpandedPythonBytes = value
 			}
-		case "--output", "--stage-dir", "--requested-dir", "--payload-dir", "--manifest":
+		case "--output", "--stage-dir", "--requested-dir", "--payload-dir", "--manifest", "--expected-uninstaller":
 			option := args[index]
 			index++
 			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
@@ -209,6 +287,39 @@ func parseCommandOptions(args []string) (commandOptions, error) {
 				opts.PayloadDir = filepath.Clean(args[index])
 			case "--manifest":
 				opts.Manifest = filepath.Clean(args[index])
+			case "--expected-uninstaller":
+				opts.Uninstaller = filepath.Clean(args[index])
+			}
+		case "--install-version", "--shortcut-name", "--menu-directory", "--publisher":
+			option := args[index]
+			index++
+			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
+				return commandOptions{}, fmt.Errorf("%s requires a value", option)
+			}
+			switch option {
+			case "--install-version":
+				opts.InstallVersion = args[index]
+			case "--shortcut-name":
+				opts.ShortcutName = args[index]
+			case "--menu-directory":
+				opts.MenuDirectory = args[index]
+			case "--publisher":
+				opts.Publisher = args[index]
+			}
+		case "--installer-pid", "--estimated-size":
+			option := args[index]
+			index++
+			if index >= len(args) {
+				return commandOptions{}, fmt.Errorf("%s requires an integer", option)
+			}
+			value, err := strconv.ParseUint(args[index], 10, 32)
+			if err != nil || value == 0 {
+				return commandOptions{}, fmt.Errorf("invalid %s", option)
+			}
+			if option == "--installer-pid" {
+				opts.InstallerPID = uint32(value)
+			} else {
+				opts.EstimatedSize = value
 			}
 		case "--upgrade":
 			opts.Upgrade = true
@@ -258,11 +369,21 @@ func parseCommandOptions(args []string) (commandOptions, error) {
 	if (opts.Command == "plan-install" || opts.Command == "prepare-install") && (opts.Output == "" || opts.InstallDir == "") {
 		return opts, errors.New("installation layout requires --install-dir and --output")
 	}
+	if opts.Command == "plan-uninstall" && (!filepath.IsAbs(opts.InstallDir) || !filepath.IsAbs(opts.Output)) {
+		return opts, errors.New("uninstall layout requires absolute --install-dir and --output")
+	}
+	if opts.Command == "unregister-uninstall" && (!filepath.IsAbs(opts.InstallDir) || !filepath.IsAbs(opts.StageDir)) {
+		return opts, errors.New("unregistration requires absolute --install-dir and --stage-dir")
+	}
 	if opts.Command == "prepare-install" && (opts.ShippedAppBytes == 0 || opts.ExpandedPythonBytes == 0) {
 		return opts, errors.New("prepare-install requires measured packaged App and expanded Python byte counts")
 	}
 	if opts.Command == "verify-payload" && (!filepath.IsAbs(opts.PayloadDir) || !filepath.IsAbs(opts.Manifest)) {
 		return opts, errors.New("verify-payload requires absolute --payload-dir and --manifest")
+	}
+	if opts.Command == "publish-install-payload" &&
+		(!filepath.IsAbs(opts.InstallDir) || !filepath.IsAbs(opts.StageDir) || !filepath.IsAbs(opts.Uninstaller)) {
+		return opts, errors.New("publish-install-payload requires absolute --install-dir, --stage-dir and --expected-uninstaller")
 	}
 	if (opts.Command == "mark-install" || opts.Command == "commit-install" || opts.Command == "rollback-install") && (opts.StageDir == "" || opts.InstallDir == "") {
 		return opts, errors.New("installation session requires --install-dir and --stage-dir")

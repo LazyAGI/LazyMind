@@ -85,6 +85,28 @@ func TestStorageRegisteredCustomAppCanBeAuthenticated(t *testing.T) {
 	}
 }
 
+func TestStoragePlanReusesRequestedStorageRoot(t *testing.T) {
+	for _, mode := range []string{"installed", "restore"} {
+		t.Run(mode, func(t *testing.T) {
+			registry, _, app, data := storageFixture(t)
+			if mode == "restore" {
+				registry.DeleteValue(teststorage.InstallKey, "InstallLocation")
+			}
+			root := filepath.Dir(app)
+			for _, requested := range []string{root, app} {
+				layout, err := planInstallation(commandOptions{InstallDir: requested, RequestedDir: requested}, false)
+				if err != nil || layout.Mode != mode || layout.App != app || layout.Data != data || layout.Storage != root {
+					t.Fatalf("plan for %q = %+v, %v; want %s at %q", requested, layout, err, mode, root)
+				}
+			}
+			other := filepath.Join(filepath.Dir(root), "other-storage")
+			if _, err := planInstallation(commandOptions{InstallDir: other, RequestedDir: other}, false); err == nil {
+				t.Fatal("plan accepted a different storage root")
+			}
+		})
+	}
+}
+
 func TestStorageUnregisteredCandidateDoesNotAuthorizeProcesses(t *testing.T) {
 	r, legacy, app, _ := storageFixture(t)
 	r.DeleteValue(teststorage.InstallKey, "InstallLocation")

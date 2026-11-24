@@ -314,6 +314,7 @@ test("Windows installer force-stops LazyMind before invoking an old uninstaller"
   const source = readFileSync(installerScript, "utf8");
   const check = nsisMacro(source, "customCheckAppRunning");
   const install = nsisMacro(source, "customInstall");
+  const remove = nsisMacro(source, "customRemoveFiles");
   const uninstall = nsisMacro(source, "customUnInstall");
 
   assert.match(
@@ -325,7 +326,16 @@ test("Windows installer force-stops LazyMind before invoking an old uninstaller"
   assert.doesNotMatch(check, /MB_RETRYCANCEL|LMCloseApp/);
   assert.match(source, /LangString LMProcessScanFailed[\s\S]*LangString LMForceStopFailed/);
   assert.match(install, /purge-local-data --install-dir "\$INSTDIR"/);
-  assert.match(uninstall, /purge-local-data --install-dir "\$INSTDIR"/);
+  assert.match(remove, /remove-program --install-dir "\$INSTDIR"/);
+  assert.match(remove, /\$\{ElseIf\} \$UninstallDataChoice == "purge"\s+StrCpy \$7 '\$7 --purge'/);
+  assert.match(uninstall, /verify-uninstalled/);
+  assert.doesNotMatch(uninstall, /purge-local-data/);
+});
+
+test("Windows silent installation refreshes the shortcut target after resolving App", () => {
+  const source = readFileSync(installerScript, "utf8");
+  const checkAppRunning = source.split("!macro customCheckAppRunning")[1].split("!macroend")[0];
+  assert.match(checkAppRunning, /Call LMPrepareInstall\s+StrCpy \$appExe "\$INSTDIR\\\$\{APP_EXECUTABLE_FILENAME\}"/);
 });
 
 test("Windows installer replaces legacy uninstallers with the fixed embedded uninstaller", () => {
@@ -1025,6 +1035,7 @@ test("Windows storage template changes use a locked dependency patch and the sta
     "templates/nsis/assistedInstaller.nsh",
     "templates/nsis/include/extractAppPackage.nsh",
     "templates/nsis/include/installer.nsh",
+    "templates/nsis/uninstaller.nsh",
   ].sort());
   assert.doesNotMatch(
     readFileSync(electronBuilderConfig, "utf8"),

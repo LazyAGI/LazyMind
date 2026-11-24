@@ -199,7 +199,9 @@ func randomKeyName() (string, error) {
 }
 
 func remap(key registry.Key) error {
-	status, _, _ := overridePredefinedKey.Call(uintptr(registry.CURRENT_USER), uintptr(key))
+	// The Windows SDK sign-extends predefined HKEYs from a 32-bit LONG.
+	currentUser := registry.CURRENT_USER
+	status, _, _ := overridePredefinedKey.Call(uintptr(int32(currentUser)), uintptr(key))
 	if status != 0 {
 		return syscall.Errno(status)
 	}

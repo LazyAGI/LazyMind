@@ -138,12 +138,13 @@ func verifyPayload(opts commandOptions) error {
 			return fmt.Errorf("payload checksum mismatch: %s", entry.Path)
 		}
 	}
-	return nil
+	return rememberVerifiedInstallPayload(opts, manifest)
 }
 
 type installLayout struct {
 	Mode, App, Data, Storage, Stage string
 	Registered                      bool
+	Fresh                           *freshInstallState
 }
 
 // This receipt is temporary, private and limited to a single installer run.
@@ -153,6 +154,8 @@ type installSession struct {
 	Program, Uninstall map[string]string
 	UninstallNumbers   map[string]uint64
 	PurgeComplete      bool
+	Fresh              *freshInstallState
+	Removal            *uninstallState
 }
 
 func currentUserSID() (string, error) {
@@ -330,12 +333,8 @@ func createPrivateDirectory(name, sid string) error {
 	} else if err != nil {
 		return err
 	}
-	sd, err := windows.SecurityDescriptorFromString("O:" + sid + "D:P(A;OICI;FA;;;" + sid + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
-	if err != nil {
-		return err
-	}
-	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
-	if err := windows.CreateDirectory(windows.StringToUTF16Ptr(name), &attributes); err == nil {
+	sd, err := createDirectoryWithPrivateACL(name, sid)
+	if err == nil {
 		return privateOwner(name, sid)
 	} else if !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		return err
@@ -377,6 +376,15 @@ func createPrivateDirectory(name, sid string) error {
 		return err
 	}
 	return privateOwner(name, sid)
+}
+
+func createDirectoryWithPrivateACL(name, sid string) (*windows.SECURITY_DESCRIPTOR, error) {
+	sd, err := windows.SecurityDescriptorFromString("O:" + sid + "D:P(A;OICI;FA;;;" + sid + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+	if err != nil {
+		return nil, err
+	}
+	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	return sd, windows.CreateDirectory(windows.StringToUTF16Ptr(name), &attributes)
 }
 
 func safeStorageAncestors(root, sid string) error {
@@ -604,7 +612,8 @@ func planInstallation(opts commandOptions, final bool) (installLayout, error) {
 	if final && !samePath(opts.InstallDir, layout.App) {
 		return layout, errors.New("installation conflicts with the retained program location")
 	}
-	if opts.RequestedDir != "" && layout.Mode != "new" && !samePath(opts.RequestedDir, layout.App) {
+	if opts.RequestedDir != "" && layout.Mode != "new" &&
+		!samePath(opts.RequestedDir, layout.Storage) && !samePath(opts.RequestedDir, layout.App) {
 		return layout, errors.New("upgrades and retained-data reinstalls cannot change installation directory")
 	}
 	return layout, nil
@@ -626,6 +635,24 @@ func writeLayoutFile(name string, layout installLayout) error {
 }
 
 func prepareInstallation(opts commandOptions) error {
+	return withInstallRecoveryLock(func() error {
+		return prepareInstallationLocked(opts)
+	})
+}
+
+func prepareInstallationLocked(opts commandOptions) error {
+	if pending, err := readPendingUninstall(); err != nil {
+		return err
+	} else if pending.Stage != "" {
+		return errors.New("finish the pending uninstall before installing LazyMind again")
+	}
+	pending, err := pendingFreshSession()
+	if err != nil {
+		return err
+	}
+	if pending.Stage != "" {
+		return errors.New("another installation still has a recovery session")
+	}
 	layout, err := planInstallation(opts, true)
 	if err != nil {
 		return err
@@ -667,6 +694,30 @@ func prepareInstallation(opts commandOptions) error {
 		}
 	}()
 	opts.StageDir = layout.Stage
+	if layout.Mode == "new" {
+		layout.Fresh, err = planFreshInstall(opts)
+		if err != nil {
+			return err
+		}
+		if err := createSession(layout); err != nil {
+			return err
+		}
+		keepStage = true
+		pending, err := pendingFreshSession()
+		if err != nil {
+			return err
+		}
+		if err := prepareFreshDirectories(layout, sid); err != nil {
+			return recoverFailedPreparation(pending, err)
+		}
+		if err := installerPreflight(opts); err != nil {
+			return recoverFailedPreparation(pending, err)
+		}
+		if err := writeLayoutFile(opts.Output, layout); err != nil {
+			return recoverFailedPreparation(pending, err)
+		}
+		return nil
+	}
 	if err := installerPreflight(opts); err != nil {
 		return err
 	}
@@ -685,23 +736,6 @@ func prepareInstallation(opts commandOptions) error {
 				return err
 			}
 			if err := ensureWritableDirectory(name); err != nil {
-				return err
-			}
-		}
-		if layout.Mode == "new" {
-			if err := os.WriteFile(filepath.Join(layout.Data, storagepath.OwnerMarker), []byte(sid+"\n"), 0600); err != nil {
-				return err
-			}
-			if err := validateOwnedData(layout.Data); err != nil {
-				return err
-			}
-			key, _, err := registry.CreateKey(registry.CURRENT_USER, storagepath.DataKey, registry.SET_VALUE|registry.WOW64_64KEY)
-			if err != nil {
-				return err
-			}
-			err = key.SetStringValue("DataRoot", layout.Data)
-			key.Close()
-			if err != nil {
 				return err
 			}
 		}
@@ -738,7 +772,11 @@ func createSession(layout installLayout) error {
 			names = []string{"DisplayName", "UninstallString", "QuietUninstallString", "DisplayVersion", "DisplayIcon", "Publisher"}
 		}
 		for _, name := range names {
-			if value, _, err := key.GetStringValue(name); err == nil {
+			if value, kind, err := key.GetStringValue(name); err == nil {
+				if layout.Mode == "new" && kind != registry.SZ {
+					key.Close()
+					return fmt.Errorf("unexpected registry type for %s", name)
+				}
 				values[name] = value
 			} else if !errors.Is(err, registry.ErrNotExist) {
 				key.Close()
@@ -747,18 +785,24 @@ func createSession(layout installLayout) error {
 		}
 		if path == uninstallKey {
 			for _, name := range []string{"NoModify", "NoRepair", "EstimatedSize"} {
-				if value, _, err := key.GetIntegerValue(name); err == nil {
+				if value, kind, err := key.GetIntegerValue(name); err == nil {
+					if layout.Mode == "new" && kind != registry.DWORD {
+						key.Close()
+						return fmt.Errorf("unexpected registry type for %s", name)
+					}
 					session.UninstallNumbers[name] = value
+				} else if layout.Mode == "new" && !errors.Is(err, registry.ErrNotExist) {
+					key.Close()
+					return err
 				}
 			}
 		}
 		key.Close()
 	}
-	content, err := json.Marshal(session)
-	if err != nil {
-		return err
+	if layout.Mode == "new" {
+		return createFreshInstallSession(layout, session)
 	}
-	return os.WriteFile(filepath.Join(layout.Stage, "session.json"), content, 0600)
+	return writeInstallSession(layout.Stage, session)
 }
 
 func loadPrivateSession(stage, app string) (installSession, error) {
@@ -817,57 +861,20 @@ func readSession(stage, app string) (installSession, error) {
 	return session, nil
 }
 
-func completePurgeSession(opts commandOptions) error {
-	if err := verifyUninstalled(); err != nil {
-		return err
-	}
-	session, err := loadPrivateSession(opts.StageDir, opts.InstallDir)
-	if err != nil {
-		return err
-	}
-	if !session.PurgeComplete {
-		return errors.New("late purge cannot authorize data deletion")
-	}
-	legacy, err := localAppDataRoot()
-	if err != nil {
-		return err
-	}
-	modern := samePath(session.App, filepath.Join(filepath.Dir(session.Data), "App")) && strings.EqualFold(filepath.Base(session.Data), "Data")
-	if modern {
-		if err := safeStorageRoot(filepath.Dir(session.Data)); err != nil {
-			return err
-		}
-		if err := privateOwner(filepath.Dir(session.Data), session.Owner); err != nil {
-			return err
-		}
-		value, err := readInstallString(storagepath.DataKey, "DataRoot")
-		if err != nil || value != "" {
-			return errors.New("data locator was not removed by this purge")
-		}
-	} else if !samePath(session.Data, legacy) || !samePath(session.App, filepath.Join(filepath.Dir(legacy), "Programs", appDataLeaf)) {
-		return errors.New("completed purge session has an untrusted target")
-	}
-	if _, err := os.Lstat(session.Data); !os.IsNotExist(err) {
-		return errors.New("late purge requires the original data target to be absent")
-	}
-	// No process handling and no data deletion remain at this late hook.
-	return os.RemoveAll(opts.StageDir)
-}
-
-func verifyUninstalled() error {
-	for key, name := range map[string]string{storagepath.InstallKey: "InstallLocation", uninstallKey: "UninstallString"} {
-		value, err := readInstallString(key, name)
-		if err != nil {
-			return err
-		}
-		if value != "" {
-			return errors.New("program registration was not removed; inspect the partial uninstall before retrying")
-		}
-	}
-	return nil
-}
-
 func markInstallation(opts commandOptions) error {
+	pending, err := pendingFreshSession()
+	if err != nil {
+		return err
+	}
+	if pending.Stage != "" {
+		if !samePath(opts.StageDir, pending.Stage) || !samePath(opts.InstallDir, pending.app()) {
+			return errors.New("payload target does not match the pending installation")
+		}
+		return withInstallRecoveryLock(func() error {
+			_, err := authenticatedFreshSession(pending)
+			return err
+		})
+	}
 	session, err := readSession(opts.StageDir, opts.InstallDir)
 	if err != nil {
 		return err
@@ -929,7 +936,7 @@ func markInstallation(opts commandOptions) error {
 	return nil
 }
 
-func removeProgram(opts commandOptions) error {
+func removeUpgradeProgram(opts commandOptions, stop func(string, string) ([]runningProcess, error)) error {
 	legacy, err := localAppDataRoot()
 	if err != nil {
 		return err
@@ -944,27 +951,10 @@ func removeProgram(opts commandOptions) error {
 	if !modern {
 		root = legacy
 	}
-	if _, err := forceStop(root, opts.InstallDir); err != nil {
+	if _, err := stop(root, opts.InstallDir); err != nil {
 		return err
 	}
 	stage := opts.StageDir
-	if stage == "" {
-		sid, err := currentUserSID()
-		if err != nil {
-			return err
-		}
-		parent := filepath.Join(filepath.Dir(opts.InstallDir), ".install-tmp")
-		if err := createPrivateDirectory(parent, sid); err != nil {
-			return err
-		}
-		stage, err = os.MkdirTemp(parent, "install-")
-		if err != nil {
-			return err
-		}
-		if err := createSession(installLayout{App: opts.InstallDir, Data: root, Stage: stage}); err != nil {
-			return err
-		}
-	}
 	if _, err := readSession(stage, opts.InstallDir); err != nil {
 		return err
 	}
@@ -983,40 +973,7 @@ func removeProgram(opts commandOptions) error {
 	if err := winfile.RetryOperation(context.Background(), func() error { return os.Rename(opts.InstallDir, old) }, winfile.RetryOptions{MaxWait: purgeRetryLimit}); err != nil {
 		return err
 	}
-	if opts.Upgrade {
-		return nil
-	}
-	if opts.Purge {
-		if err := purgeLocalData(context.Background(), root); err != nil {
-			_ = os.Rename(old, opts.InstallDir)
-			return err
-		}
-		if modern {
-			key, err := registry.OpenKey(registry.CURRENT_USER, storagepath.DataKey, registry.SET_VALUE|registry.WOW64_64KEY)
-			if err != nil {
-				return err
-			}
-			err = key.DeleteValue("DataRoot")
-			key.Close()
-			if err != nil {
-				return err
-			}
-		}
-		session, err := loadPrivateSession(stage, opts.InstallDir)
-		if err != nil {
-			return err
-		}
-		session.PurgeComplete = true
-		content, err := json.Marshal(session)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(stage, "session.json"), content, 0600); err != nil {
-			return err
-		}
-		return writeLayoutFile(opts.Output, installLayout{App: opts.InstallDir, Data: root, Stage: stage})
-	}
-	return os.RemoveAll(stage)
+	return nil
 }
 
 func finishInstallation(opts commandOptions, rollback bool) error {

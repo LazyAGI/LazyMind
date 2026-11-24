@@ -157,7 +157,7 @@ function Install-Package([string]$Label, [bool]$Legacy, [bool]$Upgrade, [string]
     $startedUtc = [DateTime]::UtcNow
     $process = Start-Process -FilePath $packages.$Label.path -ArgumentList $arguments -PassThru
     $expectedPage = if (-not $Legacy -and -not $Upgrade) { 'shown' } else { 'hidden' }
-    Write-Host "Package $Label: expected directory page=$expectedPage. New installs must select EXACTLY $storageRoot. Leave the installer open for evidence."
+    Write-Host "Package ${Label}: expected directory page=$expectedPage. New installs must select EXACTLY $storageRoot. Leave the installer open for evidence."
     $observed = Read-Host 'Enter shown/hidden after inspecting the real installer (no silent invocation)'
     Save-DesktopImage "installer-$Label-$($uiReceipts.Count)"
     Assert-That ($observed -ceq $expectedPage) 'Directory-page lifecycle contract failed.'

@@ -511,6 +511,17 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Checkout volume helper for this workflow
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: installer-volume-workflow
+          sparse-checkout: |
+            desktop/scripts/windows-installer-volume.ps1
+            desktop/scripts/windows-installer-image-file.ps1
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Download the exact installer built above
         uses: actions/download-artifact@v8
         with:
@@ -545,16 +556,16 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           "Installer arguments: $env:INSTALL_ARGUMENTS"
-          $targetVolume = Get-CimInstance Win32_Volume -Filter "DriveLetter='D:'"
-          $systemVolume = Get-CimInstance Win32_Volume -Filter "DriveLetter='$env:SystemDrive'"
-          if (-not $targetVolume -or $targetVolume.FileSystem -ne 'NTFS' -or $targetVolume.DeviceID -eq $systemVolume.DeviceID) {
-            throw 'Installer verification requires a genuinely separate local NTFS D: volume.'
-          }
-          $storageRoot = "D:\lm-layout-qa-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          if (Test-Path -LiteralPath $storageRoot) { throw "Refusing to reuse an existing test root: $storageRoot" }
+          . (Join-Path $env:GITHUB_WORKSPACE 'installer-volume-workflow/desktop/scripts/windows-installer-image-file.ps1')
+          . (Join-Path $env:GITHUB_WORKSPACE 'installer-volume-workflow/desktop/scripts/windows-installer-volume.ps1')
+          $runDirectory = "D:\lm-volume-$([guid]::NewGuid().ToString('N'))"
+          "LAZYMIND_TEST_VOLUME_RUN_DIRECTORY=$runDirectory" | Add-Content -LiteralPath $env:GITHUB_ENV
+          $volume = Initialize-WindowsInstallerSmokeVolume -RunDirectory $runDirectory
+          $storageRoot = $volume.StorageRoot
           "LAZYMIND_TEST_STORAGE_ROOT=$storageRoot" | Add-Content -LiteralPath $env:GITHUB_ENV
           $env:INSTALL_ARGUMENTS = "$env:INSTALL_ARGUMENTS /D=$storageRoot"
           $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList $env:INSTALL_ARGUMENTS -Wait -PassThru
+          "Installer test storage: $storageRoot"
           "Installer exit code: $($install.ExitCode)"
           if ($install.ExitCode -ne 0) {
             $unsignedExitCode = [uint32]$install.ExitCode
@@ -745,6 +756,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Clean installer test volume
+        id: volume_cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:LAZYMIND_TEST_VOLUME_RUN_DIRECTORY) {
+            . (Join-Path $env:GITHUB_WORKSPACE 'installer-volume-workflow/desktop/scripts/windows-installer-image-file.ps1')
+            . (Join-Path $env:GITHUB_WORKSPACE 'installer-volume-workflow/desktop/scripts/windows-installer-volume.ps1')
+            Clear-WindowsInstallerSmokeVolume -RunDirectory $env:LAZYMIND_TEST_VOLUME_RUN_DIRECTORY
+          }
+
       - name: Report installer test result
         if: always()
         shell: pwsh
@@ -755,12 +778,14 @@ jobs:
           REQUIRE_INSTALLER_WARMUP: ${{ matrix.verify_installer_warmup }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
           UNINSTALL_OUTCOME: ${{ steps.uninstall.outcome }}
+          VOLUME_CLEANUP_OUTCOME: ${{ steps.volume_cleanup.outcome }}
         run: |
           $outcomes = [ordered]@{
             install = $env:INSTALL_OUTCOME
             verify = $env:VERIFY_OUTCOME
             smoke = $env:SMOKE_OUTCOME
             uninstall = $env:UNINSTALL_OUTCOME
+            volume_cleanup = $env:VOLUME_CLEANUP_OUTCOME
           }
           if ($env:REQUIRE_INSTALLER_WARMUP -eq "true") {
             $outcomes["installer_warmup"] = $env:INSTALLER_WARMUP_OUTCOME

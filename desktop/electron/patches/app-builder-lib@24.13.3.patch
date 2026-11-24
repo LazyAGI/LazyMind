@@ -26,7 +26,7 @@ index b7f475265..5245aab62 100644
    !endif
  
 diff --git a/templates/nsis/include/extractAppPackage.nsh b/templates/nsis/include/extractAppPackage.nsh
-index f5470bf52..fc9f2cf0e 100644
+index f5470bf52..02be7981b 100644
 --- a/templates/nsis/include/extractAppPackage.nsh
 +++ b/templates/nsis/include/extractAppPackage.nsh
 @@ -1,4 +1,5 @@
@@ -35,7 +35,7 @@ index f5470bf52..fc9f2cf0e 100644
    !ifdef COMPRESS
      SetCompress off
    !endif
-@@ -66,37 +67,43 @@
+@@ -66,37 +67,56 @@
  !macroend
  
  !macro arm64_app_files
@@ -56,7 +56,12 @@ index f5470bf52..fc9f2cf0e 100644
  !macro decompress
    !ifdef ZIP_COMPRESSION
 -    nsisunz::Unzip "$PLUGINSDIR\app-$packageArch.zip" "$INSTDIR"
-+    nsisunz::Unzip "$LMStageRoot\app-$packageArch.zip" "$INSTDIR"
++    ${If} $LMLayoutMode == "new"
++      CreateDirectory "$LMStageRoot\7z-out"
++      nsisunz::Unzip "$LMStageRoot\app-$packageArch.zip" "$LMStageRoot\7z-out"
++    ${Else}
++      nsisunz::Unzip "$LMStageRoot\app-$packageArch.zip" "$INSTDIR"
++    ${EndIf}
      Pop $R0
 -    StrCmp $R0 "success" +3
 +    ${If} $R0 != "success"
@@ -65,7 +70,11 @@ index f5470bf52..fc9f2cf0e 100644
 +      SetErrorLevel 2
        Quit
 +    ${EndIf}
-+    !insertmacro LMVerifyExtract "$INSTDIR"
++    ${If} $LMLayoutMode == "new"
++      !insertmacro LMPublishFreshFiles
++    ${Else}
++      !insertmacro LMVerifyExtract "$INSTDIR"
++    ${EndIf}
    !else
 -    !insertmacro extractUsing7za "$PLUGINSDIR\app-$packageArch.7z"
 +    !insertmacro extractUsing7za "$LMStageRoot\app-$packageArch.7z"
@@ -83,11 +92,15 @@ index f5470bf52..fc9f2cf0e 100644
    Pop $R0
    SetOutPath $R0
 +  IfErrors AbortExtract7za 0
++  ${If} $LMLayoutMode == "new"
++    !insertmacro LMPublishFreshFiles
++    Goto DoneExtract7za
++  ${EndIf}
 +  !insertmacro LMVerifyExtract "$LMStageRoot\7z-out"
  
    # Retry counter
    StrCpy $R1 0
-@@ -105,7 +112,8 @@
+@@ -105,7 +125,8 @@
      IntOp $R1 $R1 + 1
  
      # Attempt to copy files in atomic way
@@ -97,7 +110,7 @@ index f5470bf52..fc9f2cf0e 100644
      IfErrors 0 DoneExtract7za
  
      DetailPrint `Can't modify "${PRODUCT_NAME}"'s files.`
-@@ -113,21 +121,12 @@
+@@ -113,21 +134,12 @@
        # Try copying a few times before asking for a user action.
        Goto RetryExtract7za
      ${else}
@@ -122,14 +135,16 @@ index f5470bf52..fc9f2cf0e 100644
      Quit
  
    RetryExtract7za:
-@@ -135,4 +134,5 @@
+@@ -135,4 +147,7 @@
      Goto LoopExtract7za
  
    DoneExtract7za:
-+    !insertmacro LMVerifyExtract "$OUTDIR"
++    ${If} $LMLayoutMode != "new"
++      !insertmacro LMVerifyExtract "$OUTDIR"
++    ${EndIf}
  !macroend
 diff --git a/templates/nsis/include/installer.nsh b/templates/nsis/include/installer.nsh
-index 34e91dfe8..ef874ec7f 100644
+index 34e91dfe8..127a1351e 100644
 --- a/templates/nsis/include/installer.nsh
 +++ b/templates/nsis/include/installer.nsh
 @@ -90,7 +90,7 @@
@@ -141,3 +156,40 @@ index 34e91dfe8..ef874ec7f 100644
        ${if} $installMode == "all"
          SetShellVarContext all
        ${endif}
+@@ -100,2 +100,4 @@
+-  File "/oname=${UNINSTALL_FILENAME}" "${UNINSTALLER_OUT_FILE}"
++  ${If} $LMLayoutMode != "new"
++    File "/oname=${UNINSTALL_FILENAME}" "${UNINSTALLER_OUT_FILE}"
++  ${EndIf}
+ !macroend
+@@ -147,2 +149,3 @@
+   WriteRegDWORD SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "EstimatedSize" "$0"
++  !insertmacro LMCommitFreshInstall
+ !macroend
+diff --git a/templates/nsis/uninstaller.nsh b/templates/nsis/uninstaller.nsh
+index 8282a6fc5..2a85edce2 100644
+--- a/templates/nsis/uninstaller.nsh
++++ b/templates/nsis/uninstaller.nsh
+@@ -5,3 +5,4 @@
+ Function un.onInit
+   SetOutPath $INSTDIR
++  !insertmacro LMRecordUninstallLocation
+   ${LogSet} on
+@@ -232,7 +233,11 @@
+-  DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}"
+-  !ifdef UNINSTALL_REGISTRY_KEY_2
+-    DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY_2}"
+-  !endif
+-  DeleteRegKey SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}"
+-
++  ${If} ${isUpdated}
++    DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}"
++    !ifdef UNINSTALL_REGISTRY_KEY_2
++      DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY_2}"
++    !endif
++    DeleteRegKey SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}"
++  ${Else}
++    !insertmacro LMUnregisterStandaloneUninstall
++  ${EndIf}
++
+   !ifmacrodef customUnInstall

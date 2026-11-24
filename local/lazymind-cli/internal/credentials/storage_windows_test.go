@@ -89,12 +89,15 @@ func runWithPrivateStorageRegistry(m *testing.M) (code int) {
 		fmt.Fprintln(os.Stderr, "resolve RegOverridePredefKey:", err)
 		return
 	}
-	if status, _, _ := override.Call(uintptr(registry.CURRENT_USER), uintptr(privateHKCU)); status != 0 {
+	// The Windows SDK sign-extends predefined HKEYs from a 32-bit LONG.
+	currentUser := registry.CURRENT_USER
+	currentUserHandle := uintptr(int32(currentUser))
+	if status, _, _ := override.Call(currentUserHandle, uintptr(privateHKCU)); status != 0 {
 		fmt.Fprintln(os.Stderr, "override HKCU:", syscall.Errno(status))
 		return
 	}
 	code = m.Run()
-	if status, _, _ := override.Call(uintptr(registry.CURRENT_USER), 0); status != 0 {
+	if status, _, _ := override.Call(currentUserHandle, 0); status != 0 {
 		// Leave the private key intact if the mapping could not be restored.
 		fmt.Fprintln(os.Stderr, "restore HKCU:", syscall.Errno(status))
 		privatePath = ""

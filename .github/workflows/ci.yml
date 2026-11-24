@@ -308,8 +308,20 @@ jobs:
         working-directory: local/local-proxy
         run: go test ./... -v
       - name: Test Local Runtime Manager
+        if: runner.os != 'Windows'
         working-directory: local/local-runtime-manager
         run: go test ./... -v
+      - name: Test Local Runtime Manager on disposable Windows runner
+        if: runner.os == 'Windows'
+        working-directory: local/local-runtime-manager
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+            throw 'Process tests require an isolated GitHub-hosted runner.'
+          }
+          $env:LAZYMIND_TEST_DISPOSABLE_ACCOUNT_SID = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          go test ./... -v
+          exit $LASTEXITCODE
       - name: Test LazyMind Agent Connector
         if: runner.os != 'Windows'
         working-directory: local/lazymind-cli

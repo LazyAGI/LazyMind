@@ -18,6 +18,7 @@ const (
 	runtimeProfileEnvVar             = "LAZYMIND_RUNTIME_PROFILE"
 	ragEnabledEnvVar                 = "LAZYMIND_RAG_ENABLED"
 	runtimeRootEnvVar                = "LAZYMIND_RUNTIME_ROOT"
+	installedLocalDataRootEnvVar     = "LAZYMIND_INTERNAL_INSTALLED_LOCAL_DATA_ROOT"
 	localBuildRootEnvVar             = "LAZYMIND_LOCAL_BUILD_ROOT"
 	runtimeResourcesRootEnvVar       = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
 	runtimeOwnerTokenEnvVar          = "LAZYMIND_RUNTIME_OWNER_TOKEN"
@@ -236,6 +237,12 @@ type RuntimePaths struct {
 	HistoryInjectionDownload *HistoryInjectionDownload
 	HistoryInjectionSHA256   string
 	TrustedLocalMode         bool
+
+	installedLocalDataRoot      string
+	registeredCredentialRoot    string
+	explicitWindowsLocalRoot    string
+	independentLocalCredentials bool
+	authCredentialDatabaseURL   string
 }
 
 type RuntimeConfig struct {
@@ -268,6 +275,8 @@ type RuntimeConfigOptions struct {
 	RuntimeRoot     string
 	BuildRoot       string
 	ResourcesRoot   string
+
+	installedLocalDataRoot string
 }
 
 type RuntimePathLayout struct {
@@ -866,12 +875,29 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		currentApp = filepath.Dir(filepath.Dir(resourcesRoot))
 	}
 	explicitRoot := cleanOptionalPath(firstNonEmpty(opts.RuntimeRoot, os.Getenv(runtimeRootEnvVar)))
-	installedRoot, newLayout := "", false
-	if profile != "local" || explicitRoot == "" {
-		installedRoot, newLayout, err = storagepath.Resolve(currentApp)
-		if err != nil {
-			return RuntimeConfig{}, RuntimePaths{}, err
+	expectedInstalledLocalRoot := ""
+	if runtime.GOOS == "windows" && profile == "local" {
+		expectedInstalledLocalRoot = opts.installedLocalDataRoot
+		if strings.TrimSpace(opts.RuntimeRoot) == "" {
+			expectedInstalledLocalRoot = firstNonEmpty(expectedInstalledLocalRoot, os.Getenv(installedLocalDataRootEnvVar))
 		}
+		expectedInstalledLocalRoot = cleanOptionalPath(expectedInstalledLocalRoot)
+	}
+	installedRoot, newLayout := "", false
+	independentLocal := false
+	if profile != "local" || explicitRoot == "" || expectedInstalledLocalRoot != "" {
+		installedRoot, newLayout, err = storagepath.Resolve(currentApp)
+	} else if runtime.GOOS == "windows" {
+		installedRoot, independentLocal, err = storagepath.ResolveExplicitLocal(explicitRoot, pathLayout.DataRoot)
+		newLayout = installedRoot != "" && !independentLocal
+	}
+	if err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
+	// Internal handoff records which registered root was used. The registry
+	// and ownership marker must still authorize that same root in this process.
+	if expectedInstalledLocalRoot != "" && (!newLayout || !strings.EqualFold(installedRoot, expectedInstalledLocalRoot) || !strings.EqualFold(explicitRoot, expectedInstalledLocalRoot)) {
+		return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("registered Local data location changed during startup")
 	}
 	if newLayout {
 		if profile == "desktop" {
@@ -1014,6 +1040,15 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		AlgorithmPIDDir:          filepath.Join(runtimeRoot, "run", "algorithm"),
 		HistoryInjectionRoot:     filepath.Join(root, "history-injection"),
 	}
+	if newLayout && profile == "local" {
+		p.installedLocalDataRoot = installedRoot
+	} else if runtime.GOOS == "windows" && profile == "local" && explicitRoot != "" {
+		p.explicitWindowsLocalRoot = explicitRoot
+		p.independentLocalCredentials = independentLocal
+	}
+	if newLayout && runtime.GOOS == "windows" {
+		p.registeredCredentialRoot = installedRoot
+	}
 	if profile == "desktop" {
 		if err := applyDesktopManifestPaths(&p); err != nil {
 			return RuntimeConfig{}, RuntimePaths{}, err
@@ -1032,6 +1067,7 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 			return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("desktop segment database conflicts with the installed data location")
 		}
 	}
+	p.authCredentialDatabaseURL = authDatabaseURL
 	ports := newLocalPortAllocator()
 	ports.skipPortChecks = skipPortChecks
 	networkProfile, err := localNetworkProfile()

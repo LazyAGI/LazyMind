@@ -27,7 +27,8 @@ func newInstalledStorageFixture(t *testing.T) installedStorageFixture {
 	for key, value := range map[string]string{
 		localHostHomeEnvVar: home, "HOME": home, "USERPROFILE": home,
 		"LOCALAPPDATA": localAppData, runtimeRootEnvVar: "", localBuildRootEnvVar: "",
-		localSQLiteDirEnvVar: "", "LAZYMIND_FILE_WATCHER_BASE_ROOT": "",
+		installedLocalDataRootEnvVar: "",
+		localSQLiteDirEnvVar:         "", "LAZYMIND_FILE_WATCHER_BASE_ROOT": "",
 		"LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR": "", cloudCredentialKeyEnvVar: "",
 		modelCredentialKeyEnvVar: "", "LAZYMIND_DESKTOP_DATA_ROOT": "",
 	} {
@@ -102,6 +103,73 @@ func TestInstalledStorageRuntimeConsumersFollowRegisteredDataRoot(t *testing.T) 
 			}
 		})
 	}
+}
+
+func TestLocalProcessComposeChildKeepsRegisteredStorageLayout(t *testing.T) {
+	f := newInstalledStorageFixture(t)
+	parent, parentPaths, err := newRuntimeConfigWithOptions(f.options("local"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Startup refreshes its port map using the already selected runtime root.
+	parent, parentPaths, err = newRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:                parent.Profile,
+		RepoRoot:               parentPaths.RepoRoot,
+		RuntimeRoot:            parent.RuntimeRoot,
+		ResourcesRoot:          parent.ResourcesRoot,
+		installedLocalDataRoot: parentPaths.installedLocalDataRoot,
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureRuntimeDirs(parent, parentPaths); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range runtimeCommandEnv(parentPaths, parent) {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("invalid child environment entry %q", entry)
+		}
+		t.Setenv(name, value)
+	}
+	child, childPaths, err := newRuntimeConfigWithOptions(RuntimeConfigOptions{RepoRoot: f.repo}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, pair := range map[string][2]string{
+		"runtime root": {childPaths.RuntimeRoot, f.data},
+		"cache":        {childPaths.CacheDir, filepath.Join(f.data, "Cache")},
+		"uv cache":     {childPaths.UVCacheDir, filepath.Join(f.data, "Cache", "uv")},
+		"pip cache":    {childPaths.PipCacheDir, filepath.Join(f.data, "Cache", "pip")},
+		"logs":         {childPaths.LogsDir, filepath.Join(f.data, "Logs")},
+		"temporary":    {childPaths.TempDir, filepath.Join(f.data, "tmp")},
+		"inbox":        {child.FileWatcher.WatchHostDir, filepath.Join(f.data, "Inbox")},
+	} {
+		if pair[0] != pair[1] {
+			t.Errorf("child %s = %q, want %q", name, pair[0], pair[1])
+		}
+	}
+	t.Run("explicit local root keeps its independent layout", func(t *testing.T) {
+		explicit := t.TempDir()
+		_, paths, err := newRuntimeConfigWithOptions(RuntimeConfigOptions{RepoRoot: f.repo, RuntimeRoot: explicit}, true)
+		if err != nil || paths.RuntimeRoot != explicit || paths.TempDir != "" {
+			t.Fatalf("explicit Local root = %q, temporary directory = %q, err = %v", paths.RuntimeRoot, paths.TempDir, err)
+		}
+	})
+	t.Run("changed registration rejects the child startup", func(t *testing.T) {
+		otherData := filepath.Join(t.TempDir(), "Data")
+		if err := os.Mkdir(otherData, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(otherData, teststorage.OwnerMarker), []byte(teststorage.SID(t)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.registry.DeleteValue(teststorage.InstallKey, "InstallLocation")
+		f.registry.SetString(teststorage.DataKey, "DataRoot", otherData)
+		if _, _, err := newRuntimeConfigWithOptions(RuntimeConfigOptions{RepoRoot: f.repo}, true); err == nil || !strings.Contains(err.Error(), "registered Local data location changed") {
+			t.Fatalf("child did not reject changed Local registration: %v", err)
+		}
+	})
 }
 
 func TestInstalledStoragePythonCacheFallbackUsesResolvedFields(t *testing.T) {

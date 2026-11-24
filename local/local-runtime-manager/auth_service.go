@@ -294,6 +294,7 @@ func pythonDependencyCacheEnv(paths RuntimePaths) []string {
 }
 
 func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
+	paths.authCredentialDatabaseURL = firstNonEmpty(cfg.AuthService.DatabaseURL, paths.authCredentialDatabaseURL)
 	cloudKey, err := cloudCredentialKeyForPaths(paths)
 	if err != nil {
 		return nil, err

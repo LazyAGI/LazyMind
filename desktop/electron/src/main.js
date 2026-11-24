@@ -381,22 +381,49 @@ function loadEditablePptDependencyConfig() {
 
 const editablePptDependencyConfig = loadEditablePptDependencyConfig();
 
-if (isWindows && !isExternalRuntimeDev && !fs.existsSync(desktopCredentialIdentityPath)) {
-  const args = ["internal", "preflight-identity", "--profile", "desktop", "--repo-root", repoRoot, "--resources-root", runtimeResourcesRoot];
+function readWindowsDesktopCredentialIdentity() {
+  const raw = fs.readFileSync(desktopCredentialIdentityPath, "utf8");
+  let identity;
+  try {
+    identity = JSON.parse(raw);
+  } catch {
+    throw new Error("Invalid Desktop credential identity");
+  }
+  const secret = typeof identity?.deviceSecret === "string" ? identity.deviceSecret.replace(/[\r\n]/g, "") : "";
+  if (identity?.version !== 1 || typeof identity.deviceId !== "string" || !identity.deviceId.trim() ||
+      !/^[A-Za-z0-9_-]{43}=?$/.test(secret) || Buffer.from(secret, "base64url").length !== 32) {
+    throw new Error("Invalid Desktop credential identity");
+  }
+  return identity;
+}
+
+function loadWindowsDesktopCredentialIdentity() {
+  try {
+    return readWindowsDesktopCredentialIdentity();
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw new Error(`Failed to read Desktop credential identity: ${error.message}`);
+    }
+  }
+  const args = ["internal", "ensure-credential-identity", "--profile", "desktop", "--repo-root", repoRoot, "--resources-root", runtimeResourcesRoot];
   if (explicitRuntimeRoot) args.push("--runtime-root", explicitRuntimeRoot);
   try {
     execFileSync(sidecarPath, args, {
-      env: process.env,
+      env: { ...sidecarBaseEnv(), LAZYMIND_DESKTOP_DATA_ROOT: windowsDesktopPaths.runtimeRoot },
       windowsHide: true,
       stdio: ["ignore", "ignore", "pipe"],
       timeout: 15000,
     });
+    return readWindowsDesktopCredentialIdentity();
   } catch (error) {
-    throw new Error(`Desktop credential identity cannot be initialized: ${String(error.stderr || "repair the existing data before starting").trim()}`);
+    throw new Error(`Desktop credential identity cannot be initialized: ${String(error.stderr || error.message || "repair the existing data before starting").trim()}`);
   }
 }
 
 function loadOrCreateDesktopCredentialIdentity() {
+  if (isWindows && !isExternalRuntimeDev) {
+    return loadWindowsDesktopCredentialIdentity();
+  }
   fs.mkdirSync(path.dirname(desktopCredentialIdentityPath), { recursive: true });
   try {
     const parsed = JSON.parse(fs.readFileSync(desktopCredentialIdentityPath, "utf8"));
@@ -443,7 +470,7 @@ function sidecarEnv() {
   const localFolderAccess = loadAccessState(localFolderAccessStatePath);
   const obsidianConfig = loadObsidianConfig(obsidianConfigPath);
   const env = {
-    ...process.env,
+    ...sidecarBaseEnv(),
     LAZYMIND_RUNTIME_PROFILE: "desktop",
     LAZYMIND_RUNTIME_OWNER_TOKEN: ownerToken,
     LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: internalServiceToken,
@@ -477,6 +504,11 @@ function sidecarEnv() {
   env.LAZYMIND_EDITABLE_PPT_WINDOWS_X64_SHA256 ||= editablePptDependencyConfig.windowsX64.sha256 || "";
   env.LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_URL ||= editablePptDependencyConfig.darwinArm64.url || "";
   env.LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_SHA256 ||= editablePptDependencyConfig.darwinArm64.sha256 || "";
+  return env;
+}
+
+function sidecarBaseEnv() {
+  const env = { ...process.env };
   if (explicitRuntimeRoot) {
     env.LAZYMIND_RUNTIME_ROOT = explicitRuntimeRoot;
   } else {
@@ -991,8 +1023,12 @@ function restartAgentHost() {
 
 function runConnectorJSON(args, timeout, input, options = {}) {
   return new Promise((resolve, reject) => {
+    const env = sidecarEnv();
+    if (options.useRuntimeRoot && isWindows && !isExternalRuntimeDev) {
+      env.LAZYMIND_RUNTIME_ROOT = currentRuntimeRoot() || windowsDesktopPaths.runtimeRoot;
+    }
     const child = execFile(agentConnectorPath, args, {
-      env: sidecarEnv(),
+      env,
       timeout,
       windowsHide: isWindows,
       signal: options.signal,
@@ -2795,7 +2831,7 @@ ipcMain.handle("lazymind:assistantSessionSet", async (event, value) => {
   let result;
   try {
     result = await (sessionWrites = sessionWrites.catch(() => {}).then(() =>
-      runConnectorJSON(["internal", "session", "set"], agentConnectorActionTimeoutMs, value)));
+      runConnectorJSON(["internal", "session", "set"], agentConnectorActionTimeoutMs, value, { useRuntimeRoot: true })));
   } catch (error) {
     if (revision === notificationSessionRevision) {
       notificationSession.clear();
