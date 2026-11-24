@@ -2,9 +2,10 @@
   "name": "lazymind-ci-agent-tools",
   "private": true,
   "version": "1.0.0",
-  "engines": {"node": ">=22.19.0"},
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "dependencies": {
-    "@openai/codex": "0.151.0",
-    "@deepseek-ai/dsh": "0.2.1-rc.2"
+    "@openai/codex": "0.151.0"
   }
 }

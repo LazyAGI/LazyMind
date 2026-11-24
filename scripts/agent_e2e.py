@@ -39,9 +39,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = Path(__file__).resolve()
 AGENTS = ("codex", "workbuddy", "deepseek-harness")
 CASES = {
-    "ppt": ("ppt-workflow", "使用 PPT 工作流，根据本目录 materials.md 制作3页中文演示文稿。主题为检索增强生成测试，受众为软件测试工程师，科研风格、白底黑字，禁用AI背景图，不联网、不使用模板。必须交付可下载的PPTX，包含目标、方法和结论，不得把HTML预览当成PPTX交付。"),
+    "ppt": ("ppt-workflow", "使用 PPT 工作流，根据本目录 materials.md 制作3页中文演示文稿。主题为检索增强生成测试，受众为软件测试工程师，科研风格、白底黑字，禁用AI背景图，不联网、不使用模板。最终输出选择原生 PPTX（presentation_output_format=native_pptx），不选择 HTML 工作流分支。必须交付可下载的PPTX，包含目标、方法和结论，不得把HTML预览当成PPTX交付。"),
     "paper": ("paper-writing", "使用论文写作工作流，仅根据本目录 materials.md 写一篇约800字的中文短论文，主题为检索增强生成系统的功能测试方法。输入是研究材料，先生成论文大纲，经测试用户确认后生成正文并结束。无需选题、文献搜索、实验、数据分析或同行审稿。不得编造文献、实验或数据，明确本文为方法说明。必须保存大纲和正文。"),
-    "meme": ("image-workflow", "使用 image-workflow 工作流生成一张最简单的白色小猫图片，纯蓝色背景，512×512。主体清晰，不要求特定动作，不添加文字。只生成一张静态图片，不要视频、GIF或图片合集。不联网搜索。必须真实调用生图能力，并发布可下载的最终图片文件；不能仅发布路径或文字说明后判成功。"),
+    "meme": ("image-workflow", "使用 image-workflow 工作流生成一张最简单的白色小猫图片，512×512。主体清晰，不要求特定动作，不添加字幕或其他文字。验收时，生图服务自动附带的 AI 生成类水印不计为文字。只生成一张静态图片，不要视频、GIF或图片合集。不联网搜索。必须真实调用生图能力，并发布可下载的最终图片文件；不能仅发布路径或文字说明后判成功。"),
 }
 MATERIALS = """# 检索增强生成系统的功能测试方法
 
@@ -182,6 +182,18 @@ def validate_guarded_call(context, name, arguments):
         raise ConnectionGuardError("stale_workflow_configuration")
 
 
+def bind_ppt_start_values(context, name, arguments):
+    """Bind the fixed CI fixture's confirmed output choice in the actual MCP request."""
+    if context["mode"] != "business" or context["workflow_id"] != "ppt-workflow" or name != "workflow.start":
+        return arguments
+    values = arguments.get("clarification_values")
+    if values is None:
+        values = {}
+    if not isinstance(values, dict):
+        raise ConnectionGuardError("invalid_ppt_start_answers")
+    return {**arguments, "clarification_values": {**values, "presentation_output_format": "native_pptx"}}
+
+
 def clean_env(home, server, agent=""):
     allowed = {"HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMPDIR", "TEMP", "TMP", "LANG", "TERM",
                "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "SystemRoot", "COMSPEC", "PATHEXT",
@@ -296,6 +308,12 @@ def observe(args):
                             if json.loads(Path(args.connection_context).read_text(encoding='utf-8'))["generation"] != context["generation"]:
                                 raise ConnectionGuardError("connection_generation_changed")
                             validate_guarded_call(context, name, arguments)
+                            bound_arguments = bind_ppt_start_values(context, name, arguments)
+                            if bound_arguments is not arguments:
+                                arguments = bound_arguments
+                                request["params"]["arguments"] = arguments
+                                line = (json.dumps(request, ensure_ascii=False) + "\n").encode('utf-8')
+                                event["presentation_output_format"] = arguments["clarification_values"]["presentation_output_format"]
                         except (ConnectionGuardError, OSError, ValueError) as error:
                             code = str(error) if isinstance(error, ConnectionGuardError) else "connection_context_unavailable"
                             record({"event": "connection_rejected", "tool": name, "code": code, "time": time.time()})
@@ -1420,8 +1438,15 @@ def run_case(args, agent, case, commands):
         if case == "ppt":
             exporter = ROOT / "workflows/ppt-workflow/runtime/scripts/export_pptx/html_to_pptx.mjs"
             browsers = Path(os.environ.get('PLAYWRIGHT_BROWSERS_PATH', str(args.home.parent / "Library/Application Support/LazyMind/deps/editable-ppt/browsers")))
-            prompt += (f"\n宿主可使用已安装的确定性PPT导出程序：{exporter}。"
-                       "当服务端ppt_export_html不可用时，使用宿主终端执行该程序，不能标记完成或交付HTML冒充PPTX。"
+            prompt += ('\n用户已明确选择原生 PPTX。workflow.start 必须显式传入 '
+                       'clarification_values.presentation_output_format="native_pptx"，不要只写在 request_context 中；'
+                       '测试控制器也会将这个已确认的固定用例参数绑定到实际启动请求，保留其他启动答案。'
+                       '其余已确认的启动参数仍按 workflow.get 的契约一并传入。'
+                       '分析步骤必须保持相同的 presentation_output_format=native_pptx，不得改成 html。'
+                       '以下导出程序使用的 HTML 只是宿主内部中间文件，不是工作流最终输出格式；'
+                       '不要调用 HTML 分支的页面准备/发布流程，不发布 preview_html 或 preview_notes。'
+                       f"\n宿主可使用已安装的确定性PPT导出程序：{exporter}。"
+                       "使用宿主终端执行该程序导出原生 PPTX 文件，不能交付HTML冒充PPTX。"
                        "命令为node <上述程序> --deck-dir <本测试目录的deck子目录> --output presentation.pptx --force --no-embed-fonts；"
                        "HTML页面放deck/pages目录，文件命名为page_001.html、page_002.html、page_003.html。设置LAZYMIND_PPT_EXTERNAL_OFFLINE=1，禁止自动安装依赖、联网或远程资源。"
                        + ('托管 CI 已安装支持中文的 Noto Sans SC，HTML 优先使用该字体。' if os.environ.get('LAZYMIND_CI_RUNTIME_PROVENANCE') else '') +
@@ -1444,7 +1469,8 @@ def run_case(args, agent, case, commands):
                 prompt += ('\n本次 CI 的可信原生导出服务可调用已安装的 Chromium。请先在 deck/pages 写入上述三个 HTML 文件，'
                            '然后通过宿主终端执行以下辅助命令导出真实 PPTX：\n' + helper +
                            '\n本次导出应使用该服务，避免 Agent 沙箱无法启动 Chromium。服务仅接受本测试 deck 目录、离线资源、'
-                           '固定三页和禁用字体嵌入；不得伪造返回结果。成功后仍须发布实际 PPTX 并完成工作流步骤。')
+                           '固定三页和禁用字体嵌入；不得伪造返回结果。这些 HTML 仅为内部导出材料，工作流仍须选择 native_pptx。'
+                           '成功后通过 output.local_path、output.content_type=file 发布实际文件到 native_pptx，再完成工作流步骤。')
             if case == 'meme' and 'image' in supplied:
                 route_path = args.private_profile_root / directory.name / 'providers.json'
                 helper = host_platform.shell_command([sys.executable, str(SCRIPT), 'provider-image', '--providers-config', str(route_path),
@@ -1452,7 +1478,7 @@ def run_case(args, agent, case, commands):
                 prompt += ('\n本次 CI 使用已验证的独立生图服务。generate_image 步骤通过宿主终端执行以下可信辅助程序发起真实生图：\n'
                            + helper + '\n不要使用 Agent 默认生图工具或替代模型，不要读取配置内容或环境变量。'
                            '辅助程序从私有配置读取密钥并返回真实512方图路径和哈希；将同一个真实文件发布到 generated_base_image 和 generated_image_output。'
-                           '本用例为普通静态生图，不调用字幕工具，不添加文字；按工作流契约结束。')
+                           '本用例为普通静态生图，不调用字幕工具，不添加文字。验收时仅豁免生图服务自动附带的 AI 生成类水印。按工作流契约结束。')
         if args.probe:
             prompt = ("只调用lazymind MCP的workflow.list和workflow.get，不创建运行、不生成文件。"
                       f"确认可以读取workflow_id={workflow_id}，revision_id={workflow['revision_id']}。")

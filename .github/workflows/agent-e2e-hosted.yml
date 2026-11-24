@@ -1,27 +1,15 @@
 name: LazyMind Agent E2E (GitHub-hosted)
 
 on:
-  workflow_call:
-    inputs:
-      git_ref:
-        description: Immutable main snapshot selected by the scheduler
-        required: true
-        type: string
-      agent:
-        type: string
-        default: all
-      case:
-        type: string
-        default: all
-      platform:
-        type: string
-        default: all
-      probe_only:
-        type: boolean
-        default: false
-      approve_test_reviews:
-        type: boolean
-        default: false
+  pull_request:
+    paths:
+      - '.github/workflows/agent-e2e*.yml'
+      - 'scripts/agent_e2e*'
+      - 'scripts/tests/test_agent_e2e*'
+      - 'scripts/ci-agent-tools/**'
+  schedule:
+    # Tuesday and Thursday, 22:00 Asia/Shanghai (UTC+8).
+    - cron: '0 14 * * 2,4'
   workflow_dispatch:
     inputs:
       agent:
@@ -52,15 +40,67 @@ permissions:
   contents: read
 
 concurrency:
-  group: agent-e2e-hosted-${{ github.run_id }}
-  cancel-in-progress: false
+  group: agent-e2e-hosted-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'schedule' && 'schedule' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  snapshot:
+    if: ${{ github.event_name == 'schedule' && vars.LAZYMIND_AGENT_E2E_SCHEDULE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.snapshot.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/heads/main
+          fetch-depth: 1
+      - name: Create immutable CI tag for the main snapshot
+        id: snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          stamp="$(TZ=Asia/Shanghai date +%Y%m%d-%H%M)"
+          tag="ci-${stamp}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git tag "$tag" "$sha"
+          # GITHUB_TOKEN tag pushes do not start push-triggered workflows.
+          git push origin "refs/tags/$tag"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          printf 'Agent E2E snapshot: `%s` (`%s`)\n' "$tag" "$sha" >> "$GITHUB_STEP_SUMMARY"
+
+  unit-tests:
+    needs: snapshot
+    # A skipped snapshot is expected for pull requests and manual runs.
+    if: ${{ !cancelled() && (github.event_name != 'schedule' || needs.snapshot.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.snapshot.outputs.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install Pillow==12.0.0 PyYAML==6.0.3
+      - name: Test supervisor without accounts or model requests
+        run: python -m unittest discover -s scripts/tests -p 'test_agent_e2e*.py' -v
+
   e2e:
+    needs: [snapshot, unit-tests]
+    if: ${{ !cancelled() && needs.unit-tests.result == 'success' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     strategy:
       fail-fast: false
+      max-parallel: ${{ (inputs.platform || 'all') == 'all' && 2 || 1 }}
       matrix:
-        os: ${{ fromJSON(inputs.platform == 'all' && '["macos-15-intel","windows-2025"]' || format('["{0}"]', inputs.platform)) }}
+        # Nine 45-minute cases exceed the six-hour hosted job limit.
+        agent: ${{ fromJSON((inputs.agent || 'all') == 'all' && (inputs.case || 'all') == 'all' && !inputs.probe_only && '["codex","workbuddy","deepseek-harness"]' || format('["{0}"]', inputs.agent || 'all')) }}
+        os: ${{ fromJSON((inputs.platform || 'all') == 'all' && '["macos-15-intel","windows-2025"]' || format('["{0}"]', inputs.platform)) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 360
     env:
@@ -68,10 +108,11 @@ jobs:
       PYTHONIOENCODING: utf-8
       UV_CONSTRAINT: ${{ github.workspace }}/scripts/ci-agent-tools/python-constraints.txt
       NODE_OPTIONS: --max-old-space-size=4096
+      TEST_AGENT: ${{ matrix.agent }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.git_ref || github.sha }}
+          ref: ${{ needs.snapshot.outputs.sha || github.sha }}
           persist-credentials: false
           submodules: false
       - uses: actions/setup-python@v5
@@ -108,14 +149,15 @@ jobs:
           LAZYMIND_CI_IMAGE_BASE_URL: ${{ vars.LAZYMIND_CI_IMAGE_BASE_URL }}
           LAZYMIND_CI_IMAGE_MODEL: ${{ vars.LAZYMIND_CI_IMAGE_MODEL }}
           LAZYMIND_CI_IMAGE_API: ${{ vars.LAZYMIND_CI_IMAGE_API }}
-          TEST_CASE: ${{ inputs.probe_only && 'ppt' || inputs.case }}
+          TEST_CASE: ${{ inputs.probe_only && 'ppt' || inputs.case || 'all' }}
         run: python scripts/agent_e2e.py config-check --providers-config scripts/agent_e2e.providers.example.json --case "$TEST_CASE"
       - name: Start a fresh source-built LazyMind and authenticate normally
         run: python scripts/agent_e2e_hosted.py start
-      - name: Install all three genuine pinned Agent CLIs
-        run: python scripts/agent_e2e_hosted.py install-agents
+      - name: Install selected pinned Agent CLIs
+        shell: bash
+        run: python scripts/agent_e2e_hosted.py install-agents --agent "$TEST_AGENT"
       - name: Prepare PPT exporter and Chromium
-        if: ${{ !inputs.probe_only && (inputs.case == 'ppt' || inputs.case == 'all') }}
+        if: ${{ !inputs.probe_only && (inputs.case == 'ppt' || (inputs.case || 'all') == 'all') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -128,10 +170,9 @@ jobs:
       - name: Run sequential cases with independent results and isolated model routes
         shell: bash
         env:
-          TEST_AGENT: ${{ inputs.agent }}
-          TEST_CASE: ${{ inputs.case }}
-          PROBE_ONLY: ${{ inputs.probe_only }}
-          APPROVE_TEST_REVIEWS: ${{ inputs.approve_test_reviews }}
+          TEST_CASE: ${{ inputs.case || 'all' }}
+          PROBE_ONLY: ${{ inputs.probe_only || false }}
+          APPROVE_TEST_REVIEWS: ${{ github.event_name == 'schedule' || inputs.approve_test_reviews }}
           LAZYMIND_CI_LLM_API_KEY: ${{ secrets.LAZYMIND_CI_LLM_API_KEY }}
           LAZYMIND_CI_IMAGE_API_KEY: ${{ secrets.LAZYMIND_CI_IMAGE_API_KEY }}
           LAZYMIND_CI_LLM_BASE_URL: ${{ vars.LAZYMIND_CI_LLM_BASE_URL }}
@@ -142,7 +183,7 @@ jobs:
           LAZYMIND_CI_IMAGE_API: ${{ vars.LAZYMIND_CI_IMAGE_API }}
         run: |
           set -euo pipefail
-          options=(run --agent "$TEST_AGENT" --case "$TEST_CASE" --timeout 1800
+          options=(run --agent "$TEST_AGENT" --case "$TEST_CASE" --timeout 2700
             --home "$LAZYMIND_HOME" --server "$LAZYMIND_SERVER_URL"
             --output "$HOSTED_ROOT/results" --private-profile-root "$HOSTED_ROOT/profiles"
             --providers-config scripts/agent_e2e.providers.example.json --managed-models)
@@ -169,7 +210,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: hosted-agent-e2e-${{ matrix.os }}-${{ github.run_id }}
+          name: hosted-agent-e2e-${{ matrix.os }}-${{ matrix.agent != (inputs.agent || 'all') && format('{0}-', matrix.agent) || '' }}${{ github.run_id }}-attempt-${{ github.run_attempt }}
           if-no-files-found: warn
           retention-days: 7
           path: |
