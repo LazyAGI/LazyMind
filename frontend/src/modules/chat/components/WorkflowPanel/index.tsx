@@ -23,7 +23,6 @@ import {
   FullscreenOutlined,
   FullscreenExitOutlined,
   RightOutlined,
-  ReloadOutlined,
 } from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
 import {
@@ -2174,6 +2173,11 @@ export function WorkflowPanel({
   const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx], controlAdapter?.continuationStep?.());
   const showContinue = Boolean(continueAction);
   const isPpt = session.workflow_id === 'ppt-workflow';
+  const selectedStage = tabs[visibleActiveTabIdx];
+  const selectedStepId = selectedStage?.step_id ?? selectedStage?.id;
+  const showPptRerun = isPpt && Boolean(onSendMessage || controlAdapter) && selectedStepId
+    && !stopping && (displayStatus === 'stopped' || displayStatus === 'completed' || displayStatus === 'failed');
+  const selectedRetryKind = selectedStepId && pptStageRetryKind(session, selectedStepId);
   const showStepRollback = !isPpt &&
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0);
@@ -2360,8 +2364,9 @@ export function WorkflowPanel({
           await controlAdapter.execute({ kind, stepId });
           return;
         }
-        const message = `${t('chat.workflowRollbackPrefix')}${stepLabel(stepId)}`;
-        if (isPpt && latest.controller_host === 'external-agent') {
+        const message = isPpt ? t('chat.workflowRerunFromStage', { stage: stepLabel(stepId) })
+          : `${t('chat.workflowRollbackPrefix')}${stepLabel(stepId)}`;
+        if (isPpt && (latest.controller_host === 'external-agent' || latest.projection?.display?.status === 'paused')) {
           await onSendMessage?.(message);
           return;
         }
@@ -2559,9 +2564,6 @@ export function WorkflowPanel({
           {tabs.map((tab, idx) => {
             const stepStatus = workflowTaskDisplayStatus(workflowTabStatus(tab, session), display?.status);
             const stepStatusLabel = stepStatus ? t(stepStatus === 'waiting_input' ? 'taskCenter.statusWaitingInput' : `taskCenter.status${stepStatus.charAt(0).toUpperCase()}${stepStatus.slice(1)}`, { defaultValue: stepStatus }) : undefined;
-            const stepId = tab.step_id ?? tab.id;
-            const retryKind = isPpt && (onSendMessage || controlAdapter)
-              ? pptStageRetryKind(session, stepId) : undefined;
             const isCurrentUnselectedTab = idx === runtimeTabIdx && idx !== visibleActiveTabIdx;
             return (
               <React.Fragment key={tab.id}>
@@ -2599,14 +2601,6 @@ export function WorkflowPanel({
                     />
                   )}
                 </button>
-                {retryKind && (
-                  <button type='button' className='workflow-panel__stage-retry' disabled={buttonsDisabled}
-                    aria-label={t('chat.workflowRetryStage', { stage: tab.label })}
-                    title={t('chat.workflowRetryStage', { stage: tab.label })}
-                    onClick={() => handleStageRetry(stepId, retryKind)}>
-                    <ReloadOutlined />
-                  </button>
-                )}
               </React.Fragment>
             );
           })}
@@ -2701,7 +2695,7 @@ export function WorkflowPanel({
 
       {/* Footer */}
       {!collapsed && showActions && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0
-        || rollbackSteps.length > 0 || sessionBusy || (showContinue && !approvalStepId) || showSessionRetry || displayStatus === 'stopped') && (
+        || showPptRerun || rollbackSteps.length > 0 || sessionBusy || (showContinue && !approvalStepId) || showSessionRetry || displayStatus === 'stopped') && (
         <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
           {!previewTarget && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0) ? (
             <DocumentActions documentFooter={documentFooter} actionPending={actionPending} runFooterAction={runFooterAction} />
@@ -2744,6 +2738,14 @@ export function WorkflowPanel({
               }
             >
               {actionPending ? t('chat.workflowSavingBeforeAction') : t('chat.workflowRetry')}
+            </button>
+          )}
+          {showPptRerun && (
+            <button type='button' className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
+              disabled={buttonsDisabled || !selectedRetryKind}
+              title={t('chat.workflowRerunFromStage', { stage: selectedStage.label })}
+              onClick={() => selectedRetryKind && handleStageRetry(selectedStepId, selectedRetryKind)}>
+              {t('chat.workflowRerun')}
             </button>
           )}
           {showContinue && !approvalStepId && (

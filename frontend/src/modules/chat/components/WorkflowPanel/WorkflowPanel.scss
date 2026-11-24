@@ -1110,20 +1110,6 @@
     background: #fff;
   }
 
-  &__stage-retry {
-    flex: 0 0 auto;
-    align-self: center;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: #365cff;
-    padding: 4px;
-    cursor: pointer;
-
-    &:hover { background: #edf2ff; }
-    &:disabled { color: #96a2b2; cursor: default; }
-  }
-
   &__rollback {
     display: flex;
     flex: 1 1 100%;
