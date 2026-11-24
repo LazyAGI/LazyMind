@@ -501,8 +501,15 @@ steps:
       when editing a card and update it when replacing foreground materials.
       Report a required missing image and recover collection before generating.
       For a new deck or unfinished planning in LazyMind, call ppt_plan_page_prompts
-      with the saved output_format and the shared global_style. It checkpoints each prompt
-      and speaker note and resumes from the first missing page after a failure.
+      with ONLY the saved output_format and the shared global_style. Do not pass
+      pages, page_prompts, page_components, total_minutes, total_seconds or
+      speaker_notes_source_schema_version. The tool reads the approved outline,
+      timing and assets itself, authors and publishes the separate speaker notes,
+      checkpoints each prompt, and resumes from the first missing page after a failure.
+      Retry with the same two arguments; never invent extra arguments to repair a
+      model response. Empty/invalid JSON is a model-output failure, not a missing
+      tool parameter. After the tool's bounded repair fails, report the cause and
+      wait for the user's retry or model change instead of repeatedly calling it.
       If the model provider stops returning content and the call times out, report
       the provider response timeout and suggest retrying later or switching provider.
       If finish=length, report that the provider truncated the output at its limit.
@@ -513,8 +520,9 @@ steps:
       prompts. Use the allocated duration and cumulative range; explain the page's
       purpose, key points, intuition, evidence and transition in natural language.
       Multiple useful sentences (often 120+ Chinese characters) are preferable to
-      one-line notes, but do not pad or recite long formula source. Publish
-      speaker_notes_source as a UTF-8 JSON file with schema_version=1 and ordered
+      one-line notes, but do not pad or recite long formula source. In external
+      execution without ppt_plan_page_prompts, publish speaker_notes_source as a
+      UTF-8 JSON file with schema_version=1 and ordered
       pages=[{page: 1, text: '...'}, ...]. Generation attaches these scripts verbatim.
       For insert/delete/reorder, remap the saved scripts to the final page order,
       preserve unedited script bodies and keep the total speaking budget.
