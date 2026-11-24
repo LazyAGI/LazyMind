@@ -1,5 +1,5 @@
 import ExternalLink from '@/components/ExternalLink';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { cloneElement, type ReactElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Modal } from 'antd';
 import { ExclamationCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { DocumentProvider, DocumentNumberingResult, DocumentConvertResult } from '@/api/generated/core-client';
@@ -474,8 +474,12 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           return { document: saved.value as WriterDocument, sourceRevision: saved.revision, draftVersion: saved.draft };
         }} /> : <div role='alert'>{String(i18n.t('chat.writerIR.saveFailed'))}</div>}
     </div>
-    {previewImage?.key === editingKey && <Image.PreviewGroup items={[{ src: previewImage.src, alt: previewImage.alt }]}
-      preview={{ visible: true, onVisibleChange: (visible: boolean) => { if (!visible) setPreviewImage(undefined); } }} />}
+    {previewImage?.key === editingKey && <Image.PreviewGroup items={[previewImage.src]}
+      preview={{
+        visible: true,
+        imageRender: (image: ReactElement<{ alt?: string }>) => cloneElement(image, { alt: previewImage.alt }),
+        onVisibleChange: (visible: boolean) => { if (!visible) setPreviewImage(undefined); },
+      }} />}
     {imageDownloads.dialog}
     {error && <div className='workflow-document-notice' role='alert'>
       <span className='workflow-document-notice__icon' aria-hidden='true'><ExclamationCircleOutlined /></span>
