@@ -254,20 +254,22 @@ def setup_codex_windows_sandbox(p, command):
     return home
 
 
-def install_agents(p):
-    """Install pinned vendor distributions, without a desktop login dependency."""
-    p.output.mkdir(parents=True, exist_ok=True)
-    tools = p.root / 'agent-tools'
-    tools.mkdir(exist_ok=True)
+def install_npm_agent(p, agent, node):
+    tools = p.root / 'agent-tools' / agent
+    tools.mkdir(parents=True, exist_ok=True)
     for name in ('package.json', 'package-lock.json'):
-        shutil.copy2(ROOT / 'scripts/ci-agent-tools' / name, tools / name)
+        shutil.copy2(ROOT / 'scripts/ci-agent-tools' / agent / name, tools / name)
     npm = shutil.which('npm.cmd' if platform.IS_WINDOWS else 'npm')
-    node = shutil.which('node')
+    if not npm:
+        raise RuntimeError('npm is required to install ' + agent)
     npm_command = [node, str(Path(npm).parent / 'node_modules/npm/bin/npm-cli.js')] if platform.IS_WINDOWS else [npm]
     run([*npm_command, 'ci', '--no-audit', '--no-fund'], cwd=tools, timeout=900)
-    modules = tools / 'node_modules'
-    commands = {'codex': [node, str(modules / '@openai/codex/bin/codex.js')],
-                'deepseek-harness': [node, str(modules / '@deepseek-ai/dsh/lib/bin.js')]}
+    entrypoints = {'codex': '@openai/codex/bin/codex.js',
+                   'deepseek-harness': '@deepseek-ai/dsh/lib/bin.js'}
+    return [node, str(tools / 'node_modules' / entrypoints[agent])]
+
+
+def install_workbuddy(p, node):
     # These URLs and hashes are the vendor's public /v2/update metadata.
     # Keep a fixed version; do not silently follow a new latest installer.
     distributions = {
@@ -303,24 +305,44 @@ def install_agents(p):
         # Give public layout clues, without dumping app files or user data.
         print('WorkBuddy CLI candidates: ' + json.dumps([str(x.relative_to(buddy)) for x in buddy.rglob('*codebuddy*')][:20]))
         raise RuntimeError('Expected one genuine WorkBuddy bundled CLI')
-    commands['workbuddy'] = [node, str(launchers[0])]
     archive.unlink()
-    env = dict(os.environ)
-    env.update(DSH_HOME=str(p.root / 'dsh'), WORKBUDDY_CONFIG_DIR=str(p.root / 'workbuddy-config'))
-    subprocess.run(commands['deepseek-harness'] + ['--profile', 'lazymind-ci', '--from-default-profile', 'headless', '--dump-config'],
-                   env=env, timeout=120, check=True, stdout=subprocess.DEVNULL)
-    e2e.private_config(p.root / 'agent-commands.json', json.dumps(commands))
+    return [node, str(launchers[0])], digest
+
+
+def install_agents(p, agent='all'):
+    """Install pinned vendor distributions for the selected Agent or full suite."""
+    p.output.mkdir(parents=True, exist_ok=True)
+    node = shutil.which('node')
+    if not node:
+        raise RuntimeError('Node.js is required to install Agent CLIs')
+
+    commands = {}
+    workbuddy_digest = None
+    exported_paths = {'HOSTED_ROOT': p.root, 'LAZYMIND_CI_AGENT_COMMANDS': p.root / 'agent-commands.json'}
+    for name in e2e.AGENTS if agent == 'all' else (agent,):
+        if name == 'workbuddy':
+            commands[name], workbuddy_digest = install_workbuddy(p, node)
+            exported_paths['WORKBUDDY_CONFIG_DIR'] = p.root / 'workbuddy-config'
+        else:
+            commands[name] = install_npm_agent(p, name, node)
+        if name == 'deepseek-harness':
+            dsh_home = p.root / 'dsh'
+            subprocess.run(commands[name] + ['--profile', 'lazymind-ci', '--from-default-profile', 'headless', '--dump-config'],
+                           env={**os.environ, 'DSH_HOME': str(dsh_home)}, timeout=120, check=True, stdout=subprocess.DEVNULL)
+            exported_paths['DSH_HOME'] = dsh_home
+
     versions = {name: e2e.version(command) for name, command in commands.items()}
-    sandbox_home = setup_codex_windows_sandbox(p, commands['codex']) if platform.IS_WINDOWS else None
-    e2e.write_json(p.output / 'installed-agents.json', {'versions': versions, 'workbuddy_distribution_sha256': digest,
-                   'codex_windows_sandbox': 'elevated setup passed' if sandbox_home else 'not applicable'})
     if any(value == 'unavailable' for value in versions.values()):
         raise RuntimeError('An installed Agent could not report its version')
+    sandbox_home = None
+    if platform.IS_WINDOWS and 'codex' in commands:
+        sandbox_home = setup_codex_windows_sandbox(p, commands['codex'])
+        exported_paths['LAZYMIND_CI_CODEX_HOME'] = sandbox_home
+    e2e.private_config(exported_paths['LAZYMIND_CI_AGENT_COMMANDS'], json.dumps(commands))
+    e2e.write_json(p.output / 'installed-agents.json', {'versions': versions, 'workbuddy_distribution_sha256': workbuddy_digest,
+                   'codex_windows_sandbox': 'elevated setup passed' if sandbox_home else 'not applicable'})
     with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
-        if sandbox_home:
-            stream.write(f'LAZYMIND_CI_CODEX_HOME={sandbox_home}\n')
-        for key, value in {'HOSTED_ROOT': p.root, 'LAZYMIND_CI_AGENT_COMMANDS': p.root / 'agent-commands.json',
-                           'DSH_HOME': p.root / 'dsh', 'WORKBUDDY_CONFIG_DIR': p.root / 'workbuddy-config'}.items():
+        for key, value in exported_paths.items():
             stream.write(f'{key}={value}\n')
 
 
@@ -329,6 +351,7 @@ def main():
         raise SystemExit('This bootstrap runs only on a disposable GitHub Actions VM.')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('start', 'stop', 'diagnose', 'install-agents'))
+    parser.add_argument('--agent', choices=('all', *e2e.AGENTS), default='all', help='Agent CLI to install')
     parser.add_argument('--root', type=Path, default=Path(os.environ['RUNNER_TEMP']) / 'lazymind-hosted')
     args = parser.parse_args()
     root = args.root.resolve()
@@ -337,7 +360,11 @@ def main():
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding='utf-8')
-    {'start': start, 'stop': stop, 'diagnose': diagnose, 'install-agents': install_agents}[args.action](paths(root))
+    p = paths(root)
+    if args.action == 'install-agents':
+        install_agents(p, args.agent)
+    else:
+        {'start': start, 'stop': stop, 'diagnose': diagnose}[args.action](p)
 
 
 if __name__ == '__main__':

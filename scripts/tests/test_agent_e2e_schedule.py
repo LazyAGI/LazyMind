@@ -13,8 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class ScheduleSnapshotTests(unittest.TestCase):
     def test_snapshot_tags_same_main_commit_without_moving_main(self):
-        workflow = yaml.safe_load((ROOT / '.github/workflows/agent-e2e-scheduled.yml').read_text())
-        command = workflow['jobs']['snapshot']['steps'][1]['run']
+        workflow = yaml.safe_load((ROOT / '.github/workflows/agent-e2e-hosted.yml').read_text())
+        command = next(step['run'] for step in workflow['jobs']['snapshot']['steps']
+                       if step.get('id') == 'snapshot')
         bash = shutil.which('bash')
         if os.name == 'nt':
             # PATH may resolve Windows' WSL launcher instead of Git Bash.
