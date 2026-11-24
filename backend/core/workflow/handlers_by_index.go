@@ -384,6 +384,10 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if slotID == "preview_html" {
+		revisions = visiblePPTRevisions(revisions)
+	}
+
 	// Build task_id lookup once for all revisions (avoids N+1 queries).
 	type stepKey struct {
 		stepID  string
@@ -410,7 +414,7 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 			"created_at":    rev.CreatedAt,
 			"selected":      rev.Selected,
 		}
-		if slotID == "draft_document" || slotID == "flat_draft_document" {
+		if slotID == "preview_html" || slotID == "draft_document" || slotID == "flat_draft_document" {
 			item["version"] = formalVersion
 		}
 		var artifactValue json.RawMessage

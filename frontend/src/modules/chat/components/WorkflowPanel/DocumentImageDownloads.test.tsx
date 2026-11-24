@@ -14,7 +14,7 @@ const source: DocumentImageDownloadSource = { artifactId: 'article', revision: 2
 function Harness({ scope = 'article', current = source }: { scope?: string; current?: DocumentImageDownloadSource }) {
   const actions = useDocumentImageDownloads({ scopeKey: scope, readSource: () => current, resolveImage: resolve });
   return <ConfigProvider theme={{ token: { motion: false } }}>{actions.menu.map(item => <button key={item.key} disabled={item.disabled} aria-busy={actions.busy} onClick={item.onClick}>{item.label}</button>)}
-    <div onClick={actions.onImageClick}><img alt='Article illustration' src='https://example.org/photo.png' /></div>
+    <button onClick={actions.showGallery}>Open image gallery</button>
     {actions.dialog}</ConfigProvider>;
 }
 function state(overrides: Partial<DocumentImageExportState> = {}): DocumentImageExportState {
@@ -73,7 +73,7 @@ describe('article image download interactions', () => {
     api.createDocumentImageExport.mockResolvedValue(response(state({ single: true, filename: '001-Photo.png' })));
     render(<Harness />);
     expect(screen.queryByRole('button', { name: 'View article images' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByAltText('Article illustration'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open image gallery' }));
     expect(await screen.findByAltText('Photo')).toHaveAttribute('src', 'https://example.org/photo.png');
     fireEvent.click(screen.getByRole('button', { name: 'Download original' }));
     await waitFor(() => expect(api.createDocumentImageExport).toHaveBeenCalledWith('article', expect.objectContaining({ image_reference: 'https://example.org/photo.png' }), expect.anything()));

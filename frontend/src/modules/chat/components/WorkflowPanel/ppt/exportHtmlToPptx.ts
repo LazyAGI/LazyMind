@@ -524,6 +524,7 @@ async function waitForSlideReady(
 }
 
 function captureOptions(pixelRatio: number, wrapper: HTMLElement) {
+  const background = wrapper.ownerDocument.defaultView?.getComputedStyle(wrapper).backgroundColor;
   return {
     width: wrapper.offsetWidth || SLIDE_W_PX,
     height: wrapper.offsetHeight || SLIDE_H_PX,
@@ -532,7 +533,7 @@ function captureOptions(pixelRatio: number, wrapper: HTMLElement) {
     // Transparent or suppressed unsupported regions should reveal a neutral
     // canvas, not the old dark-navy fallback that looked like a render failure
     // on light slides.
-    backgroundColor: '#ffffff',
+    backgroundColor: background && background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent' ? background : '#ffffff',
     pixelRatio,
     imagePlaceholder: TRANSPARENT_PIXEL,
     // Broken imgs used to reject the whole capture as a DOM Event → "[object Event]".
@@ -581,15 +582,17 @@ async function toPngSafe(
  */
 export async function captureHtmlSlidePng(
   html: string,
-  options?: { pixelRatio?: number; waitMs?: number; timeoutMs?: number },
+  options?: { pixelRatio?: number; waitMs?: number; timeoutMs?: number; staticOnly?: boolean },
 ): Promise<string> {
   const pixelRatio = options?.pixelRatio ?? 2;
   // Inline images for rasterization; ordinary slide previews keep URLs.
   // Rewrite echarts src before raster prep so chart_* containers can paint.
   const { htmlWithInlinedEcharts } = await import('./echartsInline');
-  const withCharts = await htmlWithInlinedEcharts(await embedSlideAssetsForExport(html));
+  const withCharts = await htmlWithInlinedEcharts(await embedSlideAssetsForExport(html,
+    options?.staticOnly ? { signal: AbortSignal.timeout(12000) } : undefined));
   const prepared = htmlForRasterCapture(withCharts);
   const needsJs = /data-lazymind-echarts=|data-lazymind-theme=|echarts\.init|id=["']chart_/i.test(prepared);
+  if (needsJs && options?.staticOnly) throw new Error('Slide requires an interactive renderer');
   const { iframe, doc, wrapper } = await loadHtmlIframe(prepared, { allowScripts: needsJs });
   try {
     await waitForSlideReady(doc, {

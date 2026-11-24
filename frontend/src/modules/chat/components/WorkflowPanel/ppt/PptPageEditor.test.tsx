@@ -1,7 +1,7 @@
 import { useContext } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
+import { useWorkflowStore, type WorkflowSession, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { PptPageEditContext, PptPageEditor } from './PptPageEditor';
 
 const { savePptPage, upload } = vi.hoisted(() => ({savePptPage: vi.fn(), upload: vi.fn()}));
@@ -56,4 +56,39 @@ it.each([false, true])('uses the committed baseline on the next save (refresh re
   });
   expect(upload).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('keeps the saved page and notes on remount while the session refresh is pending', async () => {
+  const original = { ...slide, revision: 2, revision_count: 1, version_number: 1 };
+  const other = { ...original, list_index: 0 };
+  const session: WorkflowSession = { session_id: 'ppt', conversation_id: 'chat', workflow_id: 'ppt-workflow',
+    workflow_mode: 'auto', current_step_id: 'generate_ppt', status: 'completed', created_at: '', updated_at: '',
+    state_version: 10, slots: [original, notes, other] };
+  const { setSession } = useWorkflowStore.getState();
+  setSession('chat', session);
+  function CurrentPage() {
+    const current = useWorkflowStore(s => s.sessionByConversation.chat)!;
+    return <PptPageEditor sessionId="ppt" slide={current.slots![0]} notes={current.slots![1]}
+      stateVersion={current.state_version} flushRef={{current: null}}><Fields /></PptPageEditor>;
+  }
+  try {
+    savePptPage.mockResolvedValue({ data: {code: 0, data: {revision: 3, notes_revision: 2, state_version: 12}} });
+    upload.mockResolvedValue('files/updated.md');
+    const view = render(<CurrentPage />);
+    fireEvent.click(screen.getByText('Slide 2'));
+    fireEvent.click(screen.getByText('Notes'));
+    fireEvent.click(screen.getByText('保存本页'));
+    await screen.findByText('Slide 3');
+    view.unmount();
+    setSession('chat', session); // The read started before the edit.
+    render(<CurrentPage />);
+    expect(screen.getByText('Slide 3')).toBeInTheDocument();
+    const cached = useWorkflowStore.getState().sessionByConversation.chat!;
+    expect(cached.slots![0]).toMatchObject({ revision: 3, version_number: 2, artifact_value: {text: 'edited 2'} });
+    expect(cached.slots![1]).toMatchObject({ revision: 2, artifact_value: {path: 'files/updated.md'} });
+    expect(cached.slots![2]).toBe(other);
+  } finally {
+    cleanup();
+    setSession('chat', null);
+  }
 });

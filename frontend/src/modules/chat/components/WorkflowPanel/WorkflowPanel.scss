@@ -1661,7 +1661,6 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    z-index: 1050;
     width: 640px;
     max-width: 94vw;
     max-height: 90vh;
@@ -5143,4 +5142,46 @@
   h1 { font-size: 24px; }
   h2 { font-size: 20px; }
   h3 { font-size: 17px; }
+}
+
+.workflow-slot__version-popover--visual {
+  width: min(960px, 94vw);
+  .workflow-slot__version-popover-body { height: min(540px, 70vh); max-height: none; }
+  .workflow-slot__version-list { width: clamp(112px, 24%, 210px); min-width: 0; }
+  .workflow-slot__version-compare { min-width: 0; }
+}
+.history-preview {
+  min-width: 0;
+  &--thumb { min-height: 40px; font-size: 11px; pointer-events: none; }
+  &--detail { flex: 1; overflow: auto; padding: 6px; }
+  &--slide.history-preview--thumb { aspect-ratio: 16 / 9; display: grid; align-items: center; }
+  &__slide { display: block; width: 100%; height: auto; }
+  &__placeholder { display: block; padding: 10px; color: #667085; }
+  &__excerpt { display: grid; gap: 3px; padding: 6px; background: white; color: #344054; }
+  &__excerpt > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &__actions { display: flex; gap: 8px; margin: 10px 0; }
+  &__actions button { color: #245bc2; background: transparent; border: 0; cursor: pointer; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+// Give the opened comparison the full reading area.
+.workflow-slot__version-compare:has(> .workflow-slot__history-comparison[open]) > .history-preview { display: none; }
+.workflow-slot__history-comparison {
+  min-height: 0;
+  overflow: auto;
+  summary { cursor: pointer; }
+}
+.writer-history-diff {
+  margin-top: 10px;
+  container-type: inline-size;
+  > [role=status] { display: block; margin-bottom: 8px; color: #475569; }
+  &__pages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  section { min-width: 0; }
+  header { font-weight: 600; padding: 6px; background: #f1f5f9; }
+  [data-history-added] { background-color: #e6f7ed; border-inline-start: 3px solid #25834a; }
+  [data-history-removed] { background-color: #fff0ef; border-inline-start: 3px dashed #bd4942; }
+  .history-preview { overflow-wrap: anywhere; }
+}
+@container (max-width: 480px) {
+  .writer-history-diff__pages { grid-template-columns: minmax(0, 1fr); }
 }

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type MutableRefObject } from 'react';
-import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
+import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
 import { SlotEditingContext } from '../slotEditingContext';
@@ -93,7 +93,11 @@ export function PptPageEditor({ sessionId, slide, notes, stateVersion, flushRef,
         };
         baseline.current = {slide: committed(base.slide, changes.slide),
           notes: base.notes && committed(base.notes, changes.notes)};
-        savedVersion.current = result.state_version ?? (stateVersion ?? 0) + 1;
+        const committedVersion: number = result.state_version ?? (stateVersion ?? 0) + 1;
+        savedVersion.current = committedVersion;
+        const savedSlots = [baseline.current.slide, baseline.current.notes]
+          .filter((slot): slot is SlotRevision => !!slot && slot !== base.slide && slot !== base.notes);
+        useWorkflowStore.getState().applySavedPptPage(sessionId, committedVersion, savedSlots);
         draft.current = {};
         setDirty(false);
         // A refresh can fail after the server has committed this checkpoint.

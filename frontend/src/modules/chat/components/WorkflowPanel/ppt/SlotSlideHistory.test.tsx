@@ -1,8 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
+import * as downloads from '@/modules/chat/utils/workflowDownload';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
-import { SlotRenderer } from '../SlotComponents';
+import { SlotRenderer, SlotVersionPopover } from '../SlotComponents';
+import * as rasterCache from './slideRasterCache';
 
 const api = vi.hoisted(() => ({ getSlotItemVersions: vi.fn(), rollbackSlotItem: vi.fn() }));
 vi.mock('@/modules/chat/utils/request', async original => ({
@@ -81,4 +83,52 @@ it('preserves the current slide when history fails and allows retry', async () =
   expect(api.rollbackSlotItem).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /版本历史/ }));
   expect(await screen.findByRole('dialog')).toBeInTheDocument();
+});
+
+it('isolates a broken snapshot and downloads the selected source before switching back to the rendered slide', async () => {
+  const download = vi.spyOn(downloads, 'downloadWorkflowFile').mockResolvedValue(undefined);
+  const source = 'invalid slide data';
+  api.getSlotItemVersions.mockResolvedValueOnce({ data: { data: { versions: [
+    { revision: 1, selected: false, change_source: 'ai', content_snapshot: { text: source } },
+    { revision: 2, selected: true, change_source: 'ai', content_snapshot: slotFor(0, 2, true).artifact_value },
+  ] } } });
+  try {
+    render(<SlotRenderer {...props} slot={slotFor(0, 2, true)} />);
+    fireEvent.click(screen.getByRole('button', { name: /版本历史/ }));
+    const dialog = await screen.findByRole('dialog');
+    const detail = () => within(dialog.querySelector<HTMLElement>('.history-preview--detail')!);
+    fireEvent.click(await within(dialog).findByRole('option', { name: /v1/ }));
+    fireEvent.click(await detail().findByRole('button', { name: '查看源码' }));
+    expect(detail().getByText(source)).toBeVisible();
+    fireEvent.click(detail().getByRole('button', { name: '下载源码' }));
+    expect(download).toHaveBeenCalledWith({ filename: 'v1.html', blob: expect.any(Blob) });
+
+    fireEvent.click(within(dialog).getByRole('option', { name: /v2/ }));
+    expect(await detail().findByRole('img', { name: 'v2' })).toHaveTextContent('Page 1 version 2');
+    expect(detail().queryByText(source)).not.toBeInTheDocument();
+  } finally {
+    download.mockRestore();
+  }
+});
+
+it('shows each visible HTML thumbnail and the selected detail while raster capture is queued', async () => {
+  const capture = vi.spyOn(rasterCache, 'ensureRasterPng').mockImplementation(() => new Promise(() => {}));
+  try {
+    render(<SlotVersionPopover sessionId='ppt-history' slotId='preview_html' previewKind='slide'
+      listIndex={0} currentRevision={2} revisionCount={2} />);
+    fireEvent.click(screen.getByRole('button', { name: /版本历史/ }));
+    const dialog = await screen.findByRole('dialog');
+    for (const revision of [1, 2]) {
+      const row = within(dialog).getByRole('option', { name: new RegExp(`v${revision}`) });
+      const frame = await within(row).findByTitle(`v${revision}`);
+      expect(frame).toHaveAttribute('sandbox', 'allow-same-origin');
+      expect(frame.getAttribute('srcdoc')).toContain(`Page 1 version ${revision}`);
+    }
+    const detail = within(dialog.querySelector<HTMLElement>('.history-preview--detail')!);
+    expect((await detail.findByTitle('v2')).getAttribute('srcdoc')).toContain('Page 1 version 2');
+    expect(capture).toHaveBeenCalledWith(expect.stringContaining(':history-thumb'), expect.any(String),
+      expect.objectContaining({ pixelRatio: 0.2 }));
+  } finally {
+    capture.mockRestore();
+  }
 });

@@ -239,22 +239,16 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 	// for persistence/concurrency, but do not expose them as formal versions.
 	revCounts := map[string]int{}
 	versionNumbers := map[string]map[int]int{}
-	type revisionNumberRow struct {
-		SlotID       string `gorm:"column:slot_id"`
-		ListIndex    *int   `gorm:"column:list_index"`
-		Revision     int    `gorm:"column:revision"`
-		ChangeSource string `gorm:"column:change_source"`
-	}
-	var revisionRows []revisionNumberRow
+	var revisionRows []orm.WorkflowSlotRevision
 	db.WithContext(ctx).
 		Model(&orm.WorkflowSlotRevision{}).
-		Select("slot_id, list_index, revision, change_source").
+		Select("slot_id, list_index, revision, change_source, step_id, attempt, producer_attempt_id").
 		Where("session_id = ?", sessionID).
 		Order("slot_id ASC, list_index ASC, revision ASC").
 		Scan(&revisionRows)
-	for _, revision := range revisionRows {
+	for i, revision := range revisionRows {
 		key := slotRevisionVersionKey(revision.SlotID, revision.ListIndex)
-		if !isWriterWorkingDraftRevision(revision.SlotID, revision.ChangeSource) {
+		if !isWriterWorkingDraftRevision(revision.SlotID, revision.ChangeSource) && (i == 0 || !samePPTGeneration(revisionRows[i-1], revision)) {
 			revCounts[key]++
 		}
 		if versionNumbers[key] == nil {
