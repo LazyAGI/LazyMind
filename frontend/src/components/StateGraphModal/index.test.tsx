@@ -47,13 +47,13 @@ it('keeps readiness and invalidated results as pending explanations, preserving 
 
 it('presents the same localized stage label as the panel while retaining the producer ID', async () => {
   vi.mocked(axiosInstance.get).mockResolvedValue({ data: { graph: { nodes: {
-    plan_page_prompts: { label: 'Plan Page Prompts' }, legacy: { label: 'Legacy' },
+    prepare: { label: 'Prepare' }, legacy: { label: 'Legacy' },
   } }, projection: {} } });
-  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='ppt-workflow'
-    stepLabels={{ plan_page_prompts: '每页提示词' }} />);
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow'
+    stepLabels={{ prepare: '准备' }} />);
   const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
   expect(graph.nodes).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: 'plan_page_prompts', label: '每页提示词' }),
+    expect.objectContaining({ id: 'prepare', label: '准备' }),
     expect.objectContaining({ id: 'legacy', label: 'Legacy' }),
   ]));
 });

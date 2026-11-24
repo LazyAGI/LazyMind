@@ -1870,8 +1870,7 @@ export function WorkflowPanel({
   const tabs = useMemo(() => workflowTabsForAudience(rawUI ?? EMPTY_WORKFLOW_UI,
     { slots: session?.slots, steps: session?.steps, projection: session?.projection, workflow_mode: session?.workflow_mode }, developerMode),
   [rawUI, developerMode, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
-  const stageLabels = useMemo(() => session?.workflow_id === 'ppt-workflow'
-    ? workflowStageLabels(rawUI?.tabs) : undefined, [session?.workflow_id, rawUI?.tabs]);
+  const stageLabels = useMemo(() => workflowStageLabels(rawUI?.tabs), [rawUI?.tabs]);
   const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
   const runtimeTabId = tabs[runtimeTabIdx]?.id;
   const visibleActiveTabIdx = view.mode === 'following' && !previewTarget && runtimeTabIdx !== -1
