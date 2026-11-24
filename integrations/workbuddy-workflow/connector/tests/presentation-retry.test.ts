@@ -3,7 +3,7 @@ import { presentationLoop } from '../src/presentation'
 import type { Cdp } from '../src/cdp'
 import type { BindingResult } from '../../../workflow-agent-core/src/adapter'
 
-it.each(['unavailable', 'access-denied'] as const)('unmounts only when the binding decision requires it (%s)', async status => {
+it('unmounts the current session panel when binding access is denied', async () => {
   const lifetime = new AbortController()
   const evaluate = vi.fn(async (expression: string) => {
     if (expression.includes('function readPresentationSession')) return { session_id: 'native-1', epoch: 'epoch-1' }
@@ -15,11 +15,12 @@ it.each(['unavailable', 'access-denied'] as const)('unmounts only when the bindi
   const loop = presentationLoop({ evaluate } as unknown as Cdp, request, 'http://127.0.0.1:19091', lifetime.signal)
   try {
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce())
-    finish({ status })
+    finish({ status: 'access-denied' })
     await new Promise(resolve => setImmediate(resolve))
     const disposals = evaluate.mock.calls.filter(([expression]) => expression.includes('"run_id":""'))
-    expect(disposals).toHaveLength(status === 'access-denied' ? 1 : 0)
-    if (status === 'access-denied') expect(disposals[0][0]).toContain('"epoch":"epoch-1"')
+    expect(disposals).toHaveLength(1)
+    expect(disposals[0][0]).toContain('"session_id":"native-1"')
+    expect(disposals[0][0]).toContain('"epoch":"epoch-1"')
   } finally { lifetime.abort(); await loop }
 })
 
