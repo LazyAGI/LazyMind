@@ -47,6 +47,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   const [selected, setSelected] = useState<Task | null>(null);
   const [archiveTask, setArchiveTask] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
+  const { stepLabels } = useTaskSteps(graphTask);
   const hasRunningTask = statusCounts.running > 0 || statusCounts.waiting_inputs > 0 || tasks.some((task) => task.status === 'running' || task.status === 'waiting_inputs');
 
   const load = useCallback(async (silent = false, refreshSteps = false) => {
@@ -209,7 +210,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
           void load();
         }}
       />
-      {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
+      {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} stepLabels={stepLabels} />}
     </div>
   );
 }

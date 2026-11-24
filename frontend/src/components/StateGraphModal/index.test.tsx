@@ -45,6 +45,19 @@ it('keeps readiness and invalidated results as pending explanations, preserving 
   expect(graph.edges[0]).toMatchObject({ edge_type: 'inactive', condition: '旧分支条件' });
 });
 
+it('presents the same localized stage label as the panel while retaining the producer ID', async () => {
+  vi.mocked(axiosInstance.get).mockResolvedValue({ data: { graph: { nodes: {
+    plan_page_prompts: { label: 'Plan Page Prompts' }, legacy: { label: 'Legacy' },
+  } }, projection: {} } });
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='ppt-workflow'
+    stepLabels={{ plan_page_prompts: '每页提示词' }} />);
+  const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
+  expect(graph.nodes).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'plan_page_prompts', label: '每页提示词' }),
+    expect.objectContaining({ id: 'legacy', label: 'Legacy' }),
+  ]));
+});
+
 it.each(['pruned', 'bypassed'])('shows %s only for a skipped node and preserves completed execution', async branch => {
   vi.mocked(axiosInstance.get).mockResolvedValue({ data: { projection: { nodes: {
     prompts: { execution: 'none', readiness: 'not_applicable', branch },

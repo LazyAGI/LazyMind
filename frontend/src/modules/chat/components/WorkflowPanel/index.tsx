@@ -23,6 +23,7 @@ import {
   FullscreenOutlined,
   FullscreenExitOutlined,
   RightOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
 import {
@@ -66,7 +67,7 @@ import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditing
 import { findWriterArtifactStream, shouldShowArtifactStream } from './writerArtifactStream';
 import { PaperAnalysisProgress } from './PaperAnalysisProgress';
 import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
-import { workflowTabStatus } from './workflowStepStatus';
+import { pptStageRetryKind, workflowStageLabels, workflowTabStatus } from './workflowStepStatus';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import type { WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
 import {
@@ -1870,6 +1871,8 @@ export function WorkflowPanel({
   const tabs = useMemo(() => workflowTabsForAudience(rawUI ?? EMPTY_WORKFLOW_UI,
     { slots: session?.slots, steps: session?.steps, projection: session?.projection, workflow_mode: session?.workflow_mode }, developerMode),
   [rawUI, developerMode, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
+  const stageLabels = useMemo(() => session?.workflow_id === 'ppt-workflow'
+    ? workflowStageLabels(rawUI?.tabs) : undefined, [session?.workflow_id, rawUI?.tabs]);
   const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
   const runtimeTabId = tabs[runtimeTabIdx]?.id;
   const visibleActiveTabIdx = view.mode === 'following' && !previewTarget && runtimeTabIdx !== -1
@@ -2170,7 +2173,8 @@ export function WorkflowPanel({
   );
   const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx], controlAdapter?.continuationStep?.());
   const showContinue = Boolean(continueAction);
-  const showStepRollback =
+  const isPpt = session.workflow_id === 'ppt-workflow';
+  const showStepRollback = !isPpt &&
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0);
 
@@ -2198,6 +2202,11 @@ export function WorkflowPanel({
       ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
   };
   const continueDisabled = (continueAction?.kind === 'advance' ? chatBusy || actionPending : buttonsDisabled) || currentStepStatus === 'failed';
+
+  const showSessionRetry = (displayStatus === 'failed' && !(isPpt && (controlAdapter || onSendMessage)
+    && tabs.some(tab => pptStageRetryKind(session, tab.step_id ?? tab.id) === 'retry')))
+    || (displayStatus === 'stopped' && Object.values(session.projection?.nodes ?? {})
+      .some(node => node.validity !== 'stale' && node.execution === 'failed'));
 
   async function refreshBeforeAction() {
     if (controlAdapter) {
@@ -2339,20 +2348,25 @@ export function WorkflowPanel({
     });
   }
 
-  function handleRollback(stepId: string) {
+  function handleStageRetry(stepId: string, kind: 'rewind' | 'retry' = 'rewind') {
     if (!session) return;
     const sessionId = session.session_id;
     void runFooterAction(async () => {
       try {
         if (!await refreshBeforeAction()) return;
         const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
-        if (!latest || latest.session_id !== sessionId) return;
+        if (!latest || latest.session_id !== sessionId || (isPpt && pptStageRetryKind(latest, stepId) !== kind)) return;
         if (controlAdapter) {
-          await controlAdapter.execute({ kind: 'rewind', stepId });
+          await controlAdapter.execute({ kind, stepId });
           return;
         }
-        await onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepLabel(stepId)}`, {
-          session_id: sessionId, kind: 'rewind', step_id: stepId, expected_state_version: latest.state_version ?? 0,
+        const message = `${t('chat.workflowRollbackPrefix')}${stepLabel(stepId)}`;
+        if (isPpt && latest.controller_host === 'external-agent') {
+          await onSendMessage?.(message);
+          return;
+        }
+        await onSendMessage?.(message, {
+          session_id: sessionId, kind, step_id: stepId, expected_state_version: latest.state_version ?? 0,
         });
       } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
     });
@@ -2404,11 +2418,11 @@ export function WorkflowPanel({
           <button
             type='button'
             className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
-            aria-label={t('chat.workflowStatusAria', { status: t(displayStatusKey) })}
+            aria-label={isPpt ? undefined : t('chat.workflowStatusAria', { status: t(displayStatusKey) })}
             onClick={() => session && setStateGraphOpen(true)}
             title={t('chat.workflowViewWorkflow')}
           >
-            {t(displayStatusKey)}
+            <span>{t(displayStatusKey)}</span>{isPpt && <> · {t('chat.workflowViewWorkflow')}</>}
           </button>
         </div>
         <div className='workflow-panel__header-right'>
@@ -2545,6 +2559,10 @@ export function WorkflowPanel({
           {tabs.map((tab, idx) => {
             const stepStatus = workflowTaskDisplayStatus(workflowTabStatus(tab, session), display?.status);
             const stepStatusLabel = stepStatus ? t(stepStatus === 'waiting_input' ? 'taskCenter.statusWaitingInput' : `taskCenter.status${stepStatus.charAt(0).toUpperCase()}${stepStatus.slice(1)}`, { defaultValue: stepStatus }) : undefined;
+            const stepId = tab.step_id ?? tab.id;
+            const retryKind = isPpt && (onSendMessage || controlAdapter)
+              ? pptStageRetryKind(session, stepId) : undefined;
+            const retryOnTab = retryKind && view.mode === 'following';
             const isCurrentUnselectedTab = idx === runtimeTabIdx && idx !== visibleActiveTabIdx;
             return (
               <React.Fragment key={tab.id}>
@@ -2560,14 +2578,16 @@ export function WorkflowPanel({
                   aria-selected={idx === visibleActiveTabIdx}
                   aria-controls={`workflow-tab-panel-${tab.id}`}
                   className={`workflow-panel__tab${idx === visibleActiveTabIdx ? ' workflow-panel__tab--active' : ''}`}
-                  onClick={() => handleTabChange(idx, tab.id)}
+                  onClick={() => retryOnTab ? handleStageRetry(stepId, retryKind) : handleTabChange(idx, tab.id)}
+                  disabled={Boolean(retryOnTab) && buttonsDisabled}
+                  title={retryOnTab ? t('chat.workflowRetryStage', { stage: tab.label }) : stepStatusLabel}
                   type='button'
                 >
                   {!ui.task_presentation?.grouped && (
                     <span className='workflow-panel__tab-badge' aria-hidden='true'>{idx + 1}</span>
                   )}
                   <span className='workflow-panel__tab-text'>
-                    <span className='workflow-panel__tab-label'>{tab.label}</span>
+                    <span className='workflow-panel__tab-label'>{tab.label}{retryOnTab && ` · ${t('chat.workflowRetry')}`}</span>
                     {isCurrentUnselectedTab && (
                       <span className='workflow-panel__tab-current' role='img'
                         aria-label={t('chat.workflowCurrentStep')} title={t('chat.workflowCurrentStep')} />
@@ -2581,6 +2601,14 @@ export function WorkflowPanel({
                     />
                   )}
                 </button>
+                {retryKind && !retryOnTab && (
+                  <button type='button' className='workflow-panel__stage-retry' disabled={buttonsDisabled}
+                    aria-label={t('chat.workflowRetryStage', { stage: tab.label })}
+                    title={t('chat.workflowRetryStage', { stage: tab.label })}
+                    onClick={() => handleStageRetry(stepId, retryKind)}>
+                    <ReloadOutlined />
+                  </button>
+                )}
               </React.Fragment>
             );
           })}
@@ -2675,7 +2703,7 @@ export function WorkflowPanel({
 
       {/* Footer */}
       {!collapsed && showActions && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0
-        || rollbackSteps.length > 0 || sessionBusy || (showContinue && !approvalStepId) || displayStatus === 'failed' || displayStatus === 'stopped') && (
+        || rollbackSteps.length > 0 || sessionBusy || (showContinue && !approvalStepId) || showSessionRetry || displayStatus === 'stopped') && (
         <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
           {!previewTarget && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0) ? (
             <DocumentActions documentFooter={documentFooter} actionPending={actionPending} runFooterAction={runFooterAction} />
@@ -2700,8 +2728,7 @@ export function WorkflowPanel({
               {t(stopping ? 'chat.workflowStopping' : 'chat.workflowStop')}
             </button>
           )}
-          {(displayStatus === 'failed' || (displayStatus === 'stopped' && Object.values(session.projection?.nodes ?? {})
-            .some(node => node.validity !== 'stale' && node.execution === 'failed'))) && (
+          {showSessionRetry && (
             <button
               type='button'
               className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
@@ -2753,7 +2780,7 @@ export function WorkflowPanel({
                   <button key={step.step_id} type='button'
                     className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
                     disabled={buttonsDisabled}
-                    onClick={() => handleRollback(step.step_id)}
+                    onClick={() => handleStageRetry(step.step_id)}
                     title={actionPending ? t('chat.workflowSavingBeforeAction')
                       : buttonsDisabled ? t('chat.workflowBtnDisabledHint')
                         : `${t('chat.workflowRollbackPrefix')}${stepLabel(step.step_id)}`}>
@@ -2777,6 +2804,7 @@ export function WorkflowPanel({
         onClose={() => setStateGraphOpen(false)}
         sessionId={session.session_id}
         workflowId={session.workflow_id}
+        stepLabels={stageLabels}
         liveRefresh
         conversationId={conversationId}
       />

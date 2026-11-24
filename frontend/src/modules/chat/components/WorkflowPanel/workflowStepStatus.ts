@@ -46,3 +46,17 @@ export function workflowTabStatus(
   }
   return 'pending';
 }
+
+/** A terminal run can replay a finished producer or retry a failed attempt. */
+export function pptStageRetryKind(session: WorkflowSession, stepId: string) {
+  const display = session.projection?.display?.status;
+  if (display !== 'completed' && display !== 'failed') return;
+  if (session.projection?.past?.includes(stepId)) return 'rewind';
+  const status = workflowTabStatus({ id: stepId }, session);
+  if (display === 'failed' && ['failed', 'interrupted', 'cancelled', 'canceled'].includes(status)) return 'retry';
+}
+
+/** The execution graph uses producer IDs while the panel presents localized tabs. */
+export function workflowStageLabels(tabs: TabDef[] = []): Record<string, string> {
+  return Object.fromEntries(tabs.map(tab => [tab.step_id ?? tab.id, tab.label]));
+}

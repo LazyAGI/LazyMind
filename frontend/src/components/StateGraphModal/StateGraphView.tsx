@@ -63,7 +63,7 @@ const S: Record<string, { color: string; dot: string; label: string }> = {
 // These runtime values share a display meaning; keep persisted execution facts intact.
 const STATUS_ALIASES: Record<string, string> = {
   completed: 'succeeded', cancelled: 'canceled',
-  pruned: 'skipped', bypassed: 'skipped', ready: 'pending', queued: 'pending', claimed: 'pending',
+  pruned: 'skipped', bypassed: 'skipped', ready: 'pending',
 };
 function sc(status: string) { return S[STATUS_ALIASES[status] ?? workflowTaskDisplayStatus(status)] ?? S.pending; }
 

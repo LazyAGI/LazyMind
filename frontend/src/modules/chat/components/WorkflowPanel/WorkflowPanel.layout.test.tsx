@@ -695,6 +695,65 @@ describe('shared workflow compact layout', () => {
     expect(within(shortcuts).queryByRole('button', { name: 'stale_step' })).not.toBeInTheDocument();
   });
 
+  it.each(['completed', 'failed'] as const)('retries an executed PPT stage directly in a %s run', async status => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.status = status;
+    fixture.session.projection!.display!.status = status;
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const stage = await screen.findByRole('tab', { name: '写作准备 · 重试' });
+    expect(screen.queryByRole('group', { name: '回退到步骤：' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /执行图/ })).toBeVisible();
+    fireEvent.click(stage);
+    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 写作准备', {
+      session_id: 'layout-test', kind: 'rewind', step_id: 'prepare', expected_state_version: 0,
+    }));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+  });
+
+  it('routes a failed PPT stage retry to its external agent using the step label', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.status = 'failed';
+    fixture.session.projection!.display!.status = 'failed';
+    fixture.session.projection!.past = ['prepare'];
+    fixture.session.steps![1].status = 'failed';
+    fixture.ui.stepLabels = { write_document: '生成演示文稿' };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    fireEvent.click(await screen.findByRole('tab', { name: /成稿 · 重试/ }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 生成演示文稿'));
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('lets PPT users browse, then retry the selected failed stage through the embedded host', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.status = 'failed';
+    fixture.session.projection!.display!.status = 'failed';
+    fixture.session.projection!.past = ['prepare'];
+    fixture.session.steps![1].status = 'failed';
+    const execute = vi.fn(async () => {});
+    render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={{ execute }} />);
+    await screen.findByRole('tab', { name: /成稿 · 重试/ });
+    fireEvent.click(screen.getByRole('button', { name: '自由浏览' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^成稿/ }));
+    expect(execute).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重试成稿' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledWith({ kind: 'retry', stepId: 'write_document' }));
+  });
+
+  it('keeps the PPT run untouched when the active design cannot be saved', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.flush.mockResolvedValue(false);
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const stage = await screen.findByRole('tab', { name: '写作准备 · 重试' });
+    await screen.findByRole('button', { name: '发布' });
+    await act(async () => fireEvent.click(stage));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('does not rerun when saving the current edits fails', async () => {
     fixture.flush.mockResolvedValue(false);
     const send = vi.fn();

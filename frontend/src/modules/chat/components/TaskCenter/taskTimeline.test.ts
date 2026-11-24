@@ -69,6 +69,15 @@ function step(
 }
 
 describe("buildOrdinaryTaskTimeline", () => {
+  it("uses the panel's localized stage name only for the matching PPT run", () => {
+    const stages = { sessionId: "session-1", labels: { plan_page_prompts: "每页提示词" } };
+    const row = step("task-1", "plan_page_prompts", 1, "effective", 0, 10);
+    expect(buildOrdinaryTaskTimeline([], [row], BASE_TIME, undefined, undefined, stages).items[0].stageLabel)
+      .toBe("每页提示词");
+    expect(buildOrdinaryTaskTimeline([], [{ ...row, session_id: "other" }], BASE_TIME, undefined, undefined, stages)
+      .items[0].stageLabel).toBeUndefined();
+  });
+
   it("projects paused workflow attempts without counting pauses as failures or changing another session", () => {
     const stopped = { ...step("stopped", "search", 1, "effective", 0, 10), status: "interrupted" };
     const paused = buildOrdinaryTaskTimeline([], [stopped], BASE_TIME, undefined, "session-1");
