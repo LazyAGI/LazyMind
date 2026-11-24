@@ -190,6 +190,38 @@ for (const [sample, minutes] of [[0, 25], [0.5, 30], [1, 35]]) test(`background 
   await timers[1].callback(); assert.equal(calls.filter((command) => command === "discover").length, 2);
 });
 
+test("a manual success refreshes focus freshness and a failed check only delays automatic retries briefly", async t => {
+  let now = 0, attempts = 0;
+  const retry = deferred();
+  t.mock.method(Date, "now", () => now);
+  const { updater } = fixture({ helper: async command => {
+    if (command === "config") return { status: "enabled", config: { channel: "stable" } };
+    assert.equal(command, "discover");
+    attempts++;
+    if (attempts === 3) throw Object.assign(new Error(), { code: "network_timeout" });
+    if (attempts === 4) return retry.promise;
+    return { status: "up_to_date" };
+  } });
+  t.after(() => updater.dispose());
+  await updater.start();
+  now = 24 * 60_000;
+  await updater.check();
+  now = 25 * 60_000;
+  await updater.checkOnFocus();
+  assert.equal(attempts, 2, "the recent manual check covers this focus");
+  now = 49 * 60_000;
+  assert.equal((await updater.checkOnFocus()).reason, "network_timeout");
+  now += 59_999;
+  await updater.checkOnFocus();
+  assert.equal(attempts, 3, "repeated focus after failure must not hammer the helper");
+  now++;
+  const pending = [updater.checkOnFocus(), updater.checkOnFocus(), updater.check()];
+  retry.resolve(available());
+  await Promise.all(pending);
+  assert.equal(attempts, 4);
+  assert.equal(updater.getState().phase, "available");
+});
+
 const updateActions = [
   ["status", "updateStatus"], ["check", "updateCheck"], ["download", "updateDownload", true],
   ["cancel", "updateCancel"], ["reveal", "updateReveal"], ["resume", "updateResume"],

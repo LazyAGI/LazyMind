@@ -3486,6 +3486,9 @@ if (!hasSingleInstanceLock) {
   app.on("activate", () => {
     void showActiveWindow();
   });
+  app.on("browser-window-focus", (_event, window) => {
+    if (window === mainWindow && !rendererReadyWait && !isQuitting) void desktopUpdater.checkOnFocus();
+  });
   app.whenReady().then(async () => {
     const startupParameters = { isPackaged, currentVersion, currentReleaseId, ownerToken,
       invoke: runSidecar, onRuntimeStarted: () => startGuard() };

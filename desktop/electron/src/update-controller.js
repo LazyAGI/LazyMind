@@ -3,12 +3,15 @@ const { createUpdateInstallFlow } = require("./update-install-flow");
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const failure = (code) => Object.assign(new Error(code), { code });
 const reasonFor = (error) => /^[a-z_]{1,64}$/.test(error?.code || "") ? error.code : "check_failed";
+const minimumCheckInterval = 25 * 60_000;
+const focusRetryDelay = 60_000;
 
 function createDesktopUpdater({ currentVersion, invokeHelper, readLocalState, revealPackage = () => {},
   downloadIntent, installIntent, nativeInstaller, runtime, clock = { setTimeout, clearTimeout }, random = Math.random, report = () => {} }) {
   let state = { revision: 0, phase: "idle", currentVersion, canInstall: false, route: [] };
   let config, checking, checkAbort, active, queued, offer, receipt, timer, started, disposed = false;
   let interrupted, resuming, recordFailure;
+  let nextFocusCheckAt = 0;
   let installFlow;
   const listeners = new Set();
   const getState = () => clone(state);
@@ -60,7 +63,9 @@ function createDesktopUpdater({ currentVersion, invokeHelper, readLocalState, re
         } else if (decision.status === "up_to_date") publish({ phase: preserveInstalled ? "installed" : "up_to_date", reason: decision.reason, channel: config.config.channel });
         else if (["blocked", "manual_required", "unsupported_system"].includes(decision.status)) publish({ phase: "blocked", reason: decision.reason, channel: config.config.channel });
         else throw failure("helper_protocol");
+        nextFocusCheckAt = Date.now() + minimumCheckInterval;
       } catch (error) {
+        nextFocusCheckAt = Math.max(nextFocusCheckAt, Date.now() + focusRetryDelay);
         if (!disposed) { const reason = reasonFor(error); publish({ ...clearOffer(), phase: "error", reason }); report(reason); }
       } finally { checking = undefined; checkAbort = undefined; }
       return getState();
@@ -152,7 +157,7 @@ function createDesktopUpdater({ currentVersion, invokeHelper, readLocalState, re
   };
   const schedule = () => {
     if (disposed || state.phase === "disabled") return;
-    timer = clock.setTimeout(async () => { timer = undefined; if (disposed) return; await check(); schedule(); }, (25 + random() * 10) * 60_000);
+    timer = clock.setTimeout(async () => { timer = undefined; if (disposed) return; await check(); schedule(); }, minimumCheckInterval + random() * 10 * 60_000);
     timer?.unref?.();
   };
   try {
@@ -168,6 +173,10 @@ function createDesktopUpdater({ currentVersion, invokeHelper, readLocalState, re
     publish, getState, revealPackage, clearDownloadIntent: () => downloadIntent?.clear(), invalidateOffer: clearOffer,
   });
   return { getState, check: () => check(false, true),
+    checkOnFocus() {
+      if (!started || state.phase === "disabled" || Date.now() < nextFocusCheckAt) return Promise.resolve(getState());
+      return check();
+    },
     download: (releaseId) => installFlow?.pending() ? Promise.reject(failure("native_update_busy")) : download(releaseId),
     cancel: () => installFlow?.pending() ? installFlow.later() : cancel(),
     resumeDownload: () => installFlow?.pending() ? Promise.reject(failure("native_update_busy")) : resumeDownload(),

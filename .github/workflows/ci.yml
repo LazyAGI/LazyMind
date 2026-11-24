@@ -399,10 +399,17 @@ jobs:
           else
             node --test desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js desktop/electron/tests/agent-discovery-refresh.test.js
           fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Test desktop update publisher offline
-        run: |
-          python -m unittest discover -s desktop/scripts -p test_publish_desktop_update.py
-          python -m unittest discover -s desktop/scripts -p test_update_publication_transport.py
+        run: >-
+          python -m unittest
+          desktop/scripts/test_publish_desktop_update.py
+          desktop/scripts/test_update_publication_transport.py
+          desktop/scripts/test_update_ci_plan.py
+          desktop/scripts/test_update_evidence_artifacts.py
+          desktop/scripts/test_update_historical_evidence.py
 
 
   test-auth-service:

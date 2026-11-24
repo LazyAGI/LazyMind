@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
+import vm from "node:vm";
 const require = createRequire(import.meta.url);
-const { sendUpdateState } = require("../electron/src/update-controller.js");
+const { createDesktopUpdater, sendUpdateState } = require("../electron/src/update-controller.js");
 
 test("the actual Electron entrypoint starts the updater and binds current window/origin authority", () => {
   const source = readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
@@ -17,6 +19,43 @@ test("the actual Electron entrypoint starts the updater and binds current window
   const residentClose = source.slice(source.indexOf('app.on("window-all-closed"'), source.indexOf('app.on("before-quit", (event)'));
   assert.ok(residentClose.includes("window-all-closed"));
   assert.doesNotMatch(residentClose, /desktopUpdater\.(?:cancel|dispose)/);
+});
+
+test("focusing a ready main window discovers a new release after 25 minutes without a click", async t => {
+  const app = new EventEmitter(), mainWindow = {};
+  const source = readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
+  let now = 0, discoveries = 0;
+  t.mock.method(Date, "now", () => now);
+  const updater = createDesktopUpdater({ currentVersion: "0.5.222", readLocalState: async () => ({}),
+    invokeHelper: async command => {
+      if (command === "config") return { status: "enabled", config: { channel: "stable" } };
+      assert.equal(command, "discover");
+      if (++discoveries === 1) return { status: "up_to_date" };
+      return { status: "direct", route: ["r224"], next: { releaseId: "r224", version: "0.5.224", package: { size: 100 } } };
+    },
+  });
+  t.after(() => updater.dispose());
+  const context = { app, mainWindow, desktopUpdater: updater, rendererReadyWait: undefined, isQuitting: false };
+  vm.runInNewContext(source.slice(source.indexOf('  app.on("second-instance"'), source.indexOf('  app.whenReady()')), context);
+  const focus = async window => { app.emit("browser-window-focus", {}, window); await new Promise(setImmediate); };
+  await focus(mainWindow);
+  assert.equal(discoveries, 0, "preserve the delayed first startup check");
+  await updater.start();
+  now = 25 * 60_000 - 1;
+  await focus(mainWindow);
+  assert.equal(discoveries, 1);
+  now++;
+  await focus({});
+  context.rendererReadyWait = {};
+  await focus(mainWindow);
+  assert.equal(discoveries, 1, "ignore auxiliary or still-loading windows");
+  context.rendererReadyWait = undefined;
+  const states = [];
+  updater.subscribe(state => states.push(state));
+  await focus(mainWindow);
+  assert.equal(discoveries, 2, "the focused main window must discover the new release");
+  assert.equal(states.at(-1).phase, "available");
+  assert.equal(states.at(-1).nextVersion, "0.5.224");
 });
 
 test("state forwarding preserves revisions and sends only to the current trusted main frame", () => {

@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify ${{ matrix.platform }} A-to-B format compatibility
+    name: Verify ${{ matrix.platform }} upgrade paths
     if: inputs.use_current_run && inputs.source_build_run_id != ''
     strategy:
       fail-fast: false
@@ -81,29 +81,22 @@ jobs:
           set -euo pipefail
           validator="${RUNNER_TEMP}/update-publisher.exe"
           build_flags=()
-          probe_flags=()
           plan_flags=()
           if [[ "${UNSIGNED_TEST}" == true ]]; then
             build_flags=(-tags lazymind_unsigned_test)
-            probe_flags=(--unsigned-test --source-components-dir publication/source/python-components --target-components-dir publication/current/python-components)
             plan_flags=(--unsigned-test)
           fi
           (cd local/local-runtime-manager && go build "${build_flags[@]+"${build_flags[@]}"}" -o "${validator}" ./cmd/update-publisher)
           uv run --no-project --python 3.11 python desktop/scripts/prepare-update-ci-plan.py \
             --verify-source-only --current publication/current --history publication/source \
             --validator "${validator}" --output-dir "${RUNNER_TEMP}/source-verification" "${plan_flags[@]+"${plan_flags[@]}"}"
-          source_records=(publication/source/*/release.json)
-          target_records=(publication/current/*/release.json)
-          [[ "${#source_records[@]}" == 1 && -f "${source_records[0]}" ]]
-          [[ "${#target_records[@]}" == 1 && -f "${target_records[0]}" ]]
-          mkdir -p publication/evidence
-          uv run --no-project --python 3.11 python desktop/scripts/verify-update-format.py \
-            --source "${source_records[0]%/release.json}" --target "${target_records[0]%/release.json}" \
-            --output "publication/evidence/${PLATFORM}.json" "${probe_flags[@]+"${probe_flags[@]}"}"
+          uv run --no-project --python 3.11 python desktop/scripts/verify-update-ci-pairs.py \
+            --plan "${RUNNER_TEMP}/source-verification" --current publication/current --baseline publication/source \
+            --platform "${PLATFORM}" --output verification "${plan_flags[@]+"${plan_flags[@]}"}"
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-format-evidence-${{ matrix.platform }}-${{ github.run_id }}
-          path: publication/evidence/${{ matrix.platform }}.json
+          path: verification
           if-no-files-found: error
 
   publish:
@@ -135,28 +128,12 @@ jobs:
         if: inputs.use_current_run && inputs.source_build_run_id != ''
         with:
           name: desktop-format-evidence-macos-${{ github.run_id }}
-          path: format-evidence/macos
+          path: verification
       - uses: actions/download-artifact@v8
         if: inputs.use_current_run && !inputs.unsigned_update_test && inputs.source_build_run_id != ''
         with:
           name: desktop-format-evidence-windows-${{ github.run_id }}
-          path: format-evidence/windows
-      - name: Retrieve the successful source build
-        if: inputs.use_current_run && inputs.source_build_run_id != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          SOURCE_RUN: ${{ inputs.source_build_run_id }}
-          UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
-        run: |
-          set -euo pipefail
-          [[ "${SOURCE_RUN}" =~ ^[0-9]+$ && "${SOURCE_RUN}" != "${GITHUB_RUN_ID}" ]]
-          test "$(gh run view "${SOURCE_RUN}" --json conclusion --jq .conclusion)" = success
-          platforms=(macos)
-          if [[ "${UNSIGNED_TEST}" != true ]]; then platforms+=(windows); fi
-          for platform in "${platforms[@]}"; do
-            gh run download "${SOURCE_RUN}" --name "desktop-update-${platform}-${SOURCE_RUN}" --dir "history/${platform}"
-          done
+          path: verification
       - name: Download successful build artifacts
         if: '!inputs.use_current_run'
         env:
@@ -190,11 +167,17 @@ jobs:
           test -n "${UPDATE_REPO}"
           historical=()
           plan_flags=()
-          if [[ -n "${SOURCE_RUN}" ]]; then historical=(--history history --evidence format-evidence); fi
+          if [[ -n "${SOURCE_RUN}" ]]; then historical=(--history verification/records --evidence verification/evidence); fi
           if [[ "${UNSIGNED_TEST}" == true ]]; then plan_flags=(--unsigned-test); fi
           uv run --no-project --python 3.11 python desktop/scripts/prepare-update-ci-plan.py \
             --current publication "${historical[@]+"${historical[@]}"}" --validator "${RUNNER_TEMP}/update-publisher" --repo "${UPDATE_REPO}" \
             --output-dir "${RUNNER_TEMP}/update-ci-plan" "${plan_flags[@]+"${plan_flags[@]}"}"
+          if [[ -n "${SOURCE_RUN}" ]]; then
+            cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" verification/macos-policy-sha256
+            if [[ "${UNSIGNED_TEST}" != true ]]; then
+              cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" verification/windows-policy-sha256
+            fi
+          fi
       - name: Assemble and sign explicit update policy
         env:
           UPDATE_PLAN: ${{ inputs.plan }}

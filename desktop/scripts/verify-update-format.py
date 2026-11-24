@@ -2,7 +2,7 @@
 """Validate a persisted v2 RAG index with the target release's Python runtime."""
 
 import argparse
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, ExitStack
 import hashlib
 import importlib.util
 import json
@@ -17,6 +17,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlsplit
+from urllib.request import build_opener
 import zipfile
 
 
@@ -45,6 +47,15 @@ def read_plain_file(root, relative):
     return path
 
 
+class IncompatibleIndex(ValueError):
+    """A persisted index field or query result violates the reader's format contract."""
+
+
+def require_index(condition, message):
+    if not condition:
+        raise IncompatibleIndex(message)
+
+
 def read_index(fixture):
     import numpy as np
     from milvus_lite.index.factory import load_index_from_spec
@@ -53,24 +64,42 @@ def read_index(fixture):
 
     # Opening a collection can load a fallback manifest, recreate an index or
     # write a WAL. Read the primary manifest, Parquet PKs and `.idx` directly.
-    manifest = json.loads(read_plain_file(fixture, 'manifest.json').read_text(encoding='utf-8'))
-    require(set(manifest['partitions']) == {PARTITION}, 'Unexpected fixture partitions')
-    partition = manifest['partitions'][PARTITION]
-    require(not partition['delta_files'] and len(partition['data_files']) == 1, 'Unexpected fixture layout')
-    spec = IndexSpec.from_dict(manifest['index_specs']['vector'])
-    require((spec.field_name, spec.index_type, spec.metric_type) == ('vector', 'FLAT', 'COSINE'),
-            'Expected a persisted FLAT/COSINE vector index')
+    manifest_text = read_plain_file(fixture, 'manifest.json').read_text(encoding='utf-8')
+    try:
+        manifest = json.loads(manifest_text)
+        partitions = manifest['partitions']
+        require_index(set(partitions) == {PARTITION}, 'Unexpected fixture partitions')
+        partition = partitions[PARTITION]
+        require_index(not partition['delta_files'] and len(partition['data_files']) == 1, 'Unexpected fixture layout')
+        relative = partition['data_files'][0]
+        spec_data = manifest['index_specs']['vector']
+    except (json.JSONDecodeError, KeyError, TypeError, IndexError) as error:
+        raise IncompatibleIndex('Unreadable persisted index manifest') from error
+    try:
+        spec = IndexSpec.from_dict(spec_data)
+    except (KeyError, ValueError) as error:
+        raise IncompatibleIndex('Unsupported persisted index specification') from error
+    require_index((spec.field_name, spec.index_type, spec.metric_type) == ('vector', 'FLAT', 'COSINE'),
+                  'Expected a persisted FLAT/COSINE vector index')
     prefix = 'partitions/' + PARTITION
-    relative = partition['data_files'][0]
-    require(relative.startswith('data/') and relative.endswith('.parquet'), 'Unexpected fixture data file')
+    require_index(isinstance(relative, str) and relative.startswith('data/') and relative.endswith('.parquet'),
+                  'Unexpected fixture data file')
     data = read_plain_file(fixture, prefix + '/' + relative)
     segment = Segment.load(str(data), PARTITION, 'id', spec.field_name)
     index_file = read_plain_file(fixture, f'{prefix}/indexes/{data.stem}.vector.flat.idx')
-    index = load_index_from_spec(spec, str(index_file), segment.vector_dim)
-    require(index.num_vectors == len(segment.pks), 'Index row count differs from Parquet')
+    try:
+        index = load_index_from_spec(spec, str(index_file), segment.vector_dim)
+    except ValueError as error:
+        # BruteForceIndex.load gives these two diagnostics for a persisted FLAT
+        # array whose rank or vector width does not match the Parquet segment.
+        layout_error = r'loaded index (?:has shape \([0-9, ]*\), expected \(N, dim\)|dim [0-9]+ != expected dim [0-9]+)'
+        if not re.fullmatch(layout_error, str(error)):
+            raise
+        raise IncompatibleIndex(str(error)) from error
+    require_index(index.num_vectors == len(segment.pks), 'Index row count differs from Parquet')
     rows, _ = index.search(np.asarray([QUERY], dtype=np.float32), top_k=1)
     row = int(rows[0, 0])
-    require(0 <= row < len(segment.pks), 'No matching persisted index row')
+    require_index(0 <= row < len(segment.pks), 'No matching persisted index row')
     return {'id': segment.pks[row]}
 
 
@@ -122,6 +151,20 @@ def verified_file(root, relative, artifact):
     return path
 
 
+def check_identity(config, release):
+    for field in ('version', 'platform', 'arch', 'signingIdentity', 'updaterProtocol', 'releaseId'):
+        require(config[field] == release[field], 'Release identity differs from config: ' + field)
+
+
+def release_catalog(catalog_file, release):
+    catalog = load_json(catalog_file)
+    require(catalog['schemaVersion'] == 1 and catalog['platform'] == release['platform']
+            and catalog['arch'] == release['arch'], 'Invalid component catalog identity')
+    rag = catalog['components']['rag']
+    require(rag['id'] == 'rag', 'Invalid RAG component identity')
+    return catalog['components'], {key: value for key, value in rag.items() if key not in ('schemaVersion', 'signingMode')}
+
+
 def release_inputs(directory, unsigned_test):
     record = load_json(read_plain_file(directory, 'release.json'))
     config, release = record['config'], record['release']
@@ -130,8 +173,7 @@ def release_inputs(directory, unsigned_test):
         platform.machine().lower())
     require(native_os and native_arch and config['platform'] == native_os and config['arch'] == native_arch,
             'Run evidence on the package platform and architecture')
-    for field in ('version', 'platform', 'arch', 'signingIdentity', 'updaterProtocol', 'releaseId'):
-        require(config[field] == release[field], 'Release identity differs from config: ' + field)
+    check_identity(config, release)
     require(config['updaterProtocol'] == 2 and re.fullmatch(r'format-v2-[a-f0-9]{64}', record['formatProfile']),
             'Expected a v2 format profile')
     if unsigned_test:
@@ -145,14 +187,9 @@ def release_inputs(directory, unsigned_test):
             'Invalid v2 package unpacked size')
     package = verified_file(directory, 'package.zip' if native_os == 'darwin' else 'package.exe', release['package'])
     catalog_file = verified_file(directory, 'components.json', release['components'])
-    catalog = load_json(catalog_file)
-    require(catalog['schemaVersion'] == 1 and catalog['platform'] == native_os and catalog['arch'] == native_arch,
-            'Invalid component catalog identity')
-    rag = catalog['components']['rag']
-    descriptor = {key: value for key, value in rag.items() if key not in ('schemaVersion', 'signingMode')}
-    require(descriptor == record['componentDescriptor'] and rag['id'] == 'rag',
-            'Release RAG descriptor differs from its component catalog')
-    return record, package, catalog_file, catalog['components']
+    entries, descriptor = release_catalog(catalog_file, release)
+    require(descriptor == record['componentDescriptor'], 'Release RAG descriptor differs from its component catalog')
+    return record, package, catalog_file, entries
 
 
 def validate_app_zip(package, app_name, unpacked_bytes):
@@ -234,14 +271,13 @@ def run_windows_installer(executable, arguments, *, timeout):
 
 
 @contextmanager
-def materialized_app(package, record, directory, unsigned_test):
-    config = record['config']
-    if config['platform'] == 'darwin':
+def materialized_app(package, release, directory, unsigned_test):
+    if release['platform'] == 'darwin':
         name = 'LazyMind Test.app' if unsigned_test else 'LazyMind.app'
-        validate_app_zip(package, name, record['release']['package']['unpackedBytes'])
+        validate_app_zip(package, name, release['package']['unpackedBytes'])
         output(['/usr/bin/ditto', '-x', '-k', str(package), str(directory)], timeout=600)
         app = directory / name
-        verify_macos_app(app, config['signingIdentity'], unsigned_test)
+        verify_macos_app(app, release['signingIdentity'], unsigned_test)
         yield app / 'Contents/Resources'
         return
 
@@ -253,13 +289,13 @@ def materialized_app(package, record, directory, unsigned_test):
             'Refusing to reuse an existing Windows installation')
     require(not any(character.isspace() for character in str(directory)),
             'Windows evidence scratch path must not contain whitespace')
-    verify_windows_signature(package, config['signingIdentity'])
+    verify_windows_signature(package, release['signingIdentity'])
     # In NSIS the /D argument is last and takes the complete destination path.
     run_windows_installer(package, f'/S --full-install /D={directory}', timeout=1950)
     app = read_plain_file(directory, 'LazyMind.exe')
     uninstall = read_plain_file(directory, 'Uninstall LazyMind.exe')
     try:
-        verify_windows_signature(app, config['signingIdentity'])
+        verify_windows_signature(app, release['signingIdentity'])
         yield directory / 'resources'
     finally:
         run_windows_installer(uninstall, '/S', timeout=300)
@@ -277,33 +313,47 @@ def format_profile(runtime):
     return 'format-v2-' + hashlib.sha256(encoded).hexdigest()
 
 
-def verify_runtime(resources, record, catalog_file):
-    config = record['config']
+def inspect_runtime(resources, release, catalog_file, descriptor, expected=None):
     runtime = resources / 'runtime'
     manifest = read_plain_file(runtime, 'manifest.json')
     with manifest.open('rb') as stream:
-        require(hashlib.file_digest(stream, 'sha256').hexdigest() == record['manifestSHA256'],
-                'Packaged runtime manifest differs from release record')
-    packaged_catalog = verified_file(runtime, 'config/python-components.json', record['release']['components'])
+        manifest_sha = hashlib.file_digest(stream, 'sha256').hexdigest()
+    profile = format_profile(runtime)
+    if expected is not None:
+        require(manifest_sha == expected['manifestSHA256'], 'Packaged runtime manifest differs from release record')
+        require(profile == expected['formatProfile'], 'Packaged format recipe differs from release record')
+    packaged_catalog = verified_file(runtime, 'config/python-components.json', release['components'])
     require(packaged_catalog.read_bytes() == catalog_file.read_bytes(), 'Packaged component catalog differs from staging')
-    identity = {key: config[key] for key in ('releaseId', 'version', 'mode', 'platform', 'arch', 'signingIdentity')}
-    identity['protocol'] = config['updaterProtocol']
-    require(load_json(read_plain_file(resources, 'app-update.yml'))['lazymind'] == identity,
-            'Packaged update metadata differs from release record')
-    require(format_profile(runtime) == record['formatProfile'], 'Packaged format recipe differs from release record')
-    windows = config['platform'] == 'windows'
+    identity = load_json(read_plain_file(resources, 'app-update.yml'))['lazymind']
+    expected_identity = {key: release[key] for key in ('releaseId', 'version', 'platform', 'arch', 'signingIdentity')}
+    expected_identity.update(protocol=release['updaterProtocol'],
+                             mode=expected['config']['mode'] if expected else identity['mode'])
+    require(identity == expected_identity, 'Packaged update metadata differs from release record')
+    windows = release['platform'] == 'windows'
     helper = read_plain_file(runtime, 'bin/lazymind-update-helper.exe' if windows else 'bin/lazymind-update-helper')
     if windows:
-        verify_windows_signature(helper, config['signingIdentity'])
-    require(json.loads(output([str(helper), 'config'])) == {'status': 'enabled', 'config': config},
+        verify_windows_signature(helper, release['signingIdentity'])
+    response = json.loads(output([str(helper), 'config']))
+    require(set(response) == {'status', 'config'} and response['status'] == 'enabled',
+            'Packaged helper update configuration is disabled or invalid')
+    config = response['config']
+    check_identity(config, release)
+    require(config['mode'] == identity['mode'] and (expected is None or expected['config'] == config),
             'Packaged helper identity differs from release record')
     python = runtime / ('deps/python/algorithm/Scripts/python.exe' if windows else 'deps/python/algorithm/bin/python')
     require(python.is_file() and python.resolve().is_relative_to(runtime.resolve()), 'Bundled algorithm Python is missing')
+    record = dict(config=config, release=release, manifestSHA256=manifest_sha,
+                  formatProfile=profile, componentDescriptor=descriptor)
+    return record, runtime, python
+
+
+def verify_runtime(resources, record, catalog_file):
+    _, runtime, python = inspect_runtime(resources, record['release'], catalog_file, record['componentDescriptor'], expected=record)
     return runtime, python
 
 
-def component_tools():
-    spec = importlib.util.spec_from_file_location('component_tools', Path(__file__).with_name('verify-python-components.py'))
+def load_script(filename):
+    spec = importlib.util.spec_from_file_location(filename[:-3], Path(__file__).with_name(filename))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -330,62 +380,132 @@ def extract_overlay(entry, directory, bundles, python, config, tools):
 
 
 def index_worker(python, command, fixture, overlay, runtime, abi):
-    result = output([str(python), '-I', '-B', '-X', 'utf8', str(Path(__file__).resolve()),
-                     '--worker', command, '--fixture', str(fixture), '--overlay', str(overlay),
-                     '--runtime', str(runtime), '--expected-abi', abi], timeout=120)
-    require(json.loads(result) == {'id': EXPECTED_ID}, 'Native runtime did not retrieve the old fixture ID')
+    args = [str(python), '-I', '-B', '-X', 'utf8', str(Path(__file__).resolve()),
+            '--worker', command, '--fixture', str(fixture), '--overlay', str(overlay),
+            '--runtime', str(runtime), '--expected-abi', abi]
+    if command == 'read-index':
+        args.append('--classify-index')
+    row = json.loads(output(args, timeout=120))
+    if command == 'read-index' and row == {'status': 'index_incompatible'}:
+        return False
+    require(isinstance(row, dict) and set(row) == {'id'} and type(row['id']) is int, 'Invalid native index worker result')
+    return row['id'] == EXPECTED_ID
 
 
-def generate_evidence(args):
-    require(not args.output.exists(), 'Format evidence output already exists')
-    source, old_package, old_catalog, old_components = release_inputs(args.source, args.unsigned_test)
-    target, new_package, new_catalog, new_components = release_inputs(args.target, args.unsigned_test)
+def download_source(release, target, directory):
+    config = target['config']
+    require(all(release[key] == config[key] for key in ('platform', 'arch', 'signingIdentity', 'updaterProtocol')),
+            'Historical release is not for the target platform, signer and updater')
+    require(type(release['package']['unpackedBytes']) is int and release['package']['unpackedBytes'] > 0,
+            'Invalid v2 package unpacked size')
+    publisher = load_script('publish-desktop-update.py')
+    origins = {origin.rstrip('/') for origin in config['allowedOrigins']}
+    opener = build_opener(publisher.PinnedRedirects(origins))
+    package = directory / ('package.zip' if release['platform'] == 'darwin' else 'package.exe')
+    catalog = directory / 'components.json'
+    for path, artifact in [(catalog, release['components']), (package, release['package'])]:
+        url = artifact['url']
+        parsed = urlsplit(url)
+        origin = 'https://' + parsed.netloc
+        require(parsed.scheme == 'https' and parsed.username is None and parsed.password is None and origin in origins,
+                'Historical artifact URL is outside the configured origins')
+        publisher.destination(url, origin + '/')
+        limit = artifact['size']
+        require(type(limit) is int and limit > 0 and SHA256.fullmatch(artifact['sha256']), 'Invalid artifact size or SHA-256')
+        require(path != catalog or limit <= MAX_METADATA, 'Component catalog exceeds the size limit')
+        digest = hashlib.sha256()
+        size = 0
+        with opener.open(url, timeout=60) as stream, path.open('xb') as file:
+            while chunk := stream.read(min(1024 * 1024, limit - size + 1)):
+                size += len(chunk)
+                require(size <= limit, path.name + ' exceeds signed size')
+                digest.update(chunk)
+                file.write(chunk)
+        require(size == limit and digest.hexdigest() == artifact['sha256'], path.name + ' size or SHA-256 mismatch')
+    return package, catalog
+
+
+def check_pair(source, target, old_components, new_components):
     old, new = source['config'], target['config']
     require(old['releaseId'] != new['releaseId'] and old['version'] != new['version'],
             'Source and target must be distinct releases')
     for key in ('platform', 'arch', 'mode', 'audience', 'channel', 'trustDomain', 'policyURL', 'signingIdentity'):
         require(old[key] == new[key], 'Source and target trust differ: ' + key)
-    require(source['formatProfile'] == target['formatProfile'], 'Source and target v2 formats differ')
-    require(set(old_components) <= set(new_components), 'Target removed a source component')
+    if source['formatProfile'] != target['formatProfile']:
+        return 'format_mismatch'
+    if not set(old_components) <= set(new_components):
+        return 'component_removed'
+    return None
 
-    tools = component_tools()
+
+def write_json(path, value):
+    with path.open('x', encoding='utf-8') as stream:
+        json.dump(value, stream, separators=(',', ':'))
+        stream.write('\n')
+
+
+def generate_evidence(args):
+    require(not args.output.exists(), 'Format evidence output already exists')
+    if args.source_record_output:
+        require(not args.source_record_output.exists() and args.source_record_output.resolve() != args.output.resolve(),
+                'Source record output must be a new, separate file')
+    target, new_package, new_catalog, new_components = release_inputs(args.target, args.unsigned_test)
+    tools = load_script('verify-python-components.py')
     scratch = os.environ.get('RUNNER_TEMP') if sys.platform == 'win32' else None
     with tempfile.TemporaryDirectory(prefix='lm-update-evidence-', dir=scratch) as temp:
         staging = Path(temp).resolve()
         fixture = staging / 'old-index'
-        with materialized_app(old_package, source, staging / 'source-app', args.unsigned_test) as resources:
-            runtime, python = verify_runtime(resources, source, old_catalog)
-            entry = old_components['rag']
-            overlay = extract_overlay(entry, staging / 'source-rag', args.source_components_dir, python, old, tools)
-            index_worker(python, 'create-index', fixture, overlay, runtime, entry['pythonAbi'])
-        before = fixture_fingerprint(fixture)
-        with materialized_app(new_package, target, staging / 'target-app', args.unsigned_test) as resources:
-            runtime, python = verify_runtime(resources, target, new_catalog)
-            entry = new_components['rag']
-            overlay = extract_overlay(entry, staging / 'target-rag', args.target_components_dir, python, new, tools)
-            index_worker(python, 'read-index', fixture, overlay, runtime, entry['pythonAbi'])
-            if 'cluster' in new_components:
-                cluster = extract_overlay(new_components['cluster'], staging / 'target-cluster', args.target_components_dir,
-                                          python, new, tools)
-                output([str(python), '-I', '-B', '-X', 'utf8',
-                        str(Path(__file__).with_name('verify-python-components.py').resolve()),
-                        '--worker', 'cluster', '--overlay', str(cluster), '--runtime', str(runtime)], timeout=180)
-        require(fixture_fingerprint(fixture) == before, 'Target runtime changed the persisted index fixture')
+        before = None
+        with ExitStack() as old_app:
+            if args.source:
+                source, old_package, old_catalog, old_components = release_inputs(args.source, args.unsigned_test)
+            else:
+                release = load_json(args.published_source)
+                old_package, old_catalog = download_source(release, target, staging)
+                old_components, descriptor = release_catalog(old_catalog, release)
+                resources = old_app.enter_context(materialized_app(old_package, release, staging / 'source-app', args.unsigned_test))
+                source, runtime, python = inspect_runtime(resources, release, old_catalog, descriptor)
+            reason = check_pair(source, target, old_components, new_components)
+            if not reason:
+                if args.source:
+                    resources = old_app.enter_context(materialized_app(old_package, source['release'], staging / 'source-app', args.unsigned_test))
+                    runtime, python = verify_runtime(resources, source, old_catalog)
+                entry = old_components['rag']
+                overlay = extract_overlay(entry, staging / 'source-rag', args.source_components_dir, python, source['config'], tools)
+                require(index_worker(python, 'create-index', fixture, overlay, runtime, entry['pythonAbi']),
+                        'Source runtime did not retrieve its own fixture ID')
+                before = fixture_fingerprint(fixture)
+        # Source and target installs must never overlap on Windows. Even for a
+        # negative historical result, verify the new package's recorded format.
+        if not args.source or not reason:
+            with materialized_app(new_package, target['release'], staging / 'target-app', args.unsigned_test) as resources:
+                runtime, python = verify_runtime(resources, target, new_catalog)
+                if not reason:
+                    entry = new_components['rag']
+                    overlay = extract_overlay(entry, staging / 'target-rag', args.target_components_dir, python, target['config'], tools)
+                    if not index_worker(python, 'read-index', fixture, overlay, runtime, entry['pythonAbi']):
+                        reason = 'index_incompatible'
+                    if 'cluster' in new_components:
+                        cluster = extract_overlay(new_components['cluster'], staging / 'target-cluster', args.target_components_dir,
+                                                  python, target['config'], tools)
+                        output([str(python), '-I', '-B', '-X', 'utf8', str(Path(__file__).with_name('verify-python-components.py')),
+                                '--worker', 'cluster', '--overlay', str(cluster), '--runtime', str(runtime)], timeout=180)
+        if before is not None and fixture_fingerprint(fixture) != before:
+            reason = 'index_incompatible'
 
-    evidence = {
-        'sourceReleaseId': old['releaseId'],
-        'targetReleaseId': new['releaseId'],
-        'dataProfile': target['formatProfile'],
-        'targetComponentsSHA256': target['release']['components']['sha256'],
-        'fixtureSHA256': before,
-        'sourceClasses': [{key: old_components['rag'][key]
-                           for key in ('tag', 'pythonAbi', 'baseFingerprint', 'packages')}],
-        'passed': True,
-        'readOnly': True,
-    }
-    with args.output.open('x', encoding='utf-8') as stream:
-        json.dump(evidence, stream, separators=(',', ':'))
-        stream.write('\n')
+    evidence = {'sourceReleaseId': source['config']['releaseId'], 'targetReleaseId': target['config']['releaseId']}
+    if reason:
+        require(args.published_source, {'format_mismatch': 'Source and target v2 formats differ',
+                                        'component_removed': 'Target removed a source component',
+                                        'index_incompatible': 'Target runtime cannot read the original index unchanged'}[reason])
+        evidence.update(passed=False, reason=reason)
+    else:
+        source_class = {key: old_components['rag'][key] for key in ('tag', 'pythonAbi', 'baseFingerprint', 'packages')}
+        evidence.update(dataProfile=target['formatProfile'], targetComponentsSHA256=target['release']['components']['sha256'],
+                        fixtureSHA256=before, sourceClasses=[source_class], passed=True, readOnly=True)
+    if args.source_record_output:
+        write_json(args.source_record_output, source)
+    write_json(args.output, evidence)
 
 
 def main():
@@ -395,7 +515,11 @@ def main():
     parser.add_argument('--overlay', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--runtime', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--expected-abi', help=argparse.SUPPRESS)
-    parser.add_argument('--source', type=Path, help='Staged source release directory')
+    parser.add_argument('--classify-index', action='store_true', help=argparse.SUPPRESS)
+    sources = parser.add_mutually_exclusive_group()
+    sources.add_argument('--source', type=Path, help='Staged source release directory')
+    sources.add_argument('--published-source', type=Path, help='Source release from the verified historical policy')
+    parser.add_argument('--source-record-output', type=Path, help='Write the reconstructed historical build record')
     parser.add_argument('--target', type=Path, help='Staged target release directory')
     parser.add_argument('--output', type=Path, help='New, immutable format evidence JSON')
     parser.add_argument('--source-components-dir', type=Path, help='Local source component bundle directory')
@@ -412,11 +536,21 @@ def main():
             import milvus_lite
             require(Path(milvus_lite.__file__).resolve().is_relative_to(args.overlay.resolve()),
                     'Milvus Lite must come from the pinned RAG overlay')
-        result = read_index(args.fixture) if args.worker == 'read-index' else create_index(args.fixture)
+        if args.worker == 'read-index':
+            try:
+                result = read_index(args.fixture)
+            except IncompatibleIndex:
+                if not args.classify_index:
+                    raise
+                result = {'status': 'index_incompatible'}
+        else:
+            result = create_index(args.fixture)
         print(json.dumps(result))
         return
-    if not (args.source and args.target and args.output):
-        parser.error('--source, --target and --output are required')
+    if not ((args.source or args.published_source) and args.target and args.output):
+        parser.error('A source, --target and --output are required')
+    if bool(args.published_source) != bool(args.source_record_output):
+        parser.error('--published-source and --source-record-output must be used together')
     generate_evidence(args)
 
 
