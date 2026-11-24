@@ -224,7 +224,7 @@ func TestPackageSourcesRequireMatchingLockedArtifact(t *testing.T) {
 	entry := CatalogSkill{UID: uid, ArchiveSHA256: snapshot.Packages[uid].ArchiveSHA256}
 	const filename = "/Skills/project-tender-lead-discovery__" + uid + ".zip"
 	sources, timeout := packageSources(entry)
-	if timeout != mirroredSourceTimeout || sources[0].name != originSource ||
+	if timeout != MirrorDownloadTimeout || sources[0].name != originSource ||
 		sources[1].url != modelScopeMirrorBase+snapshot.ModelScopeRevision+filename ||
 		sources[2].url != huggingFaceMirrorBase+snapshot.HuggingFaceRevision+filename {
 		t.Fatalf("unexpected pinned sources: %+v", sources)

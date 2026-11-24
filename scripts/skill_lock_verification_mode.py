@@ -1,5 +1,6 @@
 """Select the existing Skill lock verification mode for a pull request."""
 import json
+import re
 import subprocess
 import sys
 
@@ -32,6 +33,25 @@ def remote_lock(text):
     return catalog
 
 
+def workflow_version_only(before, after):
+    # Leave YAML parsing and workflow validation to the frozen catalog build.
+    # Only a single plain, top-level version may differ between existing workflows.
+    def without_version(text):
+        lines = text.splitlines(keepends=True)
+        if sum(line.rstrip() == 'type: workflow' for line in lines) != 1:
+            return None
+        versions = [index for index, line in enumerate(lines) if line.startswith('version:')]
+        if len(versions) != 1 or re.fullmatch(
+            r'version: [0-9]+\.[0-9]+\.[0-9]+', lines[versions[0]].rstrip(),
+        ) is None:
+            return None
+        lines[versions[0]] = 'version:\n'
+        return ''.join(lines)
+
+    previous = without_version(before)
+    return previous is not None and previous == without_version(after)
+
+
 def verification_mode(base):
     protected = [
         'skills/patches', 'skills/featured',
@@ -44,21 +64,30 @@ def verification_mode(base):
     runtime_acquisition = [
         'backend/core/skillv2/builtin/acquire.go',
         'backend/core/skillv2/builtin/acquire_test.go',
-        'backend/core/skillv2/builtin/mirrors.go',
-        'backend/core/skillv2/builtin/mirrors.json',
     ]
-    changed = subprocess.run([
-        'git', 'diff', '--quiet', base, 'HEAD', '--',
+    changed = subprocess.check_output([
+        'git', 'diff', '--name-only', '--no-renames', '-z', base, 'HEAD', '--',
         *(f':(top){path}' for path in protected),
         *(f':(top,exclude){path}' for path in runtime_acquisition),
         # Presentation assets are validated by the frozen catalog build.
         ':(top,glob,exclude)skills/featured/*/assets/**',
-    ])
-    if changed.returncode:
-        return 'full'
+    ], text=True)
 
     def read(revision, path):
-        return subprocess.check_output(['git', 'show', f'{revision}:{path}'], text=True)
+        return subprocess.check_output(
+            ['git', 'show', f'{revision}:{path}'], text=True, stderr=subprocess.PIPE,
+        )
+
+    for path in changed.split('\0'):
+        if not path:
+            continue
+        if not re.fullmatch(r'skills/featured/[^/]+/featured\.yaml', path):
+            return 'full'
+        try:
+            if not workflow_version_only(read(base, path), read('HEAD', path)):
+                return 'full'
+        except subprocess.CalledProcessError:
+            return 'full'
 
     sources_path = 'skills/builtin-sources.yaml'
     before = remote_source_sections(read(base, sources_path))

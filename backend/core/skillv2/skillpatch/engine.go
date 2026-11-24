@@ -19,7 +19,17 @@ type Result struct {
 }
 
 func Apply(target Target, files map[string][]byte, catalog Catalog) (Result, error) {
-	result := Result{Files: cloneFiles(files)}
+	return catalog.resolve(target, cloneFiles(files))
+}
+
+// Describe resolves which current patches target the locked origin and computes
+// their provenance without applying them to package files.
+func (catalog Catalog) Describe(target Target) (Result, error) {
+	return catalog.resolve(target, nil)
+}
+
+func (catalog Catalog) resolve(target Target, files map[string][]byte) (Result, error) {
+	result := Result{Files: files}
 	for _, patch := range catalog.patches {
 		if patch.Target.UID != target.UID || patch.Target.Version != target.Version {
 			continue
@@ -28,8 +38,10 @@ func Apply(target Target, files map[string][]byte, catalog Catalog) (Result, err
 			return Result{}, patchFailure("Skill patch %s origin tree mismatch: got %s, want %s", patch.ID, target.OriginTreeHash, patch.Target.OriginTreeHash)
 		}
 		for _, operation := range patch.Operations {
-			if err := applyOperation(result.Files, patch.ID, operation); err != nil {
-				return Result{}, err
+			if files != nil {
+				if err := applyOperation(files, patch.ID, operation); err != nil {
+					return Result{}, err
+				}
 			}
 			if operation.Path == "SKILL.md" {
 				result.SkillMDPatched = true

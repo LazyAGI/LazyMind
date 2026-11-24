@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -411,6 +412,91 @@ func TestFrozenSkillHubBuildAcceptsLockedArtifactWithoutVersionMetadata(t *testi
 	}
 }
 
+func TestFrozenVerificationUsesOnlyLockedMirrorBytes(t *testing.T) {
+	const originURL = "https://origin.example.test/demo.zip"
+	const msURL = "https://modelscope.example.test/demo.zip"
+	const hfURL = "https://huggingface.example.test/demo.zip"
+	lockedBytes := makeSkillZipWithVersion(t, "1.2.3")
+	driftedBytes := makeSkillZipWithVersion(t, "2.0.0")
+	root := t.TempDir()
+	originPath := filepath.Join(root, "origin.zip")
+	if err := os.WriteFile(originPath, lockedBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := resolveSource(originURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin, err := inspectOrigin(originPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, _, _, err := finalizeEntry(spec, origin, root, skillpatch.Catalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		name         string
+		validURL     string
+		brokenOrigin bool
+		invalidTree  bool
+		wantRequests []string
+		wantErrors   []string
+	}{
+		{name: "origin matches", validURL: originURL, wantRequests: []string{originURL}},
+		{name: "origin drift falls back to ModelScope", validURL: msURL, wantRequests: []string{originURL, msURL}},
+		{name: "unreachable origin and bad ModelScope fall back to Hugging Face", validURL: hfURL,
+			brokenOrigin: true, wantRequests: []string{originURL, originURL, originURL, msURL, hfURL}},
+		{name: "all sources fail", wantRequests: []string{originURL, msURL, hfURL},
+			wantErrors: []string{"origin: download does not match frozen lock origin", "ModelScope: mirror archive", "Hugging Face: mirror archive"}},
+		{name: "matching zip must also match the locked tree", validURL: msURL, invalidTree: true,
+			wantRequests: []string{originURL, msURL, hfURL}, wantErrors: []string{"ModelScope: final package metadata changed"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests []string
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				url := request.URL.String()
+				requests = append(requests, url)
+				if url == originURL && tt.brokenOrigin {
+					return nil, fmt.Errorf("origin unreachable")
+				}
+				body := driftedBytes
+				if url == tt.validURL {
+					body = lockedBytes
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), ContentLength: int64(len(body))}, nil
+			})}
+			entry := locked
+			if tt.invalidTree {
+				entry.TreeSHA256 = strings.Repeat("0", 64)
+			}
+			cache := t.TempDir()
+			current, path, _, err := materializeFrozenFromSources(context.Background(), client, spec, entry, cache, skillpatch.Catalog{}, originURL, msURL, hfURL)
+			if !slices.Equal(requests, tt.wantRequests) {
+				t.Fatalf("requested %v, want %v", requests, tt.wantRequests)
+			}
+			if len(tt.wantErrors) != 0 {
+				for _, expected := range tt.wantErrors {
+					if err == nil || !strings.Contains(err.Error(), expected) {
+						t.Fatalf("error = %v, want %q", err, expected)
+					}
+				}
+				if _, err := os.Stat(filepath.Join(cache, entry.ArchiveSHA256+".zip")); !os.IsNotExist(err) {
+					t.Fatalf("failed archive was cached: %v", err)
+				}
+				return
+			}
+			if err != nil || current.ArchiveSHA256 != entry.ArchiveSHA256 {
+				t.Fatalf("verified entry hash = %q, error = %v", current.ArchiveSHA256, err)
+			}
+			if body, err := os.ReadFile(path); err != nil || !bytes.Equal(body, lockedBytes) {
+				t.Fatalf("cached bytes do not match the lock: %v", err)
+			}
+		})
+	}
+}
+
 func TestRunBuildsCatalogAndFrozenModeUsesVerifiedCache(t *testing.T) {
 	archive := makeSkillZip(t)
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -700,6 +786,30 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 		t.Fatalf("patched script = %q", got)
 	}
 
+	finalBytes, err := os.ReadFile(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirrorClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body := finalBytes
+		if request.URL.String() == sourceURL {
+			body = makeSkillZipWithVersion(t, "2.0.0")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), ContentLength: int64(len(body))}, nil
+	})}
+	verifyMirror := func() error {
+		patches, err := skillpatch.LoadCatalog(filepath.Join(root, "patches", "catalog.yaml"))
+		if err != nil {
+			return err
+		}
+		_, _, _, err = materializeFrozenFromSources(context.Background(), mirrorClient, spec, entry, t.TempDir(), patches,
+			sourceURL, "https://modelscope.example.test/demo.zip", "https://huggingface.example.test/demo.zip")
+		return err
+	}
+	if err := verifyMirror(); err != nil {
+		t.Fatalf("locked final mirror failed verification: %v", err)
+	}
+
 	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
 	opts.FrozenLockfile = true
 	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
@@ -724,6 +834,10 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 	if err := os.WriteFile(payload, []byte("print('drifted')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := verifyMirror(); err == nil || !strings.Contains(err.Error(), "patch provenance changed") {
+		t.Fatalf("mirror verification with changed patch payload = %v", err)
+	}
+
 	opts.Output = filepath.Join(root, "runtime-frozen-drift", "builtin-skills")
 	opts.CatalogOnly = false
 	if err := run(context.Background(), opts, http.DefaultClient); err == nil {

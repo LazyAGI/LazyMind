@@ -13,13 +13,15 @@ import (
 	"time"
 )
 
+// MirrorDownloadTimeout bounds one source attempt when locked mirrors are published.
+const MirrorDownloadTimeout = 90 * time.Second
+
 const (
 	originSource      = "origin"
 	modelScopeSource  = "modelscope"
 	huggingFaceSource = "hugging_face"
 
 	originDownloadTimeout = 5 * time.Minute
-	mirroredSourceTimeout = 90 * time.Second
 
 	modelScopeMirrorBase  = "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/"
 	huggingFaceMirrorBase = "https://huggingface.co/datasets/LazyAGI/LazyMind/resolve/"
@@ -51,19 +53,32 @@ type packageSource struct {
 }
 
 func packageSources(entry CatalogSkill) ([]packageSource, time.Duration) {
-	sources := []packageSource{{name: originSource}, {name: modelScopeSource}, {name: huggingFaceSource}}
+	modelScope, huggingFace := LockedMirrorURLs(entry)
+	sources := []packageSource{
+		{name: originSource},
+		{name: modelScopeSource, url: modelScope},
+		{name: huggingFaceSource, url: huggingFace},
+	}
+	if modelScope == "" {
+		return sources, originDownloadTimeout
+	}
+	return sources, MirrorDownloadTimeout
+}
+
+// LockedMirrorURLs returns the fixed ModelScope and Hugging Face URLs for a
+// published copy of exactly the final archive referenced by the lock entry.
+func LockedMirrorURLs(entry CatalogSkill) (modelScope string, huggingFace string) {
 	snapshot, err := loadMirrorSnapshot()
 	if err != nil {
-		return sources, originDownloadTimeout
+		return "", ""
 	}
 	artifact, ok := snapshot.Packages[entry.UID]
 	if !ok || artifact.ArchiveSHA256 != entry.ArchiveSHA256 {
-		return sources, originDownloadTimeout
+		return "", ""
 	}
 	path := "/Skills/" + url.PathEscape(artifact.Filename)
-	sources[1].url = modelScopeMirrorBase + snapshot.ModelScopeRevision + path
-	sources[2].url = huggingFaceMirrorBase + snapshot.HuggingFaceRevision + path
-	return sources, mirroredSourceTimeout
+	return modelScopeMirrorBase + snapshot.ModelScopeRevision + path,
+		huggingFaceMirrorBase + snapshot.HuggingFaceRevision + path
 }
 
 var (
