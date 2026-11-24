@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
@@ -124,6 +125,9 @@ func TestSharedBridgeReleasePreservesOtherDeployment(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"running":true`) || stopped.Load() {
 		t.Fatalf("stopped borrowed service: %s", w.Body.String())
 	}
+	if w.Flushed {
+		t.Fatal("release with remaining clients flushed a shutdown response")
+	}
 	if _, ok := b.clients["compose"]; !ok {
 		t.Fatal("lost Compose lease")
 	}
@@ -134,6 +138,41 @@ func TestSharedBridgeReleasePreservesOtherDeployment(t *testing.T) {
 	w = lifecycleRequest(s, b, "release", ClientOptions{ID: "compose", Home: b.root})
 	if w.Code != 200 || !b.stopping {
 		t.Fatalf("last owner was not released: %s", w.Body.String())
+	}
+	assertShutdownResponse(t, w, `{"ok":true,"remaining_clients":0,"running":false}`)
+}
+
+func TestIsolatedBridgeFlushesShutdownResponseBeforeStop(t *testing.T) {
+	_, b := sharedTestServer(t)
+	home, err := connectorconfig.EnvironmentHome(b.root, "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := scopedTestServer(t, home)
+	child.isolated = true
+	w := httptest.NewRecorder()
+	flushedAtStop := make(chan bool, 1)
+	child.stop = func() { flushedAtStop <- w.Flushed }
+	r := httptest.NewRequest(http.MethodPost, "/v1/shutdown", nil)
+	r.Header.Set(managementHeader, b.token)
+	child.routes().ServeHTTP(w, r)
+
+	select {
+	case flushed := <-flushedAtStop:
+		if !flushed {
+			t.Fatal("bridge stopped before flushing the HTTP response")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("isolated bridge did not stop")
+	}
+	assertShutdownResponse(t, w, `{"ok":true}`)
+}
+
+func assertShutdownResponse(t *testing.T, w *httptest.ResponseRecorder, body string) {
+	t.Helper()
+	if result := w.Result(); result.StatusCode != http.StatusOK || !w.Flushed ||
+		result.ContentLength != int64(w.Body.Len()) || w.Body.String() != body+"\n" {
+		t.Fatalf("invalid shutdown response: status=%d flushed=%v content-length=%d body=%q", result.StatusCode, w.Flushed, result.ContentLength, w.Body.String())
 	}
 }
 
