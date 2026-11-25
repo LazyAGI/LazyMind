@@ -86,15 +86,26 @@ func CurrentVersion() string {
 	return version
 }
 
-func StatusIssue(status Status) string {
+// ControlIssue reports the native capability independently of Bridge health.
+func ControlIssue(status Status) string {
 	switch status.Issue {
-	case "unsupported_version", "version_unreadable", "capability_unavailable", "host_unavailable",
-		"lazymind_unavailable", "lazymind_auth_required", "pairing_required", "pairing_disabled",
-		"pairing_account_mismatch", "pairing_credential_mismatch", "pairing_invalid", "pairing_unreadable":
+	case "unsupported_version", "version_unreadable", "capability_unavailable", "host_unavailable":
 		return status.Issue
+	case "lazymind_unavailable", "lazymind_auth_required", "pairing_required", "pairing_disabled",
+		"pairing_account_mismatch", "pairing_credential_mismatch", "pairing_invalid", "pairing_unreadable":
+		// Legacy writers only set a Bridge issue after the native probe passed.
+	case "":
+		if !status.Ready {
+			return "host_unavailable"
+		}
+	default:
+		return "host_unavailable"
 	}
-	if status.Version != "" || status.Ready {
-		return VersionIssue(status.Version)
+	if issue := VersionIssue(status.Version); issue != "" {
+		return issue
+	}
+	if status.Cancellation != "session" {
+		return "capability_unavailable"
 	}
 	return ""
 }

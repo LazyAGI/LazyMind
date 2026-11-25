@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 	"os"
 	"path/filepath"
@@ -69,7 +70,9 @@ func TestWaitReadyRequiresAHeartbeatAfterInstallationWithCancellation(t *testing
 		{"unsupported layout", "session", "5.7.7", time.Now(), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body, _ := json.Marshal(Status{ConnectorID: pair.ConnectorID, Version: tc.version, Ready: true, Cancellation: tc.cancellation, CheckedAt: tc.checked.UnixMilli(), BridgeURL: "http://127.0.0.1:19091"})
+			status := Status{ConnectorID: pair.ConnectorID, Version: tc.version, Ready: true, Cancellation: tc.cancellation, CheckedAt: tc.checked.UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+			status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, "")
+			body, _ := json.Marshal(status)
 			if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
 				t.Fatal(err)
 			}
@@ -98,6 +101,11 @@ func waitReadyFixture(t *testing.T) (string, Config, workflowhost.Pairing) {
 	return home, config, pair
 }
 
+func readinessEvidence(pair workflowhost.Pairing, at int64, issue string) workflowconnector.ConnectionEvidence {
+	return workflowconnector.ConnectionEvidence{PairingRevision: pair.RuntimeRevision,
+		Connection: &workflowconnector.ConnectionObservation{CheckedAt: at, Issue: issue}}
+}
+
 func TestWaitReadyAllowsTransientStartupStatusToRecover(t *testing.T) {
 	for _, issue := range []string{"capability_unavailable", "pairing_disabled"} {
 		t.Run(issue, func(t *testing.T) {
@@ -105,6 +113,11 @@ func TestWaitReadyAllowsTransientStartupStatusToRecover(t *testing.T) {
 			since := time.Now().Add(-time.Second)
 			status := Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: issue,
 				CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+			switch issue {
+			case "lazymind_unavailable", "lazymind_auth_required", "pairing_disabled", "pairing_account_mismatch":
+				status.Issue, status.Ready, status.Cancellation = "", true, "session"
+				status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, issue)
+			}
 			body, _ := json.Marshal(status)
 			if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
 				t.Fatal(err)
@@ -114,6 +127,7 @@ func TestWaitReadyAllowsTransientStartupStatusToRecover(t *testing.T) {
 				time.Sleep(30 * time.Millisecond)
 				status.Issue, status.Ready, status.Cancellation = "", true, "session"
 				status.CheckedAt = time.Now().UnixMilli()
+				status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, "")
 				body, _ := json.Marshal(status)
 				updated <- writeAtomic(config.PairingFile+".workbuddy-status.json", body)
 			}()
@@ -147,8 +161,14 @@ func TestWaitReadyDistinguishesStartupFromTerminalFailures(t *testing.T) {
 	} {
 		t.Run(sample.issue, func(t *testing.T) {
 			home, config, pair := waitReadyFixture(t)
-			body, _ := json.Marshal(Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: sample.issue,
-				CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"})
+			status := Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: sample.issue,
+				CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+			switch sample.issue {
+			case "lazymind_unavailable", "lazymind_auth_required", "pairing_disabled", "pairing_account_mismatch":
+				status.Issue, status.Ready, status.Cancellation = "", true, "session"
+				status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, sample.issue)
+			}
+			body, _ := json.Marshal(status)
 			if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
 				t.Fatal(err)
 			}

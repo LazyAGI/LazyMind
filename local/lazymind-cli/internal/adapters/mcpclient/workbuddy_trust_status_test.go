@@ -13,12 +13,13 @@ import (
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workbuddyhost"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
 func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 	for _, tc := range []struct {
-		name, health, approvals, want                             string
+		name, health, approvals, want, pollIssue, lazyMindState   string
 		heartbeat, revoke, disablePair, signOut, disableConnector bool
 	}{
 		{name: "first rejection", approvals: "{}", heartbeat: true, want: "mcp_trust_required"},
@@ -28,7 +29,10 @@ func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 		{name: "revoked trust with CDP outage", revoke: true, heartbeat: true, health: "cdp_unavailable", want: "mcp_trust_required"},
 		{name: "revoked trust while closed", revoke: true, health: "waiting_for_app", want: "mcp_trust_required"},
 		{name: "revoked trust with startup outage", revoke: true, health: "startup_unavailable", want: "mcp_trust_required"},
-		{name: "trusted connection", heartbeat: true},
+		{name: "trusted connection", heartbeat: true, lazyMindState: "connected"},
+		{name: "legacy heartbeat", heartbeat: true, pollIssue: "legacy", lazyMindState: "pending", want: "lazymind_pending"},
+		{name: "expired LazyMind authorization", heartbeat: true, pollIssue: "lazymind_auth_required", lazyMindState: "authorization_required", want: "lazymind_auth_required"},
+		{name: "temporary LazyMind outage", heartbeat: true, pollIssue: "lazymind_unavailable", lazyMindState: "unavailable", want: "lazymind_unavailable"},
 		{name: "trusted CDP outage", heartbeat: true, health: "cdp_unavailable", want: "cdp_unavailable"},
 		{name: "trusted missing heartbeat", want: "host_unavailable"},
 		{name: "disabled connector", disableConnector: true, heartbeat: true, want: "mcp_enable_required"},
@@ -81,9 +85,15 @@ func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 			body, _ := json.Marshal(config)
 			writeTestFile(t, workbuddyhost.ConfigPath(a.home), string(body))
 			if tc.heartbeat {
-				body, _ = json.Marshal(workbuddyhost.Status{ConnectorID: pair.ConnectorID, CheckedAt: time.Now().UnixMilli(),
+				checked := time.Now().UnixMilli()
+				evidence := workflowconnector.ConnectionEvidence{PairingRevision: pair.RuntimeRevision,
+					Connection: &workflowconnector.ConnectionObservation{CheckedAt: checked, Issue: tc.pollIssue}}
+				if tc.pollIssue == "legacy" {
+					evidence = workflowconnector.ConnectionEvidence{}
+				}
+				body, _ = json.Marshal(workbuddyhost.Status{ConnectorID: pair.ConnectorID, CheckedAt: checked, ConnectionEvidence: evidence,
 					Ready: true, Cancellation: "session", Version: "5.9.3", BridgeURL: "http://127.0.0.1:9334",
-					Presentation: workbuddyhost.PresentationStatus{Status: "mounted"}})
+					Presentation: workbuddyhost.PresentationStatus{Status: "binding-unavailable"}})
 				writeTestFile(t, config.PairingFile+".workbuddy-status.json", string(body))
 			}
 			previous := workBuddyStartupHealth
@@ -143,6 +153,10 @@ func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("issue=%q want %q; status=%+v connection=%+v", got, tc.want, status, status.Connection)
+			}
+			if tc.lazyMindState != "" && (status.Connection == nil || !status.Connection.ControlReady ||
+				status.Connection.LazyMindState != tc.lazyMindState || status.Connection.PresentationStatus != "binding-unavailable") {
+				t.Fatalf("control, LazyMind and panel status were conflated: %+v", status.Connection)
 			}
 			if status.Enabled == nil || !*status.Enabled || !status.CanDisconnect {
 				t.Fatalf("lost configured switch: %+v", status)

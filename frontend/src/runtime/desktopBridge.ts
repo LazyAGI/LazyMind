@@ -101,6 +101,7 @@ export interface DesktopAgentAction {
 
 export interface DesktopAgentConnectionStatus {
   runtime_state?: "waiting" | "connection_required" | "connected" | "unavailable";
+  lazymind_state?: "pending" | "connected" | "authorization_required" | "unavailable";
   mcp_trusted?: boolean;
   mcp_enabled?: boolean;
   mcp_configured: boolean;
@@ -135,7 +136,7 @@ export interface DesktopAgentIntegrationStatus {
   };
   enabled?: boolean;
   login?: { state: "running" | "succeeded" | "failed" | "cancelled"; message?: string };
-  issue?: { stage?: string; operation_id?: string; code: "environment_mismatch" | "configuration_unreadable" | "workbuddy_login_required" | "workbuddy_auth_unreadable" | "quit_required" | "disconnect_pending" | "process_inspection_failed" | "control_port_conflict" | "control_window_unavailable" | "launch_failed" | "startup_timeout" | "runtime_unavailable" | "lazymind_auth_required" | "lazymind_unavailable" | "configuration_failed" | "operation_busy" | "operation_cancelled" | "startup_unavailable" | "pairing_required" | "pairing_disabled" | "pairing_account_mismatch" | "pairing_credential_mismatch" | "pairing_invalid" | "pairing_unreadable" | "mcp_trust_required" | "mcp_enable_required" | "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable" | "startup_unavailable" | "installation_unavailable" | "cdp_unavailable"; path?: string };
+  issue?: { stage?: string; operation_id?: string; code: "environment_mismatch" | "configuration_unreadable" | "workbuddy_login_required" | "workbuddy_auth_unreadable" | "quit_required" | "disconnect_pending" | "process_inspection_failed" | "control_port_conflict" | "control_window_unavailable" | "launch_failed" | "startup_timeout" | "runtime_unavailable" | "lazymind_pending" | "lazymind_auth_required" | "lazymind_unavailable" | "configuration_failed" | "operation_busy" | "operation_cancelled" | "startup_unavailable" | "pairing_required" | "pairing_disabled" | "pairing_account_mismatch" | "pairing_credential_mismatch" | "pairing_invalid" | "pairing_unreadable" | "mcp_trust_required" | "mcp_enable_required" | "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable" | "startup_unavailable" | "installation_unavailable" | "cdp_unavailable"; path?: string };
 	can_connect?: boolean;
 	can_disconnect?: boolean;
 	retry_action?: "connect" | "disconnect";

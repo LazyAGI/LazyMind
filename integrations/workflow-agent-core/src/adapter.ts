@@ -52,7 +52,7 @@ export interface ToolCall<A> {
 export interface PanelView { chatId: string | null; epoch: string }
 export interface PanelTarget { runId: string; frameUrl: string }
 export type WatchView = (report: (view: PanelView) => void, signal: AbortSignal) => Promise<void>
-export type BindingResult = { status: 'bound'; runId: string } | { status: 'unbound' | 'access-denied' | 'unavailable' }
+export type BindingResult = { status: 'bound'; runId: string } | { status: 'unbound' | 'access-denied' | 'unavailable'; retryAt?: number }
 export type LookupBinding = (chatId: string, signal: AbortSignal) => Promise<BindingResult>
 export type PanelResult = 'mounted' | 'reused' | 'unmounted' | 'stale' | 'layout-unavailable'
 export interface PanelSyncResult { status: PanelResult; pageStatus?: string; issue?: string }

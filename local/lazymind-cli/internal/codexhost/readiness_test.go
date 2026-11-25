@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -34,14 +35,32 @@ func writeReadiness(file string, status Status) error {
 	return localfile.Write(file, body, 0600)
 }
 
+func readinessEvidence(pair workflowhost.Pairing, at int64, issue string) workflowconnector.ConnectionEvidence {
+	return workflowconnector.ConnectionEvidence{PairingRevision: pair.RuntimeRevision,
+		Connection: &workflowconnector.ConnectionObservation{CheckedAt: at, Issue: issue}}
+}
+
 func TestWaitReadyRequiresFreshHealthyHeartbeatAndLiveControl(t *testing.T) {
-	for _, scenario := range []string{"ready", "missing", "before-restart", "expired", "future", "other-connector", "not-ready", "capability_unavailable", "cdp_unavailable", "control_window_unavailable", "live-control-lost", "live-cdp-lost", "live-window-lost"} {
+	for _, scenario := range []string{"ready", "missing", "old-worker", "old-poll", "old-pairing", "lazymind_unavailable", "before-restart", "expired", "future", "other-connector", "not-ready", "capability_unavailable", "cdp_unavailable", "control_window_unavailable", "live-control-lost", "live-cdp-lost", "live-window-lost"} {
 		t.Run(scenario, func(t *testing.T) {
 			home, pair, file := readinessFixture(t)
 			since := time.Now().Add(-time.Second)
 			status := Status{Connector: pair.ConnectorID, Ready: true, CheckedAt: time.Now().UnixMilli()}
+			status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, "")
 			wantIssue := "host_unavailable"
 			switch scenario {
+			case "old-worker":
+				status.Connection = nil
+				wantIssue = workflowconnector.ConnectionPending
+			case "old-poll":
+				status.Connection.CheckedAt = since.Add(-time.Second).UnixMilli()
+				wantIssue = workflowconnector.ConnectionPending
+			case "old-pairing":
+				status.PairingRevision = "previous"
+				wantIssue = workflowconnector.ConnectionPending
+			case "lazymind_unavailable":
+				status.Connection.Issue = scenario
+				wantIssue = scenario
 			case "before-restart":
 				status.CheckedAt = since.Add(-time.Second).UnixMilli()
 			case "expired":
@@ -96,6 +115,7 @@ func TestWaitReadyRetriesInitializingControl(t *testing.T) {
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		status.Ready, status.Issue, status.CheckedAt = true, "", time.Now().UnixMilli()
+		status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, "")
 		updated <- writeReadiness(file, status)
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -111,7 +131,9 @@ func TestWaitReadyRetriesInitializingControl(t *testing.T) {
 
 func TestWaitReadyRejectsPairingRevokedDuringLiveProbe(t *testing.T) {
 	home, pair, file := readinessFixture(t)
-	if err := writeReadiness(file, Status{Connector: pair.ConnectorID, Ready: true, CheckedAt: time.Now().UnixMilli()}); err != nil {
+	status := Status{Connector: pair.ConnectorID, Ready: true, CheckedAt: time.Now().UnixMilli()}
+	status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, "")
+	if err := writeReadiness(file, status); err != nil {
 		t.Fatal(err)
 	}
 	controlProbe = func(context.Context, string, Config) (bool, error) {
@@ -124,5 +146,21 @@ func TestWaitReadyRejectsPairingRevokedDuringLiveProbe(t *testing.T) {
 	var pairing *workflowhost.PairingError
 	if !errors.As(err, &pairing) || pairing.Code != "HOST_PAIRING_DISABLED" {
 		t.Fatalf("accepted revoked pairing: %v", err)
+	}
+}
+
+func TestWaitReadyReportsExpiredLazyMindAuthorizationWithoutProbingHostAgain(t *testing.T) {
+	home, pair, file := readinessFixture(t)
+	status := Status{Connector: pair.ConnectorID, Ready: true, CheckedAt: time.Now().UnixMilli()}
+	status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, "lazymind_auth_required")
+	if err := writeReadiness(file, status); err != nil {
+		t.Fatal(err)
+	}
+	controlProbe = func(context.Context, string, Config) (bool, error) {
+		t.Fatal("ran a live host probe before the Core connection verified")
+		return false, nil
+	}
+	if got := SetupIssue(WaitReady(context.Background(), home, "account", time.Now().Add(-time.Second))); got != "lazymind_auth_required" {
+		t.Fatalf("got %q", got)
 	}
 }

@@ -12,12 +12,15 @@ function fixture() {
     resolve: vi.fn(async id => ({ agent: id })), prompt: vi.fn(async () => 0), cancel: vi.fn(), warn: vi.fn() }
   const bridge = { actions: vi.fn<HostTransport['actions']>(async () => ({ actions: [] })), action: vi.fn(), bind: vi.fn(),
     state: vi.fn(), claim: vi.fn(), settle: vi.fn() } satisfies HostTransport
-  return { runtime, bridge, lifetime, poll: () => createDispatcher(runtime, undefined, bridge, 'worker', lifetime.signal).poll() }
+  const dispatcher = createDispatcher(runtime, undefined, bridge, 'worker', lifetime.signal)
+  return { runtime, bridge, lifetime, dispatcher, poll: dispatcher.poll }
 }
 it.each([401, 403])('waits for authorization recovery after HTTP %s and resumes without restarting', async status => {
   const f = fixture()
   f.bridge.actions.mockRejectedValue(new BridgeError('HOST_CREDENTIAL_MISMATCH', 'private raw error', status))
+  expect(f.dispatcher.connection).toBeUndefined()
   const polling = f.poll(); await vi.advanceTimersByTimeAsync(0)
+  expect(f.dispatcher.connection?.issue).toBe('pairing_credential_mismatch')
   await vi.advanceTimersByTimeAsync(29_999)
   expect(f.bridge.actions).toHaveBeenCalledTimes(1)
   expect(f.runtime.warn).toHaveBeenCalledTimes(1)
@@ -26,6 +29,7 @@ it.each([401, 403])('waits for authorization recovery after HTTP %s and resumes 
   f.bridge.actions.mockResolvedValue({ actions: [] })
   await vi.advanceTimersByTimeAsync(1)
   expect(f.bridge.actions).toHaveBeenCalledTimes(2)
+  expect(f.dispatcher.connection).toEqual({ checked_at: Date.now(), issue: '' })
   await vi.advanceTimersByTimeAsync(1000)
   expect(f.bridge.actions).toHaveBeenCalledTimes(3)
   f.lifetime.abort(); await polling
@@ -66,6 +70,7 @@ it.each(['PERMISSION_DENIED', 'HOST_AUTH_REQUIRED'])('continues dispatch after a
   const polling = f.poll(); await vi.advanceTimersByTimeAsync(0)
   expect(f.bridge.claim).toHaveBeenCalledTimes(2)
   expect(f.runtime.prompt).toHaveBeenCalledOnce()
+  expect(f.dispatcher.connection?.issue).toBe('')
   expect(f.runtime.prompt).toHaveBeenCalledWith('b', expect.objectContaining({ actionId: 'b' }), f.lifetime.signal)
   f.lifetime.abort(); await polling
 })
@@ -85,4 +90,19 @@ it('does not repeat authorization warnings on unsuccessful recovery probes', asy
   expect(f.bridge.actions).toHaveBeenCalledTimes(3)
   expect(f.runtime.warn).toHaveBeenCalledTimes(1)
   f.lifetime.abort(); await polling
+})
+
+it('requires a valid actions page and ignores cancelled replies', async () => {
+  const f = fixture()
+  f.bridge.actions.mockResolvedValueOnce({} as Awaited<ReturnType<HostTransport['actions']>>)
+  let finish!: (page: {actions: []}) => void
+  f.bridge.actions.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const polling = f.poll()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(f.dispatcher.connection?.issue).toBe('lazymind_unavailable')
+  await vi.advanceTimersByTimeAsync(1000)
+  f.lifetime.abort()
+  finish({ actions: [] })
+  await polling
+  expect(f.dispatcher.connection?.issue).toBe('lazymind_unavailable')
 })

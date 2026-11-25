@@ -79,6 +79,7 @@ async function main() {
     connectionRecovery(values['bridge-url']!, pairing, signal))
   let presentation: PresentationStatus = { status: 'starting', checked_at: Date.now() }
   const lookupBinding = bridge.lookupBinding('codex')
+  const dispatcher = createDispatcher(adapter, adapter.host, bridge, instance, signal)
   const connector = {
     connector_entry: fileURLToPath(import.meta.url),
     connector_version: process.env.LAZYMIND_WORKFLOW_CONNECTOR_VERSION,
@@ -93,7 +94,7 @@ async function main() {
       if (stopFile && await stat(stopFile).then(info => info.isFile(), () => false)) return stop()
       process.kill(parent, 0)
       const latest = JSON.parse(await readFile(path, 'utf8'))
-      if (!latest.enabled || latest.token !== pairing.token) stop()
+      if (!latest.enabled || latest.token !== pairing.token || latest.runtime_revision !== pairing.runtime_revision) stop()
     } catch { stop() }
   }, 1000)
   async function heartbeat() {
@@ -105,13 +106,14 @@ async function main() {
         ready = probe.ready; issue = probe.issue
       } catch { issue = 'cdp_unavailable' }
       try {
-        await writeFile(temp, JSON.stringify({ ...connector, connector_id: pairing.connector_id, checked_at: Date.now(), ready, issue, presentation }), { mode: 0o600 })
+        await writeFile(temp, JSON.stringify({ ...connector, connector_id: pairing.connector_id, checked_at: Date.now(), ready, issue,
+          connection: dispatcher.connection, pairing_revision: pairing.runtime_revision, presentation }), { mode: 0o600 })
         await rename(temp, file)
       } catch {}
       try { await delay(2000, undefined, { signal }) } catch { break }
     }
   }
-  try { await Promise.all([heartbeat(), createDispatcher(adapter, adapter.host, bridge, instance, signal).poll(),
+  try { await Promise.all([heartbeat(), dispatcher.poll(),
     presentationLoop(Number(values['cdp-port']), lookupBinding, values['bridge-url']!, signal, value => { presentation = value })]) }
   finally { stop(); clearInterval(timer); await unlock(); process.off('SIGINT', stop); process.off('SIGTERM', stop) }
 }

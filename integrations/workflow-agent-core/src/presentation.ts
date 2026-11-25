@@ -57,7 +57,7 @@ export async function runPresentation({ watchView, lookupBinding, ui, frameUrl, 
         try { binding = await lookupBinding(view.chatId, active) }
         catch { binding = { status: 'unavailable' } }
         if (active.aborted) return
-        const refreshAt = Date.now() + bindingRefreshMs
+        const refreshAt = Math.max(Date.now() + bindingRefreshMs, 'retryAt' in binding ? binding.retryAt ?? 0 : 0)
         if (binding.status === 'bound') await apply({ runId: binding.runId, frameUrl }, undefined, refreshAt)
         else if (binding.status === 'unavailable') publish('binding-unavailable')
         else await apply(null, binding.status)
@@ -71,7 +71,7 @@ export async function runPresentation({ watchView, lookupBinding, ui, frameUrl, 
   try {
     await watchView(view => {
       if (signal.aborted || current?.view.epoch === view.epoch && current.view.chatId === view.chatId) return
-      const clear = current !== undefined && current.view.chatId !== view.chatId
+      const clear = current !== undefined
       current?.stop.abort()
       const stop = new AbortController()
       current = { view, stop }

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
-// StatusIssue only exposes known connector categories, never renderer errors.
-func StatusIssue(status Status) string {
+// ControlIssue reports whether the host exposes session control.
+func ControlIssue(status Status) string {
 	switch status.Issue {
 	case "cdp_unavailable", "capability_unavailable", "control_window_unavailable", "host_unavailable":
 		return status.Issue
@@ -33,20 +35,37 @@ func WaitReady(ctx context.Context, home, account string, since time.Time) error
 		if err := ctx.Err(); err != nil {
 			return setupError(lastIssue, err)
 		}
-		if _, _, err := Load(home, account); err != nil {
+		config, pair, err := Load(home, account)
+		if err != nil {
 			return err
 		}
-		status, err := ReadStatus(home, account)
+		status, err := readStatus(config, pair)
 		lastIssue = "host_unavailable"
 		if err == nil && status.CheckedAt >= since.UnixMilli() {
-			lastIssue = StatusIssue(status)
+			lastIssue = ControlIssue(status)
+			if lastIssue == "" {
+				lastIssue = status.ConnectionEvidence.Issue(pair.RuntimeRevision, status.CheckedAt, since)
+				if lastIssue != "" && !workflowconnector.ConnectionRetryable(lastIssue) {
+					return setupError(lastIssue, errors.New("Codex Workflow connection authorization failed"))
+				}
+			}
 			if lastIssue == "" {
 				if err := CheckConnection(ctx, home); err == nil {
 					// The awaited live probe must not outlive pairing authorization.
-					if _, _, err := Load(home, account); err != nil {
+					config, pair, err := Load(home, account)
+					if err != nil {
 						return err
 					}
-					return nil
+					lastIssue = "host_unavailable"
+					if current, err := readStatus(config, pair); err == nil && current.CheckedAt >= since.UnixMilli() {
+						lastIssue = ControlIssue(current)
+						if lastIssue == "" {
+							lastIssue = current.ConnectionEvidence.Issue(pair.RuntimeRevision, current.CheckedAt, since)
+							if lastIssue == "" {
+								return nil
+							}
+						}
+					}
 				} else {
 					lastIssue = SetupIssue(err)
 					var issue *ConnectionIssue

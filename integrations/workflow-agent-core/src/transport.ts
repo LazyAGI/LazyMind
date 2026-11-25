@@ -1,7 +1,10 @@
 import type { WorkflowControl } from './protocol'
 import type { LookupBinding } from './adapter'
+import { RequestRetry } from './request-retry'
+import { BridgeError, isHostAuthorizationError } from './transport-errors'
+export { BridgeError, isHostAuthorizationError } from './transport-errors'
 
-export interface Pairing { connector_id: string; token: string }
+export interface Pairing { connector_id: string; token: string; runtime_revision?: string }
 export interface HostAction {
   id: string
   session_id: string
@@ -17,18 +20,6 @@ export interface HostAction {
 }
 export interface ActionClaim { action: HostAction; dispatch_token?: string; control: WorkflowControl }
 export type HostTransport = Pick<HostBridge, 'bind' | 'state' | 'actions' | 'action' | 'claim' | 'settle'>
-
-export class BridgeError extends Error {
-  constructor(readonly code: string, message: string, readonly status: number) { super(message) }
-}
-
-export function isHostAuthorizationError(error: unknown): error is BridgeError {
-  // Core can reject an individual action or receipt with 403 (including HOST_AUTH_REQUIRED).
-  // The Bridge reports a missing LazyMind session with 401 and pairing failures with explicit codes.
-  return error instanceof BridgeError && (error.status === 401
-    || ['HOST_PAIRING_MISSING', 'HOST_PAIRING_DISABLED', 'HOST_ACCOUNT_MISMATCH',
-      'HOST_CREDENTIAL_MISMATCH', 'HOST_PAIRING_INVALID', 'HOST_PAIRING_UNREADABLE'].includes(error.code))
-}
 
 export class HostBridge {
   private readonly base: string
@@ -85,23 +76,31 @@ export class HostBridge {
     })
   }
 
-  lookupBinding(provider: 'codex' | 'workbuddy', track: (request: () => Promise<string>, signal: AbortSignal) => Promise<string> = request => request()): LookupBinding {
+  lookupBinding(provider: 'codex' | 'workbuddy'): LookupBinding {
+    // Presentation supplies a new signal for each view, including when returning
+    // to the same chat. Old requests cannot touch the new view's retry state.
+    const retries = new WeakMap<AbortSignal, RequestRetry>()
     return async (chatId, signal) => {
+      signal.throwIfAborted()
+      let retry = retries.get(signal)
+      if (!retry) { retry = new RequestRetry(); retries.set(signal, retry) }
       try {
-        const runId = await track(async () => {
-          const url = new URL(`/v1/${provider}/presentation`, this.base)
-          url.searchParams.set('session_id', chatId)
-          const response = await this.requestURL<{ session_id: unknown; run_id: unknown }>(url, signal)
-          if (response.session_id !== chatId || typeof response.run_id !== 'string'
-            || response.run_id !== '' && !/^[a-zA-Z0-9_-]{1,256}$/.test(response.run_id)) throw new Error('Invalid presentation response')
-          return response.run_id
-        }, signal)
+        const url = new URL(`/v1/${provider}/presentation`, this.base)
+        url.searchParams.set('session_id', chatId)
+        const response = await this.requestURL<{ session_id: unknown; run_id: unknown }>(url, signal)
         signal.throwIfAborted()
-        return runId ? { status: 'bound', runId } : { status: 'unbound' }
+        if (response.session_id !== chatId || typeof response.run_id !== 'string'
+          || response.run_id !== '' && !/^[a-zA-Z0-9_-]{1,256}$/.test(response.run_id)) throw new Error('Invalid presentation response')
+        retry.succeeded()
+        return response.run_id ? { status: 'bound', runId: response.run_id } : { status: 'unbound' }
       } catch (error) {
         signal.throwIfAborted()
-        return { status: error instanceof BridgeError && (error.status === 403 || isHostAuthorizationError(error))
-          ? 'access-denied' : 'unavailable' }
+        if (error instanceof BridgeError && error.status === 403 && !isHostAuthorizationError(error)) {
+          retry.succeeded()
+          return { status: 'access-denied' }
+        }
+        const { authorization } = retry.failed(error)
+        return { status: authorization ? 'access-denied' : 'unavailable', retryAt: retry.retryAt }
       }
     }
   }

@@ -8,6 +8,7 @@ import { agentIntegrationStatuses, type DesktopAgentIntegrationStatus } from "@/
 import { workbuddyErrorMessage } from "./workbuddyErrors";
 import { codexErrorMessage } from "./codexErrors";
 import { requiresAgentQuit } from "./agentActions";
+import { agentConnectionReady, lazyMindConnectionIssue } from "./agentConnection";
 import RepairRequestCopy from "./RepairRequestCopy";
 
 type Stage = "nodeRequired" | "prepare" | "installing" | "login" | "quitRequired" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
@@ -51,9 +52,17 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
   const checkLocalNode = agent === "codex" && (isLocalRuntime() || isDesktopRuntime());
   // An installed plugin survives a normal Codex launch without CDP. It must
   // still go through the explicit connection/restart step before confirmation.
-  const [stage, setStage] = useState<Stage>(requiresAgentQuit(status) ? "quitRequired" : status?.state === "enabled" && status.connection?.mcp_configured
-    && (agent === "codex" ? status.connection.control_ready && !status.issue
-      : !status.issue || ["mcp_trust_required", "mcp_enable_required"].includes(status.issue.code)) ? confirmationStage : "prepare");
+  const connection = status?.connection;
+  const issue = status?.issue?.code;
+  const configured = status?.state === "enabled" && connection?.mcp_configured;
+  let initialStage: Stage = "prepare";
+  if (requiresAgentQuit(status)) initialStage = "quitRequired";
+  else if (configured && (!issue || ["mcp_trust_required", "mcp_enable_required"].includes(issue))) {
+    if (agent === "workbuddy" || connection.control_ready) initialStage = confirmationStage;
+  } else if (configured && connection.control_ready && ["pending", "authorization_required", "unavailable"].includes(connection.lazymind_state ?? "")) {
+    initialStage = "verify";
+  }
+  const [stage, setStage] = useState<Stage>(initialStage);
   const [error, setError] = useState("");
   const [zoomed, setZoomed] = useState(false);
   const [diagnostics, setDiagnostics] = useState(status);
@@ -133,7 +142,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     busy.current = true;
     if (!automatic) { setStage("checking"); setError(""); }
     const checkFailed = () => {
-      if (!automatic || agent === "codex" && stage === "notReady") {
+      if (!automatic || stage === "notReady") {
         setError(text("checkFailedDescription")); setDiagnostics(undefined);
         if (!automatic) setStage("notReady");
       }
@@ -147,7 +156,8 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       const connection = current?.connection;
       const configured = current?.state === "enabled" && connection?.mcp_configured;
       const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
-      const ready = connectorReady && connection.control_ready && !current?.issue;
+      const ready = agentConnectionReady(current);
+      const lazyMindIssue = connectorReady && connection.control_ready && lazyMindConnectionIssue(current);
       // Keep the failed operation and its diagnostic together until retry or recovery.
       if (automatic && stage === "installFailed" && !ready) return;
       if (automatic && current?.issue?.code === "pairing_account_mismatch") {
@@ -156,14 +166,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
         setStage("notReady");
         return;
       }
-      if (!automatic || agent === "codex" || ready) setDiagnostics(current);
-      if (automatic && !ready) {
-        if (agent === "codex" && stage === "notReady") {
-          setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
-        }
-        return;
-      }
-      if (!ready && agent === "codex") setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
+      if (automatic && stage !== "notReady" && !ready) return;
+      setDiagnostics(current);
+      if (!ready && lazyMindIssue && !current?.issue) setError(t(`agentIntegration.connectionIssues.${lazyMindIssue}`));
+      else if (!ready && agent === "codex") setError(codexErrorMessage(current, t, connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
       else if (!ready && current?.issue) setError(workbuddyErrorMessage(current, t));
       else if (connectorReady && !connection?.control_ready) setError(text("controlUnavailableDescription"));
       else if (!ready) setError(text(!configured ? "configurationMissingDescription"

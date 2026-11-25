@@ -4,13 +4,13 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createDispatcher } from '../../../workflow-agent-core/src/dispatcher'
-import { BridgeError, HostBridge, type Pairing } from '../../../workflow-agent-core/src/transport'
+import type { Pairing } from '../../../workflow-agent-core/src/transport'
 import { dispatcherLock, DispatcherBusy } from '../../../workflow-agent-core/node/runtime-lock'
 import { WorkBuddyAdapter } from './adapter'
 import { Cdp } from './cdp'
 import { cleanupPresentation, presentationLoop, type PresentationStatus } from './presentation'
 import { createDiagnostics, diagnosedTransport } from './diagnostics'
-import { BridgeHealth } from './bridge-health'
+import { workBuddyConnection } from './connection'
 
 async function main() {
   const { values } = parseArgs({ options: {
@@ -41,7 +41,6 @@ async function main() {
     } finally { await release() }
     return
   }
-  const bridge = new HostBridge(values['bridge-url']!, pairing) // Validates loopback URL before credential use.
   const lifetime = new AbortController()
   const signal = lifetime.signal
   const stop = () => lifetime.abort()
@@ -51,14 +50,11 @@ async function main() {
   const cdp = new Cdp(Number(values['cdp-port']))
   const log = createDiagnostics(pairing.connector_id)
   const adapter = new WorkBuddyAdapter(cdp, log)
-  const bridgeHealth = new BridgeHealth(issue => log('connector.warning', { kind: 'bridge-health', status: issue || 'connected' }))
-  const transport = diagnosedTransport(bridge, log, bridgeHealth)
-  const lookupBinding = bridge.lookupBinding('workbuddy', async (request, active) => {
-    await bridgeHealth.wait('workbuddy', active)
-    return bridgeHealth.track('workbuddy', request, active)
-  })
+  const { bridge, identities, lookupBinding } = workBuddyConnection(values['bridge-url']!, pairing, adapter, log, signal)
+  const transport = diagnosedTransport(bridge, log)
   const instance = randomUUID()
   const unlock = await dispatcherLock(path, instance)
+  const dispatcher = createDispatcher(adapter, adapter.control(signal), transport, instance, signal)
   // Parent is Assistant Bridge, never an MCP connection or iframe.
   const stopFile = values['stop-file']
   const timer = setInterval(async () => {
@@ -66,7 +62,7 @@ async function main() {
       if (stopFile && await stat(stopFile).then(info => info.isFile(), () => false)) return stop()
       if (parent) process.kill(parent, 0)
       const current = JSON.parse(await readFile(path, 'utf8'))
-      if (!current.enabled || current.token !== pairing.token) stop()
+      if (!current.enabled || current.token !== pairing.token || current.runtime_revision !== pairing.runtime_revision) stop()
     } catch { stop() }
   }, 1000)
   const statusPath = path + '.workbuddy-status.json'
@@ -83,58 +79,20 @@ async function main() {
       let version = '', ready = false, issue = 'host_unavailable'
       try {
         const probe = await adapter.probe(signal)
-        version = probe.version; issue = probe.issue || bridgeHealth.issue(); ready = !issue
+        version = probe.version; issue = probe.issue; ready = !issue
       } catch { /* A transport failure is not evidence of an unsupported version. */ }
       try {
         await writeFile(temporaryStatus, JSON.stringify({ ...connector, connector_id: pairing.connector_id, checked_at: Date.now(),
-          ready, version, issue, cancellation: adapter.cancellation, bridge_url: values['bridge-url'], presentation }), { mode: 0o600 })
+          ready, version, issue, connection: dispatcher.connection, pairing_revision: pairing.runtime_revision, cancellation: adapter.cancellation, bridge_url: values['bridge-url'], presentation }), { mode: 0o600 })
         await rename(temporaryStatus, statusPath)
       } catch { /* Status failure never changes delivery receipts. */ }
       try { await delay(2000, undefined, { signal }) } catch { break }
     }
   }
-  const request = async (route: string, body?: unknown) => {
-    await bridgeHealth.wait('workbuddy', signal)
-    return bridgeHealth.track('workbuddy', async () => {
-      const response = await fetch(values['bridge-url']! + '/v1/workbuddy/' + route, {
-        method: body === undefined ? 'GET' : 'POST', redirect: 'error',
-        signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
-        headers: { Authorization: `Bearer ${pairing.token}`, 'X-LazyMind-Connector-Id': pairing.connector_id,
-          ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      })
-      const value = await response.json().catch(() => {
-        if (!response.ok) return {}
-        throw new Error('Invalid WorkBuddy bridge response')
-      })
-      if (!response.ok) throw new BridgeError(typeof value?.code === 'string' ? value.code : 'BRIDGE_ERROR', 'WorkBuddy bridge unavailable', response.status)
-      return value
-    })
-  }
-  async function identities() {
-    while (!signal.aborted) {
-      try {
-        const page = await request('identity-requests')
-        for (const item of page.requests) {
-          try {
-            const started = performance.now()
-            const identity = await adapter.identify(item.arguments, signal)
-            await request('identity-receipts', { id: item.id, ...identity })
-            log('identity.resolved', { identity_request_id: item.id, native_session_id: identity.sessionId,
-              native_request_id: identity.requestId, tool_call_id: identity.toolCallId, status: 'resolved', duration_ms: performance.now() - started })
-          } catch {
-            // Native tool visibility may lag dispatch. Retry discovery only,
-            // never send a message or infer identity from the active UI tab.
-          }
-        }
-      } catch { /* Temporary bridge/CDP outage; callers have bounded waits. */ }
-      try { await delay(250, undefined, { signal }) } catch { break }
-    }
-  }
   try {
     console.log('WorkBuddy connector started; session wake and interruption enabled')
     let lastPresentation = ''
-    await Promise.all([createDispatcher(adapter, adapter.control(signal), transport, instance, signal).poll(), identities(), heartbeat(), presentationLoop(cdp, lookupBinding, values['bridge-url']!, signal, value => {
+    await Promise.all([dispatcher.poll(), identities(), heartbeat(), presentationLoop(cdp, lookupBinding, values['bridge-url']!, signal, value => {
       presentation = value
       const fields = { status: value.status, page_status: value.page_status, run_id: value.run_id, native_session_id: value.native_session_id }
       const key = JSON.stringify(fields)

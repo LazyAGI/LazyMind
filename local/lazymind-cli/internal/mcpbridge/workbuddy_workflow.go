@@ -14,37 +14,27 @@ import (
 	"time"
 )
 
-func (b *Bridge) workbuddyPair() (workflowhost.Pairing, error) {
+func (b *Bridge) workBuddyConnection() (workbuddyhost.Config, workflowhost.Pairing, error) {
 	store, err := credentials.NewStore(b.home, "")
 	if err != nil {
-		return workflowhost.Pairing{}, err
+		return workbuddyhost.Config{}, workflowhost.Pairing{}, err
 	}
 	account, err := store.AccountScope()
 	if err != nil {
-		return workflowhost.Pairing{}, err
+		return workbuddyhost.Config{}, workflowhost.Pairing{}, err
 	}
-	_, pair, err := workbuddyhost.Load(b.home, account)
-	return pair, err
+	return workbuddyhost.Load(b.home, account)
 }
+
 func (b *Bridge) resolveWorkBuddyDriver(ctx context.Context, args json.RawMessage) (string, error) {
-	pair, err := b.workbuddyPair()
-	if err != nil {
-		return "", err
-	}
-	store, err := credentials.NewStore(b.home, "")
-	if err != nil {
-		return "", err
-	}
-	account, err := store.AccountScope()
-	if err != nil {
-		return "", err
-	}
-	config, _, err := workbuddyhost.Load(b.home, account)
+	config, pair, err := b.workBuddyConnection()
 	if err != nil {
 		return "", err
 	}
 	status, err := workbuddyhost.ReadStatus(config, pair.ConnectorID)
-	if err != nil || !status.Ready {
+	// Identity uses the local renderer. Core authorization is checked by the
+	// subsequent Workflow call and binding, and by the local identity route for pairing.
+	if err != nil || workbuddyhost.ControlIssue(status) != "" {
 		return "", errors.New("WorkBuddy CDP connector is offline or incompatible")
 	}
 	body, _ := json.Marshal(map[string]any{"arguments": args})
@@ -77,7 +67,7 @@ func (b *Bridge) resolveWorkBuddyDriver(ctx context.Context, args json.RawMessag
 	return identity.SessionID, nil
 }
 func (b *Bridge) bindWorkBuddyController(ctx context.Context, runID, sessionID string) error {
-	pair, err := b.workbuddyPair()
+	_, pair, err := b.workBuddyConnection()
 	if err != nil {
 		return err
 	}

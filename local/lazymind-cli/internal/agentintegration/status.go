@@ -137,6 +137,7 @@ func RequireQuit(status Status, retryAction string) Status {
 // Connection reports runtime health separately from installed configuration.
 type ConnectionStatus struct {
 	RuntimeState       string `json:"runtime_state,omitempty"`
+	LazyMindState      string `json:"lazymind_state,omitempty"`
 	MCPTrusted         bool   `json:"mcp_trusted"`
 	MCPEnabled         bool   `json:"mcp_enabled"`
 	MCPConfigured      bool   `json:"mcp_configured"`

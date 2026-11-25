@@ -110,7 +110,7 @@ func (a *Adapter) currentStatusWithRepair(ctx context.Context, repairErr error) 
 	details := a.inspectConfiguration(&status)
 	defer func() { agentintegration.RecordInspection(a.home, a.self, details, &status) }()
 	if repairErr != nil {
-		if status.Issue == nil {
+		if status.Issue == nil || status.Issue.Code == workflowconnector.ConnectionPending {
 			status = agentintegration.FailError(status, repairErr)
 			status.Issue = &agentintegration.Issue{Code: "configuration_failed"}
 		} else {
@@ -158,31 +158,51 @@ func (a *Adapter) status(context.Context) agentintegration.Status {
 		}
 	}
 	if status.State == agentintegration.Enabled {
-		store, err := credentials.NewStore(a.home, "")
-		ready := false
-		presentation := "unavailable"
-		page := ""
-		status.Version = codexhost.CurrentVersion()
-		issue := "host_unavailable"
-		if err == nil {
-			scope, e := store.AccountScope()
-			if e == nil {
-				if current, statusErr := codexhost.ReadStatus(a.home, scope); statusErr == nil {
-					issue = codexhost.StatusIssue(current)
-					ready = issue == ""
-					presentation = current.Presentation.Status
-					page = current.Presentation.PageStatus
-					status.ConnectorRuntime = current.Runtime
-				}
-			}
-		}
-		status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, MCPEnabled: true, MCPTrusted: true, ControlReady: ready, PresentationStatus: presentation, PageStatus: page}
-		if !ready {
-			status.Issue = &agentintegration.Issue{Code: issue}
-			status.Message = "Codex control is disconnected. Open its installation guide in LazyMind; save current work before confirming a connection or restart."
-		}
+		status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, MCPEnabled: true, MCPTrusted: true}
+		a.inspectHostConnection(&status)
 	}
 	return status
+}
+
+func (a *Adapter) inspectHostConnection(status *agentintegration.Status) {
+	status.Version = codexhost.CurrentVersion()
+	status.Connection.PresentationStatus = "unavailable"
+	controlIssue := "host_unavailable"
+	current, err := codexhost.ReadLocalStatus(a.home)
+	if err == nil {
+		controlIssue = codexhost.ControlIssue(current)
+		status.Connection.PresentationStatus = current.Presentation.Status
+		status.Connection.PageStatus = current.Presentation.PageStatus
+		status.ConnectorRuntime = current.Runtime
+	}
+	status.Connection.ControlReady = controlIssue == ""
+	agentintegration.SetRuntimeIssue(status, controlIssue)
+	agentintegration.SetLazyMindIssue(status, a.connectionIssue(current))
+	if !status.Connection.ControlReady {
+		status.Message = "Codex control is disconnected. Open its installation guide in LazyMind; save current work before confirming a connection or restart."
+	}
+}
+
+func (a *Adapter) connectionIssue(current codexhost.Status) string {
+	store, err := credentials.NewStore(a.home, "")
+	if err != nil {
+		return "lazymind_unavailable"
+	}
+	scope, err := store.AccountScope()
+	if err != nil {
+		return "lazymind_auth_required"
+	}
+	_, pair, err := codexhost.Load(a.home, scope)
+	if err != nil {
+		if code := workflowhost.PairingIssue(err); code != "" {
+			return code
+		}
+		return workflowconnector.ConnectionPending
+	}
+	if current.Connector != pair.ConnectorID {
+		return workflowconnector.ConnectionPending
+	}
+	return current.ConnectionEvidence.Issue(pair.RuntimeRevision, current.CheckedAt, time.Time{})
 }
 
 func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) {

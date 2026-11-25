@@ -1,5 +1,4 @@
 import type { HostTransport } from '../../../workflow-agent-core/src/transport'
-import type { BridgeHealth } from './bridge-health'
 
 type Event = 'identity.resolved' | 'action.claim' | 'action.settle' | 'native.send' | 'native.cancel' | 'presentation' | 'connector.warning'
 export interface DiagnosticFields {
@@ -23,15 +22,14 @@ export function createDiagnostics(connectorId: string, sink: (line: string) => v
   }
 }
 
-export function diagnosedTransport(bridge: HostTransport, log: Diagnostic, health?: BridgeHealth): HostTransport {
-  const tracked = <T>(request: () => Promise<T>) => health ? health.track('workflow', request) : request()
+export function diagnosedTransport(bridge: HostTransport, log: Diagnostic): HostTransport {
   return {
-    bind: (...args) => tracked(() => bridge.bind(...args)), state: (...args) => tracked(() => bridge.state(...args)),
-    actions: (...args) => tracked(() => bridge.actions(...args)), action: (...args) => tracked(() => bridge.action(...args)),
+    bind: (...args) => bridge.bind(...args), state: (...args) => bridge.state(...args),
+    actions: (...args) => bridge.actions(...args), action: (...args) => bridge.action(...args),
     async claim(...args) {
       const started = performance.now()
       try {
-        const result = await tracked(() => bridge.claim(...args)), a = result.action
+        const result = await bridge.claim(...args), a = result.action
         log('action.claim', { action_id: a.id, run_id: a.session_id, native_session_id: a.native_session_id,
           execution_id: a.execution_id, kind: a.kind, status: a.status, duration_ms: performance.now() - started })
         return result
@@ -43,7 +41,7 @@ export function diagnosedTransport(bridge: HostTransport, log: Diagnostic, healt
     async settle(...args) {
       const started = performance.now()
       try {
-        await tracked(() => bridge.settle(...args))
+        await bridge.settle(...args)
         log('action.settle', { action_id: args[0], status: args[3], duration_ms: performance.now() - started })
       } catch (error) {
         log('action.settle', { action_id: args[0], status: 'unconfirmed', duration_ms: performance.now() - started })

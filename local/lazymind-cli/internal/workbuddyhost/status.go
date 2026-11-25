@@ -5,13 +5,25 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"lazymind/agentconnector/internal/workflowconnector"
 )
 
+// ReadLocalStatus observes native control without granting access to a pairing.
+func ReadLocalStatus(home string) (Status, error) {
+	config, err := readConfig(home)
+	if err != nil {
+		return Status{}, err
+	}
+	return ReadStatus(config, strings.TrimSuffix(filepath.Base(config.PairingFile), ".json"))
+}
+
 type Status struct {
 	workflowconnector.Runtime
+	workflowconnector.ConnectionEvidence
 	Issue        string             `json:"issue,omitempty"`
 	ConnectorID  string             `json:"connector_id"`
 	CheckedAt    int64              `json:"checked_at"`

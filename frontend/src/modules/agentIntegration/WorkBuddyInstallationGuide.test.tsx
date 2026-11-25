@@ -17,7 +17,7 @@ vi.mock("@/modules/modelProvider/api/systemDependencies", () => ({ getNodeDepend
 const copy = zhCN.agentIntegration.workbuddyInstallGuide;
 const installed: DesktopAgentIntegrationStatus = {
   agent: "workbuddy", display_name: "WorkBuddy", state: "enabled", requirements: [],
-  connection: { presentation_status: "ready", mcp_configured: true, mcp_trusted: false, mcp_enabled: false, control_ready: true },
+  connection: { presentation_status: "ready", mcp_configured: true, mcp_trusted: false, mcp_enabled: false, control_ready: true, runtime_state: "connected", lazymind_state: "connected" },
 };
 const signedOut: DesktopAgentIntegrationStatus = {
   ...installed, state: "action_required", action: { kind: "login" },
@@ -72,7 +72,7 @@ describe("installation status recovery", () => {
     const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
     const pending: DesktopAgentIntegrationStatus = { ...installed, agent, state: "error",
       issue: { code: "capability_unavailable", operation_id: "startup-test" },
-      connection: { ...installed.connection, mcp_trusted: true, mcp_enabled: true, control_ready: false } };
+      connection: { ...installed.connection!, mcp_trusted: true, mcp_enabled: true, control_ready: false } };
     const connect = vi.fn().mockResolvedValue(pending);
     const update = vi.fn();
     mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: pending } });
@@ -82,7 +82,7 @@ describe("installation status recovery", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
     expect(screen.getByText(labels.installFailedTitle)).toBeInTheDocument();
     const healthy: DesktopAgentIntegrationStatus = { ...pending, state: "enabled", issue: undefined,
-      connection: { ...pending.connection, control_ready: true } };
+      connection: { ...pending.connection!, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: healthy } });
     fireEvent(window, new Event("focus"));
     await screen.findByText(labels.successTitle);
@@ -95,7 +95,7 @@ describe("installation status recovery", () => {
 describe("Codex connection diagnostics", () => {
   const labels = zhCN.agentIntegration.codexInstallGuide;
   const connected: DesktopAgentIntegrationStatus = { ...installed, agent: "codex", display_name: "Codex",
-    connection: { ...installed.connection!, mcp_trusted: true, mcp_enabled: true, control_ready: true, runtime_state: "connected" } };
+    connection: { ...installed.connection!, mcp_trusted: true, mcp_enabled: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
 
   const beginCheck = async (next: DesktopAgentIntegrationStatus) => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { codex: next } });
@@ -166,7 +166,7 @@ describe("Codex connection diagnostics", () => {
 describe("explicit Codex connection failure stability", () => {
   const labels = zhCN.agentIntegration.codexInstallGuide;
   const healthy: DesktopAgentIntegrationStatus = { ...installed, agent: "codex", display_name: "Codex",
-    connection: { ...installed.connection!, mcp_trusted: true, mcp_enabled: true, control_ready: true, runtime_state: "connected" } };
+    connection: { ...installed.connection!, mcp_trusted: true, mcp_enabled: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
 
   it.each(["poll", "focus"] as const)("preserves the failed connect message and empty diagnostics through ordinary %s updates", async (trigger) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -267,7 +267,7 @@ describe("account pairing diagnostics", () => {
     const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
     const healthy: DesktopAgentIntegrationStatus = { ...installed, agent,
       display_name: agent === "codex" ? "Codex" : "WorkBuddy",
-      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected" } };
+      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
     const mismatch: DesktopAgentIntegrationStatus = { ...healthy,
       issue: { code: "pairing_account_mismatch" }, message: "private native pairing details",
       connection: { ...healthy.connection!, control_ready: false, runtime_state: "waiting" } };
@@ -301,7 +301,7 @@ describe("account pairing diagnostics", () => {
     const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
     const healthy: DesktopAgentIntegrationStatus = { ...installed, agent,
       display_name: agent === "codex" ? "Codex" : "WorkBuddy",
-      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected" } };
+      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
     const waiting: DesktopAgentIntegrationStatus = { ...healthy,
       connection: { ...healthy.connection!, control_ready: false, runtime_state: "waiting" } };
     const mismatch: DesktopAgentIntegrationStatus = { ...waiting, diagnostic_id: "account-background-check",
@@ -345,7 +345,7 @@ describe("account pairing diagnostics", () => {
     const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
     const healthy: DesktopAgentIntegrationStatus = { ...installed, agent,
       display_name: agent === "codex" ? "Codex" : "WorkBuddy",
-      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true } };
+      connection: { ...installed.connection!, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
     const disabled: DesktopAgentIntegrationStatus = { ...healthy, issue: { code: "mcp_enable_required" },
       connection: { ...healthy.connection!, mcp_enabled: false, control_ready: false } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: disabled } });
@@ -452,4 +452,38 @@ describe("Codex Node.js prerequisite", () => {
     fireEvent.click(screen.getByRole("button", { name: zhCN.nodeDependency.refresh }));
     await waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
   });
+});
+
+it.each(["workbuddy", "codex"] as const)("requires current LazyMind evidence for %s and recovers independently of the panel", async (agent) => {
+  const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
+  const current: DesktopAgentIntegrationStatus = { ...installed, agent, connection: {
+    ...installed.connection!, mcp_trusted: true, mcp_enabled: true, control_ready: true,
+    runtime_state: "connected", lazymind_state: "pending",
+  }, issue: { code: "lazymind_pending" } };
+  const connect = vi.fn(), update = vi.fn();
+  render(<WorkBuddyInstallationGuide agent={agent} status={current} onConnect={connect} onStatus={update} onClose={vi.fn()} />);
+  const checks = [
+    { state: undefined, code: undefined },
+    { state: "pending", code: "lazymind_pending" },
+    { state: "authorization_required", code: "lazymind_auth_required" },
+    { state: "unavailable", code: "lazymind_unavailable" },
+  ] as const;
+  for (const [index, { state, code }] of checks.entries()) {
+    const observed: DesktopAgentIntegrationStatus = { ...current, issue: code ? { code } : undefined,
+      connection: { ...current.connection!, lazymind_state: state } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: observed } });
+    fireEvent.click(screen.getByRole("button", { name: index ? labels.retryCheck : labels.check }));
+    const section = code ? agent === "codex" ? "connectionErrors" : "workbuddyErrors" : "connectionIssues";
+    await screen.findByText(guideI18n.t(`agentIntegration.${section}.${code || "lazymind_pending"}`));
+    expect(screen.queryByText(labels.successTitle)).not.toBeInTheDocument();
+    expect(update).toHaveBeenLastCalledWith(observed);
+  }
+  const recovered: DesktopAgentIntegrationStatus = { ...current, issue: undefined, connection: {
+    ...current.connection!, lazymind_state: "connected", presentation_status: "binding-unavailable",
+  } };
+  mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: recovered } });
+  fireEvent.click(screen.getByRole("button", { name: labels.retryCheck }));
+  await screen.findByText(labels.successTitle);
+  expect(update).toHaveBeenLastCalledWith(recovered);
+  expect(connect).not.toHaveBeenCalled();
 });

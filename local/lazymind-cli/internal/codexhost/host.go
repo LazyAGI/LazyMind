@@ -29,6 +29,7 @@ type Config struct {
 }
 type Status struct {
 	workflowconnector.Runtime
+	workflowconnector.ConnectionEvidence
 	Connector    string `json:"connector_id"`
 	CheckedAt    int64  `json:"checked_at"`
 	Ready        bool   `json:"ready"`
@@ -68,28 +69,63 @@ func Load(home, account string) (Config, workflowhost.Pairing, error) {
 	if err != nil {
 		return c, p, err
 	}
-	body, err := os.ReadFile(c.PairingFile)
+	p, err = readPairing(c)
 	if err != nil {
 		return c, p, err
-	}
-	if json.Unmarshal(body, &p) != nil || p.Provider != "codex" {
-		return c, p, errors.New("invalid Codex pairing")
 	}
 	p, err = workflowhost.Verify(home, p.ConnectorID, p.Token, account)
 	return c, p, err
 }
-func ReadStatus(home, account string) (Status, error) {
-	c, p, err := Load(home, account)
-	var s Status
+
+func readPairing(c Config) (workflowhost.Pairing, error) {
+	var pair workflowhost.Pairing
+	body, err := os.ReadFile(c.PairingFile)
 	if err != nil {
-		return s, err
+		code := "HOST_PAIRING_UNREADABLE"
+		if errors.Is(err, os.ErrNotExist) {
+			code = "HOST_PAIRING_MISSING"
+		}
+		return pair, &workflowhost.PairingError{Code: code}
 	}
+	if json.Unmarshal(body, &pair) != nil || pair.Provider != "codex" || pair.ConnectorID == "" {
+		return workflowhost.Pairing{}, &workflowhost.PairingError{Code: "HOST_PAIRING_INVALID"}
+	}
+	return pair, nil
+}
+
+func ReadStatus(home, account string) (Status, error) {
+	c, pair, err := Load(home, account)
+	if err != nil {
+		return Status{}, err
+	}
+	return readStatus(c, pair)
+}
+
+// ReadLocalStatus supplies capability and presentation during an account or
+// pairing failure. Call Load before relying on its communication evidence.
+func ReadLocalStatus(home string) (Status, error) {
+	c, err := readConfig(home)
+	if err != nil {
+		return Status{}, err
+	}
+	pair, err := readPairing(c)
+	if err != nil {
+		return Status{}, err
+	}
+	return readStatus(c, pair)
+}
+
+func readStatus(c Config, pair workflowhost.Pairing) (Status, error) {
+	var s Status
 	body, err := os.ReadFile(c.PairingFile + ".codex-status.json")
 	if err != nil {
 		return s, err
 	}
-	if json.Unmarshal(body, &s) != nil || s.Connector != p.ConnectorID || time.Now().UnixMilli()-s.CheckedAt > 12000 || s.CheckedAt > time.Now().UnixMilli() {
-		return s, errors.New("Codex connector is offline")
+	if json.Unmarshal(body, &s) != nil || s.Connector != pair.ConnectorID || time.Now().UnixMilli()-s.CheckedAt > 12000 || s.CheckedAt > time.Now().UnixMilli() {
+		return Status{}, errors.New("Codex connector is offline")
+	}
+	if s.PairingRevision != pair.RuntimeRevision {
+		s.Connection = nil
 	}
 	return s, nil
 }
@@ -102,7 +138,11 @@ func CurrentVersion() string {
 	return version
 }
 
-func Ready(home, account string) bool { s, e := ReadStatus(home, account); return e == nil && s.Ready }
+// Ready checks the host capability without requiring a Core response.
+func Ready(home, account string) bool {
+	status, err := ReadStatus(home, account)
+	return err == nil && ControlIssue(status) == ""
+}
 
 var localChatRoute = regexp.MustCompile(`(?i)^/local/[a-f0-9-]{36}$`)
 

@@ -231,7 +231,8 @@ function connectedInboundStatus(agent: DesktopAgent): DesktopAgentIntegrationSta
     agent, display_name: inboundAgentNames[agent], state: "enabled", enabled: true, can_connect: true, can_disconnect: true,
     requirements: [{ id: "installed", description: "Desktop app installed", satisfied: true }],
     connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true,
-      control_ready: true, runtime_state: "connected", presentation_status: "available" },
+      control_ready: true, runtime_state: "connected",
+      ...((agent === "codex" || agent === "workbuddy") && { lazymind_state: "connected" }), presentation_status: "available" },
   };
 }
 
@@ -767,7 +768,7 @@ describe("AgentIntegrationPage", () => {
   it.each([true, false])("requires confirmation before restarting WorkBuddy (expanded: %s)", async (expanded) => {
     const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "ready",
       requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }] };
-    const installed = { ...status, state: "enabled", connection: { mcp_configured: true, control_ready: true, mcp_trusted: false, mcp_enabled: true, presentation_status: "mounted" } };
+    const installed = { ...status, state: "enabled", connection: { mcp_configured: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected", mcp_trusted: false, mcp_enabled: true, presentation_status: "mounted" } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
     mocks.executors.mockResolvedValue({ data: { data: { executors: [{ id: "workbuddy", installed: true, host_online: true, available: true }] } } });
     mocks.executorPolicies.mockResolvedValue({ ok: true, data: { workbuddy: { provider: "workbuddy", enabled: false, installed: true, ready: true } } });
@@ -834,7 +835,7 @@ describe("AgentIntegrationPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: tr("retryCheck") }));
     await within(dialog).findByText(tr("notReadyTitle"));
     expect(dialog).not.toHaveTextContent(tr("successTitle"));
-    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...status, connection: { ...status.connection, mcp_trusted: true, mcp_enabled: true, control_ready: true } } } });
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...status, connection: { ...status.connection, mcp_trusted: true, mcp_enabled: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } } } });
     fireEvent.click(within(dialog).getByRole("button", { name: tr("retryCheck") }));
     await within(dialog).findByText(tr("successTitle"));
     expect(mocks.action).not.toHaveBeenCalled();
@@ -1581,7 +1582,7 @@ describe("AgentIntegrationPage", () => {
     await retryI18n.changeLanguage(language);
     const tr = (key: string) => retryI18n.t(`agentIntegration.codexInstallGuide.${key}`);
     const installed = { ...readyCodexStatus, state: "enabled", enabled: true,
-      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true } };
+      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
     mocks.action.mockResolvedValue({ ok: true, data: installed });
     render(<AgentIntegrationPage />);
     const card = expandAgent("codex");
@@ -1696,7 +1697,7 @@ describe("AgentIntegrationPage", () => {
         control_ready: false, presentation_status: "host-offline", runtime_state: runtimeState } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { codex: disconnected } });
     mocks.action.mockResolvedValue({ ok: true, data: { ...disconnected,
-      connection: { ...disconnected.connection, control_ready: true, runtime_state: "connected" } } });
+      connection: { ...disconnected.connection, control_ready: true, lazymind_state: "connected", runtime_state: "connected" } } });
     render(<AgentIntegrationPage />);
     const card = expandAgent("codex");
     await waitFor(() => expect(within(card).getByRole("switch", { name: "Codex 桌面端使用 LazyMind" })).toBeChecked());
@@ -1714,7 +1715,7 @@ describe("AgentIntegrationPage", () => {
 
   it.each(["cdp_unavailable", "capability_unavailable", undefined])("does not complete Codex setup when session control is lost (%s)", async (issue) => {
     const installed = { ...readyCodexStatus, state: "enabled", enabled: true,
-      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true } };
+      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { codex: installed } });
     render(<AgentIntegrationPage />);
     const card = expandAgent("codex");
@@ -1738,7 +1739,7 @@ describe("AgentIntegrationPage", () => {
   it("retries Codex connection after a refused quit without getting stuck in the guide", async () => {
     const disconnected = { ...readyCodexStatus, state: "ready", enabled: true };
     const connected = { ...readyCodexStatus, state: "enabled", enabled: true,
-      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true } };
+      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { codex: disconnected } });
     mocks.action.mockResolvedValueOnce({ ok: false, reason: "operation_failed", error: "Codex refused to close" })
       .mockResolvedValueOnce({ ok: true, data: connected });
@@ -1787,7 +1788,7 @@ describe("AgentIntegrationPage", () => {
       can_connect: true, can_disconnect: true,
       requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }],
       connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true,
-        control_ready: true, presentation_status: "mounted", runtime_state: "connected" } };
+        control_ready: true, lazymind_state: "connected", presentation_status: "mounted", runtime_state: "connected" } };
     const unconfirmed = { ...installed, issue: { code }, message: "Complete connector setup.",
       connection: { ...installed.connection, [field]: false } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: unconfirmed } });
@@ -1971,7 +1972,7 @@ describe("AgentIntegrationPage", () => {
   it("refreshes WorkBuddy health on focus without resetting its enabled choice", async () => {
     const installed = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled", enabled: true,
       requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }],
-      connection: { mcp_configured: true, control_ready: true, presentation_status: "mounted", runtime_state: "connected" } };
+      connection: { mcp_configured: true, control_ready: true, lazymind_state: "connected", presentation_status: "mounted", runtime_state: "connected" } };
     mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: installed } });
     render(<AgentIntegrationPage />);
     await screen.findByText("外部 Agent 集成");
@@ -2039,7 +2040,7 @@ describe("AgentIntegrationPage", () => {
       diagnostic_context: { action: "inspect", stage: "inspect", current_cli: "/installed/lazymind",
         environment: { LAZYMIND_HOME: "~/installed-home", LAZYMIND_CONNECTOR_CONFIG: "" } },
       connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true,
-        control_ready: true, presentation_status: "ready", runtime_state: "connected" } };
+        control_ready: true, lazymind_state: "connected", presentation_status: "ready", runtime_state: "connected" } };
     try {
       mocks.statuses.mockResolvedValue({ ok: true, data: { codex: installed } });
       render(<AgentIntegrationPage />);

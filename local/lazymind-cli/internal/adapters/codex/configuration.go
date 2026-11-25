@@ -30,7 +30,8 @@ func (a *Adapter) inspectConfiguration(status *agentintegration.Status) []agenti
 		if installed {
 			if !nativeEnabled && status.State != agentintegration.Failed && status.State != agentintegration.ActionRequired {
 				status.State = agentintegration.Enabled
-				status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, MCPTrusted: true, MCPEnabled: false, PresentationStatus: "unavailable"}
+				status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, MCPTrusted: true}
+				a.inspectHostConnection(status)
 				status.Issue = &agentintegration.Issue{Code: "mcp_enable_required"}
 				status.Message = "Enable the installed plugin in Codex."
 			}

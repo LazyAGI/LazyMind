@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 // DesktopStatus distinguishes an absent endpoint from an occupied, incompatible
@@ -112,20 +114,19 @@ func WaitReady(ctx context.Context, home, account string, since time.Time) error
 			return err
 		}
 		if status, err := ReadStatus(config, pair.ConnectorID); err == nil && status.CheckedAt >= since.UnixMilli() {
-			// The renderer can appear before its Workflow interfaces initialize.
-			// Wait for a fresh healthy heartbeat within the startup deadline;
-			// Load above verifies current pairing authorization on every poll.
-			// A worker can retain the disabled heartbeat from a rapid off/on
-			// cycle until its authorization retry completes; wait for it to clear.
-			issue := StatusIssue(status)
-			switch issue {
-			case "", "host_unavailable", "lazymind_unavailable", "capability_unavailable", "pairing_disabled":
+			lastIssue = ControlIssue(status)
+			switch lastIssue {
+			case "host_unavailable", "capability_unavailable": // The renderer may still be initializing.
+			case "":
+				lastIssue = status.ConnectionEvidence.Issue(pair.RuntimeRevision, status.CheckedAt, since)
+				if lastIssue == "" {
+					return nil
+				}
+				if !workflowconnector.ConnectionRetryable(lastIssue) {
+					return &CompatibilityError{Code: lastIssue}
+				}
 			default:
-				return &CompatibilityError{Code: issue}
-			}
-			lastIssue = issue
-			if issue == "" && status.Ready && status.Cancellation == "session" {
-				return nil
+				return &CompatibilityError{Code: lastIssue}
 			}
 		} else {
 			lastIssue = "host_unavailable"

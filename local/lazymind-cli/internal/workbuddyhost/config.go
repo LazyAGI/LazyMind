@@ -25,17 +25,25 @@ type Config struct {
 }
 
 func ConfigPath(home string) string { return filepath.Join(home, "workbuddy-workflow", "config.json") }
-func Load(home, account string) (Config, workflowhost.Pairing, error) {
+func readConfig(home string) (Config, error) {
 	var config Config
-	var pair workflowhost.Pairing
 	body, err := os.ReadFile(ConfigPath(home))
+	if err != nil {
+		return config, err
+	}
+	if json.Unmarshal(body, &config) != nil || !filepath.IsAbs(config.Node) || !filepath.IsAbs(config.PairingFile) || config.CDPPort < 1 || config.CDPPort > 65535 {
+		return config, errors.New("invalid WorkBuddy connector config")
+	}
+	return config, nil
+}
+
+func Load(home, account string) (Config, workflowhost.Pairing, error) {
+	config, err := readConfig(home)
+	var pair workflowhost.Pairing
 	if err != nil {
 		return config, pair, err
 	}
-	if json.Unmarshal(body, &config) != nil || !filepath.IsAbs(config.Node) || !filepath.IsAbs(config.PairingFile) || config.CDPPort < 1 || config.CDPPort > 65535 {
-		return config, pair, errors.New("invalid WorkBuddy connector config")
-	}
-	body, err = os.ReadFile(config.PairingFile)
+	body, err := os.ReadFile(config.PairingFile)
 	if err != nil {
 		code := "HOST_PAIRING_UNREADABLE"
 		if errors.Is(err, os.ErrNotExist) {

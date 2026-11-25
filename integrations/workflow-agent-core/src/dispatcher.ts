@@ -2,6 +2,7 @@ import { AdmissionRejected, type RuntimeAdapter } from './adapter'
 import type { Coordinator } from './coordinator'
 import { BridgeError, isHostAuthorizationError, type HostTransport, type HostAction } from './transport'
 import type { WorkflowControl } from './protocol'
+import { RequestRetry, requestErrorCode, waitUntil } from './request-retry'
 
 /** Polling and delivery policy are shared; only host admission/history live in the adapter. */
 export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coordinator<A>, 'cacheClaim' | 'cancelSession'> | undefined, bridge: HostTransport,
@@ -54,14 +55,18 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
     await bridge.settle(action.id, instanceId, claim.dispatch_token, 'accepted', seq, '', signal)
   }
 
+  const retry = new RequestRetry()
+
   async function poll() {
-    let failures = 0, lastWarning = ''
+    let lastWarning = ''
     while (!signal.aborted) {
-      let retryMs = 1000
       try {
         let after = ''
         do {
           const page = await bridge.actions(after, signal)
+          if (signal.aborted) return
+          if (!Array.isArray(page.actions)) throw new Error('Invalid Workflow actions response')
+          retry.observeSuccess()
           for (const action of [...page.actions].sort((a, b) => Number(b.kind === 'cancel') - Number(a.kind === 'cancel'))) {
             try { await deliver(action) }
             catch (error) {
@@ -71,35 +76,25 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
           }
           after = page.next_page_token ?? ''
         } while (after && !signal.aborted)
-        failures = 0
+        if (signal.aborted) return
+        retry.resetBackoff()
         lastWarning = ''
       } catch (error) {
         if (signal.aborted) break
-        const needsAuthorization = isHostAuthorizationError(error)
+        const { authorization } = retry.failed(error)
         // A renewed login or repaired pairing can recover without restarting the
         // host. Probe slowly while waiting; never replay a claimed delivery.
-        retryMs = needsAuthorization ? 30_000 : Math.min(30_000, 1000 * 2 ** Math.min(failures, 5))
-        failures++
-        const code = error instanceof BridgeError && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : 'BRIDGE_UNAVAILABLE'
-        const warning = needsAuthorization
+        const code = requestErrorCode(error)
+        const warning = authorization
           ? `lazymind-workflow: authorization required (${code}); sign in or repair the connection in LazyMind`
           : `lazymind-workflow: reconnecting Bridge (${code})`
         if (warning !== lastWarning) runtime.warn(warning)
         lastWarning = warning
       }
-      try { await delay(retryMs, signal) } catch { break }
+      try { await waitUntil(retry.retryAt || Date.now() + 1000, signal) } catch { break }
     }
   }
-  return { deliver, poll }
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) { reject(signal.reason); return }
-    const abort = () => { clearTimeout(timer); reject(signal.reason) }
-    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve() }, ms)
-    signal.addEventListener('abort', abort, { once: true })
-  })
+  return { deliver, poll, get connection() { return retry.observation } }
 }
 
 function continuationMessage(action: HostAction, control?: WorkflowControl): string {

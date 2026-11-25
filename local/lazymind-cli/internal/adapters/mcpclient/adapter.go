@@ -24,6 +24,7 @@ import (
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workbuddyhost"
 	"lazymind/agentconnector/internal/workflowconnector"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 type Kind string
@@ -110,7 +111,7 @@ func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
 	repairErr := a.Reconcile(ctx)
 	status = a.status(ctx)
 	details := a.inspectConfiguration(&status)
-	if repairErr != nil && status.Issue == nil {
+	if repairErr != nil && (status.Issue == nil || status.Issue.Code == workflowconnector.ConnectionPending) {
 		status = agentintegration.FailError(status, repairErr)
 		status.Issue = &agentintegration.Issue{Code: "configuration_failed"}
 	}
@@ -128,12 +129,7 @@ func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
 				if err == nil {
 					config, _, err := workbuddyhost.Load(a.home, account)
 					if err == nil {
-						issue, message := status.Issue, status.Message
 						agentintegration.SetRuntimeIssue(&status, workBuddyStartupHealth(ctx, a.home, config.CDPPort))
-						// Native trust and enablement are prerequisites, independent of runtime health.
-						if issue != nil && (issue.Code == "mcp_trust_required" || issue.Code == "mcp_enable_required") {
-							status.Issue, status.Message = issue, message
-						}
 					}
 				}
 			}
@@ -415,6 +411,58 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 	return a.status(ctx)
 }
 
+func (a *Adapter) workBuddyConnectionStatus(status *agentintegration.Status) bool {
+	host, statusErr := workbuddyhost.ReadLocalStatus(a.home)
+	controlIssue := "host_unavailable"
+	if statusErr == nil {
+		controlIssue = workbuddyhost.ControlIssue(host)
+		status.ConnectorRuntime = host.Runtime
+		if workbuddyhost.VersionIssue(host.Version) != "version_unreadable" {
+			status.Version = host.Version
+		}
+		status.Connection.PresentationStatus = host.Presentation.Status
+		status.Connection.PageStatus = host.Presentation.PageStatus
+	}
+	status.Connection.ControlReady = controlIssue == ""
+	agentintegration.SetRuntimeIssue(status, controlIssue)
+	if status.Version == "" {
+		status.Version = workbuddyhost.CurrentVersion()
+	}
+
+	connectionIssue := "pairing_required"
+	store, err := credentials.NewStore(a.home, "")
+	if err == nil {
+		account, err := store.AccountScope()
+		if err != nil {
+			connectionIssue = "lazymind_auth_required"
+		} else if _, pair, err := workbuddyhost.Load(a.home, account); err == nil {
+			if controlIssue == "" || controlIssue == "host_unavailable" {
+				switch {
+				case !status.Connection.MCPTrusted:
+					status.Issue = &agentintegration.Issue{Code: "mcp_trust_required"}
+				case !status.Connection.MCPEnabled:
+					status.Issue = &agentintegration.Issue{Code: "mcp_enable_required"}
+				}
+			}
+			connectionIssue = workflowconnector.ConnectionPending
+			if host.ConnectorID == pair.ConnectorID {
+				connectionIssue = host.ConnectionEvidence.Issue(pair.RuntimeRevision, host.CheckedAt, time.Time{})
+			}
+			agentintegration.SetLazyMindIssue(status, connectionIssue)
+			if status.Issue != nil {
+				status.Message = workBuddyIssueMessage(status.Issue.Code)
+			}
+			return true
+		} else if code := workflowhost.PairingIssue(err); code != "" {
+			connectionIssue = code
+		}
+	}
+	status.Issue = &agentintegration.Issue{Code: connectionIssue}
+	status.Message = workBuddyIssueMessage(connectionIssue)
+	agentintegration.SetLazyMindIssue(status, connectionIssue)
+	return false
+}
+
 func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 	if a.desktopDSHMode() {
 		return a.dshDesktopStatus(ctx)
@@ -455,61 +503,7 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 			status.Issue = &agentintegration.Issue{Code: "configuration_unreadable"}
 			return agentintegration.Fail(status, "Unable to read WorkBuddy trust configuration.")
 		}
-		status.Issue = &agentintegration.Issue{Code: "pairing_required"}
-		status.Message = "Enable the connection to start WorkBuddy and connect Workflow session control."
-		store, err := credentials.NewStore(a.home, "")
-		if err == nil {
-			account, scopeErr := store.AccountScope()
-			config, pair, configErr := workbuddyhost.Load(a.home, account)
-			if scopeErr != nil || configErr != nil {
-				state.current = false
-				if scopeErr != nil {
-					status.Issue.Code = "lazymind_auth_required"
-				} else if code := workBuddyPairingIssue(configErr); code != "" {
-					status.Issue.Code = code
-				}
-				status.Message = workBuddyIssueMessage(status.Issue.Code)
-			} else {
-				status.Issue = nil
-				// A temporary outage must not turn the user's enabled switch off
-				// or prevent disconnecting. Health is reported independently.
-				state.current = true
-				status.Message = ""
-				if host, err := workbuddyhost.ReadStatus(config, pair.ConnectorID); err == nil {
-					issue := workbuddyhost.StatusIssue(host)
-					status.ConnectorRuntime = host.Runtime
-					if workbuddyhost.VersionIssue(host.Version) != "version_unreadable" {
-						status.Version = host.Version
-					}
-					status.Connection.ControlReady = issue == "" && host.Ready && host.Cancellation == "session"
-					if issue == "" && host.Presentation.Status == "capability_unavailable" {
-						issue = "capability_unavailable"
-					}
-					if issue != "" {
-						status.Issue = &agentintegration.Issue{Code: issue}
-						status.Message = workBuddyIssueMessage(issue)
-					}
-					status.Connection.PresentationStatus = host.Presentation.Status
-					status.Connection.PageStatus = host.Presentation.PageStatus
-				} else {
-					status.Issue = &agentintegration.Issue{Code: "host_unavailable"}
-					status.Message = workBuddyIssueMessage("host_unavailable")
-				}
-				if status.Version == "" {
-					status.Version = workbuddyhost.CurrentVersion()
-				}
-				// Persisted trust and enable choices are independent of CDP.
-				// Healthy control alone must never advertise a usable MCP connection.
-				if !status.Connection.MCPTrusted && (status.Issue == nil || status.Issue.Code == "host_unavailable") {
-					status.Issue = &agentintegration.Issue{Code: "mcp_trust_required"}
-					status.Message = workBuddyIssueMessage("mcp_trust_required")
-				} else if !status.Connection.MCPEnabled && (status.Issue == nil || status.Issue.Code == "host_unavailable") {
-					code := "mcp_enable_required"
-					status.Issue = &agentintegration.Issue{Code: code}
-					status.Message = workBuddyIssueMessage(code)
-				}
-			}
-		}
+		state.current = a.workBuddyConnectionStatus(&status)
 	}
 	switch {
 	case state.configured && !state.owned:
