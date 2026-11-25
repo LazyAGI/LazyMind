@@ -104,8 +104,10 @@ func ControlIssue(status Status) string {
 	if issue := VersionIssue(status.Version); issue != "" {
 		return issue
 	}
-	if status.Cancellation != "session" {
-		return "capability_unavailable"
+	// Managed connectors advertise "none" and report their build identity.
+	// Retain support for the legacy session-capable heartbeat.
+	if status.Cancellation == "session" || status.Cancellation == "none" && status.Ready && status.Runtime.HasBuildIdentity() {
+		return ""
 	}
-	return ""
+	return "capability_unavailable"
 }

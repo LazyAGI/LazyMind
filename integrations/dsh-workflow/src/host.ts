@@ -78,12 +78,12 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
 
   const removeHook0 = ctx.on('agent/pre-step', (payload, next) => own((async () => {
     const registration = ensure(payload.agent)
-    await registration.ready
-    wrap(payload.agent, registration)
-    const allowed = await coordinator.beforeTurn({ ...payload, messages: payload.messages.map(message => {
+    const decision = coordinator.beforeTurn({ ...payload, messages: payload.messages.map(message => {
       const source = object(object(message)?.source)
       return { user: source?.kind === 'user', requestId: typeof source?.rpcId === 'string' ? source.rpcId : undefined }
     }) })
+    const [allowed] = await Promise.all([decision, registration.ready])
+    wrap(payload.agent, registration)
     if (allowed === 'skip') {
       registration.resumeInbox = true
       return { kind: 'enter' as const, messages: [] }

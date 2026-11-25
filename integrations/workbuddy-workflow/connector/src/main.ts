@@ -54,7 +54,7 @@ async function main() {
   const transport = diagnosedTransport(bridge, log)
   const instance = randomUUID()
   const unlock = await dispatcherLock(path, instance)
-  const dispatcher = createDispatcher(adapter, adapter.control(signal), transport, instance, signal)
+  const dispatcher = createDispatcher(adapter, undefined, transport, instance, signal)
   // Parent is Assistant Bridge, never an MCP connection or iframe.
   const stopFile = values['stop-file']
   const timer = setInterval(async () => {
@@ -90,7 +90,7 @@ async function main() {
     }
   }
   try {
-    console.log('WorkBuddy connector started; session wake and interruption enabled')
+    console.log('WorkBuddy connector started; session wake enabled')
     let lastPresentation = ''
     await Promise.all([dispatcher.poll(), identities(), heartbeat(), presentationLoop(cdp, lookupBinding, values['bridge-url']!, signal, value => {
       presentation = value

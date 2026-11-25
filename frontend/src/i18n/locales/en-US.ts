@@ -4937,6 +4937,7 @@ const enUS = {
     workflowControlReviewChanged: "Content was saved or changed. Review the updated content before confirming this step.",
     workflowControlDeliveryUnknown: "Host receipt is unknown. Reconciling the original session; do not resend continue.",
     workflowControlCodexStopped: "Workflow stopped. Codex cannot interrupt the current response, which may continue running.",
+    workflowControlWorkBuddyStopped: "Workflow stopped. You can stop the current response manually in WorkBuddy.",
     workflowControlDeliveryFailed: "The host did not accept the operation. Check the original session and connection.",
     workflowControlLegacy: "This run uses the legacy protocol. Control it from its original conversation; new runs use the controlled workflow protocol.",
     workflowRunRefresh: "Refresh",

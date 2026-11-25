@@ -12,6 +12,7 @@ export interface RuntimeAdapter<A> {
   parent?(agent: A): A | undefined
   isLive?(agent: A): boolean
   isRunning?(agent: A): boolean
+  activeTurn?(agent: A): { turn: number; startSeq: number } | undefined
   history?(agent: A): readonly HostEvent[]
   canReturnResult?(agent: A): boolean
   goal?(agent: A): { id: string; createdAt: number } | undefined

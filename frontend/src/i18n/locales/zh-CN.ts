@@ -4857,6 +4857,7 @@ const zhCN = {
     workflowControlReviewChanged: "内容已保存或发生变化。请检查更新后的内容，再确认当前步骤。",
     workflowControlDeliveryUnknown: "宿主回执未知，正在核对原会话。请勿重复发送继续指令。",
     workflowControlCodexStopped: "Workflow 已停止。Codex 不支持中断当前回复，仍在进行的回复可能会继续。",
+    workflowControlWorkBuddyStopped: "工作流已停止，当前回复可在 WorkBuddy 手动停止。",
     workflowControlDeliveryFailed: "宿主未能接纳操作，请检查原会话与连接。",
     workflowControlLegacy: "此运行使用旧协议。流程控制请在原对话中操作；新建运行将使用新的控制协议。",
     workflowRunRefresh: "刷新",

@@ -96,6 +96,19 @@ it('explains Codex cancellation limits without reporting that Workflow stop fail
   expect(deliveryBanner(delivery, { ...binding, provider: 'deepseek-harness' })?.tone).toBe('warning');
 });
 
+it('shows manual interruption for stopped WorkBuddy workflows and preserves unresolved receipt warnings', () => {
+  const delivery = { id: 'cancel', kind: 'cancel' as const, status: 'failed' };
+  const binding = { bound: true, provider: 'workbuddy' };
+  const manual = { key: 'chat.workflowControlWorkBuddyStopped', tone: 'info' };
+  expect(overlayInfoBanner('', delivery, binding, 'stopped')).toEqual(manual);
+  expect(overlayInfoBanner('', { ...delivery, status: 'pending' }, binding, 'stopped')).toEqual(manual);
+  expect(overlayInfoBanner('', null, binding, 'stopped')).toEqual(manual);
+  expect(overlayInfoBanner('', { ...delivery, status: 'unknown' }, binding, 'stopped')).toEqual({
+    key: 'chat.workflowControlDeliveryUnknown', tone: 'warning',
+  });
+  expect(overlayInfoBanner('', null, binding, 'continue')).toBeUndefined();
+});
+
 it('resolves completed Continue after saved edits invalidate the old execution', async () => {
  const current = state();
  current.continuation = 'awaiting_user';

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/workflowconnector"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 // ReadLocalStatus observes native control without granting access to a pairing.
@@ -51,6 +52,15 @@ func ReadStatus(config Config, connector string) (Status, error) {
 	age := time.Now().UnixMilli() - status.CheckedAt
 	if age < 0 || age > 12000 {
 		return Status{}, errors.New("WorkBuddy connector heartbeat expired")
+	}
+	if status.Cancellation == "none" {
+		// Observing the active pairing does not grant permission to use it.
+		pairing, err := os.ReadFile(config.PairingFile)
+		var pair workflowhost.Pairing
+		if err != nil || json.Unmarshal(pairing, &pair) != nil || !pair.Enabled || pair.Provider != "workbuddy" ||
+			pair.ConnectorID != connector || pair.RuntimeRevision == "" || status.PairingRevision != pair.RuntimeRevision {
+			return Status{}, errors.New("WorkBuddy status does not match the active pairing")
+		}
 	}
 	u, err := url.Parse(status.BridgeURL)
 	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && u.Hostname() != "::1" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {

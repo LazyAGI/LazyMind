@@ -146,7 +146,7 @@ func EnqueueHostAction(tx *gorm.DB, session orm.WorkflowSession, commandID, kind
 	action := orm.WorkflowHostAction{ID: uuid.NewString(), SessionID: session.ID, CommandID: commandID, Kind: kind,
 		ConnectorID: binding.ConnectorID, NativeSessionID: binding.DriverSession,
 		ExecutionID: executionID, Status: "pending", CreatedAt: now, UpdatedAt: now}
-	if kind == "cancel" && binding.Cancellation == "none" {
+	if kind == "cancel" && (binding.Cancellation == "none" || binding.Provider == "workbuddy") {
 		action.Status = "failed"
 		action.LastError = "This host does not support interrupting the current turn; Workflow is stopped in Core."
 	}

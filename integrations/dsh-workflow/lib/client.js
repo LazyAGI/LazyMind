@@ -387,7 +387,7 @@ async function runPresentation({ watchView, lookupBinding, ui, frameUrl, signal,
 
 //#endregion
 //#region src/connector-build.ts
-const connectorBuild = "0.1.6+4face6d3fe1bf398";
+const connectorBuild = "0.1.6+44ea1009987120f4";
 
 //#endregion
 //#region src/binding-rpc.ts

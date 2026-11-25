@@ -40,6 +40,7 @@ it('packaged worker polls independently, excludes a second worker and exits on d
     const secondExit = new Promise<number | null>(resolve => second!.once('exit', resolve))
     expect(await Promise.race([secondExit, delay(3000).then(() => 'timeout')])).toBe(1)
     expect(state.ready).toBe(false) // Missing CDP does not kill the independent worker.
+    expect(state.cancellation).toBe('none')
     expect(state.connection).toMatchObject({ issue: '', checked_at: expect.any(Number) })
     expect(first.exitCode).toBe(null)
     await writeFile(pairingFile, JSON.stringify({ ...pairing, enabled: false }))

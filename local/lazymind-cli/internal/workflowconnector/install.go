@@ -435,8 +435,12 @@ func (i Installation) ConfigureCommand(cmd *exec.Cmd, reload string) error {
 	return nil
 }
 
+func (r Runtime) HasBuildIdentity() bool {
+	return versionPattern.MatchString(r.ConnectorVersion) && digestPattern.MatchString(r.ConnectorRevision) && filepath.IsAbs(r.ConnectorEntry)
+}
+
 func (i Installation) Matches(r Runtime) bool {
-	if r.ConnectorVersion != i.Version || !digestPattern.MatchString(r.ConnectorRevision) || !filepath.IsAbs(r.ConnectorEntry) {
+	if r.ConnectorVersion != i.Version || !r.HasBuildIdentity() {
 		return false
 	}
 	if filepath.Clean(r.ConnectorEntry) == i.EntryPath() {

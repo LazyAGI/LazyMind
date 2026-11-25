@@ -76,6 +76,14 @@ export function dshRuntime(ctx: Context, serverName: string, webUrl: string): Ru
     parent,
     isLive: agent => ctx.agents.get(agent.session.id) === agent,
     isRunning: agent => agent.status === 'running',
+    activeTurn(agent) {
+      const events = agent.session.ownEvents()
+      for (let index = events.length - 1; index >= 0; index--) {
+        const event = events[index]
+        if (event.type === 'turn/end') return undefined
+        if (event.type === 'turn/start') return { turn: event.data.turn, startSeq: event.seq }
+      }
+    },
     history: agent => [...agent.session.ownEvents()].map(event => ({
       seq: event.seq, time: event.time, user: event.type === 'user/message', run: eventRun(event, serverName, webUrl),
     })),

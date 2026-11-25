@@ -182,6 +182,57 @@ describe('shared delivery contract with an SDK-free host', () => {
     expect(f.action().status).toBe('accepted')
   })
 
+  it('does not reuse previous ownership when a newly observed user input is still being checked', async () => {
+    const f = fixture()
+    f.runtime.suspendGoal = vi.fn()
+    await f.start()
+    let finishLookup!: () => void
+    vi.mocked(f.bridge.action).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      finishLookup = () => reject(new BridgeError('NOT_FOUND', 'manual input', 404))
+    }))
+    const checked = f.coordinator.beforeTurn({ agent: f.root, turn: 2,
+      messages: [{ user: true, requestId: 'unverified-input' }], signal: f.lifetime.signal })
+    f.updateAction({ kind: 'cancel' })
+    f.updateControl({ continuation: 'stopped' })
+    await f.dispatcher.deliver(f.action())
+    expect(f.runtime.cancel).not.toHaveBeenCalled()
+    expect(f.runtime.suspendGoal).not.toHaveBeenCalled()
+    finishLookup()
+    expect(await checked).toBe(true)
+  })
+
+  it.each([false, true])('requires exclusive native input ownership before interrupting (mixed=%s)', async mixed => {
+    const f = fixture()
+    f.runtime.suspendGoal = vi.fn()
+    await f.start()
+    f.runtime.activeTurn = () => ({ turn: 2, startSeq: 1 })
+    f.updateControl({ binding: { ...f.control().binding!, connector_id: 'connector' } })
+    f.updateAction({ connector_id: 'connector' })
+    const messages = [{ user: true, requestId: f.action().id }, ...(mixed ? [{ user: true }] : [])]
+    expect(await f.coordinator.beforeTurn({ agent: f.root, turn: 2, messages, signal: f.lifetime.signal })).toBe(true)
+    // A subsequent step with no user input still belongs to the same native turn.
+    expect(await f.coordinator.beforeTurn({ agent: f.root, turn: 2, messages: [], signal: f.lifetime.signal })).toBe(true)
+    f.updateAction({ kind: 'cancel', id: 'stop' })
+    f.updateControl({ continuation: 'stopped' })
+    await f.dispatcher.deliver(f.action())
+    expect(f.runtime.cancel).toHaveBeenCalledTimes(mixed ? 0 : 1)
+    expect(f.runtime.suspendGoal).toHaveBeenCalledTimes(mixed ? 0 : 1)
+  })
+
+  it.each(['next-turn', 'replaced-agent'] as const)('requires the current native turn and Agent (%s)', async changed => {
+    const f = fixture()
+    let turn = 1
+    f.runtime.activeTurn = () => ({ turn, startSeq: 1 })
+    await f.start()
+    await f.turn()
+    if (changed === 'next-turn') turn++
+    else f.runtime.isLive = () => false
+    f.updateAction({ kind: 'cancel' })
+    f.updateControl({ continuation: 'stopped' })
+    await f.dispatcher.deliver(f.action())
+    expect(f.runtime.cancel).not.toHaveBeenCalled()
+  })
+
   it('cancels the current Workflow-owned host turn', async () => {
     const f = fixture()
     await f.start()

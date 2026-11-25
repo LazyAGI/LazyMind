@@ -19,6 +19,8 @@ export interface Scope<A> {
   goalId?: string
   returnPending: boolean
   turn?: number
+  turnSignal?: AbortSignal
+  stopInput?: { blocked: boolean }
 }
 
 /** Coordinates host execution using Core decisions; does not proxy MCP calls. */
@@ -61,7 +63,7 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
   }
 
   function suspendGoal(scope: Scope<A>) {
-    if (!scope.runId || !scope.automatic || driver(scope.agent) !== scope.agent || !scope.control
+    if (!scope.runId || !scope.automatic || scope.stopInput?.blocked || driver(scope.agent) !== scope.agent || !scope.control
       || !PAUSED.has(scope.control.continuation) || hasModelWork(scope)) return
     runtime.suspendGoal?.(scope.agent, { runId: scope.runId, goalId: scope.goalId, continuation: scope.control.continuation })
   }
@@ -99,6 +101,8 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
     const goal = runtime.goal?.(root)
     if (goal && ownedAt && goal.createdAt <= ownedAt) scope.goalId = goal.id
     else if (goal && ownedAt && goal.createdAt > ownedAt) scope.automatic = false
+    const currentTurn = runtime.activeTurn?.(scope.agent)
+    if (scope.automatic && currentTurn && currentTurn.startSeq < ownedSeq) scope.turn = currentTurn.turn
   }
 
   function ensure(agent: A): Scope<A> {
@@ -234,6 +238,12 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
   async function beforeTurn(payload: { agent: A; turn: number; messages: readonly HostInput[]; signal: AbortSignal }): Promise<boolean | 'skip'> {
     const scope = ensure(payload.agent)
     if (scope.turn !== payload.turn) { scope.turn = payload.turn; scope.manual = false; scope.activeOwned = scope.automatic }
+    scope.turnSignal = payload.signal
+    const userInputs = payload.messages.filter(message => message.user)
+    // Update before any await. Neither a prior turn nor one matching input
+    // in a mixed batch authorizes cancelling the newly proposed work.
+    const stopInput = userInputs.length ? { blocked: true } : undefined
+    if (stopInput) scope.stopInput = stopInput
     try {
       const action = await lookupInput(payload.agent, payload.messages, payload.signal)
       if (action) {
@@ -242,10 +252,17 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
         scope.activeOwned = scope.automatic = true
         scope.manual = false
         publish(scope.runId, action.control)
-      } else if (payload.messages.some(message => message.user)) {
+      } else if (userInputs.length) {
         scope.manual = true; scope.activeOwned = scope.automatic = false
       }
       if ((!scope.manual || scope.activeOwned) && !completion(scope)) await refresh(scope, payload.signal)
+      if (stopInput && scope.stopInput === stopInput) {
+        const binding = scope.control?.binding
+        stopInput.blocked = !!action && !(action.action.kind !== 'cancel' && scope.runId === action.action.session_id
+          && binding?.bound && binding.driver_session_id === runtime.id(payload.agent)
+          && binding.connector_id && binding.connector_id === action.action.connector_id
+          && userInputs.every(message => message.requestId === action.action.id))
+      }
       if (action?.action.kind === 'model_generate' && action.action.execution_id) {
         const binding = scope.control?.binding
         scope.modelJobs.delete(action.action.execution_id)
@@ -276,18 +293,25 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
     ensure, driver, publish, suspendGoal, resumeGoal, afterResult, beforeTurn,
     async cancelSession(agent: A, claim: ActionClaim) {
       const { action, control } = claim
-      if (action.consumed_at || control.continuation !== 'stopped') {
+      if (action.kind !== 'cancel' || action.status !== 'dispatching' || action.consumed_at || control.continuation !== 'stopped') {
         throw new AdmissionRejected('Cancellation no longer applies to this Workflow.')
       }
       const scope = ensure(agent)
-      if (scope.runId !== action.session_id) return
+      if (scope.runId !== action.session_id || lifetime.aborted || runtime.id(agent) !== action.native_session_id
+        || driver(agent) !== agent || runtime.isLive?.(agent) !== true) return
       publish(action.session_id, control)
-      // Check synchronously at the host call, after all remote reads. A user turn
-      // must never inherit cancellation merely because an older execution exists.
-      if (scope.activeOwned && scope.automatic && !scope.manual && runtime.isRunning?.(agent) !== false) {
-        await runtime.cancel(agent)
+      if (scope.control?.continuation !== 'stopped') {
+        throw new AdmissionRejected('Cancellation no longer applies to this Workflow.')
       }
+      // Compare the hook's observed turn against the current native Agent and
+      // open turn synchronously, immediately before the session-scoped call.
+      const running = runtime.isRunning?.(agent) === true
+      if (running && (scope.turnSignal?.aborted
+        || runtime.activeTurn && (scope.turn === undefined || runtime.activeTurn(agent)?.turn !== scope.turn))) return
+      const cancellation = running && scope.activeOwned && scope.automatic && !scope.manual && !scope.stopInput?.blocked
+        ? runtime.cancel(agent) : undefined
       suspendGoal(scope)
+      await cancellation
     },
     cacheClaim(claim: ActionClaim) { actionCache.set(claim.action.id, claim) },
     shouldConclude(agent: A, control: WorkflowControl | null) {
@@ -296,7 +320,10 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
         && ['awaiting_user', 'awaiting_executor'].includes(control?.continuation ?? ''))
     },
     takeNestedLink(callId: string) { const link = ptcLinks.get(callId); ptcLinks.delete(callId); return link },
-    idle(agent: A) { const scope = scopes.get(agent); if (scope) { scope.activeOwned = false; scope.manual = false } },
+    idle(agent: A) {
+      const scope = scopes.get(agent)
+      if (scope) { scope.activeOwned = false; scope.manual = false; scope.turn = undefined; scope.turnSignal = undefined }
+    },
     forget(agent: A) { scopes.delete(agent) },
     dispose() { scopes.clear(); ptcLinks.clear(); actionCache.clear() },
   }

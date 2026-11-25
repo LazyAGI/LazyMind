@@ -62,7 +62,7 @@ func TestWorkflowBindUsesPairedProviderNotRequestBody(t *testing.T) {
 				t.Fatal("binding did not use trusted pairing identity")
 			}
 			wantCancellation := "none"
-			if provider == workflowhost.DSHProvider || provider == "workbuddy" {
+			if provider == workflowhost.DSHProvider {
 				wantCancellation = "session"
 			}
 			if received["cancellation"] != wantCancellation {

@@ -24,7 +24,7 @@ function fixture() {
     settle: vi.fn(async (_id, _instance, _token, state) => { action.status = state }),
   }
   const signal = new AbortController().signal
-  const dispatcher = createDispatcher(adapter, adapter.control(signal), bridge, 'worker', signal)
+  const dispatcher = createDispatcher(adapter, undefined, bridge, 'worker', signal)
   return { action, control, bridge, dispatcher, adapter, sends: () => sends, busy: () => { busy = true }, fail: () => { failSend = true } }
 }
 describe('independent HostAction delivery', () => {
@@ -49,20 +49,19 @@ describe('independent HostAction delivery', () => {
     await f.dispatcher.deliver(f.action)
     expect(f.sends()).toBe(1); expect(f.action.status).toBe('unknown')
   })
-  it('delivers Stop to a busy session without waiting for idle', async () => {
+  it('advertises no cancellation and rejects a cancel offered by an older Core', async () => {
     const f = fixture(); f.busy(); f.action.kind = 'cancel'; f.control.continuation = 'stopped'
-    await f.dispatcher.deliver(f.action)
-    expect(f.action.status).toBe('accepted'); expect(f.sends()).toBe(1)
-  })
-  it('rejects a stale Stop when the workflow has resumed', async () => {
-    const f = fixture(); f.action.kind = 'cancel'
+    expect(f.adapter.cancellation).toBe('none')
     await f.dispatcher.deliver(f.action)
     expect(f.action.status).toBe('failed'); expect(f.sends()).toBe(0)
+    expect(f.bridge.settle).toHaveBeenCalledWith('action-1', 'worker', 'lease', 'failed', 0,
+      expect.stringContaining('Workflow is stopped in Core'), expect.any(AbortSignal))
   })
-  it('does not repeat a cancel with an uncertain host receipt', async () => {
-    const f = fixture(); f.action.kind = 'cancel'; f.control.continuation = 'stopped'; f.fail()
+  it('leaves a legacy uncertain cancellation on its receipt path without calling the SDK', async () => {
+    const f = fixture(); f.action.kind = 'cancel'; f.action.status = 'dispatching'; f.control.continuation = 'stopped'
     await f.dispatcher.deliver(f.action); await f.dispatcher.deliver(f.action)
-    expect(f.action.status).toBe('unknown'); expect(f.sends()).toBe(1)
+    expect(f.action.status).toBe('unknown'); expect(f.sends()).toBe(0)
+    expect(f.bridge.settle).not.toHaveBeenCalled()
   })
   it('rejects ambiguous identity evidence instead of choosing the active UI session', async () => {
     const adapter = new WorkBuddyAdapter({ evaluate: async <T>() => ({ matches: [{ sessionId: 'a' }, { sessionId: 'b' }] }) as T })

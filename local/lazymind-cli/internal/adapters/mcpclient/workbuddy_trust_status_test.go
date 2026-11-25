@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,12 +89,14 @@ func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 				checked := time.Now().UnixMilli()
 				evidence := workflowconnector.ConnectionEvidence{PairingRevision: pair.RuntimeRevision,
 					Connection: &workflowconnector.ConnectionObservation{CheckedAt: checked, Issue: tc.pollIssue}}
+				status := workbuddyhost.Status{ConnectorID: pair.ConnectorID, CheckedAt: checked, ConnectionEvidence: evidence,
+					Ready: true, Cancellation: "none", Version: "5.9.3", BridgeURL: "http://127.0.0.1:9334",
+					Runtime:      workflowconnector.Runtime{ConnectorEntry: filepath.Join(root, "main.mjs"), ConnectorVersion: "0.1.0", ConnectorRevision: strings.Repeat("a", 64)},
+					Presentation: workbuddyhost.PresentationStatus{Status: "binding-unavailable"}}
 				if tc.pollIssue == "legacy" {
-					evidence = workflowconnector.ConnectionEvidence{}
+					status.ConnectionEvidence, status.Runtime, status.Cancellation = workflowconnector.ConnectionEvidence{}, workflowconnector.Runtime{}, "session"
 				}
-				body, _ = json.Marshal(workbuddyhost.Status{ConnectorID: pair.ConnectorID, CheckedAt: checked, ConnectionEvidence: evidence,
-					Ready: true, Cancellation: "session", Version: "5.9.3", BridgeURL: "http://127.0.0.1:9334",
-					Presentation: workbuddyhost.PresentationStatus{Status: "binding-unavailable"}})
+				body, _ = json.Marshal(status)
 				writeTestFile(t, config.PairingFile+".workbuddy-status.json", string(body))
 			}
 			previous := workBuddyStartupHealth

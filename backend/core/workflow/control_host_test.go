@@ -714,3 +714,168 @@ func TestUnsupportedCancellationPreservesStopAndAllowsResume(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func workBuddyStopFixture(t *testing.T) (WorkflowControlService, WorkflowHostIdentity) {
+	t.Helper()
+	db, _ := setupBatchTransitionSession(t)
+	if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowCommand{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}, &orm.SubAgentTask{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{
+		"control_protocol": controlpolicy.Protocol, "control_binding_json": "{}", "controller_host": "external-agent", "status": "active",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := WorkflowControlService{DB: db.DB}
+	id := WorkflowHostIdentity{ConnectorID: "connector", Credential: strings.Repeat("x", 64), InstanceID: "worker"}
+	// A session-capable binding can create the delivery state an old WorkBuddy Core did.
+	if _, err := svc.Bind(context.Background(), "batch-user", "batch-session", WorkflowHostBindingRequest{
+		ConnectorID: id.ConnectorID, Credential: id.Credential, Provider: "deepseek-harness", DriverSessionID: "driver",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return svc, id
+}
+
+// Model a database written by an older Core while keeping the same connector and driver.
+func markLegacyWorkBuddyBinding(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var session orm.WorkflowSession
+	if err := db.First(&session, "id = ?", "batch-session").Error; err != nil {
+		t.Fatal(err)
+	}
+	binding, err := controlstore.DecodeBinding(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding.Provider, binding.Cancellation = "workbuddy", "session"
+	raw, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&session).Update("control_binding_json", string(raw)).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkBuddyCoreStopOnly(t *testing.T) {
+	svc, id := workBuddyStopFixture(t)
+	ctx := context.Background()
+	markLegacyWorkBuddyBinding(t, svc.DB)
+	if err := svc.DB.Create(&orm.WorkflowSessionStep{ID: "attempt", TaskID: "attempt", SessionID: "batch-session", StepID: "branch_b", Attempt: 1, ExecutorHost: "external-agent", Status: "running", Validity: "effective", LeaseToken: "old-handle"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "stop", Kind: "stop"})
+	if err != nil || stopped.Control.Continuation != "stopped" || stopped.Control.Delivery == nil ||
+		stopped.Control.Delivery.Status != "failed" {
+		t.Fatalf("Stop should commit without a native cancellation: %+v %v", stopped, err)
+	}
+	var attempt orm.WorkflowSessionStep
+	if err := svc.DB.First(&attempt, "id = ?", "attempt").Error; err != nil || attempt.Status != "cancelled" || attempt.LeaseToken != "" {
+		t.Fatalf("Stop did not revoke execution in Core: %+v %v", attempt, err)
+	}
+	claim, err := svc.ClaimHostAction(ctx, "batch-user", stopped.Receipt.ActionID, id)
+	if err != nil || claim.DispatchToken != "" {
+		t.Fatalf("unsupported Stop granted a native dispatch: %+v %v", claim, err)
+	}
+	resumed, err := svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "resume", Kind: "resume", StateVersion: stopped.Control.StateVersion})
+	if err != nil || resumed.Control.Continuation == "stopped" {
+		t.Fatalf("Resume waited for a WorkBuddy cancellation: %+v %v", resumed, err)
+	}
+	claim, err = svc.ClaimHostAction(ctx, "batch-user", resumed.Receipt.ActionID, id)
+	if err != nil || claim.DispatchToken == "" || claim.Action.Kind != "continue" {
+		t.Fatalf("WorkBuddy continue did not remain dispatchable: %+v %v", claim, err)
+	}
+}
+
+func TestLegacyWorkBuddyCancelDoesNotGrantDispatchAfterUpgrade(t *testing.T) {
+	svc, id := workBuddyStopFixture(t)
+	ctx := context.Background()
+	stopped, err := svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "old-stop", Kind: "stop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPage, err := svc.HostActions(ctx, "batch-user", id, "")
+	if err != nil || len(oldPage.Actions) != 1 || oldPage.Actions[0].Status != "pending" {
+		t.Fatalf("legacy worker never listed the pending cancel: %+v %v", oldPage, err)
+	}
+
+	markLegacyWorkBuddyBinding(t, svc.DB)
+	page, err := svc.HostActions(ctx, "batch-user", id, "")
+	if err != nil || len(page.Actions) != 0 {
+		t.Fatalf("upgraded list leaked legacy pending cancel: %+v %v", page, err)
+	}
+	claim, err := svc.ClaimHostAction(ctx, "batch-user", oldPage.Actions[0].ID, id)
+	if err != nil || claim.DispatchToken != "" || claim.Action.Status != "pending" {
+		t.Fatalf("old worker must not dispatch or rewrite the pending cancel: %+v %v", claim, err)
+	}
+	var stored orm.WorkflowHostAction
+	if err := svc.DB.First(&stored, "id = ?", oldPage.Actions[0].ID).Error; err != nil || stored.Status != "pending" ||
+		stored.DispatchTokenHash != "" || stored.DispatchOwner != "" || stored.DispatchExpiresAt != nil || stored.ConsumedAt != nil {
+		t.Fatalf("old pending action was mutated or granted a lease: %+v %v", stored, err)
+	}
+	resumed, err := svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "resume", Kind: "resume", StateVersion: stopped.Control.StateVersion})
+	if err != nil || resumed.Control.Continuation == "stopped" {
+		t.Fatalf("Resume could not retire an undelivered action: %+v %v", resumed, err)
+	}
+}
+
+func TestLegacyWorkBuddyCancelKeepsClaimedReceiptSemantics(t *testing.T) {
+	for _, expire := range []bool{false, true} {
+		name := "real receipt"
+		if expire {
+			name = "uncertain receipt"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, id := workBuddyStopFixture(t)
+			ctx := context.Background()
+			stopped, err := svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "old-stop", Kind: "stop"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			actionID := stopped.Receipt.ActionID
+			oldClaim, err := svc.ClaimHostAction(ctx, "batch-user", actionID, id)
+			if err != nil || oldClaim.DispatchToken == "" {
+				t.Fatalf("legacy dispatch: %+v %v", oldClaim, err)
+			}
+			markLegacyWorkBuddyBinding(t, svc.DB)
+			page, err := svc.HostActions(ctx, "batch-user", id, "")
+			if err != nil || len(page.Actions) != 1 || page.Actions[0].Status != "dispatching" {
+				t.Fatalf("claimed cancel left its receipt path: %+v %v", page, err)
+			}
+			if expire {
+				if err := svc.DB.Model(&orm.WorkflowHostAction{}).Where("id = ?", actionID).Update("dispatch_expires_at", time.Now().Add(-time.Minute)).Error; err != nil {
+					t.Fatal(err)
+				}
+				for range 2 {
+					current, err := svc.ClaimHostAction(ctx, "batch-user", actionID, id)
+					if err != nil || current.DispatchToken != "" || current.Action.Status != "unknown" {
+						t.Fatalf("expired cancel must remain unknown without a token: %+v %v", current, err)
+					}
+				}
+			}
+			current, err := svc.HostAction(ctx, "batch-user", actionID, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "resume", Kind: "resume", StateVersion: current.Control.StateVersion})
+			expectControlCode(t, err, "DELIVERY_PENDING")
+			if !expire {
+				receipt := WorkflowHostReceipt{ConnectorID: id.ConnectorID, Credential: id.Credential, InstanceID: id.InstanceID,
+					DispatchToken: oldClaim.DispatchToken, Status: "accepted"}
+				settled, err := svc.SettleHostAction(ctx, "batch-user", actionID, receipt)
+				if err != nil || settled.Status != "accepted" {
+					t.Fatalf("real old receipt could not settle after upgrade: %+v %v", settled, err)
+				}
+				current, err = svc.HostAction(ctx, "batch-user", actionID, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				resumed, err := svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "resume-after-receipt", Kind: "resume", StateVersion: current.Control.StateVersion})
+				if err != nil || resumed.Control.Continuation == "stopped" {
+					t.Fatalf("Resume could not follow a real receipt: %+v %v", resumed, err)
+				}
+			}
+		})
+	}
+}

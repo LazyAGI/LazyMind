@@ -349,7 +349,7 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 		}
 	}
 	function suspendGoal(scope) {
-		if (!scope.runId || !scope.automatic || driver(scope.agent) !== scope.agent || !scope.control || !PAUSED.has(scope.control.continuation) || hasModelWork(scope)) return;
+		if (!scope.runId || !scope.automatic || scope.stopInput?.blocked || driver(scope.agent) !== scope.agent || !scope.control || !PAUSED.has(scope.control.continuation) || hasModelWork(scope)) return;
 		runtime.suspendGoal?.(scope.agent, {
 			runId: scope.runId,
 			goalId: scope.goalId,
@@ -399,6 +399,8 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 		const goal = runtime.goal?.(root);
 		if (goal && ownedAt && goal.createdAt <= ownedAt) scope.goalId = goal.id;
 		else if (goal && ownedAt && goal.createdAt > ownedAt) scope.automatic = false;
+		const currentTurn = runtime.activeTurn?.(scope.agent);
+		if (scope.automatic && currentTurn && currentTurn.startSeq < ownedSeq) scope.turn = currentTurn.turn;
 	}
 	function ensure(agent) {
 		const existing = scopes.get(agent);
@@ -560,6 +562,10 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 			scope.manual = false;
 			scope.activeOwned = scope.automatic;
 		}
+		scope.turnSignal = payload.signal;
+		const userInputs = payload.messages.filter((message) => message.user);
+		const stopInput = userInputs.length ? { blocked: true } : void 0;
+		if (stopInput) scope.stopInput = stopInput;
 		try {
 			const action = await lookupInput(payload.agent, payload.messages, payload.signal);
 			if (action) {
@@ -568,11 +574,15 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 				scope.activeOwned = scope.automatic = true;
 				scope.manual = false;
 				publish(scope.runId, action.control);
-			} else if (payload.messages.some((message) => message.user)) {
+			} else if (userInputs.length) {
 				scope.manual = true;
 				scope.activeOwned = scope.automatic = false;
 			}
 			if ((!scope.manual || scope.activeOwned) && !completion(scope)) await refresh(scope, payload.signal);
+			if (stopInput && scope.stopInput === stopInput) {
+				const binding = scope.control?.binding;
+				stopInput.blocked = !!action && !(action.action.kind !== "cancel" && scope.runId === action.action.session_id && binding?.bound && binding.driver_session_id === runtime.id(payload.agent) && binding.connector_id && binding.connector_id === action.action.connector_id && userInputs.every((message) => message.requestId === action.action.id));
+			}
 			if (action?.action.kind === "model_generate" && action.action.execution_id) {
 				const binding = scope.control?.binding;
 				scope.modelJobs.delete(action.action.execution_id);
@@ -603,12 +613,16 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 		beforeTurn,
 		async cancelSession(agent, claim) {
 			const { action, control } = claim;
-			if (action.consumed_at || control.continuation !== "stopped") throw new AdmissionRejected("Cancellation no longer applies to this Workflow.");
+			if (action.kind !== "cancel" || action.status !== "dispatching" || action.consumed_at || control.continuation !== "stopped") throw new AdmissionRejected("Cancellation no longer applies to this Workflow.");
 			const scope = ensure(agent);
-			if (scope.runId !== action.session_id) return;
+			if (scope.runId !== action.session_id || lifetime.aborted || runtime.id(agent) !== action.native_session_id || driver(agent) !== agent || runtime.isLive?.(agent) !== true) return;
 			publish(action.session_id, control);
-			if (scope.activeOwned && scope.automatic && !scope.manual && runtime.isRunning?.(agent) !== false) await runtime.cancel(agent);
+			if (scope.control?.continuation !== "stopped") throw new AdmissionRejected("Cancellation no longer applies to this Workflow.");
+			const running = runtime.isRunning?.(agent) === true;
+			if (running && (scope.turnSignal?.aborted || runtime.activeTurn && (scope.turn === void 0 || runtime.activeTurn(agent)?.turn !== scope.turn))) return;
+			const cancellation = running && scope.activeOwned && scope.automatic && !scope.manual && !scope.stopInput?.blocked ? runtime.cancel(agent) : void 0;
 			suspendGoal(scope);
+			await cancellation;
 		},
 		cacheClaim(claim) {
 			actionCache.set(claim.action.id, claim);
@@ -627,6 +641,8 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 			if (scope) {
 				scope.activeOwned = false;
 				scope.manual = false;
+				scope.turn = void 0;
+				scope.turnSignal = void 0;
 			}
 		},
 		forget(agent) {
@@ -904,6 +920,17 @@ function dshRuntime(ctx, serverName, webUrl) {
 		parent,
 		isLive: (agent) => ctx.agents.get(agent.session.id) === agent,
 		isRunning: (agent) => agent.status === "running",
+		activeTurn(agent) {
+			const events = agent.session.ownEvents();
+			for (let index = events.length - 1; index >= 0; index--) {
+				const event = events[index];
+				if (event.type === "turn/end") return void 0;
+				if (event.type === "turn/start") return {
+					turn: event.data.turn,
+					startSeq: event.seq
+				};
+			}
+		},
 		history: (agent) => [...agent.session.ownEvents()].map((event) => ({
 			seq: event.seq,
 			time: event.time,
@@ -1113,9 +1140,7 @@ function installHost(ctx, bridge, config, instanceId) {
 	}
 	const removeHook0 = ctx.on("agent/pre-step", (payload, next) => own((async () => {
 		const registration = ensure(payload.agent);
-		await registration.ready;
-		wrap(payload.agent, registration);
-		const allowed = await coordinator.beforeTurn({
+		const decision = coordinator.beforeTurn({
 			...payload,
 			messages: payload.messages.map((message) => {
 				const source = object(object(message)?.source);
@@ -1125,6 +1150,8 @@ function installHost(ctx, bridge, config, instanceId) {
 				};
 			})
 		});
+		const [allowed] = await Promise.all([decision, registration.ready]);
+		wrap(payload.agent, registration);
 		if (allowed === "skip") {
 			registration.resumeInbox = true;
 			return {
@@ -1409,7 +1436,7 @@ function mcpReadiness(ctx, serverName) {
 
 //#endregion
 //#region src/connector-build.ts
-const connectorBuild = "0.1.6+4face6d3fe1bf398";
+const connectorBuild = "0.1.6+44ea1009987120f4";
 
 //#endregion
 //#region src/binding-rpc.ts

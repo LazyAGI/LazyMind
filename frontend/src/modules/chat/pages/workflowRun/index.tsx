@@ -144,8 +144,8 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
   };
   const activities = useExecutionActivity(resultsOnly ? undefined : snapshot?.session);
   const control = snapshot?.control;
-  const liveDelivery = deliveryBanner(control?.delivery, control?.binding);
-  const infoBanner = overlayInfoBanner(noticeKey, control?.delivery, control?.binding);
+  const liveDelivery = deliveryBanner(control?.delivery, control?.binding, control?.continuation);
+  const infoBanner = overlayInfoBanner(noticeKey, control?.delivery, control?.binding, control?.continuation);
   const bannerFromNotice = Boolean(infoBanner && (!liveDelivery || infoBanner.key === noticeKey));
 
   const splitWorkbench = resultsOnly && !embedded;

@@ -89,7 +89,7 @@ func (s *Server) handleWorkflowHostBind(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	cancellation := "none"
-	if pair.Provider == workflowhost.DSHProvider || pair.Provider == "workbuddy" {
+	if pair.Provider == workflowhost.DSHProvider {
 		cancellation = "session"
 	}
 	relayWorkflowHost(w, r, api, http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.RunID)+"/host-binding", map[string]any{

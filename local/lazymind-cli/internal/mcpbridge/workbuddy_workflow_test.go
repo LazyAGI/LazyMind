@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,7 +57,8 @@ func TestWorkBuddyIdentityUsesNativeControlDuringCoreAuthorizationFailure(t *tes
 		t.Fatal(err)
 	}
 	now := time.Now().UnixMilli()
-	status := workbuddyhost.Status{ConnectorID: pair.ConnectorID, CheckedAt: now, Ready: true, Version: "5.9.3", Cancellation: "session",
+	status := workbuddyhost.Status{ConnectorID: pair.ConnectorID, CheckedAt: now, Ready: true, Version: "5.9.3", Cancellation: "none",
+		Runtime:   workflowconnector.Runtime{ConnectorEntry: filepath.Join(home, "main.mjs"), ConnectorVersion: "0.1.0", ConnectorRevision: strings.Repeat("a", 64)},
 		BridgeURL: server.URL, ConnectionEvidence: workflowconnector.ConnectionEvidence{PairingRevision: pair.RuntimeRevision,
 			Connection: &workflowconnector.ConnectionObservation{CheckedAt: now, Issue: "lazymind_auth_required"}}}
 	b := &Bridge{home: home}
@@ -65,7 +67,7 @@ func TestWorkBuddyIdentityUsesNativeControlDuringCoreAuthorizationFailure(t *tes
 			// The old worker folded unrelated Bridge failures into its native
 			// Ready bit after the renderer probe succeeded.
 			status.ConnectionEvidence = workflowconnector.ConnectionEvidence{}
-			status.Ready, status.Issue = false, "lazymind_unavailable"
+			status.Ready, status.Issue, status.Cancellation = false, "lazymind_unavailable", "session"
 		}
 		body, _ = json.Marshal(status)
 		if err := localfile.Write(config.PairingFile+".workbuddy-status.json", body, 0600); err != nil {

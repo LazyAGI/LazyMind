@@ -76,6 +76,9 @@ func (s WorkflowControlService) Bind(ctx context.Context, owner, sessionID strin
 			binding.CredentialHash = controlstore.Hash([]byte(input.Credential))
 		}
 		binding.Cancellation = input.Cancellation
+		if binding.Provider == "workbuddy" {
+			binding.Cancellation = "none"
+		}
 		encoded, err := json.Marshal(binding)
 		if err != nil {
 			return err
@@ -123,16 +126,24 @@ func (s WorkflowControlService) HostActions(ctx context.Context, owner string, i
 		if err := s.DB.WithContext(ctx).Where("id = ?", action.SessionID).First(&session).Error; err != nil {
 			return page, err
 		}
-		_, err := controlstore.AuthorizeHost(session, identity.ConnectorID, identity.Credential)
+		binding, err := controlstore.AuthorizeHost(session, identity.ConnectorID, identity.Credential)
 		if err != nil {
 			return page, err
 		}
-		page.Actions = append(page.Actions, action)
+		if !blockedWorkBuddyCancel(binding, action) {
+			page.Actions = append(page.Actions, action)
+		}
 	}
 	if len(candidates) == pageSize {
 		page.NextPageToken = candidates[len(candidates)-1].ID
 	}
 	return page, nil
+}
+
+// WorkBuddy cannot fence a session cancellation to a Workflow turn. Leave
+// actions that already have a dispatch owner on their normal receipt path.
+func blockedWorkBuddyCancel(binding controlstore.Binding, action orm.WorkflowHostAction) bool {
+	return binding.Provider == "workbuddy" && action.Kind == "cancel" && action.Status == "pending"
 }
 
 // All action reads and writes revalidate the binding under the session lock.
@@ -186,7 +197,7 @@ func (s WorkflowControlService) ClaimHostAction(ctx context.Context, owner, acti
 	}
 	err := controlstore.Transaction(ctx, s.DB, hint.SessionID, func(tx *gorm.DB, session *orm.WorkflowSession) error {
 		action := &result.Action
-		_, err := authorizeHostAction(tx, *session, owner, actionID, identity, action)
+		binding, err := authorizeHostAction(tx, *session, owner, actionID, identity, action)
 		if err != nil {
 			return err
 		}
@@ -212,6 +223,10 @@ func (s WorkflowControlService) ClaimHostAction(ctx context.Context, owner, acti
 		if action.Status != "pending" {
 			result.Control, err = controlstore.Read(tx, *session)
 			return err
+		}
+		if blockedWorkBuddyCancel(binding, *action) {
+			result.Control, err = controlstore.Read(tx, *session)
+			return err // A worker can still hold a listing from before the upgrade.
 		}
 		// Delivery grants no execution authority; Begin/Claim validate current Workflow state.
 		secret := make([]byte, 32)

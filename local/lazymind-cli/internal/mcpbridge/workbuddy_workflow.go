@@ -75,7 +75,7 @@ func (b *Bridge) bindWorkBuddyController(ctx context.Context, runID, sessionID s
 	started := time.Now()
 	err = b.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(runID)+"/host-binding", map[string]any{
 		"connector_id": pair.ConnectorID, "credential": pair.Token, "provider": "workbuddy",
-		"driver_session_id": sessionID, "cancellation": "session",
+		"driver_session_id": sessionID, "cancellation": "none",
 	}, &result)
 	status := "bound"
 	if err != nil {
