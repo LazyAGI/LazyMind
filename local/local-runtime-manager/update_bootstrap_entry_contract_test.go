@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 func TestUpdateBootstrapActivatesAfterExpandingBundledPython(t *testing.T) {
@@ -21,7 +23,11 @@ func TestUpdateBootstrapActivatesAfterExpandingBundledPython(t *testing.T) {
 	previous := resolveRuntimeRecoveryRoot
 	resolveRuntimeRecoveryRoot = func() (string, error) { return root, nil }
 	t.Cleanup(func() { resolveRuntimeRecoveryRoot = previous })
-	record := bootstrapRecord(t, f, root, "installing", nil)
+	platform, arch := runtime.GOOS, runtime.GOARCH
+	if runtime.GOOS == "linux" {
+		platform, arch = "windows", "amd64"
+	}
+	record := bootstrapRecordForPlatform(t, f, root, "installing", nil, platform, arch)
 	tx := record["transactionId"].(string)
 	python := filepath.Join(f.paths.ResourcesRoot, "deps", "python", "algorithm", "Scripts", "python.exe")
 	writePythonPayloadArchive(t, f.paths.ResourcesRoot, map[string]string{
@@ -63,8 +69,8 @@ func main() {
 	cli.newManager = func(r CommandRunner, exe string) *RuntimeManager {
 		m := NewRuntimeManager(r, exe)
 		m.relocatePythonVenvs = func(cfg RuntimeConfig, paths RuntimePaths) error {
-			if cfg.Profile != "desktop" || !sameRuntimePath(paths.ResourcesRoot, f.paths.ResourcesRoot) {
-				t.Fatal("relocation reached a different runtime")
+			if cfg.Profile != "desktop" || cfg.Algorithm.RAGDisabled || !sameRuntimePath(paths.ResourcesRoot, f.paths.ResourcesRoot) {
+				t.Fatal("relocation reached a different runtime or lost the selected RAG component")
 			}
 			if raw, err := os.ReadFile(python); err != nil || string(raw) != "unrelocated" {
 				t.Fatalf("venv relocation ran before expansion: %q %v", raw, err)
@@ -79,9 +85,38 @@ func main() {
 	if err := cli.Run(t.Context(), args); err != nil {
 		t.Fatalf("activation command: %v %s", err, output.String())
 	}
-	var result struct{ Status string }
-	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &result); err != nil || result.Status != "activated" {
-		t.Fatalf("activation did not reach Core with a usable target interpreter: %s (%v)", strings.TrimSpace(output.String()), err)
+	var result struct{ Status, Reason string }
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &result); err != nil {
+		t.Fatalf("invalid activation response: %s (%v)", output.String(), err)
+	}
+	if runtime.GOOS == "linux" {
+		// Desktop catalogs must remain foreign to the Linux CLI. Exercise the
+		// same post-verification activation as native Desktop on this host.
+		if result.Status != "blocked" || result.Reason != "data_unknown" {
+			t.Fatalf("Linux did not reject the foreign Desktop runtime: %s", output.String())
+		}
+		if _, err := os.Stat(python); !os.IsNotExist(err) {
+			t.Fatalf("foreign Desktop catalog reached payload expansion: %v", err)
+		}
+		installing, err := desktopupdate.ReadNativeRecord(root)
+		if err != nil || installing == nil || installing.Phase != "installing" {
+			t.Fatalf("expected the accepted installing record: %+v %v", installing, err)
+		}
+		artifact := desktopupdate.Artifact{SHA256: installing.ComponentsSHA256, Size: installing.ComponentsSize}
+		if _, _, err := readTargetCatalog(t.Context(), installing.ComponentsPath, artifact); desktopupdate.ErrorCode(err) != "component_update_incompatible" {
+			t.Fatalf("host accepted or misidentified the foreign component catalog: %v", err)
+		}
+		cfg := f.cfg
+		cfg.OwnerToken = "fixture-target-owner"
+		if err := activateVerifiedTarget(t.Context(), cli.newManager(runner, "fixture-manager"), cfg, f.paths, root, installing); err != nil {
+			t.Fatalf("post-verification target activation: %v", err)
+		}
+	} else if result.Status != "activated" {
+		t.Fatalf("activation did not reach Core with a usable target interpreter: %s", strings.TrimSpace(output.String()))
+	}
+	activated, err := desktopupdate.ReadNativeRecord(root)
+	if err != nil || activated == nil || activated.Phase != "activated" || activated.TransactionID != tx || activated.Owner != "fixture-target-owner" {
+		t.Fatalf("target activation did not persist: %+v %v", activated, err)
 	}
 	if after, err := os.ReadFile(f.paths.StateFile); err != nil || !bytes.Equal(before, after) || len(runner.calls) != 0 {
 		t.Fatalf("activation started services or changed runtime state: %v", err)

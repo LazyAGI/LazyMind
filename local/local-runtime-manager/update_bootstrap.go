@@ -55,7 +55,7 @@ func readNativeConfiguration(ctx context.Context, paths RuntimePaths) (desktopup
 		Config desktopupdate.Config
 	}
 	// Allow the helper's bounded 60-second signature verification to finish.
-	bounded, cancel := context.WithTimeout(ctx, 75*time.Second)
+	bounded, cancel := context.WithTimeout(ctx, nativeIdentityTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(bounded, filepath.Join(paths.ResourcesRoot, "bin", executableName("lazymind-update-helper")), "verify-identity")
 	raw, err := cmd.Output()
@@ -105,6 +105,17 @@ func guardNativeMutation(ctx context.Context, cfg RuntimeConfig, paths RuntimePa
 	return ctx.Err()
 }
 func bindNativeStartup(ctx context.Context, cfg *RuntimeConfig, paths *RuntimePaths, tx, owner string) error {
+	return bindStartup(ctx, cfg, paths, tx, owner, false)
+}
+
+func bindServiceStartup(ctx context.Context, cfg *RuntimeConfig, paths *RuntimePaths) error {
+	if err := inheritCommittedRuntimeStorage(cfg, paths); err != nil {
+		return err
+	}
+	return bindStartup(ctx, cfg, paths, bootstrapTransaction(*cfg), cfg.OwnerToken, true)
+}
+
+func bindStartup(ctx context.Context, cfg *RuntimeConfig, paths *RuntimePaths, tx, owner string, service bool) error {
 	root, err := resolveRuntimeRecoveryRoot()
 	if err != nil {
 		return err
@@ -120,9 +131,17 @@ func bindNativeStartup(ctx context.Context, cfg *RuntimeConfig, paths *RuntimePa
 		return nil
 	}
 	if !nativeScopeIntersects(*cfg, *paths, record) {
+		if tx != "" {
+			return updateStateFailure("update_transaction_conflict")
+		}
 		return nil
 	}
-	identity, err := readNativeConfiguration(ctx, *paths)
+	var identity desktopupdate.Config
+	if service && cfg.UpdateBootstrap != nil && record.Phase == "activated" && record.TransactionID == tx && owner != "" && record.Owner == owner {
+		identity, err = readServiceStartupIdentity(ctx, *paths, record)
+	} else {
+		identity, err = readNativeConfiguration(ctx, *paths)
+	}
 	if err != nil {
 		return err
 	}
@@ -138,9 +157,26 @@ func bindNativeStartup(ctx context.Context, cfg *RuntimeConfig, paths *RuntimePa
 		return err
 	}
 	if admitted == nil {
+		if tx != "" {
+			return updateStateFailure("update_incomplete")
+		}
 		return nil
 	}
-	if owner == "" || owner != cfg.OwnerToken {
+	// The record may have changed during signature verification. Use the
+	// record whose component selection and startup permission were checked.
+	if service && startupIdentityBinding(record) != startupIdentityBinding(admitted) {
+		return updateStateFailure("update_transaction_conflict")
+	}
+	record = admitted
+	release, version, want, _ := record.EffectiveTarget()
+	if !nativeIdentityMatches(record, identity, *paths) || release != identity.ReleaseID || version != identity.Version || identity.UpdaterProtocol != 2 {
+		return updateStateFailure("update_transaction_conflict")
+	}
+	if owner == "" || owner != cfg.OwnerToken || (record.Owner != "" && record.Owner != owner) {
+		return updateStateFailure("update_transaction_conflict")
+	}
+	if service && (cfg.UpdateBootstrap == nil || record.Owner != owner || cfg.UpdateBootstrap.ReleaseID != release ||
+		!reflect.DeepEqual(cfg.UpdateBootstrap.Actor, record.TargetActor) || !reflect.DeepEqual(cfg.UpdateBootstrap.Storage, nativeStorageSnapshot(record))) {
 		return updateStateFailure("update_transaction_conflict")
 	}
 	if err := resolveBootstrapStorage(cfg, paths, record); err != nil {
@@ -153,7 +189,6 @@ func bindNativeStartup(ctx context.Context, cfg *RuntimeConfig, paths *RuntimePa
 	if err != nil {
 		return err
 	}
-	release, _, want, _ := record.EffectiveTarget()
 	if dirty || profile != want {
 		return updateStateFailure("update_startup_failed")
 	}
@@ -372,6 +407,39 @@ func (w *boundedUpdateOutput) Write(raw []byte) (int, error) {
 	return count, nil
 }
 func (w *boundedUpdateOutput) Bytes() []byte { return w.data }
+
+// The caller has already verified the signed identity, data format and exact target selections.
+func activateVerifiedTarget(ctx context.Context, manager *RuntimeManager, cfg RuntimeConfig, paths RuntimePaths, root string, record *desktopupdate.NativeRecord) error {
+	effective, _, profile, _ := record.EffectiveTarget()
+	components := record.EffectiveComponents()
+	if len(components) != 0 {
+		// A Windows simple install leaves Python archived. Activation runs
+		// before Up, so prepare the target interpreter before Core probes it.
+		release, err := acquireUpLock(paths)
+		if err != nil {
+			return updateStateFailure("update_transaction_conflict")
+		}
+		defer release()
+		err = prepareBundledPythonRuntime(ctx, paths, nil)
+		if err == nil {
+			err = manager.relocatePythonVenvs(cfg, paths)
+		}
+		if err != nil {
+			_ = nativeCommand(ctx, root, "repair", map[string]string{"transactionId": record.TransactionID, "reason": "component_target_verification_failed"})
+			return updateStateFailure("component_target_verification_failed")
+		}
+	}
+	if _, err := invokeCoreMaintenance(ctx, paths, "activate", record.TransactionID); err != nil {
+		_ = nativeCommand(ctx, root, "repair", map[string]string{"transactionId": record.TransactionID, "reason": "component_target_verification_failed"})
+		return err
+	}
+	actor, err := desktopupdate.IdentifyProcess(os.Getppid())
+	if err != nil {
+		return err
+	}
+	return nativeCommand(ctx, root, "activated", map[string]any{"transactionId": record.TransactionID, "releaseId": effective, "dataProfile": profile, "componentMode": record.ComponentMode, "components": componentRevisions(components), "owner": cfg.OwnerToken, "actor": actor})
+}
+
 func nativeCommand(ctx context.Context, root, action string, value any) error {
 	raw, _ := json.Marshal(value)
 	output, err := desktopupdate.NativeUpdateStateCommand(ctx, root, action, raw)
@@ -735,32 +803,7 @@ func (c *CLI) updateBootstrapCommand(ctx context.Context, manager *RuntimeManage
 		if !equalComponentDescriptors(components, record.EffectiveComponents()) {
 			return blocked(updateStateFailure("component_update_incompatible"))
 		}
-		if len(components) != 0 {
-			// A Windows simple install leaves Python archived. Activation runs
-			// before Up, so prepare the target interpreter before Core probes it.
-			release, err := acquireUpLock(paths)
-			if err != nil {
-				return blocked(updateStateFailure("update_transaction_conflict"))
-			}
-			defer release()
-			err = prepareBundledPythonRuntime(ctx, paths, nil)
-			if err == nil {
-				err = manager.relocatePythonVenvs(cfg, paths)
-			}
-			if err != nil {
-				_ = nativeCommand(ctx, root, "repair", map[string]string{"transactionId": *tx, "reason": "component_target_verification_failed"})
-				return blocked(updateStateFailure("component_target_verification_failed"))
-			}
-		}
-		if _, err := invokeCoreMaintenance(ctx, paths, "activate", *tx); err != nil {
-			_ = nativeCommand(ctx, root, "repair", map[string]string{"transactionId": *tx, "reason": "component_target_verification_failed"})
-			return blocked(err)
-		}
-		actor, err := desktopupdate.IdentifyProcess(os.Getppid())
-		if err != nil {
-			return blocked(err)
-		}
-		if err := nativeCommand(ctx, root, "activated", map[string]any{"transactionId": *tx, "releaseId": effective, "dataProfile": profile, "componentMode": record.ComponentMode, "components": componentRevisions(components), "owner": cfg.OwnerToken, "actor": actor}); err != nil {
+		if err := activateVerifiedTarget(ctx, manager, cfg, paths, root, record); err != nil {
 			return blocked(err)
 		}
 		return emit(map[string]any{"status": "activated", "transactionId": *tx, "owner": cfg.OwnerToken})

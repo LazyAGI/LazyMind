@@ -38,12 +38,17 @@ var bootstrapGoModuleCache, bootstrapGoModuleCacheError = func() (string, error)
 // own tests; the CLI, path binding, service env and OS processes remain real.
 func bootstrapRecord(t *testing.T, f *updateStateFixture, root, phase string, targetCatalog []byte) map[string]any {
 	t.Helper()
+	return bootstrapRecordForPlatform(t, f, root, phase, targetCatalog, runtime.GOOS, runtime.GOARCH)
+}
+
+func bootstrapRecordForPlatform(t *testing.T, f *updateStateFixture, root, phase string, targetCatalog []byte, platform, arch string) map[string]any {
+	t.Helper()
 	pub, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	configuration := desktopupdate.Config{TrustDomain: "fixture-domain", Audience: "official", Channel: "stable", Mode: "official",
-		ReleaseID: "target", Version: "1.1.0", Platform: runtime.GOOS, Arch: runtime.GOARCH, SigningIdentity: "fixture", UpdaterProtocol: 2,
+		ReleaseID: "target", Version: "1.1.0", Platform: platform, Arch: arch, SigningIdentity: "fixture", UpdaterProtocol: 2,
 		PolicyURL: "https://updates.example.invalid/policy.json", AllowedOrigins: []string{"https://updates.example.invalid"}, PublicKeys: map[string]string{"fixture": base64.StdEncoding.EncodeToString(pub)}}
 	if phase == "pending" {
 		configuration.ReleaseID, configuration.Version = "source", "1.0.0"
@@ -70,6 +75,12 @@ func bootstrapRecord(t *testing.T, f *updateStateFixture, root, phase string, ta
 	}
 	state := bootstrapPolicyLocalState(f.measure(t))
 	sourceComponent := bootstrapSelectedComponent(t, f, state.Components["rag"])
+	if sourceComponent != nil && (platform != runtime.GOOS || arch != runtime.GOARCH) {
+		// The on-disk source was measured by the host. The signed Desktop
+		// transaction and its installed target must describe the simulated package.
+		sourceComponent["platform"], sourceComponent["arch"] = platform, arch
+		writeBootstrapFixtureRAG(t, f, sourceComponent)
+	}
 	storageRaw, _ := json.Marshal(f.cfg.UpdateStorage)
 	var storage map[string]any
 	_ = json.Unmarshal(storageRaw, &storage)
@@ -77,7 +88,7 @@ func bootstrapRecord(t *testing.T, f *updateStateFixture, root, phase string, ta
 	record := map[string]any{"version": 2, "transactionId": strings.Repeat("1", 32), "phase": phase,
 		"sourceReleaseId": "source", "sourceVersion": "1.0.0", "targetReleaseId": "target", "targetVersion": "1.1.0",
 		"trustDomain": configuration.TrustDomain, "audience": configuration.Audience, "channel": "stable", "signingIdentity": configuration.SigningIdentity,
-		"platform": runtime.GOOS, "arch": runtime.GOARCH, "runtimeRoot": f.paths.RuntimeRoot, "installationRoot": f.paths.ResourcesRoot, "scope": scope,
+		"platform": platform, "arch": arch, "runtimeRoot": f.paths.RuntimeRoot, "installationRoot": f.paths.ResourcesRoot, "scope": scope,
 		"sourceDataProfile": state.DataProfile, "targetDataProfile": state.DataProfile, "sourceStorage": storage,
 		"sourceHadRAG": sourceComponent != nil, "componentMode": "absent", "expectedPeers": bootstrapPeerNames(f.cfg),
 		"policyDigest": strings.Repeat("c", 64), "policySequence": 42, "sourceOwnerDigest": hexDigest([]byte(f.cfg.OwnerToken)), "sourceActor": actor, "handoffActor": actor}
@@ -85,8 +96,8 @@ func bootstrapRecord(t *testing.T, f *updateStateFixture, root, phase string, ta
 		if sourceComponent != nil {
 			targetCatalog, err = os.ReadFile(filepath.Join(f.paths.ResourcesRoot, "config", "python-components.json"))
 		} else {
-			targetCatalog, err = json.Marshal(map[string]any{"schemaVersion": 1, "platform": runtime.GOOS, "arch": runtime.GOARCH, "components": map[string]any{"rag": map[string]any{
-				"id": "rag", "revision": strings.Repeat("a", 64), "sha256": strings.Repeat("d", 64), "baseFingerprint": strings.Repeat("b", 64), "platform": runtime.GOOS, "arch": runtime.GOARCH, "pythonAbi": "cp311",
+			targetCatalog, err = json.Marshal(map[string]any{"schemaVersion": 1, "platform": platform, "arch": arch, "components": map[string]any{"rag": map[string]any{
+				"id": "rag", "revision": strings.Repeat("a", 64), "sha256": strings.Repeat("d", 64), "baseFingerprint": strings.Repeat("b", 64), "platform": platform, "arch": arch, "pythonAbi": "cp311",
 				"tag": strings.Repeat("a", 64), "packages": map[string]string{"fixture-package": "1"}, "url": "https://updates.example.invalid/fixed-rag.zip", "filename": "fixed-rag.zip", "sizeBytes": 4, "unpackedBytes": 4,
 			}}})
 		}
@@ -168,6 +179,21 @@ func installBootstrapFixtureRAG(t *testing.T, f *updateStateFixture) {
 	entry := map[string]any{"id": "rag", "revision": strings.Repeat("a", 64), "sha256": hexDigest([]byte("test")), "baseFingerprint": strings.Repeat("b", 64),
 		"platform": runtime.GOOS, "arch": runtime.GOARCH, "pythonAbi": "cp311", "packages": map[string]string{"fixture-package": "1"}, "tag": strings.Repeat("c", 64),
 		"catalogUrl": "https://updates.example.invalid/catalog.json", "url": "https://updates.example.invalid/fixed-rag.zip", "filename": "fixed-rag.zip", "sizeBytes": 4, "unpackedBytes": 4}
+	writeBootstrapFixtureRAG(t, f, entry)
+	f.cfg.Algorithm.RAGDisabled = false
+	state, err := readRuntimeState(f.paths.StateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Config.Algorithm.RAGDisabled = false
+	if err := writeRuntimeState(f.paths.StateFile, state); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ragEnabledEnvVar, "true")
+}
+
+func writeBootstrapFixtureRAG(t *testing.T, f *updateStateFixture, entry map[string]any) {
+	t.Helper()
 	write := func(filename string, value any) {
 		t.Helper()
 		raw, err := json.Marshal(value)
@@ -181,7 +207,7 @@ func installBootstrapFixtureRAG(t *testing.T, f *updateStateFixture) {
 			t.Fatal(err)
 		}
 	}
-	write(filepath.Join(f.paths.ResourcesRoot, "config", "python-components.json"), map[string]any{"schemaVersion": 1, "platform": runtime.GOOS, "arch": runtime.GOARCH, "components": map[string]any{"rag": entry}})
+	write(filepath.Join(f.paths.ResourcesRoot, "config", "python-components.json"), map[string]any{"schemaVersion": 1, "platform": entry["platform"], "arch": entry["arch"], "components": map[string]any{"rag": entry}})
 	dir := filepath.Join(f.paths.RuntimeRoot, "deps", "python-components", "rag", entry["revision"].(string))
 	if err := os.MkdirAll(filepath.Join(dir, "site-packages"), 0700); err != nil {
 		t.Fatal(err)
@@ -191,16 +217,6 @@ func installBootstrapFixtureRAG(t *testing.T, f *updateStateFixture) {
 		t.Fatal(err)
 	}
 	write(filepath.Join(filepath.Dir(dir), "catalog-"+entry["tag"].(string)+".json"), entry)
-	f.cfg.Algorithm.RAGDisabled = false
-	state, err := readRuntimeState(f.paths.StateFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	state.Config.Algorithm.RAGDisabled = false
-	if err := writeRuntimeState(f.paths.StateFile, state); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(ragEnabledEnvVar, "true")
 }
 
 func TestUpdateBootstrapRuntimePlanFixtures(t *testing.T) {

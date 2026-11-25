@@ -340,6 +340,10 @@ func withEnvOverrides(env []string, overrides ...string) []string {
 }
 
 func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	return m.startSupervisor(ctx, cfg, paths, nil)
+}
+
+func (m *ProcessComposeManager) startSupervisor(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, server *startupIdentityServer) error {
 	if err := m.EnsureBinary(ctx, paths); err != nil {
 		return err
 	}
@@ -358,13 +362,21 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		}
 		cmd := exec.Command(processComposeCommand(paths), args...)
 		cmd.Dir = paths.RepoRoot
+		locator := ""
+		if server != nil {
+			locator = server.locator
+		}
 		cmd.Env = append(os.Environ(), processComposeRuntimeEnv(paths)...)
+		cmd.Env = append(cmd.Env, startupIdentityEnv+"="+locator)
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 		configureChildProcess(cmd, true)
 		if err := cmd.Start(); err != nil {
 			_ = logFile.Close()
 			return fmt.Errorf("process-compose up failed: %w", err)
+		}
+		if server != nil {
+			server.serve(cmd.Process.Pid)
 		}
 		if err := os.WriteFile(paths.ProcessComposePIDFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 			_ = killAlgorithmProcess(cmd.Process)
@@ -374,6 +386,9 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		registerLocalProcess(paths, processComposeServiceName, cmd.Process.Pid, []int{cfg.ProcessComposePort}, append([]string{processComposeCommand(paths)}, args...))
 		go func() {
 			_ = cmd.Wait()
+			if server != nil {
+				server.cancel()
+			}
 			_ = logFile.Close()
 			_ = os.Remove(paths.ProcessComposePIDFile)
 			unregisterLocalProcess(paths, processComposeServiceName, cmd.Process.Pid)

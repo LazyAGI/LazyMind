@@ -688,7 +688,14 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, c
 	}
 
 	m.progressf("starting process-compose supervisor on 127.0.0.1:%d", cfg.ProcessComposePort)
-	if err := m.processCompose.Up(ctx, cfg, paths); err != nil {
+	var identityServer *startupIdentityServer
+	if _, realSupervisor := m.processCompose.runner.(*ExecRunner); realSupervisor {
+		identityServer = newStartupIdentityServer(ctx, cfg, paths)
+	}
+	if identityServer != nil {
+		defer identityServer.cancel()
+	}
+	if err := m.processCompose.startSupervisor(ctx, cfg, paths, identityServer); err != nil {
 		failureCtx := attemptContext(runtimeDiagnosticPhaseSupervisorStart, processComposeServiceName, "127.0.0.1", "", cfg.ProcessComposePort, 15*time.Second)
 		return fail(classifyPortFailure(err, failureCtx, processComposeServiceName, "127.0.0.1", cfg.ProcessComposePort), failureCtx)
 	}
@@ -815,6 +822,9 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, c
 	state.OverallStatus = "ready"
 	state.Diagnostic = nil
 	state.UpdatedAt = m.now().UTC().Format(time.RFC3339)
+	if identityServer != nil {
+		identityServer.stopAccepting()
+	}
 	if err := writeRuntimeState(paths.StateFile, *state); err != nil {
 		return err
 	}

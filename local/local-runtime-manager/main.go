@@ -254,10 +254,7 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 			return err
 		}
 		if sub == "algorithm-run" {
-			if err := inheritCommittedRuntimeStorage(&cfg, &paths); err != nil {
-				return err
-			}
-			if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+			if err := bindServiceStartup(ctx, &cfg, &paths); err != nil {
 				return err
 			}
 			return withRuntimeUpdateAdmission(ctx, cfg, paths, func() error { return manager.algorithm.Run(ctx, cfg, paths, service) })
@@ -273,10 +270,7 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		return err
 	}
 	if strings.HasSuffix(sub, "-run") {
-		if err := inheritCommittedRuntimeStorage(&cfg, &paths); err != nil {
-			return err
-		}
-		if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+		if err := bindServiceStartup(ctx, &cfg, &paths); err != nil {
 			return err
 		}
 	}
