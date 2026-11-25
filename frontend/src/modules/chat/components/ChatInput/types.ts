@@ -62,6 +62,8 @@ export interface SendMessageParams {
 export interface ChatInputImperativeProps {
   clearFiles: () => void;
   element: HTMLDivElement | null;
+  selectWorkflow: (workflow: import("../../utils/workflowLaunch").WorkflowLaunch) => Promise<void>;
+  selectSkill: (skill: Pick<import("../../utils/skillLaunch").SkillLaunch, "skillId" | "name">) => Promise<void>;
   focus: () => void;
   uploadFiles: (files: File[]) => void;
 }

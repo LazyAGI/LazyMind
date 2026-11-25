@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   getKnowledgeMarketItem: vi.fn(),
   getChatSettings: vi.fn(),
   clearFiles: vi.fn(),
+  selectWorkflow: vi.fn().mockResolvedValue(undefined),
+  selectSkill: vi.fn().mockResolvedValue(undefined),
   vlmReady: true,
   latestChatInputProps: null as any,
   latestChatLayoutProps: null as any,
@@ -118,6 +120,8 @@ vi.mock("@/modules/chat/components/ChatInput", () => ({
         useChatInputStore.getState().saveInputFiles(props.draftKey, []);
       },
       focus: vi.fn(),
+      selectWorkflow: mocks.selectWorkflow,
+      selectSkill: mocks.selectSkill,
       element: null,
     }));
     return (
@@ -235,9 +239,49 @@ describe("NewChatPage featured templates", () => {
     mocks.getChatSettings.mockReset();
     mocks.getChatSettings.mockResolvedValue({ data: { data: entryDefaults } });
     mocks.clearFiles.mockReset();
+    mocks.selectWorkflow.mockClear();
+    mocks.selectSkill.mockClear();
     mocks.vlmReady = true;
     mocks.latestChatInputProps = null;
     mocks.latestChatLayoutProps = null;
+  });
+
+  it('opens workflow launches in task mode, waits for defaults and never auto-submits', async () => {
+    const submit = vi.fn();
+    window.addEventListener('lazymind:chat-submit-input', submit);
+    window.sessionStorage.setItem('lazymind:pending-conversation-prompt', 'stale prompt');
+    const workflowLaunch = { workflowRef: 'builtin:paper-writing', name: '论文写作' };
+    let resolveDefaults!: (response: unknown) => void;
+    mocks.getChatSettings.mockReturnValue(new Promise(resolve => { resolveDefaults = resolve; }));
+    const view = render(<MemoryRouter initialEntries={[{ pathname: '/agent/chat/home', state: { workflowLaunch } }]}><NewChatPage /></MemoryRouter>);
+    expect(mocks.selectWorkflow).not.toHaveBeenCalled();
+    await act(async () => resolveDefaults({ data: { data: entryDefaults } }));
+    await waitFor(() => expect(mocks.selectWorkflow).toHaveBeenCalledWith(workflowLaunch));
+    expect(mocks.selectWorkflow).toHaveBeenCalledOnce();
+    expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+    expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(entryDefaults.new_task.conversation_settings);
+    expect(submit).not.toHaveBeenCalled();
+    view.unmount();
+    window.removeEventListener('lazymind:chat-submit-input', submit);
+  });
+
+  it.each(['chat', 'work'])('opens a skill launch in %s mode without auto-submitting', async (entryType) => {
+    const submit = vi.fn();
+    window.addEventListener('lazymind:chat-submit-input', submit);
+    window.sessionStorage.setItem('lazymind:pending-conversation-prompt', 'stale prompt');
+    const skillLaunch = { skillId: 'installed-skill', name: '写作技能', entryType };
+    let resolveDefaults!: (response: unknown) => void;
+    mocks.getChatSettings.mockReturnValue(new Promise(resolve => { resolveDefaults = resolve; }));
+    const view = render(<MemoryRouter initialEntries={[{ pathname: '/agent/chat/home', state: { skillLaunch } }]}><NewChatPage /></MemoryRouter>);
+    expect(mocks.selectSkill).not.toHaveBeenCalled();
+    await act(async () => resolveDefaults({ data: { data: entryDefaults } }));
+    await waitFor(() => expect(mocks.selectSkill).toHaveBeenCalledWith(skillLaunch));
+    expect(mocks.selectSkill).toHaveBeenCalledOnce();
+    expect(mocks.latestChatInputProps.runInBackground).toBe(entryType === 'work');
+    expect(mocks.latestChatInputProps.initialConversationSettings).toEqual((entryType === 'work' ? entryDefaults.new_task : entryDefaults.quick_question).conversation_settings);
+    expect(submit).not.toHaveBeenCalled();
+    view.unmount();
+    window.removeEventListener('lazymind:chat-submit-input', submit);
   });
 
   it("applies the configured Quick Q&A defaults to the welcome composer", async () => {

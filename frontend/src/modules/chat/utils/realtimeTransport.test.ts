@@ -32,6 +32,26 @@ beforeEach(() => { Socket.instances = []; vi.stubGlobal('WebSocket', Socket); })
 afterEach(() => { streams.splice(0).forEach(s => s.close()); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('multiplexed realtime transport', () => {
+  it('shares workflow task notifications with conversation streams without opening HTTP connections', () => {
+    const xhr = vi.spyOn(XMLHttpRequest.prototype, 'open');
+    const changed = vi.fn();
+    const conversation = stream('/conversations/c1/events');
+    const notifications = stream('/task-center/workflow-events', { callbacks: { changed } });
+    expect(Socket.instances).toHaveLength(1);
+    const socket = Socket.instances[0]; socket.connected();
+    const notification = socket.sent.find(frame => frame.path === '/task-center/workflow-events')!;
+    expect(notification.method).toBe('GET');
+    socket.frame({ type: 'headers', id: notification.id, status: 200 });
+    socket.frame({ type: 'data', id: notification.id, data: data(new TextEncoder().encode('event: changed\ndata: {"cursor":8}\n\n')) });
+    expect(changed).toHaveBeenCalledWith(expect.objectContaining({ data: '{"cursor":8}' }));
+    expect(xhr).not.toHaveBeenCalled();
+    notifications.close();
+    expect(socket.sent[socket.sent.length - 1]).toEqual({ type: 'cancel', id: notification.id });
+    expect(socket.readyState).toBe(Socket.OPEN);
+    conversation.close();
+    expect(socket.readyState).toBe(3);
+  });
+
   it('carries more than six subscriptions without opening HTTP streams', () => {
     const xhr = vi.spyOn(XMLHttpRequest.prototype, 'open');
     const messages = Array.from({ length: 12 }, () => vi.fn());

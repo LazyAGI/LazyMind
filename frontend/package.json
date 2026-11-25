@@ -35,7 +35,6 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@js-preview/docx": "^1.6.4",
     "@js-preview/excel": "^1.7.14",
     "@lexical/list": "0.35.0",
     "@lexical/react": "0.35.0",

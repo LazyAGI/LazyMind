@@ -1,4 +1,5 @@
-import type { MouseEvent } from "react";
+import { useRef, useState, type MouseEvent } from "react";
+import { Tooltip } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -43,6 +44,8 @@ export default function CaseCard({
 }: CaseCardProps) {
   const { t } = useTranslation();
   const location = useLocation();
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [titleTooltipOpen, setTitleTooltipOpen] = useState(false);
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
   const entryType = showcaseEntryType(item.type, preferredEntryType);
   const technologyType = showcaseTechnologyType(item.type);
@@ -99,23 +102,36 @@ export default function CaseCard({
         <div className="showcase-card-category">{item.category}</div>
         <div className="showcase-card-output">{item.output_label}</div>
         <div className="showcase-card-title-row">
-          <Link
-            className="showcase-card-title-link"
-            to={primaryPath}
-            state={isDetailPrimary ? detailState : undefined}
-            onClick={isDetailPrimary ? undefined : handleTry}
+          <Tooltip
+            title={item.title}
+            placement="top"
+            trigger={["hover", "focus"]}
+            mouseEnterDelay={1}
+            mouseLeaveDelay={0}
+            open={titleTooltipOpen}
+            onOpenChange={(open) => {
+              const title = titleRef.current;
+              setTitleTooltipOpen(Boolean(open && title && title.scrollWidth > title.clientWidth));
+            }}
           >
-            <h3>{item.title}</h3>
-            <span
-              className={`showcase-capability-icon is-${entryType}`}
-              role="img"
-              aria-label={entryTypeLabel}
+            <Link
+              className="showcase-card-title-link"
+              to={primaryPath}
+              state={isDetailPrimary ? detailState : undefined}
+              onClick={isDetailPrimary ? undefined : handleTry}
             >
-              {pagePath ? <ReadOutlined aria-hidden="true" /> : entryType === "chat"
-                ? <MessageOutlined aria-hidden="true" />
-                : <ScheduleOutlined aria-hidden="true" />}
-            </span>
-          </Link>
+              <h3 ref={titleRef}>{item.title}</h3>
+              <span
+                className={`showcase-capability-icon is-${entryType}`}
+                role="img"
+                aria-label={entryTypeLabel}
+              >
+                {pagePath ? <ReadOutlined aria-hidden="true" /> : entryType === "chat"
+                  ? <MessageOutlined aria-hidden="true" />
+                  : <ScheduleOutlined aria-hidden="true" />}
+              </span>
+            </Link>
+          </Tooltip>
           <Link
             className="showcase-detail-link"
             to={secondaryPath}

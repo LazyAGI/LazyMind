@@ -7,6 +7,8 @@ import type ArtifactPanel from './ArtifactPanel';
 import type YamlEditor from './YamlEditor';
 import type UiEditorPanel from './UiEditorPanel';
 import StateGraphEditor, { type StateGraphEditorHandle } from './index';
+import { parseYaml } from './core/parser';
+import { parseWorkflowYaml } from './core/workflowParser';
 
 const canvas = vi.hoisted(() => ({
   addNode: vi.fn(),
@@ -28,7 +30,12 @@ vi.mock('./GraphCanvas', () => ({
         inputs: [{ material: 'report', required: true }], outputs: [], transitions: [],
       }] });
     } }));
-    return <div role="region" aria-label="Graph canvas" data-readonly={readonly} />;
+    const lastNode = model.nodes[model.nodes.length - 1];
+    return <div role="region" aria-label="Graph canvas" data-readonly={readonly}>
+      {lastNode && <input aria-label="Step name" value={lastNode.label} readOnly={readonly}
+        onChange={(event) => onModelChange({ ...model, nodes: model.nodes.map((node) => node.id === lastNode.id
+          ? { ...node, label: event.target.value } : node) })} />}
+    </div>;
   },
 }));
 
@@ -156,6 +163,22 @@ describe('StateGraphEditor workspace navigation', () => {
     fireEvent.click(artifactsButton());
     expect(screen.getByRole('complementary', { name: 'Artifacts' })).toBeInTheDocument();
     expect(onArtifactsChange).toHaveBeenCalledWith(true);
+  });
+
+  it('saves a renamed new step in both declarations and restores its name after reopening', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const view = render(<StateGraphEditor {...initialProps} onSave={onSave} />);
+    fireEvent.click(button('sgeAddStepBtn'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Step name' }), { target: { value: '整理辅助文档' } });
+    await flushEditorWork();
+
+    const saved = onSave.mock.calls[onSave.mock.calls.length - 1][0];
+    expect(parseYaml(saved.stateYaml)?.nodes.find((node) => node.id === 'review_2')?.label).toBe('整理辅助文档');
+    expect(parseWorkflowYaml(saved.workflowYaml)?.steps.find((step) => step.id === 'review_2')?.label).toBe('整理辅助文档');
+    view.unmount();
+    render(<StateGraphEditor initialStateYaml={saved.stateYaml} initialWorkflowYaml={saved.workflowYaml} />);
+    expect(screen.getByRole('textbox', { name: 'Step name' })).toHaveValue('整理辅助文档');
+    expect(screen.getByRole('button', { name: '3 · 整理辅助文档' })).toBeInTheDocument();
   });
 
   it('locates existing steps without changing or saving the workflow', async () => {

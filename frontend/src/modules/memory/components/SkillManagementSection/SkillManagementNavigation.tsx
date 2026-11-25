@@ -1,4 +1,4 @@
-import { ApartmentOutlined, AppstoreOutlined, FileTextOutlined } from '@ant-design/icons';
+import WorkflowIcon from '@/modules/workflow/components/WorkflowIcon';
 import type { SkillViewMode } from '../../shared';
 
 interface SkillManagementNavigationProps {
@@ -12,8 +12,8 @@ export default function SkillManagementNavigation({ t, skillView, onSkillViewCha
   return (
     <nav className="memory-skill-resource-rail" aria-label={t('admin.memorySkillViewBarLabel')}>
       {([
-        { view: 'installed', label: 'admin.memorySkillViewInstalled', icon: <FileTextOutlined /> },
-        { view: 'workflows', label: 'admin.memorySkillViewWorkflows', icon: <ApartmentOutlined /> },
+        { view: 'installed', label: 'admin.memorySkillViewInstalled', icon: <WorkflowIcon name="puzzle" size={18} /> },
+        { view: 'workflows', label: 'admin.memorySkillViewWorkflows', icon: <WorkflowIcon name="workflow" size={18} /> },
       ] as const).map(({ view, label, icon }) => (
         <button type="button" key={view} disabled={disabled} className={skillView === view ? 'is-active' : ''}
           aria-current={skillView === view ? 'page' : undefined} onClick={() => onSkillViewChange(view)}>
@@ -23,7 +23,7 @@ export default function SkillManagementNavigation({ t, skillView, onSkillViewCha
       <span className="memory-skill-resource-rail__divider" aria-hidden="true" />
       <button type="button" disabled={disabled} className={skillView === 'market' ? 'is-active' : ''}
         aria-current={skillView === 'market' ? 'page' : undefined} onClick={() => onSkillViewChange('market')}>
-        <span aria-hidden="true"><AppstoreOutlined /></span><span>{t('admin.memorySkillViewMarket')}</span>
+        <span aria-hidden="true"><WorkflowIcon name="store" size={18} /></span><span>{t('admin.memorySkillViewMarket')}</span>
       </button>
     </nav>
   );

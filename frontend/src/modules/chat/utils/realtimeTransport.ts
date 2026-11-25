@@ -21,7 +21,7 @@ interface StreamRequest {
   payload: string;
 }
 
-const subscriptions = /^\/(conversations\/[A-Za-z0-9_-]+\/events|tasks\/[A-Za-z0-9_-]+:stream|workflow-sessions\/[A-Za-z0-9_-]+\/events)$/;
+const subscriptions = /^\/(conversations\/[A-Za-z0-9_-]+\/events|tasks\/[A-Za-z0-9_-]+:stream|workflow-sessions\/[A-Za-z0-9_-]+\/events|task-center\/workflow-events)$/;
 const connections = new Map<string, RealtimeConnection>();
 let nextID = 0;
 

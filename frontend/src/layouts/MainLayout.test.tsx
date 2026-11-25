@@ -371,6 +371,24 @@ describe("MainLayout resizable navigation", () => {
   }
 
   it.each([
+    ["/lib/knowledge/detail/regular", "layout.resourceLib"],
+    ["/cloud-documents", "layout.resourceLib"],
+    ["/document-directories", "layout.resourceLib"],
+    ["/memory-management/skills", "layout.aiEvolution"],
+    ["/task-center", "layout.taskCenter"],
+    ["/agent/chat/home", ""],
+  ])("highlights only the current module on %s", async (path, activeLabel) => {
+    renderLayout(path);
+    await waitFor(() => {
+      for (const label of ["layout.resourceLib", "layout.aiEvolution", "layout.taskCenter"]) {
+        const button = screen.getByRole("button", { name: label });
+        if (label === activeLabel) expect(button).toHaveClass("is-active");
+        else expect(button).not.toHaveClass("is-active");
+      }
+    });
+  });
+
+  it.each([
     "/agent/chat/home",
     "/memory-management/skills",
     "/memory-management/workflows",

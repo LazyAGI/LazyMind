@@ -5,7 +5,7 @@ import { Tag, Tooltip } from 'antd';
 import { RobotOutlined, UserOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ValidationError } from '../core/validator';
-import { formatExpression, isHiddenId } from '../core/model';
+import { formatExpression } from '../core/model';
 import type { MaterialExpression, NodeLayout } from '../core/model';
 import { NODE_MIN_HEIGHT } from '../core/layout';
 
@@ -201,7 +201,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
         />
 
         <div className="step-node-header">
-          {visibility.label !== false && <span className="step-node-label">{String(label)}</span>}
+          {visibility.label !== false && <div className="step-node-label" title={label}>{label}</div>}
           <div className="step-node-badges">
             {isChoice && visibility.conditionalRoute !== false && (
               <Tooltip title={t('selfEvolutionRun.stepNodeChoiceTooltip')}>
@@ -225,7 +225,6 @@ function StepNodeComponent({ data, selected }: NodeProps) {
             >{mode === 'auto' ? t('selfEvolutionRun.sgeNodeAutoContinue') : t('selfEvolutionRun.sgeNodeUserConfirm')}</Tag>}
           </div>
         </div>
-        {visibility.stepId === true && !isHiddenId(id) && (visibility.label === false || id !== label) && <div className="step-node-id">{String(id)}</div>}
         {visibility.outputs !== false && (
           <div className="step-node-input-summary" title={nodeData.inputLabels?.join('、')}>
             {nodeData.inputLabels?.length

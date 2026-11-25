@@ -9,7 +9,7 @@ import { NODE_MIN_WIDTH } from './StepNode';
 
 const colorString = (color: Color) => color.toHexString();
 const visibilityFields: Array<[keyof NodeVisibility, string]> = [
-  ['stepId', '步骤标识'], ['label', '展示名称'], ['outputs', '产出'], ['approval', '审批/执行标志'],
+  ['label', '展示名称'], ['outputs', '产出'], ['approval', '审批/执行标志'],
   ['conditionalRoute', '条件路由标志'], ['parallelRoute', '并行标志'], ['skippable', '可跳过标志'],
 ];
 const gradientDirections = [
@@ -123,7 +123,7 @@ export function NodeVisualPanel({ value, onChange, onReset, readonly = false, te
   const fill = value.fill;
   const border = value.border;
   return <div className="node-props-panel-body visual-props">
-    {!terminal && <VisualSection title="内容显示"><div className="visibility-grid">{visibilityFields.map(([key, label]) => <Row key={key} label={label}><Switch size="small" disabled={readonly} checked={visible[key] ?? (key !== 'stepId')} onChange={(checked) => update({ visible: { ...visible, [key]: checked } })} /></Row>)}</div></VisualSection>}
+    {!terminal && <VisualSection title="内容显示"><div className="visibility-grid">{visibilityFields.map(([key, label]) => <Row key={key} label={label}><Switch size="small" disabled={readonly} checked={visible[key] !== false} onChange={(checked) => update({ visible: { ...visible, [key]: checked } })} /></Row>)}</div></VisualSection>}
     <VisualSection title="位置与大小">
       <div className="visual-grid">
         {!batch&&<><Row label="X"><InputNumber disabled={readonly} value={Math.round(value.x)} onChange={(x) => update({ x: Number(x ?? 0) })} /></Row>

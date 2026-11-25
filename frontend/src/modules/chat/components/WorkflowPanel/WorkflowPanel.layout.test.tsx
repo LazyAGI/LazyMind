@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { message } from 'antd';
 import { setupAntdStaticCleanup } from '@/test/antdStatic';
 import i18n from '@/i18n';
-import { hydrateWorkflowUI, type SlotRevision, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
+import { hydrateWorkflowUI, type SlotRevision, type TabDef, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
 import { WorkflowPanel } from './index';
 import { controlActions, externalPanelAction, externalContinuationStep, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
@@ -135,7 +135,7 @@ beforeEach(async () => {
   fixture.focusedTab = undefined;
   fixture.setFocusedTab.mockImplementation((_id: string, tab: string) => { fixture.focusedTab = tab; });
   localStorage.clear();
-  fixture.ui = { name: '示例工作流', tabs: [
+  fixture.ui = { name: '示例工作流', stepLabels: { prepare: '写作准备', write_document: '成稿' }, tabs: [
     { id: 'prepare', step_id: 'prepare', label: '写作准备', layout: 'list', slots: [] },
     { id: 'draft', step_id: 'write_document', label: '成稿', layout: 'list', slots: [
       { id: 'document', label: '成稿', type: 'text', widget: { widgetType: 'writer-document' } },
@@ -165,6 +165,32 @@ async function waitForCompletedContinueButton() {
 }
 
 describe('shared workflow compact layout', () => {
+  it.each(['missing', 'stale', 'composite', 'hidden'])(
+    'uses the saved step name for rollback with a %s result tab and targets the stable ID', async (tabKind) => {
+      const stepId = 'step_dfb9f0';
+      const tab: TabDef = { id: 'auxiliary', step_id: stepId, label: '旧页签名称', slots: [] };
+      if (tabKind === 'stale') fixture.ui.tabs!.push(tab);
+      if (tabKind === 'composite') fixture.ui.tabs!.push({ ...tab, step_id: undefined, status_step_ids: [stepId, 'write_document'] });
+      if (tabKind === 'hidden') fixture.ui.tabs!.push({ ...tab, slots: [{ id: 'internal', type: 'text', user_visible: false }] });
+      fixture.ui = hydrateWorkflowUI({
+        steps: [{ id: stepId, label: '整理辅助文档' }], ui: fixture.ui,
+      });
+      fixture.session.steps!.push({ ...fixture.session.steps![0], id: stepId, step_id: stepId });
+      fixture.session.projection!.past!.push(stepId);
+      const send = vi.fn();
+      render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+      await screen.findByRole('tab', { name: '成稿' });
+      const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
+      const rollback = within(shortcuts).getByRole('button', { name: '整理辅助文档' });
+      expect(within(shortcuts).queryByRole('button', { name: stepId })).not.toBeInTheDocument();
+      expect(within(shortcuts).queryByRole('button', { name: '旧页签名称' })).not.toBeInTheDocument();
+      fireEvent.click(rollback);
+      await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 整理辅助文档', {
+        session_id: 'layout-test', kind: 'rewind', step_id: stepId, expected_state_version: 0,
+      }));
+    },
+  );
+
   it('preserves a tab selected before the initial follow effect runs', async () => {
     fixture.ui.tabs!.push({ id: 'optional', label: '可选步骤', slots: [] });
     fixture.session.projection!.nodes = { optional: {

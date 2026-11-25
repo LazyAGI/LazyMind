@@ -38,7 +38,7 @@ func readFrame(t *testing.T, ws *websocket.Conn) frame {
 }
 
 func TestMultiplexedStreamsAndCancellation(t *testing.T) {
-	var started, cancelled atomic.Int32
+	var started, cancelled, workflowNotifications atomic.Int32
 	ws := connect(t, Handler{
 		Authorize: func(r *http.Request) int {
 			if r.Header.Get("Authorization") != "Bearer test" {
@@ -48,6 +48,9 @@ func TestMultiplexedStreamsAndCancellation(t *testing.T) {
 			return 200
 		},
 		Routes: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/task-center/workflow-events" {
+				workflowNotifications.Add(1)
+			}
 			if r.Header.Get("X-User-Id") != "owner" || r.Header.Get("Last-Event-ID") != "7" {
 				t.Error("identity or cursor lost")
 			}
@@ -60,7 +63,11 @@ func TestMultiplexedStreamsAndCancellation(t *testing.T) {
 		}),
 	})
 	for i := 0; i < 12; i++ {
-		if err := ws.WriteJSON(command{Type: "open", ID: fmt.Sprint(i), Method: "GET", Path: "/conversations/c1/events?view=ordinary", Authorization: "Bearer test", LastEventID: "7"}); err != nil {
+		path := "/conversations/c1/events?view=ordinary"
+		if i == 0 {
+			path = "/task-center/workflow-events"
+		}
+		if err := ws.WriteJSON(command{Type: "open", ID: fmt.Sprint(i), Method: "GET", Path: path, Authorization: "Bearer test", LastEventID: "7"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -83,8 +90,8 @@ func TestMultiplexedStreamsAndCancellation(t *testing.T) {
 			break
 		}
 	}
-	if started.Load() != 12 || cancelled.Load() != 1 {
-		t.Fatalf("started=%d cancelled=%d", started.Load(), cancelled.Load())
+	if started.Load() != 12 || cancelled.Load() != 1 || workflowNotifications.Load() != 1 {
+		t.Fatalf("started=%d cancelled=%d workflowNotifications=%d", started.Load(), cancelled.Load(), workflowNotifications.Load())
 	}
 	ws.Close()
 	deadline := time.Now().Add(time.Second)
@@ -104,6 +111,9 @@ func TestUnauthorizedAndNonStreamOperationsNeverReachHandler(t *testing.T) {
 		status       int
 	}{
 		{"GET", "/conversations/c1/events", 403},
+		{"GET", "/task-center/workflow-events", 403},
+		{"POST", "/task-center/workflow-events", 400},
+		{"GET", "/task-center/workflow-events/extra", 400},
 		{"POST", "/conversations:chat", 403},
 		{"DELETE", "/conversations/c1", 400},
 		{"GET", "http://external.invalid/conversations/c1/events", 400},

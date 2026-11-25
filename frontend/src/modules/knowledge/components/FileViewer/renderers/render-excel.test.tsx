@@ -5,8 +5,8 @@ import * as XLSX from "xlsx";
 const previewState = vi.hoisted(() => ({ calls: 0, renderOnRetry: true, mismatchedSheet: false }));
 
 vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
-vi.mock("@js-preview/excel", () => ({
-  default: {
+vi.mock("./loadExcelPreview", () => ({
+  loadExcelPreview: async () => ({
     init: (container: HTMLElement, options: { transformData: (data: unknown[]) => unknown[] }) => ({
       destroy: vi.fn(),
       preview: vi.fn(async () => {
@@ -32,7 +32,7 @@ vi.mock("@js-preview/excel", () => ({
         }
       }),
     }),
-  },
+  }),
 }));
 
 import RenderExcel from "./render-excel";

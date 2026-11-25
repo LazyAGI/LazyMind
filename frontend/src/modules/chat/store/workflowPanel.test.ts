@@ -179,6 +179,18 @@ describe('hydrateWorkflowUI', () => {
     expect(hydrateWorkflowUI({ ui })).toBe(ui);
   });
 
+  it('retains step names independently of tab names and the presence of output slots', () => {
+    const ui = hydrateWorkflowUI({
+      steps: [
+        { id: 'step_dfb9f0', label: '生成辅助文档' },
+        { id: 'approve', label: '审核文档' },
+      ],
+      ui: { tabs: [{ id: 'result', step_id: 'step_dfb9f0', label: '旧页签名称', slots: [] }] },
+    });
+    expect(ui.stepLabels).toEqual({ step_dfb9f0: '生成辅助文档', approve: '审核文档' });
+    expect(ui.tabs?.[0].label).toBe('旧页签名称');
+  });
+
   it('preserves declarative tab actions while hydrating slots', () => {
     const action = {
       id: 'export_deck',

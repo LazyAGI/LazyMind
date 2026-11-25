@@ -621,6 +621,7 @@ export interface CompositeBehavior {
 }
 
 export interface WorkflowUI {
+  /** Step names from the pinned workflow declaration, independent of result tabs. */
   stepLabels?: Record<string, string>;
   /** Root slot metadata, including slots not referenced by a tab. */
   slotDefinitions?: SlotDef[];
