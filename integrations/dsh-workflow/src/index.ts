@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
-import { HostBridge, loadPairing } from './bridge'
+import { HostBridge, loadPairing, reportRuntime } from './bridge'
 import { installHost } from './host'
 import { dispatcherLock } from './runtime-lock'
 import { installPresentationConfig, type PresentationConfig } from './presentation-config'
@@ -33,23 +33,40 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const stop = watchConnection(signal => resolveConnection(config, signal), async current => {
     const pairing = await loadPairing(current.pairingFile)
     const instance = randomUUID()
-    const release = await dispatcherLock(current.pairingFile, instance)
+    const release = await dispatcherLock(current.pairingFile, instance, processInstance)
     try {
       let mcpReady = readiness.get(current.serverName)
       if (!mcpReady) { mcpReady = mcpReadiness(ctx, current.serverName); readiness.set(current.serverName, mcpReady) }
-      const host = new HostBridge(current.bridgeUrl, pairing, async signal => ({
+      const identity: Record<string, string> = current.configRevision && pairing.runtime_revision ? {
+        'X-LazyMind-DSH-Dispatcher': instance,
+        'X-LazyMind-DSH-Process': processInstance,
+        'X-LazyMind-DSH-Config-Revision': current.configRevision,
+        'X-LazyMind-DSH-Pairing-Revision': pairing.runtime_revision,
+      } : {}
+      const runtimeHeaders = async (signal: AbortSignal) => ({
+        ...identity,
         'X-LazyMind-MCP-Ready': await mcpReady(signal) ? '1' : '0',
         'X-LazyMind-DSH-Build': connectorBuild,
         'X-LazyMind-DSH-Process': processInstance,
         'X-LazyMind-DSH-Process-Started-At': String(processStartedAt),
         'X-LazyMind-DSH-Panel': panel && Date.now() - panel.at < 20_000 ? panel.status : 'waiting-session',
         ...(clientBuild ? { 'X-LazyMind-DSH-Client-Build': clientBuild } : {}),
-      }))
+      })
+      let legacyPoll = true
+      const host = new HostBridge(current.bridgeUrl, pairing, async signal =>
+        legacyPoll ? runtimeHeaders(signal) : identity)
       const dispose = installHost(ctx, host, current, instance)
+      const runtimeLifetime = new AbortController()
+      const heartbeat = current.configRevision && pairing.runtime_revision
+        ? reportRuntime(host, runtimeHeaders, legacy => { legacyPoll = legacy }, runtimeLifetime.signal)
+        : Promise.resolve()
       presentation = { serverName: current.serverName, webUrl: current.webUrl }
       binding = { lookup: host.lookupBinding('deepseek-harness'), config: presentation }
       lastError = ""
-      return async () => { try { await dispose() } finally { await release() } }
+      return async () => {
+        runtimeLifetime.abort()
+        try { await Promise.all([heartbeat, dispose()]) } finally { await release() }
+      }
     } catch (error) { await release(); throw error }
   }, error => {
     presentation = undefined

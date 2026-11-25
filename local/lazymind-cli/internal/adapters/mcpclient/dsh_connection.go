@@ -75,7 +75,7 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 		dshConnectionIssue(status, "lazymind_unavailable")
 		return
 	}
-	account, err := store.AccountScope()
+	account, err := store.AccountScopeSnapshot()
 	if err != nil {
 		code := "lazymind_unavailable"
 		if credentials.IsAuthenticationRequired(err) {

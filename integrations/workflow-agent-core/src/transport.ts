@@ -53,6 +53,10 @@ export class HostBridge {
     return value as T
   }
 
+  async reportHeartbeat(headers: Record<string, string>, signal: AbortSignal): Promise<void> {
+    await this.request('/heartbeat', signal, {}, headers)
+  }
+
   async bind(runId: string, driver: string, signal: AbortSignal): Promise<WorkflowControl> {
     return (await this.request<{ control: WorkflowControl }>('/bind', signal, {
       run_id: runId, driver_session_id: driver,

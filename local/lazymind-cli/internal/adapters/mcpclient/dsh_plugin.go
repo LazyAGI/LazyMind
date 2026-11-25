@@ -231,7 +231,7 @@ func (a *Adapter) dshPluginStatus() *agentintegration.PluginStatus {
 	if err != nil {
 		return status
 	}
-	account, err := store.AccountScope()
+	account, err := store.AccountScopeSnapshot()
 	if err != nil {
 		return status
 	}
@@ -241,7 +241,7 @@ func (a *Adapter) dshPluginStatus() *agentintegration.PluginStatus {
 		return status
 	}
 	if observed, err := workflowhost.ReadLastRuntimeStatus(a.home, pair); err == nil {
-		if r := time.Now().UnixMilli() - observed.CheckedAt; r >= 0 && r <= 12000 {
+		if observed.Alive(a.home, pair) {
 			status.RunningVersion, status.ProcessInstance = observed.Build, observed.Instance
 			status.RunningClientVersion = observed.ClientBuild
 		}
@@ -343,5 +343,5 @@ func (a *Adapter) dshProfileRunning(ctx context.Context) (bool, error) {
 	if json.Unmarshal(body, &lock) != nil || lock.PID < 1 {
 		return false, errors.New("invalid DSH dispatcher process record")
 	}
-	return !dshProcessExited(lock.PID), nil
+	return !workflowhost.DSHProcessExited(lock.PID), nil
 }

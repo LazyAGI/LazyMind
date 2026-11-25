@@ -184,6 +184,9 @@ var HostBridge = class {
 		if (!response.ok) throw new BridgeError(typeof value.code === "string" ? value.code : "BRIDGE_ERROR", typeof value.error === "string" ? value.error : "Workflow Bridge request failed", response.status);
 		return value;
 	}
+	async reportHeartbeat(headers, signal) {
+		await this.request("/heartbeat", signal, {}, headers);
+	}
 	async bind(runId, driver, signal) {
 		return (await this.request("/bind", signal, {
 			run_id: runId,
@@ -258,8 +261,28 @@ async function loadPairing(path) {
 	if (!value || typeof value.connector_id !== "string" || typeof value.token !== "string" || value.token.length !== 64 || value.enabled !== true) throw new Error("Workflow pairing is unavailable; reconnect DeepSeek Harness from LazyMind");
 	return {
 		connector_id: value.connector_id,
-		token: value.token
+		token: value.token,
+		...typeof value.runtime_revision === "string" ? { runtime_revision: value.runtime_revision } : {}
 	};
+}
+/** Report local runtime evidence independently of the dispatcher's Core backoff. */
+async function reportRuntime(host, headers, useLegacyPoll, signal) {
+	while (!signal.aborted) {
+		try {
+			const bounded = AbortSignal.any([signal, AbortSignal.timeout(2500)]);
+			const current = await headers(bounded);
+			bounded.throwIfAborted();
+			await host.reportHeartbeat(current, bounded);
+			useLegacyPoll(false);
+		} catch (error) {
+			if (error instanceof BridgeError && [404, 405].includes(error.status)) useLegacyPoll(true);
+		}
+		try {
+			await waitUntil(Date.now() + 3e3, signal);
+		} catch {
+			return;
+		}
+	}
 }
 
 //#endregion
@@ -1161,14 +1184,15 @@ function installHost(ctx, bridge, config, instanceId) {
 //#endregion
 //#region src/runtime-lock.ts
 /** One cooperating dispatcher per pairing/profile, including across DSH processes. */
-async function dispatcherLock(pairingFile, instanceId) {
+async function dispatcherLock(pairingFile, instanceId, processInstance$1) {
 	const path = `${pairingFile}.runtime.lock`;
 	for (let attempt = 0; attempt < 2; attempt++) try {
 		const file = await open(path, "wx", 384);
 		try {
 			await file.writeFile(JSON.stringify({
 				pid: process.pid,
-				instanceId
+				instanceId,
+				processInstance: processInstance$1
 			}));
 		} finally {
 			await file.close();
@@ -1385,7 +1409,7 @@ function mcpReadiness(ctx, serverName) {
 
 //#endregion
 //#region src/connector-build.ts
-const connectorBuild = "0.1.6+3e9c5bfad7ed66b7";
+const connectorBuild = "0.1.6+4face6d3fe1bf398";
 
 //#endregion
 //#region src/binding-rpc.ts
@@ -1469,22 +1493,35 @@ async function apply(ctx, config) {
 	const stop = watchConnection((signal) => resolveConnection(config, signal), async (current) => {
 		const pairing = await loadPairing(current.pairingFile);
 		const instance = randomUUID();
-		const release = await dispatcherLock(current.pairingFile, instance);
+		const release = await dispatcherLock(current.pairingFile, instance, processInstance);
 		try {
 			let mcpReady = readiness.get(current.serverName);
 			if (!mcpReady) {
 				mcpReady = mcpReadiness(ctx, current.serverName);
 				readiness.set(current.serverName, mcpReady);
 			}
-			const host = new HostBridge(current.bridgeUrl, pairing, async (signal) => ({
+			const identity = current.configRevision && pairing.runtime_revision ? {
+				"X-LazyMind-DSH-Dispatcher": instance,
+				"X-LazyMind-DSH-Process": processInstance,
+				"X-LazyMind-DSH-Config-Revision": current.configRevision,
+				"X-LazyMind-DSH-Pairing-Revision": pairing.runtime_revision
+			} : {};
+			const runtimeHeaders = async (signal) => ({
+				...identity,
 				"X-LazyMind-MCP-Ready": await mcpReady(signal) ? "1" : "0",
 				"X-LazyMind-DSH-Build": connectorBuild,
 				"X-LazyMind-DSH-Process": processInstance,
 				"X-LazyMind-DSH-Process-Started-At": String(processStartedAt),
 				"X-LazyMind-DSH-Panel": panel && Date.now() - panel.at < 2e4 ? panel.status : "waiting-session",
 				...clientBuild ? { "X-LazyMind-DSH-Client-Build": clientBuild } : {}
-			}));
+			});
+			let legacyPoll = true;
+			const host = new HostBridge(current.bridgeUrl, pairing, async (signal) => legacyPoll ? runtimeHeaders(signal) : identity);
 			const dispose = installHost(ctx, host, current, instance);
+			const runtimeLifetime = new AbortController();
+			const heartbeat = current.configRevision && pairing.runtime_revision ? reportRuntime(host, runtimeHeaders, (legacy) => {
+				legacyPoll = legacy;
+			}, runtimeLifetime.signal) : Promise.resolve();
 			presentation = {
 				serverName: current.serverName,
 				webUrl: current.webUrl
@@ -1495,8 +1532,9 @@ async function apply(ctx, config) {
 			};
 			lastError = "";
 			return async () => {
+				runtimeLifetime.abort();
 				try {
-					await dispose();
+					await Promise.all([heartbeat, dispose()]);
 				} finally {
 					await release();
 				}

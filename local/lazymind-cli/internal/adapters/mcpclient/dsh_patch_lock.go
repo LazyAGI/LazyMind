@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 // Match @deepseek-ai/dsh-atomic-write: exclusive PID records, bounded waiting,
@@ -60,7 +62,7 @@ func exitedDSHLockHolder(record []byte) bool {
 		}
 	}
 	pid, err := strconv.ParseInt(string(record[:len(record)-1]), 10, 32)
-	return err == nil && pid > 0 && int(pid) != os.Getpid() && dshProcessExited(int(pid))
+	return err == nil && pid > 0 && int(pid) != os.Getpid() && workflowhost.DSHProcessExited(int(pid))
 }
 
 func takeOverExitedDSHLock(path string) bool {

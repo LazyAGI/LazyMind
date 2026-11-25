@@ -207,6 +207,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/workflow-host/bind", s.handleWorkflowHostBind)
 	mux.HandleFunc("GET /v1/workflow-host/runs/{session}/control", s.handleWorkflowHostState)
 	mux.HandleFunc("GET /v1/workflow-host/actions", s.handleWorkflowHostActions)
+	mux.HandleFunc("POST /v1/workflow-host/heartbeat", s.handleDSHRuntimeHeartbeat)
 	mux.HandleFunc("GET /v1/workflow-host/actions/{action}", s.handleWorkflowHostAction)
 	mux.HandleFunc("POST /v1/workflow-host/actions/{action}/claim", s.handleWorkflowHostClaim)
 	mux.HandleFunc("POST /v1/workflow-host/actions/{action}/settle", s.handleWorkflowHostReceipt)
