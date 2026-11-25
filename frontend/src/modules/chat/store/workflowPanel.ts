@@ -292,6 +292,7 @@ export interface WorkflowSession {
   /** Current execution mode; changed only by explicit workflow approval settings. */
   workflow_mode: 'auto' | 'dynamic';
   approval_mode?: 'auto' | 'dynamic';
+  saved_approval_mode?: 'auto' | 'dynamic';
   controller_host?: string;
   /** Immutable package revision selected when this session was created. */
   pinned_revision_id?: string;

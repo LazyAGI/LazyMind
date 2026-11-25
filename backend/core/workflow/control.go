@@ -576,6 +576,9 @@ func (h WorkflowControlHandler) Read(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		dto := toSessionDTO(session)
+		if err := enrichApprovalPreference(tx, session, &dto); err != nil {
+			return err
+		}
 		revisions, err := LoadDisplaySlots(r.Context(), tx, session.ID)
 		if err != nil {
 			return err

@@ -22,6 +22,7 @@ type approvalPreferenceRequest struct {
 	StepID               string `json:"step_id"`
 	Scope                string `json:"scope"`
 	ApprovalRequired     bool   `json:"approval_required"`
+	Remember             *bool  `json:"remember,omitempty"`
 	ExpectedStateVersion *int64 `json:"expected_state_version"`
 }
 
@@ -247,7 +248,7 @@ func SetWorkflowApprovalPreference(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		NotifyWorkflowRuntimeUpdated(r.Context(), store.DB(), session.ID, "", "approval_preference")
-		common.ReplyOK(w, map[string]any{"approval_required": req.ApprovalRequired, "scope": req.Scope})
+		common.ReplyOK(w, map[string]any{"approval_required": req.ApprovalRequired, "scope": req.Scope, "state_version": *req.ExpectedStateVersion + 1})
 		return
 	}
 	req.StepID = strings.TrimSpace(req.StepID)
@@ -280,8 +281,8 @@ func SetWorkflowApprovalPreference(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Policy edits do not grant execution permission. A pending review is retained;
-// only Continue accepts its result and dispatches the next step.
+// Retain the checkpoint until the UI admits continuation through the native Chat
+// turn or external control protocol. Saving policy alone must not orphan execution.
 func setSessionApprovalMode(ctx context.Context, db *gorm.DB, sessionID, owner string, req approvalPreferenceRequest) error {
 	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var session orm.WorkflowSession
@@ -318,6 +319,14 @@ func setSessionApprovalMode(ctx context.Context, db *gorm.DB, sessionID, owner s
 		mode := "auto"
 		if req.ApprovalRequired {
 			mode = "dynamic"
+		}
+		if req.Remember != nil && !*req.Remember {
+			if req.Scope == "workflow" {
+				return controlstore.Reject("INVALID_COMMAND", "workflow scope requires remember")
+			}
+			if err := tx.Where("user_id = ? AND workflow_id = ?", owner, session.WorkflowID).Delete(&orm.WorkflowApprovalPreference{}).Error; err != nil {
+				return err
+			}
 		}
 		if req.Scope == "workflow" {
 			if req.ApprovalRequired {

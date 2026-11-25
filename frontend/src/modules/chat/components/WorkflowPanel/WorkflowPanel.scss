@@ -5037,7 +5037,15 @@
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 16px; font-size: 12px; color: #64748b;
 }
-.workflow-panel__graph-actions { display: flex; align-items: center; gap: 4px; }
+.workflow-panel__graph-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  .workflow-panel__tool { line-height: 20px; }
+  .workflow-panel__tool > .anticon { font-size: 14px; }
+  .workflow-panel__toolbar-icon { width: 14px; height: 14px; }
+  .workflow-panel__graph-popout { width: 30px; height: 30px; padding: 0; }
+}
 .workflow-panel__graph > .state-graph-modal__content { flex: 1; min-height: 300px; height: 420px; }
 .workflow-approval-settings {
   width: 248px; display: flex; flex-direction: column; gap: 12px; padding: 4px;

@@ -1,11 +1,15 @@
-type ToolbarIconName = 'graph' | 'approval' | 'following' | 'browse' | 'chevron';
+type ToolbarIconName = 'graph' | 'approval' | 'following' | 'browse' | 'chevron' | 'external-link';
 
 /** Consistent, rounded outline icons for the compact workflow toolbar. */
 export function WorkflowToolbarIcon({ name }: { name: ToolbarIconName }) {
   return (
     <svg className={`workflow-panel__toolbar-icon${name === 'chevron' ? ' workflow-panel__toolbar-icon--chevron' : ''}`}
       width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor'
-      strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      strokeWidth={name === 'external-link' ? 1.6 : 1.8} strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      {name === 'external-link' && <>
+        <path d='M15 3h6v6M10 14 21 3' />
+        <path d='M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6' />
+      </>}
       {name === 'graph' && <>
         <path d='M6 3v12M18 9a9 9 0 0 1-9 9' />
         <circle cx='6' cy='18' r='3' />

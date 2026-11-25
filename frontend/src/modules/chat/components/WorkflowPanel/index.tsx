@@ -21,7 +21,6 @@ import { useAppVersion } from '@/runtime/useAppVersion';
 import { message as antdMessage, Popconfirm, Tooltip, Dropdown, Collapse, Alert } from 'antd';
 import {
   ApartmentOutlined,
-  ExportOutlined,
   ArrowLeftOutlined,
   MoreOutlined,
   InfoCircleOutlined,
@@ -2422,7 +2421,8 @@ export function WorkflowPanel({
             onClick={() => { setGraphVisible(!graphVisible); if (collapsed) setCollapsed(false); }}>
             <WorkflowToolbarIcon name='graph' />{t('chat.workflowExecutionGraph')}
           </button>
-          {!resultsOnly && <WorkflowApprovalSettings session={session} onRefresh={refresh} disabled={actionPending} />}
+          {!resultsOnly && <WorkflowApprovalSettings session={session} onRefresh={refresh} disabled={actionPending}
+                onSendMessage={onSendMessage} beforeApply={() => flushPendingEdits()} />}
           {uiReady && <Tooltip title={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}>
             <button type='button' className='workflow-panel__tool workflow-panel__follow-button'
               aria-label={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}
@@ -2632,8 +2632,8 @@ export function WorkflowPanel({
               <ArrowLeftOutlined />{t('chat.workflowReturnArtifacts')}
             </button>
             <Tooltip title={t('chat.workflowGraphWindow')}>
-              <button type='button' className='workflow-panel__tool' aria-label={t('chat.workflowGraphWindow')}
-                onClick={() => setStateGraphOpen(true)}><ExportOutlined /></button>
+              <button type='button' className='workflow-panel__tool workflow-panel__graph-popout' aria-label={t('chat.workflowGraphWindow')}
+                onClick={() => setStateGraphOpen(true)}><WorkflowToolbarIcon name='external-link' /></button>
             </Tooltip>
           </div>
         </div>

@@ -445,3 +445,97 @@ func TestNativeColdStartSnapshotsSavedApprovalPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestUnrememberApprovalKeepsCurrentModeAndClearsFutureOverrides(t *testing.T) {
+	db, _ := humanCheckpoint(t, false)
+	session, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := func(scope string, required bool, remember *bool) {
+		t.Helper()
+		if err := setSessionApprovalMode(t.Context(), db.DB, session.ID, session.CreateUserID, approvalPreferenceRequest{
+			Scope: scope, ApprovalRequired: required, Remember: remember, ExpectedStateVersion: &session.StateVersion,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.First(session, "id = ?", session.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, required := range []bool{false, true, false} {
+		change("workflow", required, nil)
+		dto := toSessionDTO(session)
+		if err := enrichApprovalPreference(db.DB, session, &dto); err != nil {
+			t.Fatal(err)
+		}
+		if dto.SavedApprovalMode != session.ApprovalMode {
+			t.Fatalf("saved mode not reflected: %+v", dto)
+		}
+	}
+	remember := false
+	change("session", false, &remember)
+	if session.ApprovalMode != "auto" || session.WorkflowMode != "auto" {
+		t.Fatal("clearing default changed this run")
+	}
+	dto := toSessionDTO(session)
+	if err := enrichApprovalPreference(db.DB, session, &dto); err != nil || dto.SavedApprovalMode != "" {
+		t.Fatalf("remember still set: %+v %v", dto, err)
+	}
+	future, err := CreateSession(t.Context(), db.DB, CreateSessionInput{SessionID: "future-default", ConversationID: "future-chat", WorkflowID: session.WorkflowID, CreateUserID: session.CreateUserID})
+	if err != nil || future.WorkflowMode != "dynamic" || len(future.ApprovalPreferences) != 0 {
+		t.Fatalf("future default: %+v %v", future, err)
+	}
+}
+
+func TestApplyAutomaticSettingsThenAdmitNativeContinuation(t *testing.T) {
+	db, _ := humanCheckpoint(t, false)
+	session, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setSessionApprovalMode(t.Context(), db.DB, session.ID, session.CreateUserID, approvalPreferenceRequest{
+		Scope: "workflow", ApprovalRequired: false, ExpectedStateVersion: &session.StateVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BeginNativeControlTurn(t.Context(), db.DB, session.CreateUserID, session.ConversationID, NativeControlCommand{
+		SessionID: session.ID, Kind: "approve", StepID: "branch_b", ExpectedStateVersion: session.StateVersion + 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(session, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	view, err := displaystate.Read(db.DB, *session)
+	if err != nil || view.ApprovalRequired() || session.ApprovalMode != "auto" {
+		t.Fatalf("checkpoint not released: %+v %v", view, err)
+	}
+	var pending int64
+	if err := db.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND status = ?", session.ID, "pending").Count(&pending).Error; err != nil || pending != 0 {
+		t.Fatalf("pending reviews: %d %v", pending, err)
+	}
+}
+
+func TestBottomRememberedContinuationIsReflectedInApprovalMenu(t *testing.T) {
+	db, _ := humanCheckpoint(t, false)
+	session, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BeginNativeControlTurn(t.Context(), db.DB, session.CreateUserID, session.ConversationID, NativeControlCommand{
+		SessionID: session.ID, Kind: "approve", StepID: "branch_b", PreferenceScope: "following", ExpectedStateVersion: session.StateVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(session, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	dto := toSessionDTO(session)
+	if err := enrichApprovalPreference(db.DB, session, &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.ApprovalMode != "auto" || dto.SavedApprovalMode != "auto" {
+		t.Fatalf("bottom action not reflected: %+v", dto)
+	}
+}

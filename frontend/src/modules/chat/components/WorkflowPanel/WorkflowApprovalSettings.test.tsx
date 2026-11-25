@@ -5,27 +5,30 @@ import type { WorkflowSession } from '../../store/workflowPanel';
 import { WorkflowApprovalSettings } from './WorkflowApprovalSettings';
 
 const save = vi.hoisted(() => vi.fn());
-vi.mock('../../utils/request', () => ({ WorkflowSessionApi: () => ({ setApprovalPreference: save }) }));
+const read = vi.hoisted(() => vi.fn());
+vi.mock('../../utils/request', () => ({ WorkflowSessionApi: () => ({ setApprovalPreference: save, getSession: read }) }));
 afterEach(cleanup);
-beforeEach(async () => { save.mockReset().mockResolvedValue({}); await i18n.changeLanguage('zh-CN'); });
+beforeEach(async () => { save.mockReset().mockResolvedValue({}); read.mockReset().mockResolvedValue({ data: { data: { session: {} } } }); await i18n.changeLanguage('zh-CN'); });
 const session = { session_id: 'run', state_version: 7, workflow_mode: 'auto', approval_mode: 'auto' } as WorkflowSession;
 
 it('restores approvals for this run by default and refreshes authoritative state', async () => {
   const refresh = vi.fn(async () => {});
   render(<WorkflowApprovalSettings session={session} onRefresh={refresh} disabled={false} />);
   fireEvent.click(screen.getByRole('button', { name: '审批设置' }));
-  fireEvent.click(await screen.findByRole('radio', { name: '按需审批' }));
+  await waitFor(() => expect(screen.getByRole('radio', { name: '按需审批' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('radio', { name: '按需审批' }));
   fireEvent.click(screen.getByRole('button', { name: /应\s*用/ }));
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
-  expect(save).toHaveBeenCalledWith('run', { scope: 'session', approval_required: true, expected_state_version: 7 });
+  expect(save).toHaveBeenCalledWith('run', { scope: 'session', remember: false, approval_required: true, expected_state_version: 7 });
 });
 
 it('saves future-workflow policy only when explicitly checked', async () => {
   render(<WorkflowApprovalSettings session={session} onRefresh={vi.fn(async () => {})} disabled={false} />);
   fireEvent.click(screen.getByRole('button', { name: '审批设置' }));
-  fireEvent.click(await screen.findByRole('checkbox', { name: '以后此工作流沿用此设置' }));
+  await waitFor(() => expect(screen.getByRole('checkbox')).toBeEnabled());
+  fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: /应\s*用/ }));
-  await waitFor(() => expect(save).toHaveBeenCalledWith('run', { scope: 'workflow', approval_required: false, expected_state_version: 7 }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('run', { scope: 'workflow', remember: true, approval_required: false, expected_state_version: 7 }));
 });
 
 it('keeps the previous mode and settings open when saving fails', async () => {
@@ -33,9 +36,24 @@ it('keeps the previous mode and settings open when saving fails', async () => {
   const refresh = vi.fn(async () => {});
   render(<WorkflowApprovalSettings session={session} onRefresh={refresh} disabled={false} />);
   fireEvent.click(screen.getByRole('button', { name: '审批设置' }));
-  fireEvent.click(await screen.findByRole('radio', { name: '按需审批' }));
+  await waitFor(() => expect(screen.getByRole('radio', { name: '按需审批' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('radio', { name: '按需审批' }));
   fireEvent.click(screen.getByRole('button', { name: /应\s*用/ }));
   await waitFor(() => expect(screen.getByRole('button', { name: /应\s*用/ })).toBeEnabled());
   expect(screen.getByRole('button', { name: '审批设置' })).toHaveTextContent('自动执行');
   expect(refresh).not.toHaveBeenCalled();
+});
+
+it('shows saved preference on opening and clears it without changing this run mode', async () => {
+  read.mockResolvedValue({ data: { data: { session: { saved_approval_mode: 'auto' } } } });
+  render(<WorkflowApprovalSettings session={session} onRefresh={vi.fn(async () => {})} disabled={false} />);
+  fireEvent.click(screen.getByRole('button', { name: '审批设置' }));
+  await waitFor(() => expect(screen.getByRole('checkbox')).toBeEnabled());
+  expect(screen.getByRole('checkbox')).toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: /应\s*用/ }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('run', {
+    scope: 'session', remember: false, approval_required: false, expected_state_version: 7,
+  }));
+  expect(await screen.findByText('已切换为自动执行，仅本次运行生效。')).toBeInTheDocument();
 });
