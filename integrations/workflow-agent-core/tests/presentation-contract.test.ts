@@ -1,15 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import type { BindingResult, LookupBinding, PanelView, UIAdapter, WatchView } from '../../workflow-agent-core/src/adapter'
-import { runPresentation, type PresentationStatus } from '../../workflow-agent-core/src/presentation'
-import { HostBridge } from '../../workflow-agent-core/src/transport'
+import type { BindingResult, LookupBinding, PanelView, UIAdapter, WatchView } from '../src/adapter'
+import { runPresentation, type PresentationStatus } from '../src/presentation'
+import { HostBridge } from '../src/transport'
 
 const frameUrl = 'http://127.0.0.1:19091/v1/codex/frame'
-
-vi.mock('node:timers/promises', () => ({ setTimeout: (ms: number, _value: undefined, { signal }: { signal: AbortSignal }) => new Promise<void>((resolve, reject) => {
-  const timer = setTimeout(() => { signal.removeEventListener('abort', stop); resolve() }, ms)
-  function stop() { clearTimeout(timer); reject(signal.reason) }
-  signal.addEventListener('abort', stop, { once: true })
-}) }))
 
 function start(lookupBinding: LookupBinding, ui: UIAdapter) {
   const lifetime = new AbortController(), states: PresentationStatus[] = []

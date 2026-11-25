@@ -26,6 +26,10 @@ func (s *Server) handleCodexPresentation(w http.ResponseWriter, r *http.Request)
 	s.handleBoundPresentation(w, r, "codex")
 }
 
+func (s *Server) handleDSHPresentation(w http.ResponseWriter, r *http.Request) {
+	s.handleBoundPresentation(w, r, "deepseek-harness")
+}
+
 func (s *Server) handleBoundPresentation(w http.ResponseWriter, r *http.Request, provider string) {
 	pair, api, ok := s.workflowHost(w, r)
 	if !ok {

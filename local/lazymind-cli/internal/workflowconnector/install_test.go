@@ -194,3 +194,100 @@ func TestInstalledHeartbeatCanUseCanonicalPath(t *testing.T) {
 		t.Fatal("heartbeat reported a different file")
 	}
 }
+
+func TestDSHConnectorProvisionRetainsReleasesAndIsolatesBadPackages(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "bin", "lazymind")
+	home := t.TempDir()
+	first := connectortest.WriteDSHPackage(t, executable, "0.1.0+0000000000000001")
+	pkg, err := workflowconnector.ReadPackage(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(t.TempDir(), "bin", "lazymind")
+	if err := pkg.Stage(staged); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowconnector.Provision(t.Context(), home, staged, false); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := workflowconnector.Resolve(home, workflowconnector.DSHHost)
+	if err != nil || selected.Release != first.Release {
+		t.Fatalf("standalone DSH package: %+v %v", selected, err)
+	}
+	archive, err := os.ReadFile(selected.EntryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := connectortest.WriteDSHPackage(t, executable, "0.2.0+0000000000000002")
+	for _, host := range []string{"codex", "workbuddy"} {
+		connectortest.WriteMinimalPackage(t, executable, host)
+	}
+	path := filepath.Join(filepath.Dir(executable), "workflow-connectors", workflowconnector.DSHHost, second.Entry)
+	if err := os.WriteFile(path, archive, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowconnector.Provision(t.Context(), home, executable, true); err == nil || !strings.Contains(err.Error(), "DeepSeek Harness") {
+		t.Fatalf("bad DSH package: %v", err)
+	}
+	for _, host := range []string{"codex", "workbuddy"} {
+		if _, err := workflowconnector.Resolve(home, host); err != nil {
+			t.Fatalf("bad DSH archive prevented %s installation: %v", host, err)
+		}
+	}
+	selected, err = workflowconnector.Resolve(home, workflowconnector.DSHHost)
+	if err != nil || selected.Release != first.Release {
+		t.Fatalf("invalid DSH package replaced selected default: %+v %v", selected, err)
+	}
+	second = connectortest.WriteDSHPackage(t, executable, second.Version)
+	if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
+		t.Fatal(err)
+	}
+	selected, err = workflowconnector.Resolve(home, workflowconnector.DSHHost)
+	if err != nil || selected.Release != second.Release {
+		t.Fatalf("repaired DSH default: %+v %v", selected, err)
+	}
+	previous, err := workflowconnector.DSHRelease(t.Context(), home, "", "", first.Release)
+	if err != nil || previous.Version != first.Version {
+		t.Fatalf("rollback archive no longer available: %+v %v", previous, err)
+	}
+}
+
+func TestBuiltDSHConnectorPackage(t *testing.T) {
+	directory := os.Getenv("LAZYMIND_TEST_DSH_CONNECTOR")
+	if directory == "" {
+		t.Skip("requires a staged DSH Connector package")
+	}
+	self := filepath.Join(filepath.Dir(filepath.Dir(directory)), "lazymind")
+	home := t.TempDir()
+	installed, err := workflowconnector.DSHRelease(t.Context(), home, self, directory, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	connectortest.UnpackDSHFixture(t, installed.EntryPath(), dir)
+	if err := installed.CheckDSHInstall(dir); err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+const [, dir, expected] = process.argv
+const server = await import(pathToFileURL(join(dir, 'lib', 'index.js')))
+const source = await readFile(join(dir, 'lib', 'client.js'), 'utf8')
+let browser
+new Function('window', source)({ __ModuleLoader__: { load: ({ factory }) => { browser = factory(() => ({})) } } })
+if (server.connectorBuild !== expected || browser?.connectorBuild !== expected) {
+  throw Error(JSON.stringify({ expected, server: server.connectorBuild, browser: browser?.connectorBuild }))
+}
+`
+	cmd := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script, dir, installed.Version)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("load both compiled DSH entries: %s %v", output, err)
+	}
+	t.Logf("Node and browser loaded build %s from archive release %s", installed.Version, installed.Release)
+}

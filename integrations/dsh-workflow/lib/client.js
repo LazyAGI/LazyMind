@@ -162,13 +162,23 @@ function windowStore() {
 		state = next;
 		for (const listener of listeners) listener();
 	};
-	const update = (id, entry) => publish({
+	const update = (id, entry$1) => publish({
 		...state,
 		entries: {
 			...state.entries,
-			[id]: entry
+			[id]: entry$1
 		}
 	});
+	const entry = (sessionId) => Object.hasOwn(state.entries, sessionId) ? state.entries[sessionId] : void 0;
+	const close = (sessionId) => {
+		if (!entry(sessionId)) return;
+		const entries = { ...state.entries };
+		delete entries[sessionId];
+		publish({
+			...state,
+			entries
+		});
+	};
 	return {
 		snapshot: () => state,
 		subscribe(listener) {
@@ -181,35 +191,46 @@ function windowStore() {
 			if (!run.hostSessionId) return;
 			const key = runKey(run);
 			const first = state.firstCards[key];
-			const current = state.entries[run.hostSessionId];
-			const shouldOpen = !current || run.operation === "start" && run.runId !== current.run.runId && anchor > current.anchor;
-			if (first === void 0 || anchor < first || shouldOpen) publish({
+			if (first === void 0 || anchor < first) publish({
+				...state,
 				firstCards: {
 					...state.firstCards,
-					[key]: first === void 0 ? anchor : Math.min(first, anchor)
-				},
-				entries: shouldOpen ? {
-					...state.entries,
-					[run.hostSessionId]: {
-						run,
-						minimized: false,
-						anchor
-					}
-				} : state.entries
+					[key]: anchor
+				}
 			});
 		},
-		open(run, anchor) {
-			if (!run.hostSessionId) return;
-			update(run.hostSessionId, {
+		open(run) {
+			if (run.hostSessionId) update(run.hostSessionId, {
 				run,
 				minimized: false,
-				anchor
+				source: "manual"
+			});
+		},
+		binding(sessionId, run) {
+			const current = entry(sessionId);
+			if (current?.source === "manual") return;
+			if (!run) {
+				close(sessionId);
+				return;
+			}
+			if (current && runKey(current.run) === runKey(run)) return;
+			update(sessionId, {
+				run,
+				minimized: false,
+				source: "binding"
+			});
+		},
+		close,
+		clear() {
+			if (Object.keys(state.entries).length > 0) publish({
+				...state,
+				entries: {}
 			});
 		},
 		minimize(id) {
-			const entry = state.entries[id];
-			if (entry) update(id, {
-				...entry,
+			const current = entry(id);
+			if (current) update(id, {
+				...current,
 				minimized: true
 			});
 		},
@@ -227,13 +248,16 @@ function windowStore() {
 //#region src/presentation-config.ts
 const PRESENTATION_CONFIG_PATH = "/lazymind-workflow/config";
 const CONFIG_KEY = "__LAZYMIND_WORKFLOW_PRESENTATION__";
-function readPresentationConfig(scope) {
-	const value = object(object(scope)?.[CONFIG_KEY]);
+function parsePresentationConfig(input) {
+	const value = object(input);
 	if (typeof value?.serverName !== "string" || !value.serverName || typeof value.webUrl !== "string" || !presentationLink("config-check", value.webUrl)) throw new Error("Reconnect LazyMind Workflow and reload DSH to load its panel configuration");
 	return {
 		serverName: value.serverName,
 		webUrl: value.webUrl
 	};
+}
+function readPresentationConfig(scope) {
+	return parsePresentationConfig(object(scope)?.[CONFIG_KEY]);
 }
 /** Optional connections must not prevent the rest of the DSH client from booting. */
 function observePresentationConfig(scope, update, request = fetch, interval = 3e3) {
@@ -268,11 +292,160 @@ function observePresentationConfig(scope, update, request = fetch, interval = 3e
 }
 
 //#endregion
+//#region ../workflow-agent-core/src/presentation.ts
+const bindingRefreshMs = 5e3;
+const layoutRetryMs = 100;
+function delay(ms, signal) {
+	signal.throwIfAborted();
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			signal.removeEventListener("abort", stop);
+			resolve();
+		}, ms);
+		function stop() {
+			clearTimeout(timer);
+			reject(signal.reason);
+		}
+		signal.addEventListener("abort", stop, { once: true });
+	});
+}
+/** The caller owns the window and its renderer cleanup. */
+async function runPresentation({ watchView, lookupBinding, ui, frameUrl, signal, report }) {
+	let current;
+	async function synchronize(view, clear, active) {
+		function publish(status, runId, pageStatus) {
+			if (!active.aborted) report({
+				status,
+				checked_at: Date.now(),
+				native_session_id: view.chatId ?? void 0,
+				run_id: runId,
+				page_status: pageStatus
+			});
+		}
+		async function apply$1(target, statusForUnmount, retryUntil = 0) {
+			do {
+				if (active.aborted) return;
+				try {
+					const result = await ui.syncPanel(view, target, active);
+					if (result.status !== "stale") publish(result.issue ?? (result.status === "unmounted" ? statusForUnmount ?? "unmounted" : result.status === "reused" ? "mounted" : result.status), target?.runId, result.pageStatus);
+					if (result.status !== "layout-unavailable" || result.issue) return;
+				} catch {
+					publish("renderer-unavailable", target?.runId);
+					return;
+				}
+				if (Date.now() >= retryUntil || active.aborted) return;
+				await delay(layoutRetryMs, active);
+			} while (!active.aborted);
+		}
+		try {
+			if (clear || view.chatId === null) await apply$1(null, view.chatId === null ? "waiting-session" : void 0);
+			if (view.chatId === null) return;
+			while (!active.aborted) {
+				let binding;
+				try {
+					binding = await lookupBinding(view.chatId, active);
+				} catch {
+					binding = { status: "unavailable" };
+				}
+				if (active.aborted) return;
+				const refreshAt = Math.max(Date.now() + bindingRefreshMs, "retryAt" in binding ? binding.retryAt ?? 0 : 0);
+				if (binding.status === "bound") await apply$1({
+					runId: binding.runId,
+					frameUrl
+				}, void 0, refreshAt);
+				else if (binding.status === "unavailable") publish("binding-unavailable");
+				else await apply$1(null, binding.status);
+				if (!active.aborted) await delay(Math.max(0, refreshAt - Date.now()), active);
+			}
+		} catch (error) {
+			if (!active.aborted) throw error;
+		}
+	}
+	try {
+		await watchView((view) => {
+			if (signal.aborted || current?.view.epoch === view.epoch && current.view.chatId === view.chatId) return;
+			const clear = current !== void 0;
+			current?.stop.abort();
+			const stop = new AbortController();
+			current = {
+				view,
+				stop
+			};
+			const active = AbortSignal.any([signal, stop.signal]);
+			synchronize(view, clear, active).catch(() => {
+				if (!active.aborted) report({
+					status: "unavailable",
+					checked_at: Date.now(),
+					native_session_id: view.chatId ?? void 0
+				});
+			});
+		}, signal);
+	} finally {
+		current?.stop.abort();
+	}
+}
+
+//#endregion
+//#region src/connector-build.ts
+const connectorBuild = "0.1.6+3e9c5bfad7ed66b7";
+
+//#endregion
+//#region src/binding-rpc.ts
+const channel = "/api";
+const endpoint = "lazymind/workflow-binding";
+const identifier = /^[A-Za-z0-9_-]{1,256}$/;
+function callBinding(ctx, sessionId, signal) {
+	return (ctx.get?.("connection"))?.rpc?.call(channel, endpoint, {
+		sessionId,
+		clientBuild: connectorBuild
+	}, signal);
+}
+function reportClientBuild(ctx, signal) {
+	callBinding(ctx, null, signal)?.catch(() => {});
+}
+function clientBindingLookup(ctx, updateConfig) {
+	return async (sessionId, signal) => {
+		try {
+			const result = object(await callBinding(ctx, sessionId, signal));
+			signal.throwIfAborted();
+			const value = object(result?.value);
+			if (result?.ok !== true || value?.sessionId !== sessionId) return { status: "unavailable" };
+			updateConfig(value.config);
+			const binding = object(value.binding);
+			switch (binding?.status) {
+				case "bound":
+					if (typeof binding.runId === "string" && identifier.test(binding.runId)) return {
+						status: "bound",
+						runId: binding.runId
+					};
+					return { status: "unavailable" };
+				case "unbound":
+				case "access-denied":
+				case "unavailable": return {
+					status: binding.status,
+					...typeof binding.retryAt === "number" ? { retryAt: binding.retryAt } : {}
+				};
+				default: return { status: "unavailable" };
+			}
+		} catch (error) {
+			signal.throwIfAborted();
+			return error instanceof Error && /HTTP (401|403)$/.test(error.message) ? { status: "access-denied" } : { status: "unavailable" };
+		}
+	};
+}
+
+//#endregion
 //#region src/client/index.tsx
 const interactiveRegion = { WebkitAppRegion: "no-drag" };
-const inject = ["uiConversation", "slots"];
+const inject = [
+	"uiConversation",
+	"slots",
+	"connection"
+];
 function apply(ctx) {
 	let config;
+	let unregister;
+	let viewEpoch = 0;
 	const configListeners = /* @__PURE__ */ new Set();
 	const subscribeConfig = (listener) => {
 		configListeners.add(listener);
@@ -316,9 +489,9 @@ function apply(ctx) {
 		}
 	};
 	function Entry({ node, sessionId }) {
-		const run = node.data.hostSessionId ? node.data : {
+		const run = {
 			...node.data,
-			hostSessionId: sessionId
+			hostSessionId: sessionId ?? node.data.hostSessionId
 		};
 		const snapshot = (0, react.useSyncExternalStore)(windows.subscribe, windows.snapshot, windows.snapshot);
 		(0, react.useEffect)(() => {
@@ -339,14 +512,32 @@ function apply(ctx) {
 			},
 			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "LazyMind Workflow" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				style: { marginLeft: 12 },
-				onClick: () => windows.open(run, node.anchorSeq),
+				onClick: () => windows.open(run),
 				children: "Open workflow"
 			})]
 		});
 	}
+	function publishConfig(next) {
+		if (JSON.stringify(next) === JSON.stringify(config)) return;
+		if (config && config.webUrl !== next?.webUrl) windows.clear();
+		config = next;
+		unregister?.();
+		unregister = config ? ctx.uiConversation.events.register(definition) : void 0;
+		for (const listener of configListeners) listener();
+	}
+	const lookupBinding = clientBindingLookup(ctx, (value) => {
+		if (value === null) {
+			publishConfig(void 0);
+			return;
+		}
+		try {
+			publishConfig(parsePresentationConfig(value));
+		} catch {}
+	});
 	function WorkflowDock({ session }) {
 		const connection = (0, react.useSyncExternalStore)(subscribeConfig, configSnapshot, configSnapshot);
-		const current = (0, react.useSyncExternalStore)(windows.subscribe, windows.snapshot, windows.snapshot).entries[session.sessionId];
+		const state = (0, react.useSyncExternalStore)(windows.subscribe, windows.snapshot, windows.snapshot);
+		const current = Object.hasOwn(state.entries, session.sessionId) ? state.entries[session.sessionId] : void 0;
 		const frame = (0, react.useRef)(null);
 		const anchor = (0, react.useRef)(null);
 		const [tail, setTail] = (0, react.useState)(null);
@@ -356,6 +547,39 @@ function apply(ctx) {
 		const runId = current?.run.runId;
 		const link = current && connection ? presentationLink(current.run.runId, connection.webUrl) : null;
 		const origin = link ? new URL(link.url).origin : void 0;
+		(0, react.useLayoutEffect)(() => {
+			const lifetime = new AbortController();
+			const chatId = session.sessionId;
+			const view = {
+				chatId,
+				epoch: String(++viewEpoch)
+			};
+			runPresentation({
+				signal: lifetime.signal,
+				frameUrl: config?.webUrl ?? "",
+				lookupBinding,
+				watchView: (report, signal) => {
+					report(view);
+					return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+				},
+				ui: { async syncPanel(next, target, signal) {
+					if (signal.aborted || next.epoch !== view.epoch) return { status: "stale" };
+					const run = config && target ? presentationLink(target.runId, config.webUrl) : null;
+					windows.binding(chatId, run && {
+						...run,
+						hostSessionId: chatId
+					});
+					return { status: run ? "mounted" : "unmounted" };
+				} },
+				report: (state$1) => {
+					if (state$1.status === "access-denied") windows.close(chatId);
+				}
+			});
+			return () => {
+				lifetime.abort();
+				windows.close(chatId);
+			};
+		}, [session.sessionId]);
 		(0, react.useLayoutEffect)(() => {
 			const seat = anchor.current?.closest("[data-composer-seat]");
 			const scroller = seat?.parentElement;
@@ -513,15 +737,11 @@ function apply(ctx) {
 		}), tail) : panel] });
 	}
 	ctx.effect(() => {
-		let unregister;
-		const stop = observePresentationConfig(globalThis, (next) => {
-			if (JSON.stringify(next) === JSON.stringify(config)) return;
-			config = next;
-			unregister?.();
-			unregister = config ? ctx.uiConversation.events.register(definition) : void 0;
-			for (const listener of configListeners) listener();
-		});
+		const stop = observePresentationConfig(globalThis, publishConfig);
+		const lifetime = new AbortController();
+		reportClientBuild(ctx, lifetime.signal);
 		return () => {
+			lifetime.abort();
 			stop();
 			unregister?.();
 		};
@@ -539,5 +759,6 @@ function apply(ctx) {
 
 //#endregion
 exports.apply = apply;
+exports.connectorBuild = connectorBuild;
 exports.inject = inject;
 return module.exports; } });

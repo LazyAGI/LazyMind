@@ -167,15 +167,22 @@ export function createCoordinator<A>(runtime: RuntimeAdapter<A>, bridge: HostTra
       scope.activeOwned = scope.automatic = true
       scope.manual = false
     }
+    const driverId = runtime.id(root)
     if (operation === 'start') {
       scope.activeOwned = scope.automatic = rootScope.activeOwned = rootScope.automatic = true
       scope.manual = rootScope.manual = false
+      // Preserve the native receipt even when a committed start is still
+      // waiting for its separate binding. It authorizes recovery of that run.
+      if (exec.nested && run) ptcLinks.set(exec.callId, { ...run, hostSessionId: driverId, operation })
     }
     try {
       const fresh = operation === 'start'
-        ? await bridge.bind(runId, runtime.id(root), signal(exec.signal))
+        ? await bridge.bind(runId, driverId, signal(exec.signal))
         : returned ?? await bridge.state(runId, signal(exec.signal))
-      if (fresh.binding?.driver_session_id !== runtime.id(root)) return null
+      if (fresh.binding?.driver_session_id !== driverId) return null
+      if (operation === 'start' && (!fresh.binding.bound || fresh.session_id !== runId)) {
+        throw new Error('Workflow binding confirmation is pending')
+      }
       if (rootScope.runId && rootScope.runId !== runId && operation !== 'start') {
         if (scope !== rootScope) { scope.runId = runId; publish(runId, fresh); return scope.control ?? fresh }
         return null

@@ -50,6 +50,18 @@ func connectedDSHFixture(t *testing.T) (*Adapter, workflowhost.Pairing, workflow
 	return a, pairs[0], pairs[1]
 }
 
+func recordDSHFixtureRuntime(t *testing.T, a *Adapter, pair workflowhost.Pairing, issue string, mcpReady bool) error {
+	t.Helper()
+	record, err := a.forDSHProfile(filepath.Base(pair.Profile), "").dshPluginRecord()
+	if err != nil {
+		return err
+	}
+	time.Sleep(time.Millisecond)
+	return workflowhost.RecordRuntimeStatus(a.home, pair, issue, mcpReady, workflowhost.DSHLoad{
+		Build: record.Installed.Version, Instance: "00000000-0000-0000-0000-000000000001", StartedAt: record.RestartAfter + 1,
+	})
+}
+
 func TestDSHConnectionUsesOnlyFreshDesktopRuntime(t *testing.T) {
 	a, desktop, web := connectedDSHFixture(t)
 	assertState := func(runtime, issue string, ready bool) {
@@ -66,25 +78,33 @@ func TestDSHConnectionUsesOnlyFreshDesktopRuntime(t *testing.T) {
 		}
 	}
 	assertState("waiting", "", false)
-	if err := workflowhost.RecordRuntimeStatus(a.home, web, "", true); err != nil {
+	if err := recordDSHFixtureRuntime(t, a, web, "", true); err != nil {
 		t.Fatal(err)
 	}
 	assertState("waiting", "", false)
 	a.dshRunning = func(context.Context, string) (bool, error) { return true, nil }
-	assertState("unavailable", "host_unavailable", false)
-	if err := workflowhost.RecordRuntimeStatus(a.home, desktop, "", true); err != nil {
+	assertState("waiting", "", false)
+	if err := recordDSHFixtureRuntime(t, a, desktop, "", true); err != nil {
 		t.Fatal(err)
 	}
 	assertState("connected", "", true)
-	if err := workflowhost.RecordRuntimeStatus(a.home, desktop, "", false); err != nil {
+	if err := recordDSHFixtureRuntime(t, a, desktop, "", false); err != nil {
 		t.Fatal(err)
 	}
 	assertState("unavailable", "mcp_unavailable", true)
-	if err := workflowhost.RecordRuntimeStatus(a.home, desktop, "lazymind_unavailable", true); err != nil {
+	if err := recordDSHFixtureRuntime(t, a, desktop, "lazymind_unavailable", true); err != nil {
 		t.Fatal(err)
 	}
-	assertState("unavailable", "lazymind_unavailable", false)
-	if err := workflowhost.RecordRuntimeStatus(a.home, desktop, "", true); err != nil {
+	assertState("connected", "lazymind_unavailable", true)
+	if err := recordDSHFixtureRuntime(t, a, desktop, "lazymind_auth_required", true); err != nil {
+		t.Fatal(err)
+	}
+	assertState("connected", "lazymind_auth_required", true)
+	independent := a.Status(t.Context()).Connection
+	if independent.LazyMindState != "authorization_required" || independent.PresentationStatus != "available" {
+		t.Fatalf("Core authorization changed local control or presentation evidence: %+v", independent)
+	}
+	if err := recordDSHFixtureRuntime(t, a, desktop, "", true); err != nil {
 		t.Fatal(err)
 	}
 	assertState("connected", "", true)
@@ -93,7 +113,27 @@ func TestDSHConnectionUsesOnlyFreshDesktopRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live.CheckedAt = time.Now().Add(-13 * time.Second).UnixMilli()
+	live.Panel = "unavailable"
+	if err := workflowhost.RecordRuntimeStatus(a.home, desktop, "", true, live.DSHLoad); err != nil {
+		t.Fatal(err)
+	}
+	panel := a.Status(t.Context()).Connection
+	if panel.PresentationStatus != "binding-unavailable" || !panel.ControlReady || panel.LazyMindState != "connected" {
+		t.Fatalf("panel failure changed available control: %+v", panel)
+	}
+	// Keep the verified cold start while expiring its latest heartbeat.
+	// Shift the install boundary and the runtime together without a real wait.
+	target := a.forDSHProfile("desktop", "")
+	record, err := target.dshPluginRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.RestartAfter -= 20_000
+	if err := target.saveDSHPlugin(record); err != nil {
+		t.Fatal(err)
+	}
+	live.CheckedAt -= 20_000
+	live.StartedAt -= 20_000
 	body, _ := json.Marshal(live)
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		t.Fatal(err)
@@ -113,7 +153,11 @@ func TestDSHBundleUpdatePreservesConfigurationAndRetryIntent(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				writeTestFile(t, path, strings.ReplaceAll(string(body), dshBundleHash(), strings.Repeat("0", 64)))
+				record, err := a.forDSHProfile(profile, "").dshPluginRecord()
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeTestFile(t, path, strings.ReplaceAll(string(body), record.Installed.Release, strings.Repeat("0", 64)))
 			}
 			record, err := a.dshRecord()
 			if err != nil {
@@ -142,7 +186,7 @@ func TestDSHNativeEnablementAndPairingOverrideLiveRuntime(t *testing.T) {
 	for _, scenario := range []string{"disabled plugin", "unselected bundle", "disabled pairing", "account changed", "signed out"} {
 		t.Run(scenario, func(t *testing.T) {
 			a, pair, _ := connectedDSHFixture(t)
-			if err := workflowhost.RecordRuntimeStatus(a.home, pair, "", true); err != nil {
+			if err := recordDSHFixtureRuntime(t, a, pair, "", true); err != nil {
 				t.Fatal(err)
 			}
 			want := ""
@@ -197,7 +241,7 @@ func TestDSHNativeEnablementAndPairingOverrideLiveRuntime(t *testing.T) {
 
 func TestDSHReconnectRepairsPairingWithoutReusingReadiness(t *testing.T) {
 	a, before, _ := connectedDSHFixture(t)
-	if err := workflowhost.RecordRuntimeStatus(a.home, before, "", true); err != nil {
+	if err := recordDSHFixtureRuntime(t, a, before, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if err := workflowhost.Disable(a.home, before.ConnectorID); err != nil {
@@ -214,5 +258,30 @@ func TestDSHReconnectRepairsPairingWithoutReusingReadiness(t *testing.T) {
 	}
 	if _, err := workflowhost.ReadRuntimeStatus(a.home, after); err == nil {
 		t.Fatal("reconnected installation reused old readiness")
+	}
+}
+
+func TestDSHRestartRejectsPreInstallProcessWithMatchingBuild(t *testing.T) {
+	a, desktop, _ := connectedDSHFixture(t)
+	target := a.forDSHProfile("desktop", "")
+	record, err := target.dshPluginRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowhost.RecordRuntimeStatus(a.home, desktop, "", true, workflowhost.DSHLoad{
+		Build: record.Installed.Version, Instance: "00000000-0000-0000-0000-000000000002", StartedAt: record.RestartAfter,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status := a.Status(t.Context())
+	if status.Connection.ControlReady || status.Profiles[0].Plugin.State != "restart_required" {
+		t.Fatalf("old process confirmed the reinstalled build: %+v", status)
+	}
+	if err := recordDSHFixtureRuntime(t, a, desktop, "", true); err != nil {
+		t.Fatal(err)
+	}
+	status = a.Status(t.Context())
+	if !status.Connection.ControlReady || status.Profiles[0].Plugin.State != "verified" {
+		t.Fatalf("new process did not confirm the reinstalled build: %+v", status)
 	}
 }

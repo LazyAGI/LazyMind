@@ -59,6 +59,7 @@
   },
   "scripts": {
     "bundle": "tsdown",
+    "stage-connectors": "node ../workflow-agent-core/node/stage-connectors.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

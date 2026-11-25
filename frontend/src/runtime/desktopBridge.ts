@@ -105,6 +105,7 @@ export interface DesktopAgentConnectionStatus {
   mcp_trusted?: boolean;
   mcp_enabled?: boolean;
   mcp_configured: boolean;
+  mcp_ready?: boolean;
   control_ready: boolean;
   presentation_status: string;
   page_status?: string;
@@ -140,7 +141,20 @@ export interface DesktopAgentIntegrationStatus {
 	can_connect?: boolean;
 	can_disconnect?: boolean;
 	retry_action?: "connect" | "disconnect";
-	profiles?: Array<{ name: string; state: DesktopAgentIntegrationState; message?: string }>;
+  profiles?: Array<{
+    name: string;
+    state: DesktopAgentIntegrationState;
+    message?: string;
+    plugin?: {
+      state: string;
+      selected_version?: string;
+      installed_version?: string;
+      previous_version?: string;
+      running_version?: string;
+      running_client_version?: string;
+      process_instance?: string;
+    };
+  }>;
   agent: DesktopAgent;
   display_name: string;
   version?: string;

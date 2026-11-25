@@ -2702,6 +2702,7 @@ const zhCN = {
     notEnabled: "未启用",
     enabled: "已启用",
     connected: "已连接",
+    dshPluginRestartRequired: "请完全退出并重启 DeepSeek Harness 配置以加载已安装的插件",
     enabledPendingConnection: "已启用，待连接",
     awaitingConfirmation: "等待确认",
     configurationIncomplete: "配置未完成",

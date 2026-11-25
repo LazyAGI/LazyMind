@@ -193,6 +193,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/workbuddy/presentation", s.handleWorkBuddyPresentation)
 	mux.HandleFunc("GET /v1/workbuddy/frame", s.handleWorkBuddyFrame)
 	mux.HandleFunc("GET /v1/codex/presentation", s.handleCodexPresentation)
+	mux.HandleFunc("GET /v1/deepseek-harness/presentation", s.handleDSHPresentation)
 	mux.HandleFunc("POST /v1/codex/recovery", s.handleCodexRecovery)
 	mux.HandleFunc("POST /v1/codex/recovery/{request}/accepted/{intent}", s.handleCodexRecovery)
 	mux.HandleFunc("POST /v1/codex/recovery/{request}/complete", s.handleCodexRecovery)

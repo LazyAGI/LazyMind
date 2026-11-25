@@ -23,7 +23,26 @@ import (
 const packageDirectory = "workflow-connectors"
 const manifestName = "connector.json"
 
-var hosts = []string{"codex", "workbuddy"}
+const DSHHost = "dsh"
+const dshArchiveName = "dsh-workflow.tgz"
+
+var hosts = []string{"codex", "workbuddy", DSHHost}
+
+func distributionHosts(executable string) []string {
+	dir := filepath.Join(filepath.Dir(executable), packageDirectory)
+	absent := func(host string) bool {
+		_, err := os.Lstat(filepath.Join(dir, host))
+		return errors.Is(err, os.ErrNotExist)
+	}
+	if absent(DSHHost) {
+		return hosts[:2]
+	}
+	if absent("codex") && absent("workbuddy") {
+		return hosts[2:]
+	}
+	return hosts
+}
+
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+-]{0,79}$`)
 var modulePattern = regexp.MustCompile(`^([a-zA-Z0-9_-]+/)*[a-zA-Z0-9_.-]+\.mjs$`)
@@ -63,10 +82,14 @@ func RecordPath(home, host string) string {
 }
 
 func displayHost(host string) string {
-	if host == "workbuddy" {
+	switch host {
+	case DSHHost:
+		return "DeepSeek Harness"
+	case "workbuddy":
 		return "WorkBuddy"
+	default:
+		return "Codex"
 	}
-	return "Codex"
 }
 
 func readManifest(path, host string) (Manifest, error) {
@@ -78,6 +101,12 @@ func readManifest(path, host string) (Manifest, error) {
 	if json.Unmarshal(body, &manifest) != nil || manifest.Schema != 1 || manifest.Host != host ||
 		!digestPattern.MatchString(manifest.Release) || !versionPattern.MatchString(manifest.Version) || len(manifest.Files) > 128 {
 		return Manifest{}, fmt.Errorf("invalid %s Connector installation record %s", displayHost(host), path)
+	}
+	if host == DSHHost {
+		if manifest.Entry != dshArchiveName || !slices.Equal(manifest.Files, []string{dshArchiveName}) || manifest.Presentation != "" || manifest.Control != "" {
+			return Manifest{}, fmt.Errorf("invalid %s Connector archive layout in %s", displayHost(host), path)
+		}
+		return manifest, nil
 	}
 	files := make(map[string]bool, len(manifest.Files))
 	for _, file := range manifest.Files {
@@ -129,6 +158,9 @@ func Resolve(home, host string) (Installation, error) {
 	if err != nil {
 		return installation, err
 	}
+	if host == DSHHost {
+		return installation, installation.verifyRelease("")
+	}
 	for _, file := range installation.Files {
 		if err := installation.checkFile(file); err != nil {
 			return installation, err
@@ -150,6 +182,11 @@ func (i Installation) revision(copyTo string) (string, error) {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return "", &PathError{Host: i.Host, Item: "module", Path: path, Err: err}
+		}
+		if i.Host == DSHHost {
+			if _, err := dshPluginFiles(body, i.Version); err != nil {
+				return "", &PathError{Host: i.Host, Item: "archive", Path: path, Err: err}
+			}
 		}
 		sum := sha256.Sum256(body)
 		hash.Write([]byte(file))
@@ -215,25 +252,36 @@ func (i Installation) install(ctx context.Context, home string, upgrade bool) er
 	defer unlock()
 	previous, err := Read(home, i.Host)
 	if err == nil && (!upgrade || previous.Release == i.Release) {
-		// Same release reconnects keep any local edits and their backups.
+		// Same-release editable reconnects keep local changes. DSH archives
+		// are immutable and must still pass verification.
+		if i.Host == DSHHost {
+			return i.verifyRelease("")
+		}
 		return nil
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	dir := filepath.Join(filepath.Dir(record), "connectors", i.Release)
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		if err := i.configureCopy(dir); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-	pending := Installation{Manifest: i.Manifest, Dir: dir}
-	if err := pending.checkFile(pending.Entry); err != nil {
+	if _, err := i.retain(home); err != nil {
 		return err
 	}
 	return writeManifest(record, i.Manifest)
+}
+
+func (i Installation) retain(home string) (Installation, error) {
+	dir := filepath.Join(filepath.Dir(RecordPath(home, i.Host)), "connectors", i.Release)
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		if err := i.configureCopy(dir); err != nil {
+			return Installation{}, err
+		}
+	} else if err != nil {
+		return Installation{}, err
+	}
+	pending := Installation{Manifest: i.Manifest, Dir: dir}
+	if i.Host == DSHHost {
+		return pending, pending.verifyRelease("")
+	}
+	return pending, pending.checkFile(pending.Entry)
 }
 
 // Provision is called by the desktop or local install entry point. A standalone
@@ -247,10 +295,10 @@ func Provision(ctx context.Context, home, executable string, upgrade bool) error
 		return err
 	}
 	var result error
-	for _, host := range hosts {
+	for _, host := range distributionHosts(executable) {
 		source, err := packaged(executable, host)
 		if err == nil {
-			err = source.install(ctx, home, upgrade)
+			err = source.install(ctx, home, upgrade || host == DSHHost)
 		}
 		result = errors.Join(result, err)
 	}
@@ -290,10 +338,11 @@ func ReadPackage(executable string) (Package, error) {
 	if err != nil {
 		return result, err
 	}
-	releases := make([]string, len(hosts))
+	releases := make([]string, 0, len(hosts))
 	var failures error
-	for index, host := range hosts {
+	for _, host := range distributionHosts(executable) {
 		source, err := packaged(executable, host)
+		releases = append(releases, "")
 		if err == nil {
 			err = source.verifyRelease("")
 		}
@@ -302,7 +351,7 @@ func ReadPackage(executable string) (Package, error) {
 			continue
 		}
 		result.sources = append(result.sources, source)
-		releases[index] = source.Release
+		releases[len(releases)-1] = source.Release
 	}
 	if len(result.sources) > 0 {
 		// Empty release slots distinguish partial packages from each other and

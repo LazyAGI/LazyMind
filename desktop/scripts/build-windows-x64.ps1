@@ -543,7 +543,10 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
         Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot $project)
         Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot $project)
     }
-    Invoke-Native 'node.exe' @((Join-Path $repoRoot 'integrations\workflow-agent-core\node\stage-connectors.mjs'), (Join-Path $runtimeRoot 'bin')) $repoRoot
+    $dshConnector = Join-Path $repoRoot 'integrations\dsh-workflow'
+    Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') $dshConnector
+    Invoke-Native 'pnpm.cmd' @('bundle') $dshConnector
+    Invoke-Native 'pnpm.cmd' @('stage-connectors', (Join-Path $runtimeRoot 'bin')) $dshConnector
     Build-GoBinary (Join-Path $repoRoot 'local\lazymind-cli') (Join-Path $runtimeRoot 'bin\lazymind.exe') @('.\cmd\lazymind')
     Build-GoBinary (Join-Path $repoRoot 'local\local-proxy') (Join-Path $runtimeRoot 'bin\local-proxy.exe') @('.\cmd\local-proxy')
     Build-GoBinary (Join-Path $repoRoot 'backend\core') (Join-Path $runtimeRoot 'bin\core.exe')

@@ -66,8 +66,12 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
     const sidecars = path.join(path.dirname(f.source), 'workflow-connectors');
     const codex = path.join(sidecars, 'codex');
     const workbuddy = path.join(sidecars, 'workbuddy');
+    const dsh = path.join(sidecars, 'dsh');
     mkdirSync(codex, { recursive: true });
     mkdirSync(workbuddy);
+    mkdirSync(dsh);
+    writeFileSync(path.join(dsh, 'connector.json'), 'dsh-manifest');
+    writeFileSync(path.join(dsh, 'dsh-workflow.tgz'), 'dsh-package-v1');
     writeFileSync(path.join(codex, 'connector.json'), 'codex-manifest');
     writeFileSync(path.join(codex, 'main.mjs'), 'codex-module');
     writeFileSync(path.join(workbuddy, 'main.mjs'), 'workbuddy-module');
@@ -79,6 +83,7 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
     const partialSidecars = path.join(path.dirname(partialExecutable), 'workflow-connectors');
     assert.equal(readFileSync(path.join(partialSidecars, 'codex', 'main.mjs'), 'utf8'), 'codex-module');
     assert.ok(!existsSync(path.join(partialSidecars, 'workbuddy')));
+    assert.equal(readFileSync(path.join(partialSidecars, 'dsh', 'dsh-workflow.tgz'), 'utf8'), 'dsh-package-v1');
 
     writeFileSync(path.join(workbuddy, 'connector.json'), 'workbuddy-manifest');
     success(f.run('start'), 'start');
@@ -89,9 +94,18 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
     success(f.run('start'), 'start');
     assert.equal(f.calls().at(-1).executable, fullExecutable);
 
+    writeFileSync(path.join(dsh, 'dsh-workflow.tgz'), 'dsh-package-v2');
+    success(f.run('start'), 'start');
+    const upgradedExecutable = f.calls().at(-1).executable;
+    assert.notEqual(upgradedExecutable, fullExecutable);
+    const upgradedSidecars = path.join(path.dirname(upgradedExecutable), 'workflow-connectors');
+    assert.equal(readFileSync(path.join(upgradedSidecars, 'dsh', 'dsh-workflow.tgz'), 'utf8'), 'dsh-package-v2');
+    assert.equal(readFileSync(path.join(upgradedSidecars, 'codex', 'main.mjs'), 'utf8'), 'codex-module');
+    assert.equal(readFileSync(path.join(fullSidecars, 'dsh', 'dsh-workflow.tgz'), 'utf8'), 'dsh-package-v1');
+
     writeFileSync(path.join(workbuddy, 'main.mjs'), 'modified workbuddy module');
     success(f.run('start'), 'start');
-    assert.notEqual(f.calls().at(-1).executable, fullExecutable);
+    assert.notEqual(f.calls().at(-1).executable, upgradedExecutable);
   });
   await t.test('stop with no executable is idempotent', t => success(fixture(t).run('stop'), 'stop'));
   await t.test('Local startup does not bind to a Compose origin', t => {

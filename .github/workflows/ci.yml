@@ -311,13 +311,17 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          pnpm --dir integrations/dsh-workflow install --frozen-lockfile
+          pnpm --dir integrations/dsh-workflow bundle
+          pnpm --dir integrations/dsh-workflow exec vitest run --root ../workflow-agent-core
           pnpm --dir integrations/codex-workflow install --frozen-lockfile
           pnpm --dir integrations/codex-workflow typecheck
           pnpm --dir integrations/codex-workflow test
           pnpm --dir integrations/workbuddy-workflow/connector install --frozen-lockfile
           pnpm --dir integrations/workbuddy-workflow/connector typecheck
           pnpm --dir integrations/workbuddy-workflow/connector test
-          node integrations/workflow-agent-core/node/stage-connectors.mjs "$RUNNER_TEMP/workflow-cli/bin"
+          pnpm --dir integrations/dsh-workflow stage-connectors "$RUNNER_TEMP/workflow-cli/bin"
+          LAZYMIND_TEST_DSH_CONNECTOR="$RUNNER_TEMP/workflow-cli/bin/workflow-connectors/dsh" go -C local/lazymind-cli test ./internal/workflowconnector -run TestBuiltDSHConnectorPackage -v
           git diff --exit-code -- local/lazymind-cli/internal/workflowpresentation/assets/presentation.html
       - name: Test Local Proxy
         working-directory: local/local-proxy
@@ -350,16 +354,13 @@ jobs:
         with:
           name: go-cli-diagnostics-windows
           path: ${{ runner.temp }}/go-cli-diagnostics
-      - name: Test and verify the bundled DSH plugin
+      - name: Test the DSH plugin and verify tracked client artifacts
         if: runner.os == 'Linux'
         working-directory: integrations/dsh-workflow
         run: |
-          pnpm install --frozen-lockfile
           pnpm typecheck
           pnpm test
-          pnpm bundle
-          (cd ../../local/lazymind-cli && go run ./cmd/package-workflow-bundle)
-          git diff --exit-code -- lib ../../local/lazymind-cli/internal/adapters/mcpclient/assets/dsh-workflow.tgz
+          git diff --exit-code -- lib
 
   test-desktop-shell:
     needs: [lint, doc_check]

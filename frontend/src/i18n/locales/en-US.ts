@@ -2740,6 +2740,7 @@ const enUS = {
     notEnabled: "Not enabled",
     enabled: "Enabled",
     connected: "Connected",
+    dshPluginRestartRequired: "Restart the DeepSeek Harness profile to load the installed plugin",
     enabledPendingConnection: "Enabled, waiting for connection",
     awaitingConfirmation: "Awaiting confirmation",
     configurationIncomplete: "Setup incomplete",

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"lazymind/agentconnector/internal/coreapi"
@@ -118,7 +119,12 @@ func (s *Server) handleWorkflowHostActions(w http.ResponseWriter, r *http.Reques
 	// Only the current plugin's explicit runtime observation establishes MCP
 	// readiness; older plugins without the header remain visibly unavailable.
 	mcpReady := r.Header.Get("X-LazyMind-MCP-Ready") == "1"
-	if recordErr := workflowhost.RecordRuntimeStatus(s.store.Directory(), pair, issue, mcpReady); recordErr != nil {
+	startedAt, _ := strconv.ParseInt(r.Header.Get("X-LazyMind-DSH-Process-Started-At"), 10, 64)
+	loaded := workflowhost.DSHLoad{
+		Build: r.Header.Get("X-LazyMind-DSH-Build"), Instance: r.Header.Get("X-LazyMind-DSH-Process"), StartedAt: startedAt,
+		Panel: r.Header.Get("X-LazyMind-DSH-Panel"), ClientBuild: r.Header.Get("X-LazyMind-DSH-Client-Build"),
+	}
+	if recordErr := workflowhost.RecordRuntimeStatus(s.store.Directory(), pair, issue, mcpReady, loaded); recordErr != nil {
 		log.Printf("DSH dispatcher status could not be recorded")
 	}
 	if err != nil {

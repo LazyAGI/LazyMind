@@ -70,7 +70,10 @@ $digest = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLower
 $sidecar = Join-Path (Split-Path -Parent $SourcePath) 'workflow-connectors'
 $sidecarHosts = @()
 if (Test-Path -LiteralPath $sidecar -PathType Container) {
-    foreach ($connectorHost in @('codex', 'workbuddy')) {
+    $desktopSidecars = (Test-Path -LiteralPath (Join-Path $sidecar 'codex')) -or (Test-Path -LiteralPath (Join-Path $sidecar 'workbuddy'))
+    $dshSidecar = Test-Path -LiteralPath (Join-Path $sidecar 'dsh')
+    foreach ($connectorHost in @('codex', 'workbuddy', 'dsh')) {
+        if (($connectorHost -eq 'dsh' -and -not $dshSidecar) -or ($connectorHost -ne 'dsh' -and $dshSidecar -and -not $desktopSidecars)) { continue }
         $hostPath = Join-Path $sidecar $connectorHost
         try {
             $manifest = Join-Path $hostPath 'connector.json'

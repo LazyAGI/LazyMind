@@ -76,7 +76,7 @@ export class HostBridge {
     })
   }
 
-  lookupBinding(provider: 'codex' | 'workbuddy'): LookupBinding {
+  lookupBinding(provider: 'codex' | 'workbuddy' | 'deepseek-harness'): LookupBinding {
     // Presentation supplies a new signal for each view, including when returning
     // to the same chat. Old requests cannot touch the new view's retry state.
     const retries = new WeakMap<AbortSignal, RequestRetry>()

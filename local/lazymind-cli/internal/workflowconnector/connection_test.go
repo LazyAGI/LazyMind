@@ -39,3 +39,29 @@ func TestConnectionEvidenceReadiness(t *testing.T) {
 		t.Fatalf("old poll became current via a new heartbeat: %s", got)
 	}
 }
+
+func TestConnectionEvidenceAcrossAgentHosts(t *testing.T) {
+	now := time.Now()
+	for _, host := range []string{"deepseek-harness", "codex", "workbuddy"} {
+		t.Run(host, func(t *testing.T) {
+			revision := host + "-active"
+			latest := now.UnixMilli()
+			value := ConnectionEvidence{PairingRevision: revision, Connection: &ConnectionObservation{CheckedAt: latest}}
+			if issue := value.Issue(host+"-previous", latest, now.Add(-time.Second)); issue != ConnectionPending {
+				t.Fatalf("pairing mismatch: %q", issue)
+			}
+			value.Connection.CheckedAt = now.Add(-time.Minute - time.Second).UnixMilli()
+			if issue := value.Issue(revision, latest, time.Time{}); issue != ConnectionPending {
+				t.Fatalf("expired evidence: %q", issue)
+			}
+			value.Connection = &ConnectionObservation{CheckedAt: latest, Issue: "lazymind_auth_required"}
+			if issue := value.Issue(revision, latest, time.Time{}); issue != "lazymind_auth_required" {
+				t.Fatalf("expired authorization: %q", issue)
+			}
+			value.Connection.Issue = ""
+			if issue := value.Issue(revision, latest, time.Time{}); issue != "" {
+				t.Fatalf("authorization recovery: %q", issue)
+			}
+		})
+	}
+}

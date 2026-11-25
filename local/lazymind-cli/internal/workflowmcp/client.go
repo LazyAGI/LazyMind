@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -20,6 +21,8 @@ import (
 
 const contractVersion = "workflow.v1"
 const ControlProtocol = "workflow.control.v1"
+
+var dshSessionPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
 
 type StartOrigin struct {
 	ConversationID string
@@ -110,6 +113,8 @@ type StartResult struct {
 	Status                     string           `json:"status,omitempty"`
 	PreparationID              string           `json:"preparation_id"`
 	SessionID                  string           `json:"session_id,omitempty"`
+	IdempotencyKey             string           `json:"idempotency_key,omitempty"`
+	BindingStatus              string           `json:"binding_status,omitempty"`
 	WorkflowID                 string           `json:"workflow_id"`
 	RevisionID                 string           `json:"revision_id,omitempty"`
 	Questions                  []map[string]any `json:"questions,omitempty"`
@@ -509,7 +514,12 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 	if err != nil {
 		return StartResult{}, err
 	}
-	if (c.HostProvider == "codex" || c.HostProvider == "workbuddy") && c.RequireHostBinding {
+	synchronousBinding := c.RequireHostBinding && (c.HostProvider == "codex" || c.HostProvider == "workbuddy")
+	dshBinding := c.RequireHostBinding && c.HostProvider == "deepseek-harness"
+	if dshBinding && !dshSessionPattern.MatchString(input.DriverSessionID) {
+		return StartResult{}, errors.New("DeepSeek Harness must provide the issuing native session ID")
+	}
+	if synchronousBinding {
 		if !codexThreadPattern.MatchString(input.DriverSessionID) {
 			return StartResult{}, errors.New("Native driver session UUID is missing; use verified host identity, never the Workflow session_id")
 		}
@@ -556,11 +566,12 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		request["clarification_values"] = input.ClarificationValues
 	}
 	origin := c.origin
-	if c.HostProvider == "workbuddy" && c.RequireHostBinding {
-		origin.ExternalRef = "workbuddy:" + input.DriverSessionID
+	useNativeOrigin := dshBinding || c.HostProvider == "workbuddy" && c.RequireHostBinding
+	if useNativeOrigin {
+		origin.ExternalRef = c.HostProvider + ":" + input.DriverSessionID
 		origin.ConversationID = ""
 	}
-	if invocation, ok := coreapi.InvocationFromContext(ctx); ok && !(c.HostProvider == "workbuddy" && c.RequireHostBinding) {
+	if invocation, ok := coreapi.InvocationFromContext(ctx); ok && !useNativeOrigin {
 		if strings.TrimSpace(origin.ExternalRef) == "" {
 			origin.ExternalRef = strings.TrimSpace(invocation.ExternalRef)
 		}
@@ -620,23 +631,45 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		map[string]any{"session_id": input.SessionID}, &consumed); err != nil {
 		return StartResult{}, err
 	}
-	if (c.HostProvider == "codex" || c.HostProvider == "workbuddy") && c.RequireHostBinding {
-		if err := c.BindController(ctx, consumed.SessionID, input.DriverSessionID); err != nil {
-			return StartResult{}, fmt.Errorf("workflow %s was created but controller binding failed: %w; retry workflow.start with idempotency_key=%s and session_id=%s", consumed.SessionID, err, input.IdempotencyKey, consumed.SessionID)
-		}
-	}
-	state, err := c.State(ctx, consumed.SessionID)
-	if err != nil {
-		return StartResult{}, err
+	if strings.TrimSpace(consumed.SessionID) == "" {
+		return StartResult{}, errors.New("Workflow preparation did not return a created session ID")
 	}
 	workflowID := strings.TrimSpace(consumed.WorkflowID)
 	if workflowID == "" {
 		workflowID = input.WorkflowID
 	}
-	return StartResult{
+	result := StartResult{
 		Status: "started", PreparationID: prepared.PreparationID, SessionID: consumed.SessionID, WorkflowID: workflowID,
-		RevisionID: strings.TrimSpace(consumed.RevisionID), State: &state,
-	}, nil
+		RevisionID: strings.TrimSpace(consumed.RevisionID),
+	}
+	if c.RequireHostBinding {
+		result.IdempotencyKey = input.IdempotencyKey
+		result.BindingStatus = "pending"
+		result.AgentInstruction = "The Workflow session was created. Reuse its session_id and idempotency_key with the same workflow.start arguments if binding needs a retry."
+	}
+	if synchronousBinding {
+		if err := c.BindController(ctx, consumed.SessionID, input.DriverSessionID); err != nil {
+			// The successful consume receipt is the retry identity even when
+			// the separate host binding request failed.
+			return result, nil
+		}
+	}
+	state, err := c.State(ctx, consumed.SessionID)
+	if err != nil {
+		if c.RequireHostBinding {
+			return result, nil
+		}
+		return StartResult{}, err
+	}
+	result.State = &state
+	if c.RequireHostBinding {
+		binding, _ := state.Control["binding"].(map[string]any)
+		if binding["bound"] == true && binding["driver_session_id"] == input.DriverSessionID {
+			result.BindingStatus = "confirmed"
+			result.AgentInstruction = ""
+		}
+	}
+	return result, nil
 }
 
 func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, error) {

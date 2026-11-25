@@ -13,7 +13,8 @@ const connectionIssueCodes = new Set([
 ]);
 
 export function lazyMindConnectionIssue(status?: DesktopAgentIntegrationStatus) {
-  if (status?.agent !== "codex" && status?.agent !== "workbuddy") return undefined;
+  if (status?.agent !== "codex" && status?.agent !== "workbuddy"
+    && !(status?.agent === "deepseek-harness" && status.connection?.lazymind_state)) return undefined;
   switch (status.connection?.lazymind_state) {
     case "connected": return undefined;
     case "authorization_required": return "lazymind_auth_required";
@@ -27,7 +28,7 @@ export function agentConnectionReady(status?: DesktopAgentIntegrationStatus): bo
   // A saved configuration or enabled switch is not evidence of a live connection.
   return status?.state === "enabled" && !status.inspection_unavailable && status.enabled !== false && status.retry_action !== "disconnect"
     && !status.issue && !requiresAgentQuit(status) && connection?.mcp_configured === true
-    && connection.mcp_enabled === true && connection.mcp_trusted === true
+    && connection.mcp_enabled === true && connection.mcp_trusted === true && connection.mcp_ready !== false
     && connection.control_ready === true && connection.runtime_state === "connected"
     && !lazyMindConnectionIssue(status);
 }
@@ -45,6 +46,9 @@ export function agentConnectionStatusKey(status: DesktopAgentIntegrationStatus |
     ? "agentIntegration.setupFeedback.disableFailed" : "agentIntegration.connectionIssues.operation_failed";
   if (status?.state === "action_required") return "agentIntegration.awaitingConfirmation";
   if (enabled) {
+    if (status?.agent === "deepseek-harness" && status.profiles?.some(({ plugin }) => plugin?.state === "restart_required")) {
+      return "agentIntegration.dshPluginRestartRequired";
+    }
     const connection = status?.connection;
     const issue = lazyMindConnectionIssue(status);
     if (issue && connection?.mcp_configured && connection.mcp_trusted && connection.mcp_enabled && connection.control_ready) {

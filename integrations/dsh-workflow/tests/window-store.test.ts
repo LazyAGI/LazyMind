@@ -55,32 +55,41 @@ describe('standard-event workflow presentation', () => {
     expect(eventRun({ ...event, data: { ...event.data, name: 'mcp__other__workflow_start' } }, 'lazymind', 'http://localhost:8090')).toBeNull()
     expect(eventRun({ ...event, data: { ...event.data, isError: true } }, 'lazymind', 'http://localhost:8090')).toBeNull()
   })
-  it('isolates sessions, deduplicates entry cards and does not reopen a minimized workflow on state reads', () => {
+  it('deduplicates history without deciding the default panel for either chat', () => {
     const store = windowStore()
     const run = { runId: 'r', url: 'http://localhost:8090/workflow-runs/r', hostSessionId: 'a', operation: 'start' }
     store.observe(run, 20)
     store.observe({ ...run, operation: 'state' }, 30)
     expect(store.snapshot().firstCards[runKey(run)]).toBe(20)
+    expect(store.snapshot().entries).toEqual({})
+    store.binding('a', run)
     store.minimize('a')
-    store.observe({ ...run, operation: 'state' }, 40)
+    store.binding('a', run)
     expect(store.snapshot().entries.a.minimized).toBe(true)
-    store.observe({ ...run, runId: 'second', url: 'http://localhost:8090/workflow-runs/second', hostSessionId: 'b' }, 50)
+    store.observe({ ...run, hostSessionId: 'b', operation: 'state' }, 50)
     expect(store.snapshot().entries.a.run.runId).toBe('r')
+    expect(store.snapshot().entries.b).toBeUndefined()
+    const second = { runId: 'second', url: 'http://localhost:8090/workflow-runs/second', hostSessionId: 'b' }
+    store.binding('b', second)
     expect(store.snapshot().entries.b.run.runId).toBe('second')
     store.dispose()
     expect(store.snapshot().entries).toEqual({})
   })
-  it('keeps the active run identity on later observations and reopens it explicitly', () => {
+  it('opens historical cards explicitly and clears the automatic panel on unbinding', () => {
     const store = windowStore()
     const run = { runId: 'r', url: 'http://localhost:8090/workflow-runs/r', hostSessionId: 'a', operation: 'start' }
     store.observe(run, 20)
+    store.binding('a', run)
     const entry = store.snapshot().entries.a
     store.observe({ ...run, operation: 'state' }, 40)
     expect(store.snapshot().entries.a).toBe(entry)
-    store.minimize('a')
-    store.open(run, 20)
-    expect(store.snapshot().entries.a).toMatchObject({ minimized: false, run })
-    store.observe({ ...run, runId: 'second', url: 'http://localhost:8090/workflow-runs/second' }, 80)
-    expect(store.snapshot().entries.a.run.runId).toBe('second')
+    store.binding('a', null)
+    expect(store.snapshot().entries.a).toBeUndefined()
+    expect(store.snapshot().firstCards[runKey(run)]).toBe(20)
+    store.open(run)
+    expect(store.snapshot().entries.a).toMatchObject({ minimized: false, run, source: 'manual' })
+    store.close('a')
+    expect(store.snapshot().entries.a).toBeUndefined()
   })
+
 })

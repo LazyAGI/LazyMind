@@ -34,13 +34,17 @@ export function installPresentationConfig(ctx: Context, source: PresentationConf
   })
 }
 
-export function readPresentationConfig(scope: unknown): PresentationConfig {
-  const value = object(object(scope)?.[CONFIG_KEY])
+export function parsePresentationConfig(input: unknown): PresentationConfig {
+  const value = object(input)
   if (typeof value?.serverName !== 'string' || !value.serverName
     || typeof value.webUrl !== 'string' || !presentationLink('config-check', value.webUrl)) {
     throw new Error('Reconnect LazyMind Workflow and reload DSH to load its panel configuration')
   }
   return { serverName: value.serverName, webUrl: value.webUrl }
+}
+
+export function readPresentationConfig(scope: unknown): PresentationConfig {
+  return parsePresentationConfig(object(scope)?.[CONFIG_KEY])
 }
 
 /** Optional connections must not prevent the rest of the DSH client from booting. */

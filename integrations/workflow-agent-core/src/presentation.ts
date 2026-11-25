@@ -1,4 +1,3 @@
-import { setTimeout as delay } from 'node:timers/promises'
 import type { BindingResult, LookupBinding, PanelTarget, PanelView, UIAdapter, WatchView } from './adapter'
 
 export interface PresentationStatus {
@@ -11,6 +10,15 @@ export interface PresentationStatus {
 
 const bindingRefreshMs = 5000
 const layoutRetryMs = 100
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted()
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => { signal.removeEventListener('abort', stop); resolve() }, ms)
+    function stop() { clearTimeout(timer); reject(signal.reason) }
+    signal.addEventListener('abort', stop, { once: true })
+  })
+}
 
 /** The caller owns the window and its renderer cleanup. */
 export async function runPresentation({ watchView, lookupBinding, ui, frameUrl, signal, report }: {
@@ -45,7 +53,7 @@ export async function runPresentation({ watchView, lookupBinding, ui, frameUrl, 
           return
         }
         if (Date.now() >= retryUntil || active.aborted) return
-        await delay(layoutRetryMs, undefined, { signal: active })
+        await delay(layoutRetryMs, active)
       } while (!active.aborted)
     }
 
@@ -61,7 +69,7 @@ export async function runPresentation({ watchView, lookupBinding, ui, frameUrl, 
         if (binding.status === 'bound') await apply({ runId: binding.runId, frameUrl }, undefined, refreshAt)
         else if (binding.status === 'unavailable') publish('binding-unavailable')
         else await apply(null, binding.status)
-        if (!active.aborted) await delay(Math.max(0, refreshAt - Date.now()), undefined, { signal: active })
+        if (!active.aborted) await delay(Math.max(0, refreshAt - Date.now()), active)
       }
     } catch (error) {
       if (!active.aborted) throw error

@@ -103,3 +103,22 @@ it('keeps opaque execution handles out of call titles and forwards original pres
   wrapped.presentResult?.({}, {content: [], isError: false, meta: {lazymind_workflow: {}, original: {rich: true}}})
   expect(presenter.mock.calls[0][1].meta).toEqual({rich: true})
 })
+
+it('uses the issuing DSH session and stable retry identity, then reports the confirmed binding', async () => {
+  const original = definition('binding_required')
+  const execute = vi.fn(original.execute)
+  const wrapped = workflowTool({ ...original, execute }, {
+    operation: 'start', hostSessionId: 'native-chat-A',
+    afterResult: async () => ({
+      protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 4, continuation: 'continue',
+      admission: { can_begin: true }, active_execution_ids: [],
+      binding: { bound: true, driver_session_id: 'native-chat-A' },
+    }),
+  })
+  const exec = { callId: 'call-1' as ToolCallId } as Parameters<typeof wrapped.execute>[1]
+  const value = await wrapped.execute({ workflow_id: 'workflow-A', driver_session_id: 'model-supplied-chat-B' }, exec)
+  await wrapped.execute({ workflow_id: 'workflow-A' }, exec)
+  expect(execute.mock.calls[0][0]).toMatchObject({ driver_session_id: 'native-chat-A', idempotency_key: expect.stringMatching(/^dsh-[a-f0-9]{64}$/) })
+  expect(execute.mock.calls[0][0]).toEqual(execute.mock.calls[1][0])
+  expect(value).toMatchObject({ structuredContent: { session_id: 'run-1', binding_status: 'confirmed' } })
+})

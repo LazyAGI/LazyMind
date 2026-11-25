@@ -23,6 +23,8 @@ import (
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workflowconnector/connectortest"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 type dshTestProbe struct{}
@@ -30,6 +32,8 @@ type dshTestProbe struct{}
 func (dshTestProbe) Probe(context.Context) (mcpbridge.ProbeResult, error) {
 	return mcpbridge.ProbeResult{}, nil
 }
+
+const dshFixtureBuild = "0.1.1+0000000000000001"
 
 const desktopManifest = `{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}`
 
@@ -69,6 +73,7 @@ func desktopAdapterFixture(t *testing.T) *Adapter {
 	if !agentexec.SameExecutable(a.self, a.self) {
 		t.Fatal("LazyMind fixture is not a resolvable executable")
 	}
+	connectortest.WriteDSHPackage(t, a.self, dshFixtureBuild)
 	a.home = filepath.Join(root, "LazyMind home")
 	a.bridge = dshTestProbe{}
 	a.dshRunning = func(context.Context, string) (bool, error) { return false, nil }
@@ -96,13 +101,20 @@ func desktopAdapterFixture(t *testing.T) *Adapter {
 	return a
 }
 
-func installDSHFixture(t *testing.T, name string) {
+func installDSHFixture(t *testing.T, name string, nativeArgs ...string) {
 	t.Helper()
 	profile := filepath.Join(dshHome(), "profiles", name)
-	writeTestFile(t, filepath.Join(profile, "package.json"), `{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","@lazymind/dsh-workflow"]}}}`)
-	for _, pkg := range []string{dshWorkflowPackage} {
-		writeTestFile(t, filepath.Join(profile, "node_modules", pkg, "package.json"), `{"version":"0.1.1"}`)
+	writeTestFile(t, filepath.Join(profile, "package.json"), `{"dependencies":{"@lazymind/dsh-workflow":"file:workflow.tgz"},"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app","@lazymind/dsh-workflow"]}}}`)
+	copyDSHFixtureFiles(t, profile, nativeArgs...)
+}
+
+func copyDSHFixtureFiles(t *testing.T, profile string, nativeArgs ...string) {
+	t.Helper()
+	archive := filepath.Join(filepath.Dir(dshHome()), "workflow-connectors", "dsh", "dsh-workflow.tgz")
+	if len(nativeArgs) > 0 {
+		archive = nativeArgs[len(nativeArgs)-1]
 	}
+	connectortest.UnpackDSHFixture(t, archive, filepath.Join(profile, "node_modules", dshWorkflowPackage))
 }
 
 func TestDesktopStatusIsReadOnlyAndRequiresValidInitialization(t *testing.T) {
@@ -272,6 +284,8 @@ func TestDesktopConnectEnablesAlreadyInstalledBundle(t *testing.T) {
 	a.dshRunner = func(_ context.Context, name string, _ ...string) error {
 		if name == "web" {
 			installDSHFixture(t, name)
+		} else {
+			copyDSHFixtureFiles(t, dir)
 		}
 		return nil
 	}
@@ -519,6 +533,11 @@ func TestInstalledDSHDesktopCLISmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := desktopAdapterFixture(t)
+	connector := os.Getenv("DSH_DESKTOP_TEST_CONNECTOR")
+	if connector == "" {
+		t.Skip("set DSH_DESKTOP_TEST_CONNECTOR to a staged DSH package directory")
+	}
+	a.actualSelf = filepath.Join(filepath.Dir(filepath.Dir(connector)), "lazymind")
 	t.Setenv("PATH", "/usr/bin:/bin")
 	t.Setenv("LAZYMIND_DSH_DESKTOP_PATH", cli)
 	a.dshInspector = nil
@@ -537,6 +556,29 @@ func TestInstalledDSHDesktopCLISmoke(t *testing.T) {
 	}
 	if s := a.Status(context.Background()); s.State != agentintegration.Enabled {
 		t.Fatalf("installed runtime result: %+v", s)
+	}
+	// The package-manager path changes even when the npm version stays fixed.
+	// A native reinstall must switch the loaded entry bytes in both directions.
+	web := a.forDSHProfile("web", cli)
+	originalRelease, err := web.dshPluginRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseVersion, _, _ := strings.Cut(originalRelease.Installed.Version, "+")
+	altExecutable := filepath.Join(t.TempDir(), "lazymind")
+	next := connectortest.WriteDSHPackage(t, altExecutable, baseVersion+"+9999999999999999")
+	alternate := filepath.Join(filepath.Dir(altExecutable), "workflow-connectors", "dsh")
+	for _, operation := range []struct{ action, directory, version string }{
+		{"upgrade", alternate, next.Version}, {"rollback", "", originalRelease.Installed.Version},
+	} {
+		if _, err := a.ChangeDSHPlugin(t.Context(), "web", operation.action, operation.directory); err != nil {
+			t.Fatalf("native Web %s: %v", operation.action, err)
+		}
+		record, err := web.dshPluginRecord()
+		if err != nil || record.Installed.Version != operation.version {
+			t.Fatalf("native Web %s installed %+v: %v", operation.action, record.Installed, err)
+		}
+		t.Logf("native Web %s installed %s", operation.action, operation.version)
 	}
 	// Reproduce an old store in a disposable profile after a valid installation.
 	modulesPath := filepath.Join(dshHome(), "profiles", "web", "node_modules", ".modules.yaml")
@@ -734,5 +776,113 @@ func TestDesktopMalformedPatchReportsUnknownConfiguration(t *testing.T) {
 	status := adapter.Status(context.Background())
 	if status.Enabled != nil || status.Issue == nil || status.Issue.Code != "configuration_unreadable" {
 		t.Fatalf("unreadable patch: %+v", status)
+	}
+}
+
+func TestEmbeddedDSHInstallationMigratesPairingAndOverrides(t *testing.T) {
+	a, desktop, web := connectedDSHFixture(t)
+	const oldHash = "12ed0fa928241ee0e961b5ca85582c19b8b66d01edcaace21a26bd7c25de9722"
+	for _, pair := range []workflowhost.Pairing{desktop, web} {
+		target := a.forDSHProfile(filepath.Base(pair.Profile), "")
+		record, err := target.dshPluginRecord()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(target.dshPluginRecordPath()); err != nil {
+			t.Fatal(err)
+		}
+		patch := target.dshConfigPath()
+		data, err := os.ReadFile(patch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.ReplaceAll(string(data), record.Installed.Release, oldHash)
+		writeTestFile(t, patch, text+"\n- id: DSH-user-override\n  disabled: false\n")
+		native := filepath.Join(pair.Profile, "node_modules", dshWorkflowPackage)
+		writeTestFile(t, filepath.Join(native, "package.json"), `{"version":"0.1.6"}`)
+		writeTestFile(t, filepath.Join(native, "lib", "index.js"), "export const legacy = true")
+	}
+	if status := a.Status(t.Context()); status.State != agentintegration.Enabled || status.Profiles[0].Plugin != nil {
+		t.Fatalf("legacy status: %+v", status)
+	}
+	calls := map[string]int{}
+	a.dshRunner = func(_ context.Context, name string, args ...string) error {
+		calls[name]++
+		installDSHFixture(t, name, args...)
+		return nil
+	}
+	status := a.Connect(t.Context())
+	if status.State != agentintegration.Enabled || calls["desktop"] != 1 || calls["web"] != 1 {
+		t.Fatalf("migration: %+v, native calls %v", status, calls)
+	}
+	for _, before := range []workflowhost.Pairing{desktop, web} {
+		after, err := workflowhost.Load(a.home, before.ConnectorID, before.AccountScope)
+		if err != nil || after != before {
+			t.Fatalf("migration changed %s pairing: %v", before.Profile, err)
+		}
+		data, err := os.ReadFile(filepath.Join(before.Profile, "cordis.patch.yml"))
+		if err != nil || !strings.Contains(string(data), "DSH-user-override") || strings.Contains(string(data), oldHash) {
+			t.Fatalf("migration lost native profile overrides: %v", err)
+		}
+	}
+}
+
+func TestDSHTargetedUpgradeRetriesAndPreservesNativeSelection(t *testing.T) {
+	a, desktop, web := connectedDSHFixture(t)
+	ctx := t.Context()
+	target := a.forDSHProfile("web", "")
+	if err := setDSHWorkflowBundle(ctx, web.Profile, false); err != nil {
+		t.Fatal(err)
+	}
+	patch := filepath.Join(desktop.Profile, "cordis.patch.yml")
+	beforePatch, err := os.ReadFile(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desktopRecord, err := a.forDSHProfile("desktop", "").dshPluginRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgraded := connectortest.WriteDSHPackage(t, a.self, "0.1.2+0000000000000002")
+	failed, calls := true, 0
+	a.dshRunner = func(_ context.Context, name string, args ...string) error {
+		if name != "web" {
+			t.Fatalf("targeted install touched %s", name)
+		}
+		calls++
+		if failed {
+			return errors.New("native installation interrupted")
+		}
+		installDSHFixture(t, name, args...)
+		return nil
+	}
+	if _, err := a.ChangeDSHPlugin(ctx, "web", "upgrade", ""); err == nil {
+		t.Fatal("native failure was hidden")
+	}
+	state, err := target.dshPluginRecord()
+	if err != nil || state.Selected.Release != upgraded.Release || state.Installed.Version != dshFixtureBuild || state.Step != "install" {
+		t.Fatalf("retry intent lost: %+v %v", state, err)
+	}
+	failed = false
+	if _, err := a.ChangeDSHPlugin(ctx, "web", "upgrade", ""); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, err := dshBundleEnabled(web.Profile); err != nil || enabled {
+		t.Fatalf("native disabled selection changed: %v %v", enabled, err)
+	}
+	if calls != 2 {
+		t.Fatalf("native retries: %d", calls)
+	}
+	body, err := os.ReadFile(patch)
+	if err != nil || string(body) != string(beforePatch) {
+		t.Fatalf("other profile patch changed: %v", err)
+	}
+	after, err := a.forDSHProfile("desktop", "").dshPluginRecord()
+	if err != nil || after != desktopRecord {
+		t.Fatalf("other profile record changed: %+v %v", after, err)
+	}
+	current, err := workflowhost.Load(a.home, web.ConnectorID, web.AccountScope)
+	if err != nil || current != web {
+		t.Fatalf("target pairing changed: %v", err)
 	}
 }

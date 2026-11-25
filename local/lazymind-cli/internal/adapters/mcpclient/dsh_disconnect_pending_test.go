@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"lazymind/agentconnector/internal/agentintegration"
-	"lazymind/agentconnector/internal/workflowhost"
 )
 
 func TestDSHPendingDisconnectSurvivesRefreshUntilRetried(t *testing.T) {
@@ -21,7 +20,7 @@ func TestDSHPendingDisconnectSurvivesRefreshUntilRetried(t *testing.T) {
 			running := true
 			a.dshRunning = func(context.Context, string) (bool, error) { return running, nil }
 			if live {
-				if err := workflowhost.RecordRuntimeStatus(a.home, pair, "", true); err != nil {
+				if err := recordDSHFixtureRuntime(t, a, pair, "", true); err != nil {
 					t.Fatal(err)
 				}
 			}

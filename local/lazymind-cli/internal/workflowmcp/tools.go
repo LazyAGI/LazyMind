@@ -110,7 +110,7 @@ type ArtifactGetResult struct {
 	Rendered     bool           `json:"rendered_as_mcp_content,omitempty"`
 }
 
-const workflowStartDescription = "Start a revision-bound Workflow with request_context, known clarification_values and declared file inputs. Get input IDs and types from workflow.get. Files use absolute Connector-local paths or existing resource references and are bound before creation. needs_input returns questions and preparation guidance. started returns session_id and state. Reuse idempotency_key for identical retries and use a new key after changing answers or inputs. The host displays the panel for the bound conversation after session creation."
+const workflowStartDescription = "Start a revision-bound Workflow with request_context, known clarification_values and declared file inputs. Get input IDs and types from workflow.get. Files use absolute Connector-local paths or existing resource references and are bound before creation. needs_input returns questions and preparation guidance. started returns the created session_id. For host-bound starts, binding_status reports pending or confirmed independently. Retry a pending binding with the returned session_id and idempotency_key. Reuse idempotency_key for identical retries and use a new key after changing answers or inputs. The host displays the panel for the bound conversation after session creation."
 
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { HostEvent, RuntimeAdapter, ToolCall } from '../../workflow-agent-core/src/adapter'
-import { createCoordinator } from '../../workflow-agent-core/src/coordinator'
-import { createDispatcher } from '../../workflow-agent-core/src/dispatcher'
-import { BridgeError, type HostAction, type HostTransport } from '../../workflow-agent-core/src/transport'
-import type { WorkflowControl } from '../../workflow-agent-core/src/protocol'
+import type { HostEvent, RuntimeAdapter, ToolCall } from '../src/adapter'
+import { createCoordinator } from '../src/coordinator'
+import { createDispatcher } from '../src/dispatcher'
+import { BridgeError, type HostAction, type HostTransport } from '../src/transport'
+import type { WorkflowControl } from '../src/protocol'
 
 // Deliberately contains no DSH SDK, event names, goal format or tool-name encoding.
 interface Agent { id: string; parent?: Agent; events: HostEvent[] }

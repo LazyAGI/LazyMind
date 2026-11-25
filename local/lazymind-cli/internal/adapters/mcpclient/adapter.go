@@ -285,29 +285,15 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 			}
 		}
 	}
-	var unlockPatch func()
-	defer func() {
-		if unlockPatch != nil {
-			unlockPatch()
-		}
-	}()
-	controlled := false
 	if a.kind == DeepSeekHarness {
-		var err error
-		controlled, err = a.installDSHWorkflow(ctx, func() error {
-			if err := os.MkdirAll(filepath.Dir(a.dshConfigPath()), 0700); err != nil {
-				return err
-			}
-			unlockPatch, err = lockDSHPatch(ctx, a.dshConfigPath())
-			return err
-		})
-		if err != nil {
+		if err := a.changeDSHProfile(ctx, true); err != nil {
 			return agentintegration.FailError(status, err)
 		}
+		return a.status(ctx)
 	}
 	if a.kind != WorkBuddy || workBuddyRegistered {
 		operation.Enter("configuration")
-		if err := writeManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID, controlled); err != nil {
+		if err := writeManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID, false); err != nil {
 			if a.kind == WorkBuddy {
 				return workBuddyRegistrationFailure(err)
 			}
@@ -382,14 +368,10 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 	status.Issue = nil
 	status.State = agentintegration.Ready
 	if a.kind == DeepSeekHarness {
-		if err := os.MkdirAll(filepath.Dir(a.dshConfigPath()), 0700); err != nil {
+		if err := a.changeDSHProfile(ctx, false); err != nil {
 			return agentintegration.FailError(status, err)
 		}
-		unlock, err := lockDSHPatch(ctx, a.dshConfigPath())
-		if err != nil {
-			return agentintegration.FailError(status, err)
-		}
-		defer unlock()
+		return a.status(ctx)
 	}
 	if a.kind == WorkBuddy {
 		// Keep ownership until the local pairing and startup state are cleaned up.
@@ -402,11 +384,6 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 			return workBuddyRegistrationFailure(err)
 		}
 		return agentintegration.FailError(status, err)
-	}
-	if a.kind == DeepSeekHarness {
-		if err := a.disconnectDSHWorkflow(); err != nil {
-			return agentintegration.FailError(status, err)
-		}
 	}
 	return a.status(ctx)
 }
@@ -484,6 +461,9 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 		status.CanDisconnect = state.configured
 	}
 	if a.kind == DeepSeekHarness && state.configured && state.owned && state.current {
+		if plugin := a.dshPluginStatus(); plugin != nil {
+			status.Profiles = []agentintegration.ProfileStatus{{Name: a.dshProfile(), State: agentintegration.Enabled, Plugin: plugin}}
+		}
 		if !a.dshWorkflowInstalled() {
 			state.current = false
 			status.Message = "MCP is configured; reconnect to install or update the Workflow panel and host adapter."

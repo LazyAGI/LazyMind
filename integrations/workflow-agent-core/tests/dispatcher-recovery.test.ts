@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { createDispatcher } from '../../../workflow-agent-core/src/dispatcher'
-import type { RuntimeAdapter } from '../../../workflow-agent-core/src/adapter'
-import { BridgeError, HostBridge, isHostAuthorizationError, type HostTransport } from '../../../workflow-agent-core/src/transport'
+import { createDispatcher } from '../src/dispatcher'
+import type { RuntimeAdapter } from '../src/adapter'
+import { BridgeError, HostBridge, isHostAuthorizationError, type HostTransport } from '../src/transport'
 
 const lifetimes: AbortController[] = []
 afterEach(() => { lifetimes.splice(0).forEach(c => c.abort()); vi.useRealTimers(); vi.unstubAllGlobals() })

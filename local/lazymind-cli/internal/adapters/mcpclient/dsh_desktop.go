@@ -112,7 +112,7 @@ func validDSHDesktopManifest() error {
 
 // DSH's plugin add command selects newly added bundles, but leaves existing
 // dependencies unselected. An explicit LazyMind connection should enable its bundle.
-func enableDSHWorkflowBundle(ctx context.Context, profile string) error {
+func setDSHWorkflowBundle(ctx context.Context, profile string, enabled bool) error {
 	path := filepath.Join(profile, "package.json")
 	unlock, err := lockDSHPatch(ctx, path)
 	if err != nil {
@@ -138,7 +138,7 @@ func enableDSHWorkflowBundle(ctx context.Context, profile string) error {
 	if err := json.Unmarshal(settings["bundles"], &bundles); err != nil {
 		return err
 	}
-	if slices.Contains(bundles, dshWorkflowPackage) {
+	if slices.Contains(bundles, dshWorkflowPackage) == enabled {
 		return nil
 	}
 	var dependencies map[string]string
@@ -151,7 +151,12 @@ func enableDSHWorkflowBundle(ctx context.Context, profile string) error {
 	if _, err := dshModuleVersion(profile, dshWorkflowPackage); err != nil {
 		return fmt.Errorf("read installed DSH Workflow bundle: %w", err)
 	}
-	settings["bundles"], err = json.Marshal(append(bundles, dshWorkflowPackage))
+	if enabled {
+		bundles = append(bundles, dshWorkflowPackage)
+	} else {
+		bundles = slices.DeleteFunc(bundles, func(bundle string) bool { return bundle == dshWorkflowPackage })
+	}
+	settings["bundles"], err = json.Marshal(bundles)
 	if err != nil {
 		return err
 	}
@@ -302,7 +307,7 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 				target.dshMCPReady = inspected.Diagnostic == "" && inspected.MCPPath != "" && inspected.MCPVersion != ""
 			}
 		}
-		p := agentintegration.ProfileStatus{Name: name, State: agentintegration.Ready}
+		p := agentintegration.ProfileStatus{Name: name, State: agentintegration.Ready, Plugin: target.dshPluginStatus()}
 		if err := target.checkDSHOwnership(); err != nil {
 			p.State, p.Message = agentintegration.Conflict, err.Error()
 			conflict = true
@@ -415,6 +420,18 @@ func (s dshFileSnapshot) restore() error {
 // Package manager changes are intentionally retained. Roll back only the
 // profile patch and pairing if publication of the managed connection fails.
 func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error) {
+	unlock, err := a.lockDSHPlugin(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if a.dshProfile() != "desktop" {
+		if running, err := a.dshProfileRunning(ctx); err != nil {
+			return err
+		} else if running {
+			return errors.New("fully quit the selected DSH profile before changing its connection")
+		}
+	}
 	// Cooperate with DSH's atomic writer, which uses an exclusive .lock file.
 	if err = os.MkdirAll(filepath.Dir(a.dshConfigPath()), 0700); err != nil {
 		return err
@@ -512,16 +529,21 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 		}
 	}()
 	if connect {
-		if _, err = a.installDSHWorkflow(ctx, lockPatch); err != nil {
+		record, err := a.installDSHWorkflow(ctx, lockPatch)
+		if err != nil {
 			return err
 		}
 		if err = writeManagedConfig(DeepSeekHarness, a.dshConfigPath(), a.self, a.home, a.hostID, true); err != nil {
 			return err
 		}
-		if err = enableDSHWorkflowBundle(ctx, filepath.Dir(a.dshConfigPath())); err != nil {
-			return fmt.Errorf("enable installed DSH Workflow bundle: %w", err)
+		if a.dshCLI != "" && record.KeepEnabled == nil {
+			if err = setDSHWorkflowBundle(ctx, filepath.Dir(a.dshConfigPath()), true); err != nil {
+				return fmt.Errorf("enable installed DSH Workflow bundle: %w", err)
+			}
 		}
-		return nil
+		record.Step = "restart"
+		record.KeepEnabled = nil
+		return a.saveDSHPlugin(record)
 	}
 	if err = a.disconnectDSHWorkflow(); err != nil {
 		return err

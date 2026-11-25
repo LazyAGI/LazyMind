@@ -113,6 +113,13 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	flags.SetOutput(stderr)
 	agentBinary := flags.String("agent-bin", "", "external Agent CLI executable")
 	refreshInstallations := flags.Bool("refresh-installations", false, "refresh cached desktop installation discovery")
+	var profile, pluginPackage string
+	if agent == string(mcpclient.DeepSeekHarness) && (action == "upgrade-plugin" || action == "rollback-plugin") {
+		flags.StringVar(&profile, "profile", "", "DSH profile (desktop or web)")
+		if action == "upgrade-plugin" {
+			flags.StringVar(&pluginPackage, "package", "", "directory containing a DSH Connector archive and manifest")
+		}
+	}
 	if err := flags.Parse(args[3:]); err != nil {
 		return err
 	}
@@ -166,6 +173,13 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		adapter, err := mcpclient.New(mcpclient.Kind(agent), "", bridge)
 		if err != nil {
 			return err
+		}
+		if agent == string(mcpclient.DeepSeekHarness) && (action == "upgrade-plugin" || action == "rollback-plugin") {
+			status, err := adapter.ChangeDSHPlugin(ctx, profile, strings.TrimSuffix(action, "-plugin"), pluginPackage)
+			if err != nil {
+				return err
+			}
+			return printJSON(stdout, status)
 		}
 		var status agentintegration.Status
 		switch action {

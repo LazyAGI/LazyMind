@@ -565,7 +565,9 @@ workflow-connectors-build:
 		"$(PNPM)" --dir integrations/codex-workflow build && \
 		"$(PNPM)" --dir integrations/workbuddy-workflow/connector install --frozen-lockfile --prefer-offline && \
 		"$(PNPM)" --dir integrations/workbuddy-workflow/connector build && \
-		node integrations/workflow-agent-core/node/stage-connectors.mjs "$(dir $(LAZYMIND_CLI_BIN))"; \
+		"$(PNPM)" --dir integrations/dsh-workflow install --frozen-lockfile --prefer-offline && \
+		"$(PNPM)" --dir integrations/dsh-workflow bundle && \
+		"$(PNPM)" --dir integrations/dsh-workflow stage-connectors "$(abspath $(dir $(LAZYMIND_CLI_BIN)))"; \
 	else \
 		$(_HOST_DOCKER_PREFIX) docker run --rm $(_HOST_DOCKER_USER_FLAG) \
 			-e COREPACK_HOME=/tmp/corepack -e npm_config_store_dir=/tmp/pnpm-store \
@@ -574,7 +576,9 @@ workflow-connectors-build:
 				corepack pnpm@10.0.0 --dir integrations/codex-workflow build; \
 				corepack pnpm@10.0.0 --dir integrations/workbuddy-workflow/connector install --frozen-lockfile --prefer-offline; \
 				corepack pnpm@10.0.0 --dir integrations/workbuddy-workflow/connector build; \
-				node integrations/workflow-agent-core/node/stage-connectors.mjs /src/local/build/bin'; \
+				corepack pnpm@10.0.0 --dir integrations/dsh-workflow install --frozen-lockfile --prefer-offline; \
+				corepack pnpm@10.0.0 --dir integrations/dsh-workflow bundle; \
+				corepack pnpm@10.0.0 --dir integrations/dsh-workflow stage-connectors /src/local/build/bin'; \
 	fi
 
 lazymind-cli-build: workflow-connectors-build
