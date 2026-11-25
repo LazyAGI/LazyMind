@@ -67,5 +67,5 @@ export interface NativeWorkflowControl {
   kind: 'approve' | 'resume' | 'retry' | 'rewind' | 'continue';
   expected_state_version: number;
   step_id?: string;
-  preference_scope?: 'step' | 'following';
+  preference_scope?: 'step' | 'session' | 'following';
 }

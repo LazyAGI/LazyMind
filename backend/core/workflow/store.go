@@ -103,6 +103,9 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
+	if err := workflowstore.ApplySavedApprovalMode(db.WithContext(ctx), s); err != nil {
+		return nil, err
+	}
 	if err := db.WithContext(ctx).Create(s).Error; err != nil {
 		return nil, err
 	}

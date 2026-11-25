@@ -462,7 +462,7 @@ func confirmWorkflowReview(ctx context.Context, tx *gorm.DB, session *orm.Workfl
 		return err
 	}
 	if command.PreferenceScope != "" {
-		if _, err := saveWorkflowApprovalPreference(tx, owner, session.WorkflowID, review.StepID, command.PreferenceScope); err != nil {
+		if err := saveApprovalContinuationPreference(tx, session, review.StepID, command.PreferenceScope); err != nil {
 			return err
 		}
 	}

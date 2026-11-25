@@ -288,13 +288,9 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 			}
 		}
 	}
-	display, err := displaystate.Read(db.WithContext(ctx), *session)
+	display, err := displaystate.ReadProjected(db.WithContext(ctx), *session, projection.Completed)
 	if err != nil {
 		return projectionResponse{}, err
-	}
-	// A normal Chat handoff cannot turn a proven graph end back into waiting.
-	if projection.Completed && (display.Reason == "next_step_required" || display.Reason == "preparing" || display.Reason == "no_advance") {
-		display.Status, display.Reason = "completed", "completed"
 	}
 	if display.Status == "waiting" || display.Status == "waiting_input" || display.Status == "paused" {
 		projection.Completed = false

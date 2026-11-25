@@ -339,7 +339,6 @@
 
   &__status {
     border: 0;
-    cursor: pointer;
     flex-shrink: 0;
     white-space: nowrap;
     font-size: 11px;
@@ -652,22 +651,6 @@
     height: 12px;
     flex-shrink: 0;
     color: #cbd5e1;
-  }
-
-  @container workflow-panel (min-width: 700px) {
-    &__topbar--few-steps {
-      grid-template-areas: 'title tabs actions';
-      grid-template-columns: minmax(0, 1fr) minmax(0, max-content) minmax(0, 1fr);
-
-      .workflow-panel__header-right {
-        justify-self: end;
-      }
-
-      .workflow-panel__tabs {
-        max-width: min(48cqw, 420px);
-        margin-bottom: 0;
-      }
-    }
   }
 
   &__step-status {
@@ -5017,28 +5000,51 @@
   }
 }
 
-.workflow-panel__follow-mode {
+// Quiet text controls share one height; color communicates the active view/mode.
+.workflow-panel__logo { color: #475569; font-size: 18px; flex-shrink: 0; }
+.workflow-panel__tool {
   display: inline-flex;
   align-items: center;
-  flex-shrink: 0;
-  gap: 2px;
-  padding: 2px;
-  background: #f1f5f9;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 0;
   border-radius: 6px;
-
-  button {
-    padding: 4px 8px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: #475569;
-    font-size: 12px;
-    white-space: nowrap;
-    cursor: pointer;
-    &[aria-pressed='true'] { background: #fff; color: #2563eb; box-shadow: 0 1px 3px #0f172a1a; }
-    &:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
-    &:disabled { opacity: 0.6; cursor: wait; }
-  }
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  > .anticon { font-size: 15px; }
+  &:hover, &[aria-expanded='true'] { color: #1677ff; background: #f5f8ff; }
+  &[aria-pressed='true'] { color: #1677ff; }
+  &:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+  &:disabled { opacity: .5; cursor: not-allowed; }
+}
+.workflow-panel__follow-button { width: 30px; padding: 5px; }
+.workflow-panel__toolbar-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  &--chevron { width: 12px; height: 12px; }
+}
+.workflow-panel__tool-spacer { width: 4px; }
+.workflow-panel__graph { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.workflow-panel__graph-heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; font-size: 12px; color: #64748b;
+}
+.workflow-panel__graph-actions { display: flex; align-items: center; gap: 4px; }
+.workflow-panel__graph > .state-graph-modal__content { flex: 1; min-height: 300px; height: 420px; }
+.workflow-approval-settings {
+  width: 248px; display: flex; flex-direction: column; gap: 12px; padding: 4px;
+  .ant-radio-group { display: flex; flex-direction: column; gap: 10px; }
+  > .ant-checkbox-wrapper { border-top: 1px solid #f0f1f3; padding-top: 12px; font-size: 12px; }
+  > p { margin: 0; color: #94a3b8; font-size: 12px; line-height: 1.6; }
+  > .ant-btn { align-self: flex-end; }
 }
 
 .workflow-panel__tab-text {
@@ -5066,11 +5072,11 @@
   background: #2563eb;
 }
 
-@container workflow-panel (max-width: 440px) {
+@container workflow-panel (max-width: 640px) {
   .workflow-panel__topbar { grid-template-areas: 'title title' 'actions actions' 'tabs tabs'; }
   .workflow-panel__header-left, .workflow-panel__header-right { min-height: 36px; }
   .workflow-panel__header-right { flex-wrap: wrap; justify-content: flex-end; }
-  .workflow-panel__follow-mode { margin-right: auto; }
+  .workflow-panel__tool-spacer { margin-right: auto; }
 }
 
 

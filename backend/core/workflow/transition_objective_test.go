@@ -49,13 +49,28 @@ func TestSessionIntentTextReadsPersistedTriggerContext(t *testing.T) {
 	}
 }
 
+func TestSessionIntentTextReadsActiveStructuredIntent(t *testing.T) {
+	got := sessionIntentText(`{"version":2,"revision":3,"goal":"白猫插画","deliverable":"一张静态图片","constraints":["纯蓝背景","1024×1024"],"corrections":["尺寸取代旧要求"],"emphasized_points":["不发布"],"execution_mode":"仅重试生成","superseded":["512×512"]}`)
+	if !containsAll(got, "白猫插画", "一张静态图片", "纯蓝背景", "1024×1024", "尺寸取代旧要求", "不发布", "仅重试生成") {
+		t.Fatalf("structured intent lost active requirements: %q", got)
+	}
+	if strings.Contains(got, "512×512") || strings.Contains(got, "revision") {
+		t.Fatalf("audit fields leaked into execution intent: %q", got)
+	}
+	for _, empty := range []string{"", "{}", `{"version":2,"revision":1,"superseded":["old"]}`} {
+		if got := sessionIntentText(empty); got != "" {
+			t.Fatalf("empty intent rendered as %q", got)
+		}
+	}
+}
+
 func TestApplyRecoveryIntentPreservesLaunchRequest(t *testing.T) {
 	target := transitionTarget{
 		UserInput:          "请重新执行步骤 collect_materials",
 		RuntimeInstruction: "Replace only the first item.",
 	}
 
-	applyRecoveryIntent(`{"text":"搜索一张哈兰德照片并在球衣上写必胜"}`, &target)
+	applyRecoveryIntent("搜索一张哈兰德照片并在球衣上写必胜", &target)
 
 	if target.UserInput != "搜索一张哈兰德照片并在球衣上写必胜" {
 		t.Fatalf("recovery replaced launch request: %q", target.UserInput)
@@ -69,7 +84,7 @@ func TestApplyRecoveryIntentPreservesLaunchRequest(t *testing.T) {
 func TestApplyRecoveryIntentDoesNotDuplicateLaunchRequest(t *testing.T) {
 	target := transitionTarget{UserInput: "原始请求"}
 
-	applyRecoveryIntent(`{"text":"原始请求"}`, &target)
+	applyRecoveryIntent("原始请求", &target)
 
 	if target.UserInput != "原始请求" || target.RuntimeInstruction != "" {
 		t.Fatalf("unexpected target: %#v", target)

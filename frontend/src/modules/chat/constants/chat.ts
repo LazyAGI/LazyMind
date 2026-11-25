@@ -187,3 +187,5 @@ export interface ChatConversationActivityDetail {
   /** When set on a conversation not yet in the sidebar list, insert it at the top. */
   displayName?: string;
 }
+
+export const CHAT_ENTRY_DEFAULTS_CHANGED_EVENT = 'chat:entry-defaults-changed';

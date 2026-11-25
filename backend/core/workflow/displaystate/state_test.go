@@ -76,6 +76,7 @@ func TestDurableDisplayStates(t *testing.T) {
 				}
 			}
 			if sample.skip {
+				session.ApprovalPreferences = map[string]bool{"*": false}
 				if err := db.Create(&orm.WorkflowApprovalPreference{UserID: "owner", WorkflowID: "workflow", StepID: "*", ApprovalRequired: false}).Error; err != nil {
 					t.Fatal(err)
 				}

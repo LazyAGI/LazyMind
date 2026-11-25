@@ -95,7 +95,7 @@ func TestAlgorithmOutageLeavesQueuedAndRestartCanClaim(t *testing.T) {
 	}
 }
 
-func TestCanonicalPaperQueuePreservesLaunchAndCurrentRequirements(t *testing.T) {
+func TestCanonicalQueuePreservesLaunchAndCurrentRequirements(t *testing.T) {
 	for _, validator := range []string{"paper-agent-v1", ""} {
 		t.Run(validator, func(t *testing.T) {
 			db := dispatchDB(t, true)
@@ -120,12 +120,8 @@ func TestCanonicalPaperQueuePreservesLaunchAndCurrentRequirements(t *testing.T) 
 			if err := json.Unmarshal(outbox.PayloadJSON, &value); err != nil {
 				t.Fatal(err)
 			}
-			if validator == "paper-agent-v1" {
-				if value.LaunchRequest != params["launch_user_input"] || value.UserRequest != params["current_user_input"] {
-					t.Fatalf("requirements lost: %+v", value)
-				}
-			} else if value.LaunchRequest != "" || value.UserRequest != "" {
-				t.Fatal("non-paper context changed")
+			if value.LaunchRequest != params["launch_user_input"] || value.UserRequest != params["current_user_input"] {
+				t.Fatalf("requirements lost: %+v", value)
 			}
 		})
 	}

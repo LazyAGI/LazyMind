@@ -19,9 +19,10 @@ import (
 )
 
 type approvalPreferenceRequest struct {
-	StepID           string `json:"step_id"`
-	Scope            string `json:"scope"`
-	ApprovalRequired bool   `json:"approval_required"`
+	StepID               string `json:"step_id"`
+	Scope                string `json:"scope"`
+	ApprovalRequired     bool   `json:"approval_required"`
+	ExpectedStateVersion *int64 `json:"expected_state_version"`
 }
 
 // NativeControlCommand travels with the Chat request that actually continues
@@ -98,12 +99,20 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 				return err
 			}
 			now := time.Now().UTC()
-			if err := tx.Create(&orm.WorkflowReviewCheckpoint{ID: common.GenerateID(), SessionID: session.ID, AttemptID: step.ID, StepID: step.StepID, Status: "accepted", AcceptedBy: owner, AcceptedAt: &now, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+			var pending int64
+			if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND attempt_id = ? AND status = ?", session.ID, step.ID, "pending").Count(&pending).Error; err != nil {
+				return err
+			}
+			if pending > 0 {
+				if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND attempt_id = ? AND status = ?", session.ID, step.ID, "pending").Updates(map[string]any{"status": "accepted", "accepted_by": owner, "accepted_at": now, "updated_at": now}).Error; err != nil {
+					return err
+				}
+			} else if err := tx.Create(&orm.WorkflowReviewCheckpoint{ID: common.GenerateID(), SessionID: session.ID, AttemptID: step.ID, StepID: step.StepID, Status: "accepted", AcceptedBy: owner, AcceptedAt: &now, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 				return err
 			}
 		}
 		if req.PreferenceScope != "" {
-			if _, err := saveWorkflowApprovalPreference(tx, session.CreateUserID, session.WorkflowID, req.StepID, req.PreferenceScope); err != nil {
+			if err := saveApprovalContinuationPreference(tx, &session, req.StepID, req.PreferenceScope); err != nil {
 				return err
 			}
 		}
@@ -227,15 +236,28 @@ func SetWorkflowApprovalPreference(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid approval preference", http.StatusBadRequest)
 		return
 	}
+	if req.Scope == "session" || req.Scope == "workflow" {
+		if req.ExpectedStateVersion == nil {
+			common.ReplyErr(w, "expected_state_version is required", http.StatusUnprocessableEntity)
+			return
+		}
+		err := setSessionApprovalMode(r.Context(), store.DB(), session.ID, userID, req)
+		if err != nil {
+			writeWorkflowControlError(w, err)
+			return
+		}
+		NotifyWorkflowRuntimeUpdated(r.Context(), store.DB(), session.ID, "", "approval_preference")
+		common.ReplyOK(w, map[string]any{"approval_required": req.ApprovalRequired, "scope": req.Scope})
+		return
+	}
 	req.StepID = strings.TrimSpace(req.StepID)
 	if _, err := workflowApprovalPreferenceTarget(req.StepID, req.Scope); err != nil {
 		common.ReplyErr(w, "step_id and scope (step|following) are required", http.StatusUnprocessableEntity)
 		return
 	}
-	// The current UI only offers opt-out actions. Reject opt-in writes so a
-	// malformed client cannot silently make package-auto steps require approval.
+	// Legacy step/following writes remain opt-out; reversible run settings use the versioned scopes above.
 	if req.ApprovalRequired {
-		common.ReplyErr(w, "approval_required must be false", http.StatusUnprocessableEntity)
+		common.ReplyErr(w, "use session or workflow scope to restore approval", http.StatusUnprocessableEntity)
 		return
 	}
 	graph, err := loadSessionGraph(r.Context(), store.DB(), &session)
@@ -254,6 +276,105 @@ func SetWorkflowApprovalPreference(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, map[string]any{
 		"workflow_id": session.WorkflowID, "scope": req.Scope, "step_ids": []string{stepID},
-		"workflow_wide": req.Scope == "following", "approval_required": false,
+		"workflow_wide": req.Scope == "following", "approval_required": req.ApprovalRequired,
 	})
+}
+
+// Policy edits do not grant execution permission. A pending review is retained;
+// only Continue accepts its result and dispatches the next step.
+func setSessionApprovalMode(ctx context.Context, db *gorm.DB, sessionID, owner string, req approvalPreferenceRequest) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		var session orm.WorkflowSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND dismissed = false", sessionID, owner).First(&session).Error; err != nil {
+			return err
+		}
+		if session.StateVersion != *req.ExpectedStateVersion {
+			return controlstore.Reject("STATE_VERSION_CONFLICT", "workflow changed; reload before changing approval settings")
+		}
+		graph, err := loadSessionGraph(ctx, tx, &session)
+		if err != nil {
+			return err
+		}
+		display, err := displaystate.Read(tx, session)
+		if err != nil {
+			return err
+		}
+		if display.ApprovalStepID != "" && !controlstore.Controlled(session) {
+			var step orm.WorkflowSessionStep
+			if err := tx.Where("session_id = ? AND step_id = ? AND validity <> ? AND status = ?", session.ID, display.ApprovalStepID, "stale", "succeeded").Order("attempt DESC").First(&step).Error; err != nil {
+				return err
+			}
+			var count int64
+			if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("attempt_id = ? AND status = ?", step.ID, "pending").Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				now := time.Now().UTC()
+				if err := tx.Create(&orm.WorkflowReviewCheckpoint{ID: common.GenerateID(), SessionID: session.ID, AttemptID: step.ID, StepID: step.StepID, Status: "pending", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		mode := "auto"
+		if req.ApprovalRequired {
+			mode = "dynamic"
+		}
+		if req.Scope == "workflow" {
+			if req.ApprovalRequired {
+				if err := tx.Where("user_id = ? AND workflow_id = ?", owner, session.WorkflowID).Delete(&orm.WorkflowApprovalPreference{}).Error; err != nil {
+					return err
+				}
+				now := time.Now().UTC()
+				if err := tx.Create(&orm.WorkflowApprovalPreference{UserID: owner, WorkflowID: session.WorkflowID, StepID: "*", ApprovalRequired: true, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					return err
+				}
+			} else if _, err := saveWorkflowApprovalPreference(tx, owner, session.WorkflowID, "*", "following"); err != nil {
+				return err
+			}
+		}
+		if err := updateSessionApprovalMode(tx, &session, mode, graph); err != nil {
+			return err
+		}
+		if err := tx.Model(&session).Update("state_version", gorm.Expr("state_version + 1")).Error; err != nil {
+			return err
+		}
+		session.StateVersion++
+		payload, err := json.Marshal(map[string]any{"workflow_mode": mode, "approval_mode": mode})
+		if err != nil {
+			return err
+		}
+		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
+	})
+}
+
+func updateSessionApprovalMode(tx *gorm.DB, session *orm.WorkflowSession, mode string, graph *graphengine.CompiledStateGraph) error {
+	if err := tx.Model(session).Updates(map[string]any{"workflow_mode": mode, "approval_mode": mode, "approval_preferences": "{}"}).Error; err != nil {
+		return err
+	}
+	session.WorkflowMode, session.ApprovalMode = mode, mode
+	session.ApprovalPreferences = nil
+	// A step already executing must observe the latest policy at completion.
+	for id, node := range graph.Nodes {
+		if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND step_id = ? AND status IN ?", session.ID, id, []string{"pending", "queued", "claimed", "running"}).Update("review_required", mode == "dynamic" && node.Mode == "human").Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func saveApprovalContinuationPreference(tx *gorm.DB, session *orm.WorkflowSession, stepID, scope string) error {
+	if scope != "session" && scope != "following" {
+		_, err := saveWorkflowApprovalPreference(tx, session.CreateUserID, session.WorkflowID, stepID, scope)
+		return err
+	}
+	if scope == "following" {
+		if _, err := saveWorkflowApprovalPreference(tx, session.CreateUserID, session.WorkflowID, stepID, scope); err != nil {
+			return err
+		}
+	}
+	graph, err := loadSessionGraph(tx.Statement.Context, tx, session)
+	if err != nil {
+		return err
+	}
+	return updateSessionApprovalMode(tx, session, "auto", graph)
 }

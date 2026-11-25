@@ -555,6 +555,21 @@ func launchWorkflowAttempt(
 			Updates(map[string]any{"status": "running", "updated_at": time.Now().UTC()}).Error
 	}
 
+	// Resolve the run's policy for both cold starts and subsequent native steps.
+	reviewRequired := false
+	if params.RevisionID != "" {
+		session, err := GetSession(ctx, db, sessionID)
+		if err != nil {
+			return sessionID, taskID, false, err
+		}
+		graph, err := loadSessionGraph(ctx, db, session)
+		if err != nil {
+			return sessionID, taskID, false, err
+		}
+		params.WorkflowMode = session.WorkflowMode
+		reviewRequired = displaystate.SessionApprovalRequired(*session, graph.Nodes[stepID].Mode == "human", stepID)
+	}
+
 	// Inject artifacts from previous steps into objective, then append retry_hint if present.
 	enrichedObjective := objective
 	if params.RetryHint != "" {
@@ -710,12 +725,15 @@ func launchWorkflowAttempt(
 	if attemptErr != nil {
 		return sessionID, task.ID, false, fmt.Errorf("plugin: allocate attempt: %w", attemptErr)
 	}
-	if _, stepErr := CreateSessionStep(ctx, db, sessionID, stepID, task.ID, attempt); stepErr != nil {
+	step, stepErr := CreateSessionStep(ctx, db, sessionID, stepID, task.ID, attempt)
+	if stepErr != nil {
 		return sessionID, task.ID, false, fmt.Errorf("plugin: create session step: %w", stepErr)
-	} else {
-		fmt.Printf("[plugin] workflow_session_step created conv=%s session=%s step=%s task=%s attempt=%d\n",
-			convID, sessionID, stepID, task.ID, attempt)
 	}
+	if err := db.Model(step).Update("review_required", reviewRequired).Error; err != nil {
+		return sessionID, task.ID, false, err
+	}
+	fmt.Printf("[plugin] workflow_session_step created conv=%s session=%s step=%s task=%s attempt=%d\n",
+		convID, sessionID, stepID, task.ID, attempt)
 	runParams := map[string]any{
 		"workflow_id": workflowID,
 		"step_id":     stepID,
@@ -940,12 +958,16 @@ func OnSubAgentDone(
 		}
 	}
 
-	// Determine mode: use context-level WorkflowMode (set from request body during HandleWorkflowStepCreated).
-	// Falls back to "dynamic" if not set. Env-var defaultMode() is no longer used.
-	mode := pctx.WorkflowMode
-	if mode != "auto" && mode != "dynamic" {
-		mode = "dynamic"
+	// Read the durable user choice: it may have changed while this attempt ran.
+	currentSession, err := GetSession(ctx, db, pctx.SessionID)
+	if err != nil {
+		onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+		return
 	}
+	mode := normalizeSessionWorkflowMode(currentSession.WorkflowMode)
+	updatedContext := *pctx
+	updatedContext.WorkflowMode = mode
+	pctx = &updatedContext
 	fmt.Printf("[plugin] sub_agent terminal conv=%s session=%s step=%s task=%s status=%s mode=%s summary_len=%d\n",
 		pctx.ConvID, pctx.SessionID, pctx.StepID, taskID, status, mode, len(summary))
 	if stepFailed && pctx.HandOff != nil && !*pctx.HandOff {

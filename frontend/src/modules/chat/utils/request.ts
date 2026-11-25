@@ -697,7 +697,7 @@ export function WorkflowSessionApi() {
     },
     setApprovalPreference(
       sessionId: string,
-      payload: { step_id: string; scope: 'step' | 'following'; approval_required: false },
+      payload: { step_id?: string; scope: 'step' | 'following' | 'session' | 'workflow'; approval_required: boolean; expected_state_version?: number },
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.post(

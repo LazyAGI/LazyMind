@@ -27,7 +27,7 @@ func testRepo(t *testing.T) *Repository {
 	if err := repo.AutoMigrate(); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.db.AutoMigrate(&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}); err != nil {
+	if err := repo.db.AutoMigrate(&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowApprovalPreference{}); err != nil {
 		t.Fatal(err)
 	}
 	return repo

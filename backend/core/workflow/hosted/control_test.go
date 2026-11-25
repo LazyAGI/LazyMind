@@ -358,7 +358,7 @@ func TestConfirmationCannotAcceptADeletedRequiredOutput(t *testing.T) {
 }
 
 func TestApprovalPreferenceEntryPointsShareFuturePolicy(t *testing.T) {
-	for _, scope := range []string{"step", "following"} {
+	for _, scope := range []string{"step", "following", "session"} {
 		for _, entry := range []string{"preference", "confirmation"} {
 			t.Run(scope+"/"+entry, func(t *testing.T) {
 				service, db, execution := controlledService(t)
@@ -371,7 +371,7 @@ func TestApprovalPreferenceEntryPointsShareFuturePolicy(t *testing.T) {
 				if entry == "preference" {
 					corestore.Init(db, nil, nil)
 					t.Cleanup(func() { corestore.Init(nil, nil, nil) })
-					body, _ := json.Marshal(map[string]any{"step_id": review.StepID, "scope": scope, "approval_required": false})
+					body, _ := json.Marshal(map[string]any{"step_id": review.StepID, "scope": scope, "approval_required": false, "expected_state_version": result.Control.StateVersion})
 					request := func(mcp bool) *http.Request {
 						r := httptest.NewRequest(http.MethodPost, "/workflow-sessions/session-1:approval-preference", strings.NewReader(string(body)))
 						r = mux.SetURLVars(r, map[string]string{"session_id": "session-1"})
@@ -408,7 +408,18 @@ func TestApprovalPreferenceEntryPointsShareFuturePolicy(t *testing.T) {
 				if scope == "following" {
 					step = "*"
 				}
-				if len(preferences) != 1 || preferences[0].StepID != step || preferences[0].ApprovalRequired {
+				if scope == "session" {
+					if len(preferences) != 0 {
+						t.Fatalf("current run leaked into future policy: %+v", preferences)
+					}
+					var session orm.WorkflowSession
+					if err := db.First(&session, "id = ?", "session-1").Error; err != nil {
+						t.Fatal(err)
+					}
+					if session.ApprovalMode != "auto" || session.WorkflowMode != "auto" {
+						t.Fatalf("current run mode: %+v", session)
+					}
+				} else if len(preferences) != 1 || preferences[0].StepID != step || preferences[0].ApprovalRequired {
 					t.Fatalf("future approval policy: %+v", preferences)
 				}
 				var current orm.WorkflowReviewCheckpoint

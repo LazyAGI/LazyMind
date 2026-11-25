@@ -58,7 +58,7 @@ func TestDynamicNextStepDoesNotRequireApproval(t *testing.T) {
 	for _, action := range []string{"execute", "continuation"} {
 		t.Run(action, func(t *testing.T) {
 			db, hash := humanCheckpoint(t, false)
-			if err := db.Create(&orm.WorkflowApprovalPreference{UserID: "batch-user", WorkflowID: "batch-plugin", StepID: "*", ApprovalRequired: false}).Error; err != nil {
+			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("approval_preferences", `{"*":false}`).Error; err != nil {
 				t.Fatal(err)
 			}
 			session, err := GetSession(t.Context(), db.DB, "batch-session")
@@ -135,6 +135,7 @@ func TestHumanApprovalSurvivesPauseAndGraphCompletion(t *testing.T) {
 		t.Run(map[bool]string{false: "pause", true: "final"}[final], func(t *testing.T) {
 			db, _ := humanCheckpoint(t, final)
 			if final {
+				createExplicitFinalReview(t, db)
 				if err := freezeRouteDecision(t.Context(), db.DB, "batch-session", "branch_b", "review-task"); err != nil {
 					t.Fatal(err)
 				}
@@ -353,6 +354,7 @@ func TestPauseWaitsForEveryExecutorAndRejectsWrongReceipt(t *testing.T) {
 
 func TestPausedFinalApprovalResumesWithoutCompletingOrAcceptingReview(t *testing.T) {
 	db, _ := humanCheckpoint(t, true)
+	createExplicitFinalReview(t, db)
 	if err := freezeRouteDecision(t.Context(), db.DB, "batch-session", "branch_b", "review-task"); err != nil {
 		t.Fatal(err)
 	}
@@ -384,5 +386,34 @@ func TestPausedFinalApprovalResumesWithoutCompletingOrAcceptingReview(t *testing
 	s, _ = GetSession(t.Context(), db.DB, s.ID)
 	if s.Status != "completed" {
 		t.Fatalf("approved final checkpoint did not complete: %s", s.Status)
+	}
+}
+
+func createExplicitFinalReview(t *testing.T, db *orm.DB) {
+	t.Helper()
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("approval_mode", "dynamic").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowReviewCheckpoint{ID: "explicit-final-review", SessionID: "batch-session", StepID: "branch_b", AttemptID: "review-attempt", Status: "pending"}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFinalOutputCompletesWithoutImplicitApproval(t *testing.T) {
+	db, _ := humanCheckpoint(t, true)
+	if err := freezeRouteDecision(t.Context(), db.DB, "batch-session", "branch_b", "review-task"); err != nil {
+		t.Fatal(err)
+	}
+	session, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected, err := projectSession(t.Context(), db.DB, session)
+	if err != nil || session.Status != "completed" || !projected.Projection.Completed || projected.Display.Status != "completed" || projected.Display.ApprovalStepID != "" {
+		t.Fatalf("final output still requires continuation: session=%+v projection=%+v err=%v", session, projected, err)
+	}
+	var reviews int64
+	if err := db.Model(&orm.WorkflowReviewCheckpoint{}).Count(&reviews).Error; err != nil || reviews != 0 {
+		t.Fatalf("manufactured approval: %d %v", reviews, err)
 	}
 }

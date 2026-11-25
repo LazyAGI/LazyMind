@@ -2,6 +2,8 @@ import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developer
 import { hiddenUserSlots, workflowTabsForAudience, workflowUIForAudience } from './workflowAudience';
 import { WorkflowExtensions } from '../../extensions/WorkflowExtensions';
 import { groupDownloadActions } from './groupDownloadActions';
+import { WorkflowApprovalSettings } from './WorkflowApprovalSettings';
+import { WorkflowToolbarIcon } from './WorkflowToolbarIcon';
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
 import { CompactWorkflowEmptyStatesContext, type ExternalWorkflowPresentation } from './external/presentation';
 import { activeExecutionTasks } from './external/useExecutionActivity';
@@ -18,6 +20,9 @@ import { useTranslation } from 'react-i18next';
 import { useAppVersion } from '@/runtime/useAppVersion';
 import { message as antdMessage, Popconfirm, Tooltip, Dropdown, Collapse, Alert } from 'antd';
 import {
+  ApartmentOutlined,
+  ExportOutlined,
+  ArrowLeftOutlined,
   MoreOutlined,
   InfoCircleOutlined,
   FullscreenOutlined,
@@ -27,6 +32,7 @@ import {
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
 import {
   workflowTabAllowsDownload,
+  workflowStageLabels,
   useWorkflowStore,
 } from '@/modules/chat/store/workflowPanel';
 import { workflowDisplayLabel, type NativeWorkflowControl } from '@/modules/chat/store/workflowStatus';
@@ -1890,6 +1896,9 @@ export function WorkflowPanel({
   }, [viewKey]);
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
+  const [graphVisible, setGraphVisible] = useState(false);
+  useEffect(() => { setGraphVisible(false); setStateGraphOpen(false); }, [session?.session_id]);
+  const graphStepLabels = useMemo(() => workflowStageLabels(ui), [ui]);
   // Track which slots are currently being edited; dismiss stays blocked until
   // each editor saves or cancels. Footer retry/continue flushes pending saves.
   const editingSlots = useRef<Set<string>>(new Set());
@@ -2108,6 +2117,7 @@ export function WorkflowPanel({
   }, [previewTarget, uiReady, conversationId, session?.session_id, setFocusedTab, setFocusedSortOrder, enterBrowse, updateView, tabs]);
 
   const handleTabChange = useCallback((idx: number, tabId: string) => {
+    setGraphVisible(false);
     if (previewTarget) artifactPreview?.close();
     if (view.mode === 'free' || idx !== runtimeTabIdx) enterBrowse(tabId);
     updateView({ tabId });
@@ -2192,7 +2202,7 @@ export function WorkflowPanel({
     && step.validity !== 'stale'
     && all.findIndex((candidate) => candidate.step_id === step.step_id && candidate.validity !== 'stale') === index) : [];
   const stepLabel = (stepId: string) => {
-    const label = ui.stepLabels?.[stepId]?.trim();
+    const label = graphStepLabels[stepId]?.trim();
     if (label && label !== stepId) return label;
     return tabs.find(tab => getTabStepId(tab) === stepId)?.label
       ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
@@ -2283,7 +2293,7 @@ export function WorkflowPanel({
     return action?.kind === continueAction.kind && action.stepId === continueAction.stepId;
   }
 
-  function handleContinueWithApprovalPreference(scope?: 'step' | 'following') {
+  function handleContinueWithApprovalPreference(scope?: 'step' | 'session' | 'following') {
     if (!session || !approvalStepId || !isContinuationCurrent()) return;
     const sessionId = session.session_id;
     void runFooterAction(async () => {
@@ -2387,10 +2397,11 @@ export function WorkflowPanel({
       data-session-id={session.session_id}
       aria-label={t('chat.workflowPanelTitle')}
     >
-      <div className={`workflow-panel__topbar${!collapsed && hasTabs && tabs.length <= 3 ? ' workflow-panel__topbar--few-steps' : ''}`}>
+      <div className="workflow-panel__topbar">
       {/* Header */}
       <div className='workflow-panel__header'>
         <div className='workflow-panel__header-left'>
+          <ApartmentOutlined className='workflow-panel__logo' aria-hidden />
           <div className='workflow-panel__heading'>
             <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
             {appVersion && (
@@ -2401,17 +2412,31 @@ export function WorkflowPanel({
               </span>
             )}
           </div>
-          <button
-            type='button'
-            className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
-            aria-label={t('chat.workflowStatusAria', { status: t(displayStatusKey) })}
-            onClick={() => session && setStateGraphOpen(true)}
-            title={t('chat.workflowViewWorkflow')}
-          >
+          <span className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
+            aria-label={t('chat.workflowStatusAria', { status: t(displayStatusKey) })}>
             {t(displayStatusKey)}
-          </button>
+          </span>
         </div>
         <div className='workflow-panel__header-right'>
+          <button type='button' className='workflow-panel__tool' aria-pressed={graphVisible}
+            onClick={() => { setGraphVisible(!graphVisible); if (collapsed) setCollapsed(false); }}>
+            <WorkflowToolbarIcon name='graph' />{t('chat.workflowExecutionGraph')}
+          </button>
+          {!resultsOnly && <WorkflowApprovalSettings session={session} onRefresh={refresh} disabled={actionPending} />}
+          {uiReady && <Tooltip title={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}>
+            <button type='button' className='workflow-panel__tool workflow-panel__follow-button'
+              aria-label={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}
+              aria-pressed={view.mode === 'following'} disabled={resumingFollow}
+              onClick={() => {
+                if (view.mode === 'following') {
+                  enterBrowse();
+                  antdMessage.info({ key: 'workflow-follow-mode', content: t('chat.workflowFreeBrowseChanged'), duration: 3 });
+                } else void resumeFollowing();
+              }}>
+              <WorkflowToolbarIcon name={view.mode === 'following' ? 'following' : 'browse'} />
+            </button>
+          </Tooltip>}
+          <span className='workflow-panel__tool-spacer' />
           <div className='workflow-panel__intent-btn-wrap'>
             <Dropdown trigger={['click']} menu={{
               items: [
@@ -2428,17 +2453,6 @@ export function WorkflowPanel({
               moreButtonRef.current?.focus();
             }} />}
           </div>
-          {uiReady && <div className='workflow-panel__follow-mode' role='group' aria-label={t('chat.workflowFollowModeLabel')}>
-            <button type='button' aria-pressed={view.mode === 'following'} disabled={resumingFollow}
-              onClick={() => void resumeFollowing()}>{t('chat.workflowFollowProgress')}</button>
-            <button type='button' aria-pressed={view.mode === 'free'}
-              onClick={() => {
-                enterBrowse();
-                if (view.mode !== 'free') {
-                  antdMessage.info({ key: 'workflow-follow-mode', content: t('chat.workflowFreeBrowseChanged'), duration: 3 });
-                }
-              }}>{t('chat.workflowFreeBrowse')}</button>
-          </div>}
           {(!embedded || externalPresentation?.onToggleExpand) && <button
             type='button'
             className='workflow-panel__expand-btn'
@@ -2610,9 +2624,27 @@ export function WorkflowPanel({
         })}
       </div>}
 
+      {!collapsed && graphVisible && <section className='workflow-panel__graph' aria-label={t('chat.workflowGraph.title')}>
+        <div className='workflow-panel__graph-heading'>
+          <span>{t('chat.workflowGraph.title')}</span>
+          <div className='workflow-panel__graph-actions'>
+            <button type='button' className='workflow-panel__tool' onClick={() => setGraphVisible(false)}>
+              <ArrowLeftOutlined />{t('chat.workflowReturnArtifacts')}
+            </button>
+            <Tooltip title={t('chat.workflowGraphWindow')}>
+              <button type='button' className='workflow-panel__tool' aria-label={t('chat.workflowGraphWindow')}
+                onClick={() => setStateGraphOpen(true)}><ExportOutlined /></button>
+            </Tooltip>
+          </div>
+        </div>
+        <StateGraphModal open inline={!stateGraphOpen} onClose={() => setStateGraphOpen(false)}
+          sessionId={session.session_id} workflowId={session.workflow_id} stepLabels={graphStepLabels}
+          liveRefresh conversationId={conversationId} />
+      </section>}
+
       {/* Body */}
       {!collapsed && (
-        <div className={`workflow-panel__body${previewTarget ? ' workflow-panel__body--artifact-preview' : ''}`} key={session.session_id}
+        <div className={`workflow-panel__body${previewTarget ? ' workflow-panel__body--artifact-preview' : ''}`} key={session.session_id} style={graphVisible ? { display: 'none' } : undefined}
           onFocusCapture={event => {
             const target = event.target as HTMLElement;
             if (target.closest('[contenteditable="true"], textarea:not([readonly]), input[type="text"]:not([readonly])')) enterBrowse();
@@ -2771,16 +2803,6 @@ export function WorkflowPanel({
       }} />
     )}
     </div>
-    {session && (
-      <StateGraphModal
-        open={stateGraphOpen}
-        onClose={() => setStateGraphOpen(false)}
-        sessionId={session.session_id}
-        workflowId={session.workflow_id}
-        liveRefresh
-        conversationId={conversationId}
-      />
-    )}
     </SlotEditingContext.Provider>
     </CompactWorkflowEmptyStatesContext.Provider>
   );

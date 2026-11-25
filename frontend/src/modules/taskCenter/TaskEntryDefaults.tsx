@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CHAT_ENTRY_DEFAULTS_CHANGED_EVENT } from '@/modules/chat/constants/chat';
 import { useSettingsDraft } from '@/modules/settings/SettingsNavigationGuard';
 import { Alert, Button, Radio, Select, Skeleton, Switch } from 'antd';
 import type { RadioChangeEvent } from 'antd';
@@ -157,6 +158,7 @@ export default function TaskEntryDefaults({
           [kind]: cloneEntryDefault(draft[kind]),
         }));
       }
+      window.dispatchEvent(new Event(CHAT_ENTRY_DEFAULTS_CHANGED_EVENT));
       setSaveState('saved');
       savedTimerRef.current = window.setTimeout(() => setSaveState('idle'), 1600);
       return true;

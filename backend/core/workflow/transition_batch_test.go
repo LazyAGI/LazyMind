@@ -253,7 +253,7 @@ func TestAutomaticRetryRetainsCurrentEdit(t *testing.T) {
 	}
 	edit := "我不喜欢黑底ppt 给我换成 白底黑字"
 	params, _ := json.Marshal(map[string]string{
-		"current_user_input": edit, "retry_hint": "只修改配色，保留内容、页数和讲稿",
+		"current_user_input": edit, "launch_user_input": "生成8页深色科研PPT", "retry_hint": "只修改配色，保留内容、页数和讲稿",
 	})
 	if err := db.Create(&orm.SubAgentTask{ID: "failed-edit", ConversationID: "batch-conversation",
 		AgentType: "workflow_step", Title: "edit", Objective: edit, Mode: "manual", Status: "failed",
@@ -337,7 +337,7 @@ func TestRetryKeepsFailedAttemptInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db, hash := setupBatchTransitionSession(t)
 			db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("intent_context", `{"text":"原始研究任务"}`)
-			previousParams, _ := json.Marshal(map[string]string{"current_user_input": tc.previous})
+			previousParams, _ := json.Marshal(map[string]string{"current_user_input": tc.previous, "launch_user_input": "原始研究任务"})
 			status := StepStatusFailed
 			if tc.operation == "rewind" {
 				status = StepStatusSucceeded
@@ -413,6 +413,76 @@ func TestExecuteFreshStepKeepsCurrentInput(t *testing.T) {
 			}
 			if _, exists := params["retry_hint"]; exists {
 				t.Fatalf("fresh execution unexpectedly received retry_hint=%v", params["retry_hint"])
+			}
+		})
+	}
+}
+
+func TestRetryUsesUpdatedDurableIntent(t *testing.T) {
+	const updated = `{"version":2,"revision":2,"constraints":["生成白猫插画，不发布","尺寸改为1024×1024，取代512×512"],"execution_mode":"仅重试生成"}`
+	for _, scope := range []string{"session", "step"} {
+		t.Run(scope, func(t *testing.T) {
+			for _, tc := range []struct{ name, current, origin, previousLaunch string }{
+				{"button", "", "user", "生成512×512白猫插画"},
+				{"chat_retry", "重试", "user", "生成512×512白猫插画"},
+				{"automatic", "provider failure", "automatic", "生成512×512白猫插画"},
+				{"missing_snapshot", "", "user", ""},
+				{"new_request", "这次改成1536×1024", "user", "生成512×512白猫插画"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					db, hash := setupBatchTransitionSession(t)
+					wantIntent := sessionIntentText(updated)
+					if scope == "session" {
+						if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("intent_context", updated).Error; err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("intent_context", `{"text":"生成512×512白猫插画"}`).Error; err != nil {
+							t.Fatal(err)
+						}
+						if err := db.Create(&orm.WorkflowStepIntent{ID: "intent-b", SessionID: "batch-session", StepID: "branch_b", IntentContext: updated}).Error; err != nil {
+							t.Fatal(err)
+						}
+						wantIntent = "生成512×512白猫插画\n\nStep-specific intent (overrides conflicting workflow requirements):\n" + wantIntent
+					}
+					previous, _ := json.Marshal(map[string]string{"launch_user_input": tc.previousLaunch, "current_user_input": "生成512×512白猫插画，保留蓝色背景"})
+					if err := db.Create(&orm.SubAgentTask{ID: "failed-image", ConversationID: "batch-conversation", Params: previous, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}).Error; err != nil {
+						t.Fatal(err)
+					}
+					if err := db.Create(&orm.WorkflowSessionStep{ID: "failed-image-attempt", SessionID: "batch-session", StepID: "branch_b", TaskID: "failed-image", Attempt: 1, Status: StepStatusFailed, Validity: "effective"}).Error; err != nil {
+						t.Fatal(err)
+					}
+					response, _, _, err := applyWorkflowTransition(t.Context(), db.DB, "batch-session", transitionCommandRequest{
+						CommandID: "updated-intent-retry", Operation: "retry", RetryOrigin: tc.origin,
+						TargetStepID: "branch_b", TaskID: "retried-image", UserInput: tc.current,
+						ExpectedStateVersion: 4, GraphHash: hash,
+					})
+					if err != nil || !response.Accepted {
+						t.Fatalf("retry rejected: %+v %v", response, err)
+					}
+					var task orm.SubAgentTask
+					if err := db.First(&task, "id = ?", "retried-image").Error; err != nil {
+						t.Fatal(err)
+					}
+					var params map[string]any
+					if err := json.Unmarshal(task.Params, &params); err != nil {
+						t.Fatal(err)
+					}
+					if params["launch_user_input"] != wantIntent || params["user_input"] != wantIntent {
+						t.Fatalf("updated intent not passed to execution: %#v", params)
+					}
+					current, _ := params["current_user_input"].(string)
+					if tc.name == "new_request" {
+						if current != tc.current {
+							t.Fatalf("explicit new request overwritten: %q", current)
+						}
+					} else if !containsAll(current, "保留蓝色背景", "Updated workflow intent", "1024×1024", "不发布") {
+						t.Fatalf("retry lost saved update or unmodified refinement: %q", current)
+					}
+					if params["retry_existing_outputs"] == true {
+						t.Fatal("changed requirements must not recover old outputs")
+					}
+				})
 			}
 		})
 	}
@@ -662,6 +732,8 @@ func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
 		{"rewind", "rewind", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", false},
 		{"changed_revision", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "older-revision", false},
 		{"execution_failure", "retry", "model failed", "batch-revision", false},
+		{"changed_step_intent", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", false},
+		{"missing_snapshot", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, hash := setupBatchTransitionSession(t)
@@ -675,6 +747,20 @@ func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
 			old, err := CreateSessionStep(context.Background(), db.DB, "batch-session", "branch_b", "old-analysis", 1)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if test.name != "missing_snapshot" {
+				payload, err := json.Marshal(executor.AttemptContext{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Create(&orm.WorkflowOutbox{ID: "previous-outbox", AttemptID: old.ID, SessionID: "batch-session", PayloadJSON: payload, Status: "completed"}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.name == "changed_step_intent" {
+				if err := db.Create(&orm.WorkflowStepIntent{ID: "updated-intent", SessionID: "batch-session", StepID: "branch_b", IntentContext: `{"constraints":["1024x1024"]}`}).Error; err != nil {
+					t.Fatal(err)
+				}
 			}
 			status := StepStatusFailed
 			if test.operation == "rewind" {
@@ -752,6 +838,42 @@ func TestParameterFailureAllowsOneAutomaticRerunAndExplicitManualRetry(t *testin
 			}
 			if tc.want == 409 && !strings.Contains(w.Body.String(), `"max_automatic_attempts":2`) {
 				t.Fatal(w.Body.String())
+			}
+		})
+	}
+}
+
+func TestStepIntentReachesNativeAndExternalAttempts(t *testing.T) {
+	for _, host := range []string{"lazymind", "external-agent"} {
+		t.Run(host, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{"controller_host": host, "intent_context": `{"text":"generate a white cat"}`}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowStepIntent{ID: "intent-b", SessionID: "batch-session", StepID: "branch_b", IntentContext: `{"constraints":["1024x1024"]}`}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowStepIntent{ID: "intent-c", SessionID: "batch-session", StepID: "branch_c", IntentContext: `{"constraints":["unrelated intent"]}`}).Error; err != nil {
+				t.Fatal(err)
+			}
+			response, _, _, err := applyWorkflowTransition(t.Context(), db.DB, "batch-session", transitionCommandRequest{CommandID: "step-intent", Operation: "execute", TargetStepID: "branch_b", TaskID: "new-attempt", ExpectedStateVersion: 4, GraphHash: hash})
+			if err != nil || !response.Accepted {
+				t.Fatalf("execute: %+v %v", response, err)
+			}
+			var attempt orm.WorkflowSessionStep
+			if err := db.Where("task_id = ?", "new-attempt").First(&attempt).Error; err != nil {
+				t.Fatal(err)
+			}
+			var outbox orm.WorkflowOutbox
+			if err := db.Where("attempt_id = ?", attempt.ID).First(&outbox).Error; err != nil {
+				t.Fatal(err)
+			}
+			var payload executor.AttemptContext
+			if err := json.Unmarshal(outbox.PayloadJSON, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if !containsAll(payload.LaunchRequest, "white cat", "1024x1024") || strings.Contains(string(outbox.PayloadJSON), "unrelated intent") {
+				t.Fatalf("step intent missing or leaked: %+v", payload)
 			}
 		})
 	}

@@ -280,6 +280,8 @@ ALTER TABLE conversations
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_ref VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS controller_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
+ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS approval_preferences TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS approval_mode VARCHAR(16) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS workflow_mode VARCHAR(16) NOT NULL DEFAULT 'dynamic';
 CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
 
@@ -383,6 +385,8 @@ ALTER TABLE conversations
 ALTER TABLE plugin_sessions ADD COLUMN origin_host varchar(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN controller_host varchar(32) NOT NULL DEFAULT 'lazymind';
+ALTER TABLE plugin_sessions ADD COLUMN approval_preferences TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE plugin_sessions ADD COLUMN approval_mode VARCHAR(16) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN workflow_mode varchar(16) NOT NULL DEFAULT 'dynamic';
 CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
 
@@ -3918,3 +3922,16 @@ WHERE job_type = 'document_pdf_ir' AND started_at IS NOT NULL
   AND CAST(payload_json ->> 'automatic' AS TEXT) IN ('true', '1')
   AND COALESCE(payload_json ->> 'source_sha256', '') <> ''
 GROUP BY create_user_id, payload_json ->> 'source_sha256';
+
+-- Freeze existing run preferences before defaults can change.
+-- +migrate Dialect postgres
+UPDATE plugin_sessions SET approval_preferences = COALESCE((
+    SELECT json_object_agg(step_id, approval_required)::text FROM workflow_approval_preferences
+    WHERE user_id = plugin_sessions.create_user_id AND workflow_id = plugin_sessions.plugin_id
+), '{}');
+
+-- +migrate Dialect sqlite
+UPDATE plugin_sessions SET approval_preferences = COALESCE((
+    SELECT json_group_object(step_id, json(CASE WHEN approval_required THEN 'true' ELSE 'false' END)) FROM workflow_approval_preferences
+    WHERE user_id = plugin_sessions.create_user_id AND workflow_id = plugin_sessions.plugin_id
+), '{}');

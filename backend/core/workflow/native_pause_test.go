@@ -463,6 +463,8 @@ func TestNativeRewindRejectsInvalidControlWithoutMutation(t *testing.T) {
 			case "paused":
 				session.Status = "stopped"
 			case "approval":
+				createExplicitFinalReview(t, db)
+				session.ApprovalMode = "dynamic"
 				var revision orm.WorkflowRevision
 				if err := db.First(&revision, "id = ?", "batch-revision").Error; err != nil {
 					t.Fatal(err)

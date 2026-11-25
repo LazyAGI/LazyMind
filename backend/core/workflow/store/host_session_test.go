@@ -12,6 +12,40 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func TestInitializedHostSessionInheritsApprovalPreference(t *testing.T) {
+	for _, host := range []string{"lazymind", "external-agent"} {
+		t.Run(host, func(t *testing.T) {
+			repo := testRepo(t)
+			createTestConversation(t, repo, "first-chat", "owner")
+			createTestConversation(t, repo, "second-chat", "owner")
+			workflow := WorkflowPackage{WorkflowID: "image", WorkflowRef: "builtin:image", RevisionID: "rev"}
+			pref := orm.WorkflowApprovalPreference{UserID: "owner", WorkflowID: "image", StepID: "*", ApprovalRequired: false}
+			if err := repo.db.Create(&pref).Error; err != nil {
+				t.Fatal(err)
+			}
+			create := func(id, chat, mode string) (orm.WorkflowSession, bool, error) {
+				return repo.CreateInitializedHostSession(t.Context(), "owner", id, chat, host, chat, host, workflow, mode, "", nil, ControlSettings{})
+			}
+			first, fresh, err := create("first", "first-chat", "dynamic")
+			if err != nil || !fresh || first.WorkflowMode != "auto" || first.ApprovalMode != "auto" {
+				t.Fatalf("saved auto preference not inherited: %+v fresh=%v err=%v", first, fresh, err)
+			}
+			if err := repo.db.Model(&pref).Update("approval_required", true).Error; err != nil {
+				t.Fatal(err)
+			}
+			// Replaying the original creation cannot apply a changed future default.
+			replayed, fresh, err := create("first", "first-chat", "dynamic")
+			if err != nil || fresh || replayed.ApprovalMode != "auto" {
+				t.Fatalf("replay changed mode: %+v %v", replayed, err)
+			}
+			second, fresh, err := create("second", "second-chat", "auto")
+			if err != nil || !fresh || second.WorkflowMode != "dynamic" || second.ApprovalMode != "dynamic" {
+				t.Fatalf("restored preference not inherited: %+v %v", second, err)
+			}
+		})
+	}
+}
+
 func TestCreateHostSessionRegistersTaskCenterOnce(t *testing.T) {
 	for _, taskType := range []string{"", "background_chat", "scheduled"} {
 		t.Run("trigger_"+taskType, func(t *testing.T) {
@@ -69,7 +103,7 @@ func TestCreateHostSessionPersistsConversationBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.Conversation{}, &orm.TaskCenterTask{}); err != nil {
+	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.Conversation{}, &orm.TaskCenterTask{}, &orm.WorkflowApprovalPreference{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -209,5 +243,33 @@ func TestExternalRunWithoutConversationRegistersTask(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].ConversationID != "" || tasks[0].WorkflowSessionID == nil || *tasks[0].WorkflowSessionID != "external-run" {
 		t.Fatalf("external run must be discoverable once without an invented conversation: %#v", tasks)
+	}
+}
+
+func TestApprovalSnapshotClearsOnReload(t *testing.T) {
+	for _, kind := range []string{"orm", "raw"} {
+		t.Run(kind, func(t *testing.T) {
+			repo := testRepo(t)
+			if err := repo.db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
+				t.Fatal(err)
+			}
+			session := orm.WorkflowSession{ID: "snapshot", WorkflowID: "workflow", ApprovalPreferences: orm.WorkflowApprovalSnapshot{"review": false}}
+			if err := repo.db.Create(&session).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.db.Model(&session).Update("approval_preferences", "{}").Error; err != nil {
+				t.Fatal(err)
+			}
+			session.ApprovalPreferences = orm.WorkflowApprovalSnapshot{"review": false}
+			var err error
+			if kind == "raw" {
+				err = repo.db.Raw("SELECT * FROM plugin_sessions WHERE id = ?", session.ID).Scan(&session).Error
+			} else {
+				err = repo.db.First(&session, "id = ?", session.ID).Error
+			}
+			if err != nil || len(session.ApprovalPreferences) != 0 {
+				t.Fatalf("old preferences survived reload: %v %v", session.ApprovalPreferences, err)
+			}
+		})
 	}
 }

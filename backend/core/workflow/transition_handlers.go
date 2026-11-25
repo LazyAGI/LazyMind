@@ -656,11 +656,25 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			}
 			return graphErr
 		}
+		var stepIntents []orm.WorkflowStepIntent
+		if err := tx.Where("session_id = ?", session.ID).Find(&stepIntents).Error; err != nil {
+			return err
+		}
+		intentByStep := make(map[string]string, len(stepIntents))
+		for _, intent := range stepIntents {
+			intentByStep[intent.StepID] = sessionIntentText(intent.IntentContext)
+		}
+		launchInputs := make(map[string]string, len(targets))
 		currentInputs := make(map[string]string, len(targets))
 		for i := range targets {
+			intent := sessionIntentText(session.IntentContext)
+			if stepIntent := intentByStep[targets[i].TargetStepID]; stepIntent != "" {
+				intent += "\n\nStep-specific intent (overrides conflicting workflow requirements):\n" + stepIntent
+			}
+			launchInputs[targets[i].TaskID] = strings.TrimSpace(intent)
 			currentInputs[targets[i].TaskID] = targets[i].UserInput
 			if strings.TrimSpace(targets[i].UserInput) == "" {
-				targets[i].UserInput = sessionIntentText(session.IntentContext)
+				targets[i].UserInput = launchInputs[targets[i].TaskID]
 			}
 		}
 		snapshot, snapshotErr := loadRuntimeSnapshot(ctx, tx, session.ID, graph)
@@ -724,12 +738,19 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				}
 				var input struct {
 					CurrentUserInput string `json:"current_user_input"`
+					LaunchUserInput  string `json:"launch_user_input"`
 				}
 				if err == nil && json.Unmarshal(previous.Params, &input) == nil && !isBareRetryInput(input.CurrentUserInput) &&
 					(isBareRetryInput(currentInputs[targets[0].TaskID]) || currentInputs[targets[0].TaskID] == input.CurrentUserInput) {
 					targets[0].UserInput = input.CurrentUserInput
-					currentInputs[targets[0].TaskID] = input.CurrentUserInput
 					retryExistingOutputs = latest.Status == StepStatusFailed
+					if intent := launchInputs[targets[0].TaskID]; intent != "" && intent != input.LaunchUserInput {
+						// A bare retry preserves local edits, but cannot promote an older
+						// attempt's requirements above intent saved since that attempt.
+						targets[0].UserInput += "\n\nUpdated workflow intent (overrides conflicting previous attempt requirements; preserve other refinements):\n" + intent
+						retryExistingOutputs = false
+					}
+					currentInputs[targets[0].TaskID] = targets[0].UserInput
 				}
 			}
 			var failedResult struct {
@@ -740,7 +761,23 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			if req.Operation == "retry" && latest.Status == StepStatusFailed && json.Unmarshal([]byte(latest.ResultJSON), &failedResult) == nil &&
 				strings.Contains(failedResult.Error+failedResult.Summary, "MEDIA_CAPABILITY_DEPENDENCY_MISSING") &&
 				failedResult.Checkpoint != nil && failedResult.Checkpoint.WorkflowRevision == session.WorkflowRevisionID {
-				postStepCheckpoint = failedResult.Checkpoint
+				// A saved result can bypass execution only for the same durable intent.
+				// A changed session/step intent requires fresh outputs, even if the
+				// previous failure happened after generation at a configuration gate.
+				var previous orm.WorkflowOutbox
+				result := tx.Where("attempt_id = ?", latest.ID).Limit(1).Find(&previous)
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected > 0 {
+					var payload executor.AttemptContext
+					if err := json.Unmarshal(previous.PayloadJSON, &payload); err != nil {
+						return err
+					}
+					if payload.LaunchRequest == launchInputs[targets[0].TaskID] {
+						postStepCheckpoint = failedResult.Checkpoint
+					}
+				}
 			}
 			automaticAttempts, countErr := workflowstore.New(tx).AutomaticAttemptCount(ctx, session.ID, latest.StepID)
 			if countErr != nil {
@@ -760,7 +797,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 		}
 		if req.Operation == "retry" || req.Operation == "rewind" ||
 			(req.Operation == "execute" && projection.Nodes[targets[0].TargetStepID].Validity == "stale") {
-			applyRecoveryIntent(session.IntentContext, &targets[0])
+			applyRecoveryIntent(launchInputs[targets[0].TaskID], &targets[0])
 		}
 		completedContinue := session.Status == SessionStatusCompleted && len(targets) == 1 &&
 			req.Operation == "execute" && declaredCompletedContinueStep(graph, targets[0].TargetStepID) &&
@@ -870,7 +907,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				executorHost = executorHostForStep(session.ControllerHost, binding.Provider, nodeDef, graph.Runtime)
 			}
 			if executorHost == "external-agent" {
-				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
+				if err := queueHostAttempt(ctx, tx, session, target, launchInputs[target.TaskID], nodeDef, now); err != nil {
 					return err
 				}
 				if err := acceptRunControl(ctx, tx, &session, "continue", nil, nil); err != nil {
@@ -890,7 +927,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				for _, optional := range nodeDef.OptionalInputs {
 					inputKeys = append(inputKeys, optional.Material)
 				}
-				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, LaunchUserInput: sessionIntentText(session.IntentContext), CurrentUserInput: currentInputs[target.TaskID], HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, LaunchUserInput: launchInputs[target.TaskID], CurrentUserInput: currentInputs[target.TaskID], HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				params.HostedTaskID = req.HostedTaskID
 				params.RetryExistingOutputs = retryExistingOutputs
 				params.RetryHint = workflowStepRuntimeInstruction(target.Objective, target.RuntimeInstruction)
@@ -939,7 +976,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				return err
 			}
 
-			if controlstore.Controlled(session) {
+			if executorHost == "external-agent" {
 				if err := tx.Model(&attempt).Update("review_required", projection.Nodes[target.TargetStepID].RequiresApproval).Error; err != nil {
 					return err
 				}
@@ -971,12 +1008,45 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 
 func sessionIntentText(value string) string {
 	var intent struct {
-		Text string `json:"text"`
+		Text             string   `json:"text"`
+		Goal             string   `json:"goal"`
+		Deliverable      string   `json:"deliverable"`
+		ExecutionMode    string   `json:"execution_mode"`
+		Constraints      []string `json:"constraints"`
+		Corrections      []string `json:"corrections"`
+		EmphasizedPoints []string `json:"emphasized_points"`
 	}
-	if json.Unmarshal([]byte(value), &intent) == nil {
-		return strings.TrimSpace(intent.Text)
+	if json.Unmarshal([]byte(value), &intent) != nil {
+		return ""
 	}
-	return ""
+	if text := strings.TrimSpace(intent.Text); text != "" {
+		return text
+	}
+	// intentwrite replaces the legacy text with a v2 document. Render active
+	// fields only: superseded is an audit trail, not an execution requirement.
+	var sections []string
+	for _, field := range []struct {
+		label string
+		items []string
+	}{
+		{"Goal", []string{intent.Goal}},
+		{"Deliverable", []string{intent.Deliverable}},
+		{"Constraints", intent.Constraints},
+		{"Corrections", intent.Corrections},
+		{"Emphasized points", intent.EmphasizedPoints},
+		{"Execution mode", []string{intent.ExecutionMode}},
+	} {
+		var items []string
+		for _, item := range field.items {
+			if text := strings.TrimSpace(item); text != "" {
+				items = append(items, text)
+			}
+		}
+		if len(items) > 0 {
+			sections = append(sections, field.label+":\n"+strings.Join(items, "\n"))
+		}
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 // inheritAutomaticRetryIntent retains the failed native attempt's user amendment.
@@ -1028,11 +1098,10 @@ func inheritAutomaticRetryIntent(ctx context.Context, tx *gorm.DB, sessionID str
 // applyRecoveryIntent keeps the workflow launch request authoritative when a
 // user retries, rewinds, or re-executes a stale step. The recovery command is useful execution
 // context, but it must not replace {{user_input}} and silently change the task.
-func applyRecoveryIntent(intentContext string, target *transitionTarget) {
+func applyRecoveryIntent(original string, target *transitionTarget) {
 	if target == nil {
 		return
 	}
-	original := sessionIntentText(intentContext)
 	recovery := strings.TrimSpace(target.UserInput)
 	if original == "" {
 		return
@@ -1058,7 +1127,7 @@ func isBareRetryInput(input string) bool {
 	}
 }
 
-func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
+func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget, launchInput string,
 	node graphengine.CompiledNode, now time.Time) error {
 	node = node.ForExecutor("external-agent")
 	objective := workflowStepObjectiveWithRuntimeBoundaries(node.Prompt, target.Objective, target.UserInput, node.Capabilities, node.LegacyTools, node.TerminalTools)
@@ -1076,7 +1145,7 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 	}
 	value := executor.AttemptContext{ContractVersion: attempt.ContractVersion, SessionID: session.ID,
 		AttemptID: target.TaskID, StepID: target.TargetStepID, AttemptNo: int(count) + 1, Operation: "execute",
-		LaunchRequest: sessionIntentText(session.IntentContext), UserRequest: target.UserInput,
+		LaunchRequest: launchInput, UserRequest: target.UserInput,
 		Objective: objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
 		Instruction: workflowStepRuntimeInstruction(target.Objective, target.RuntimeInstruction), PartialSelector: target.PartialIndices,
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,

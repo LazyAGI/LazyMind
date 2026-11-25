@@ -732,8 +732,10 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 		}
 		var existing orm.WorkflowSession
 		if err := tx.Where("id = ?", sessionID).First(&existing).Error; err == nil {
+			// A saved or user-selected approval mode supersedes the preparation's
+			// mode. Replaying creation must preserve that run's current setting.
 			if existing.CreateUserID != owner || existing.WorkflowRevisionID != workflow.RevisionID ||
-				existing.ConversationID != conversationID || existing.WorkflowMode != workflowMode {
+				existing.ConversationID != conversationID || (existing.ApprovalMode == "" && existing.WorkflowMode != workflowMode) {
 				return ErrIdempotencyConflict
 			}
 			if triggerHistoryID != "" && existing.TriggerHistoryID == "" {
@@ -776,6 +778,9 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 				TriggerHistoryID: triggerHistoryID,
 				WorkflowMode:     workflowMode, Status: "active", CreateUserID: owner,
 				CreatedAt: now, UpdatedAt: now}
+			if err := ApplySavedApprovalMode(tx, &created); err != nil {
+				return err
+			}
 			if control.Protocol != "" {
 				binding, err := json.Marshal(controlstore.Binding{Required: control.BindingRequired, Provider: control.Provider})
 				if err != nil {
