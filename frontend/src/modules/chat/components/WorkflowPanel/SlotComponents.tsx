@@ -3491,6 +3491,7 @@ function SlotWriterDocument({
           <MarkdownArtifactEditor
             markdown={markdown}
             resolveImageUrl={hasWriterMediaURLs ? resolveWriterMarkdownImage : undefined}
+            disableImageSettingsButton
             numbering={rendered.numbering}
             sourceRevision={displayRevision}
             editingKey={editingKey}

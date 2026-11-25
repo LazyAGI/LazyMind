@@ -158,9 +158,9 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       .filter(item => item.selected && ['media_assets', 'resolved_media_assets', 'flat_resolved_media_assets', 'target_document'].includes(item.slot_id))
       .map(item => [item.slot_id, item.artifact_id, item.revision, item.draft_version]));
   });
-  const mediaKey = JSON.stringify([sessionId, slot.artifact_id, slot.revision, slot.draft_version, writerSlot, mediaRevision]);
+  // Core resolves these URLs from the selected media slots, independently of the document draft.
   const [media, setMedia] = useState<{ key: string; urls?: Record<string, string> }>();
-  const mediaUrls = boundMediaUrls ?? (media?.key === mediaKey || retainedPublicationSource.current !== undefined ? media?.urls : undefined);
+  const mediaUrls = boundMediaUrls ?? (media?.key === editingKey && mediaRevision !== undefined ? media?.urls : undefined);
   const latestMediaUrls = useRef(mediaUrls);
   latestMediaUrls.current = mediaUrls;
   const resolveImageUrl = useCallback(async (url: string) => {
@@ -182,12 +182,10 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     void WorkflowSessionApi().renderWriterDocument(sessionId, writerSlot, {
       signal: controller.signal, silentError: true,
     } as never).then(response => {
-      if (!controller.signal.aborted) setMedia({ key: mediaKey, urls: response.data.code === 0 ? response.data.data.media_urls : undefined });
-    }).catch(() => {
-      if (!controller.signal.aborted) setMedia({ key: mediaKey });
-    });
+      if (!controller.signal.aborted && response.data.code === 0) setMedia({ key: editingKey, urls: response.data.data.media_urls });
+    }).catch(() => { /* Keep the current preview if a media refresh fails. */ });
     return () => controller.abort();
-  }, [descriptor.representation, writerSlot, mediaRevision, slot.list_index, sessionId, mediaKey]);
+  }, [descriptor.representation, writerSlot, mediaRevision, slot.list_index, sessionId, editingKey]);
 
   useEffect(() => { setPublicationUrl(documentPublicationTargetUrl({ uri: slot.write_back_url, doc_id: slot.provider_document_id }, slot.provider)); }, [slot.write_back_url, slot.provider, slot.provider_document_id]);
 
@@ -455,6 +453,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     }}>
     {representation === 'markdown' && typeof value === 'string'
       ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
+        disableImageSettingsButton={Boolean(writerSlot) && !paperDocument}
         numberingDocument={typeof currentNumbering?.document === 'string' ? currentNumbering.document : undefined}
         resolveImageUrl={resolveImageUrl} onDownloadImage={imageDownloads.downloadImage} onContentChange={edit} numbering={numbering} toolbarActions={versionHistory}
         onRewriteSelection={canRewrite ? (picked) => { if (picked.supported) setSelection({ type: 'markdown', selected_text: picked.text, selectedText: picked.text, paragraph: picked.paragraph, paragraphs: picked.paragraphSelections?.map(item => item.paragraph), startOffset: picked.startOffset, sourceRange: picked.sourceRange, sourceRanges: picked.sourceRanges, anchor: picked.anchor }); } : undefined}

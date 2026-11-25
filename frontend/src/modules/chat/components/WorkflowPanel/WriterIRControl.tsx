@@ -609,7 +609,7 @@ export function WriterIRControl({
   }, [draft]);
 
   const handleUndo = useCallback(() => {
-    if (textEditStartRef.current) {
+    if (textEditStartRef.current && textEditStartRef.current !== draft) {
       const nextFuture = [draft, ...futureRef.current];
       futureRef.current = nextFuture;
       setFuture(nextFuture);
@@ -618,6 +618,7 @@ export function WriterIRControl({
       setSaveError(undefined);
       return;
     }
+    textEditStartRef.current = null;
     const currentHistory = historyRef.current;
     const previous = currentHistory[currentHistory.length - 1];
     if (!previous) return;
@@ -884,10 +885,17 @@ export function WriterIRControl({
     finishTextEdit();
   }, [finishTextEdit]);
 
-  const handleDocumentChange = useCallback((nextDocument: WriterDocument) => {
+  const handleDocumentChange = useCallback((nextDocument: WriterDocument, edit?: 'drag') => {
+    if (edit === 'drag') {
+      const before = draftRef.current;
+      const start = textEditStartRef.current;
+      textEditStartRef.current = null;
+      historyRef.current = [...historyRef.current, ...(start && start !== before ? [start] : []), before];
+      setHistory(historyRef.current);
+    }
     draftRef.current = nextDocument;
     setDraft((current) => {
-      if (!textEditStartRef.current) textEditStartRef.current = current;
+      if (edit !== 'drag' && !textEditStartRef.current) textEditStartRef.current = current;
       return nextDocument;
     });
     futureRef.current = [];

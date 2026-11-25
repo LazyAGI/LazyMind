@@ -493,6 +493,7 @@ interface MarkdownArtifactEditorProps {
   /** Prompts keep HTML examples literal and do not acquire document navigation metadata. */
   contentKind?: 'document' | 'prompt';
   resolveImageUrl?: MarkdownImageResolver;
+  disableImageSettingsButton?: boolean;
   onDownloadImage?: (source: string) => Promise<void>;
   numbering?: WriterNumberingState;
   numberingDocument?: string;
@@ -574,6 +575,7 @@ export function MarkdownArtifactEditor({
   renderContext,
   resolveImageUrl,
   onDownloadImage,
+  disableImageSettingsButton,
   numbering,
   numberingDocument,
   sourceRevision,
@@ -2200,6 +2202,7 @@ export function MarkdownArtifactEditor({
                 }],
               }),
               imagePlugin({
+                disableImageSettingsButton,
                 imagePreviewHandler: resolveImageUrl ?? resolveMarkdownImageUrlAsync,
               }),
               writerImageDownloadPlugin({ onDownload: onDownloadImage }),

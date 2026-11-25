@@ -4486,6 +4486,7 @@ const enUS = {
       invalid: "Enter a valid HEX, RGB or RGBA color value.",
     },
     writerImageGroups: {
+      merge: "Merge into sliding gallery",
       title: "Image display",
       setSliding: "Set as sliding gallery",
       restoreVertical: "Restore vertical layout",

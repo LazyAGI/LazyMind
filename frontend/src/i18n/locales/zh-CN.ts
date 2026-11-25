@@ -4411,6 +4411,7 @@ const zhCN = {
       invalid: "请输入有效的 HEX、RGB 或 RGBA 颜色值。",
     },
     writerImageGroups: {
+      merge: "合并为滑动图组",
       title: "图片展示方式",
       setSliding: "设为滑动图组",
       restoreVertical: "恢复纵向排列",
