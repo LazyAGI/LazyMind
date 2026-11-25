@@ -263,6 +263,7 @@ export function ArtifactRewriteDialog({
                   type: 'ppt_html',
                   page: selection.page,
                   el: selection.el,
+                  ...(selection.text_block ? { text_block: selection.text_block } : {}),
                   ...(selection.index ? { index: selection.index } : {}),
                   ...(selection.group ? { group: selection.group } : {}),
                   ...(selection.dom_path ? { dom_path: selection.dom_path } : {}),

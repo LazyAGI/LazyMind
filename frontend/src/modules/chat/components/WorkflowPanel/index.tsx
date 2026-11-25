@@ -60,6 +60,8 @@ import {
   SlotDownloadContext,
   SlotMarkdownStream,
 } from './SlotComponents';
+import { PptPageEditor } from './ppt/PptPageEditor';
+import { isSlideSpecArtifact } from './ppt/slideSchema';
 import { SlideThumb, type SlideThumbHandle } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
@@ -973,6 +975,7 @@ function CompositeSlotGrid({
       && !Array.isArray(tab.composite_layout)
       && tab.composite_layout.direction === 'column',
   );
+  const flushPptPage = useRef<(() => Promise<boolean>) | null>(null);
   const [slideExpanded, setSlideExpanded] = useState(false);
   const [localPage, setLocalPage] = useState<number | null>(null);
   const currentPage = tab.page_group ? (pageGroups.pages[tab.page_group] ?? null) : localPage;
@@ -997,6 +1000,15 @@ function CompositeSlotGrid({
   }, [paged, tabActive, currentPage, onFocusSortOrder]);
 
   const activePage = currentPage != null && rows.includes(currentPage) ? currentPage : rows[0];
+  const pageSlide = session.workflow_id === 'ppt-workflow' && tab.step_id === 'generate_ppt'
+    ? findSlotRevision(session, tab, 'preview_html', activePage) : undefined;
+  const pageNotes = pageSlide ? findSlotRevision(session, tab, 'preview_notes', activePage) : undefined;
+  const pptRunning = Boolean(pageSlide && workflowTabStatus(tab, session) !== 'succeeded');
+  const editPage = pageSlide?.selected && pageSlide.list_index != null && !pptRunning && !readOnly
+    && !isSlideSpecArtifact(pageSlide.artifact_value);
+  const changePage = async (page: number) => {
+    if (!flushPptPage.current || await flushPptPage.current()) setCurrentPage(page);
+  };
   const reorderableCompositeSlotIds = tab.slots
     .filter((slot) => slot.cardinality === 'list' && slot.ordered)
     .map((slot) => slot.id)
@@ -1011,6 +1023,7 @@ function CompositeSlotGrid({
 
   const handlePageReorder = useCallback(async (nextPages: number[]) => {
     if (!canReorderPages || reordering || nextPages.length !== rows.length) return;
+    if (flushPptPage.current && !await flushPptPage.current()) return;
     if (nextPages.every((page, index) => page === rows[index])) return;
 
     const focusedVisualIdx = Math.max(0, nextPages.indexOf(activePage));
@@ -1090,7 +1103,7 @@ function CompositeSlotGrid({
                 expanded: slideExpanded,
                 onExpandedChange: setSlideExpanded,
                 onChange: (index) => {
-                  if (index >= 0 && index < rows.length) setCurrentPage(rows[index]);
+                  if (index >= 0 && index < rows.length) void changePage(rows[index]);
                 },
               } : undefined}
               expectedType={def?.type}
@@ -1100,7 +1113,7 @@ function CompositeSlotGrid({
               onRefresh={onRefresh}
               onReference={onReference}
               hideImageMutationActions={hideImageMutationActions}
-              readOnly={readOnly || (session.workflow_id === 'ppt-workflow' && isPptPreviewRevision(rev) && !rev.selected)}
+              readOnly={readOnly || (pptRunning && isPptPreviewRevision(rev)) || (session.workflow_id === 'ppt-workflow' && isPptPreviewRevision(rev) && !rev.selected)}
             />
           </DocumentActionScope>
         ) : (
@@ -1256,7 +1269,7 @@ function CompositeSlotGrid({
       position={pageBarPosition!}
       pages={rows}
       currentPage={activePage}
-      onChange={setCurrentPage}
+      onChange={changePage}
       onReorder={canReorderPages ? handlePageReorder : undefined}
       reordering={reordering}
       tab={tab}
@@ -1278,7 +1291,12 @@ function CompositeSlotGrid({
             <div role='status'>{t('chat.workflowStalePreview')}</div>
           )}
           {reorderError && <span className='composite-toolbar__error'>{reorderError}</span>}
-          <div className='composite-grid composite-grid--paged'>{renderRow(activePage)}</div>
+          <div className='composite-grid composite-grid--paged'>{editPage && pageSlide
+            ? <PptPageEditor key={session.session_id + ':' + pageSlide.list_index} sessionId={session.session_id}
+                stateVersion={session.state_version} slide={pageSlide} notes={pageNotes?.selected ? pageNotes : undefined} flushRef={flushPptPage} refresh={onRefresh}>
+                {renderRow(activePage)}
+              </PptPageEditor>
+            : renderRow(activePage)}</div>
         </div>
         {(pageBarPosition === 'bottom' || pageBarPosition === 'right') && rail}
       </div>

@@ -50,7 +50,7 @@ function scaleToFit(containerW: number, containerH: number): number {
   return Math.max(0.2, Math.min(sx, sy, 1));
 }
 
-function SlideCanvas({ spec }: { spec: SlideSpec }) {
+export function SlideCanvas({ spec }: { spec: SlideSpec }) {
   const theme = resolveTheme(spec.theme);
   const cards = (spec.cards || []).slice(0, 4);
   const bullets = (spec.bullets || []).slice(0, 8);

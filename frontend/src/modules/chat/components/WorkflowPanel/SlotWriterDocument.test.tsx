@@ -17,10 +17,6 @@ vi.mock('@/modules/chat/utils/request', async (importOriginal) => ({
   WorkflowSessionApi: () => workflowApi,
 }));
 
-vi.mock('@/modules/chat/components/MarkdownViewer', () => ({
-  default: ({ children }: { children: string }) => <div>{children}</div>,
-}));
-
 vi.mock('@/modules/chat/utils/chunkUpload', () => chunkUpload);
 
 vi.mock('antd', async (importOriginal) => {
@@ -99,11 +95,11 @@ describe('artifact stream rendering', () => {
       content, deltas: Array.from(content),
     };
     const view = render(<SlotMarkdownStream stream={stream} />);
-    expect(view.container.querySelector('.workflow-slot__artifact-body')?.textContent).toBe(content);
+    expect(view.container.querySelector('.workflow-slot__artifact-body p')?.textContent).toBe(content.split('\n')[1]);
     // Only scroll following uses a frame; no text playback is scheduled.
     expect(raf).toHaveBeenCalledTimes(1);
     view.rerender(<SlotMarkdownStream stream={{ ...stream, state: 'ended' }} />);
-    expect(view.container.querySelector('.workflow-slot__artifact-body')?.textContent).toBe(content);
+    expect(view.container.querySelector('.workflow-slot__artifact-body p')?.textContent).toBe(content.split('\n')[1]);
     view.rerender(<SlotMarkdownStream stream={{ ...stream, state: 'ready', final_content: '已发布完整正文' }} />);
     expect(screen.getByText('已发布完整正文')).toBeInTheDocument();
     view.rerender(<SlotMarkdownStream stream={{ ...stream, stream_id: 'retry', content: '新执行', deltas: ['新', '执行'] }} />);
@@ -406,7 +402,7 @@ describe('SlotWriterDocument render refresh', () => {
       latestRequest.resolve(renderedMarkdown('# latest document'));
       await latestRequest.promise;
     });
-    expect(screen.getByText('# latest document')).toBeInTheDocument();
+    expect(screen.getByText('latest document')).toBeInTheDocument();
 
     await act(async () => {
       staleRequest.reject(Object.assign(new Error('canceled'), {
@@ -416,7 +412,7 @@ describe('SlotWriterDocument render refresh', () => {
       await staleRequest.promise.catch(() => undefined);
     });
 
-    expect(screen.getByText('# latest document')).toBeInTheDocument();
+    expect(screen.getByText('latest document')).toBeInTheDocument();
     expect(document.querySelector('.workflow-slot--error')).not.toBeInTheDocument();
   });
 
@@ -853,31 +849,24 @@ describe('Writer version diff text', () => {
     );
 
     fireEvent.click(container.querySelector<HTMLButtonElement>('.workflow-slot__version-btn')!);
-    await waitFor(() => expect(document.querySelector('.workflow-slot__version-diff')).not.toBeNull());
-
-    const labels = document.querySelectorAll('.workflow-slot__version-diff-label');
-    expect(labels[0]).toHaveTextContent('v1');
-    expect(labels[1]).toHaveTextContent('v2');
-    expect(document.querySelector('.workflow-slot__version-diff-header')).toHaveTextContent('修改前');
-    expect(document.querySelector('.workflow-slot__version-diff-header')).toHaveTextContent('修改后');
-    expect(document.querySelector('.workflow-slot__version-diff-arrow')).toHaveTextContent('→');
-    expect(document.querySelector('.workflow-slot__version-diff')).not.toHaveTextContent('当前版本');
-
+    fireEvent.click(await screen.findByText('对比上一版'));
+    await waitFor(() => expect(document.querySelector('.writer-history-diff')).not.toBeNull());
+    const comparison = document.querySelector('.writer-history-diff')!;
     await waitFor(() => {
-      const removed = document.querySelector('.memory-diff-inline-remove');
-      const added = document.querySelector('.memory-diff-inline-add');
-      expect(removed).toHaveTextContent('初');
-      expect(removed?.closest('.memory-diff-line')).toHaveClass('is-remove');
-      expect(added).toHaveTextContent('第二');
-      expect(added?.closest('.memory-diff-line')).toHaveClass('is-add');
+      expect(comparison.querySelector('h1[data-history-removed]')).toHaveTextContent('初版');
+      expect(comparison.querySelector('h1[data-history-added]')).toHaveTextContent('第二版');
     });
+    const labels = comparison.querySelectorAll('header');
+    expect(labels[0]).toHaveTextContent(/修改前.*v1/);
+    expect(labels[1]).toHaveTextContent(/修改后.*v2/);
+    expect(comparison).not.toHaveTextContent('当前版本');
 
     const versionItems = document.querySelectorAll<HTMLElement>('.workflow-slot__version-item');
     fireEvent.click(versionItems[1]);
 
     await waitFor(() => {
-      expect(document.querySelector('.workflow-slot__version-diff')).toBeNull();
-      expect(document.querySelector('.workflow-slot__version-current-text')).toHaveTextContent('# 初版');
+      expect(document.querySelector('.writer-history-diff')).toBeNull();
+      expect(document.querySelector('.history-preview--detail')).toHaveTextContent('初版');
     });
     expect(document.querySelector('.workflow-slot__version-apply-btn')).toHaveTextContent('v1');
   });
@@ -920,7 +909,13 @@ describe('Writer version diff text', () => {
     expect(versionButton).not.toHaveTextContent('v2');
 
     fireEvent.click(versionButton);
-    await waitFor(() => expect(document.querySelector('.workflow-slot__version-diff')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('.history-preview--detail h1')).toHaveTextContent('人工草稿'));
+    expect(document.querySelector('.writer-history-diff')).toBeNull();
+    fireEvent.click(await screen.findByText('对比已保存版本'));
+    await waitFor(() => {
+      expect(document.querySelector('h1[data-history-removed]')).toHaveTextContent('AI 初稿');
+      expect(document.querySelector('h1[data-history-added]')).toHaveTextContent('人工草稿');
+    });
 
     const versionItems = Array.from(document.querySelectorAll('.workflow-slot__version-item'));
     expect(versionItems).toHaveLength(2);
@@ -973,16 +968,15 @@ describe('Writer version diff text', () => {
     );
 
     fireEvent.click(container.querySelector<HTMLButtonElement>('.workflow-slot__version-btn')!);
-    await waitFor(() => expect(document.querySelector('.workflow-slot__version-diff')).not.toBeNull());
+    fireEvent.click(await screen.findByText('对比上一版'));
+    await waitFor(() => expect(document.querySelector('.writer-history-diff')).not.toBeNull());
 
-    const unchangedLines = Array.from(document.querySelectorAll('.memory-diff-line.is-same'));
-    const removedLines = Array.from(document.querySelectorAll('.memory-diff-line.is-remove'));
-    const addedLines = Array.from(document.querySelectorAll('.memory-diff-line.is-add'));
-
-    expect(unchangedLines.some((line) => line.textContent?.includes(retainedParagraph))).toBe(true);
-    expect(removedLines.some((line) => line.textContent?.includes(retainedParagraph))).toBe(false);
-    expect(addedLines.some((line) => line.textContent?.includes(retainedParagraph))).toBe(false);
-    expect(removedLines.some((line) => line.textContent?.includes(removedParagraph))).toBe(true);
+    const comparison = document.querySelector('.writer-history-diff')!;
+    await waitFor(() => expect(comparison.querySelector('[data-history-removed]')).toHaveTextContent(removedParagraph));
+    const unchanged = Array.from(comparison.querySelectorAll('p')).filter(p => p.textContent === retainedParagraph);
+    expect(unchanged).toHaveLength(2);
+    for (const paragraph of unchanged) expect(paragraph.matches('[data-history-added], [data-history-removed]')).toBe(false);
+    expect(comparison.querySelector('[data-history-added]')).toBeNull();
   });
 
   it('uploads an image version against the selected draft baseline', async () => {

@@ -14,6 +14,33 @@ func isPPTPreviewSlot(session *orm.WorkflowSession, slotID string) bool {
 		(slotID == "preview_html" || slotID == "preview_notes")
 }
 
+// A generated page can be published incrementally and again during finalization.
+// Keep storage revisions for editing and rollback, but expose one entry per attempt.
+func samePPTGeneration(a, b orm.WorkflowSlotRevision) bool {
+	automatic := func(source string) bool { return source == "host" || source == "ai" }
+	return a.SlotID == "preview_html" && b.SlotID == a.SlotID &&
+		a.ListIndex != nil && b.ListIndex != nil && *a.ListIndex == *b.ListIndex &&
+		a.StepID == "generate_ppt" && a.StepID == b.StepID &&
+		a.Attempt > 0 && a.Attempt == b.Attempt && a.ProducerAttemptID == b.ProducerAttemptID &&
+		automatic(a.ChangeSource) && automatic(b.ChangeSource)
+}
+
+func visiblePPTRevisions(rows []orm.WorkflowSlotRevision) []orm.WorkflowSlotRevision {
+	visible := make([]orm.WorkflowSlotRevision, 0, len(rows))
+	for _, row := range rows {
+		last := len(visible) - 1
+		if last >= 0 && samePPTGeneration(visible[last], row) {
+			// An older client may have explicitly selected an intermediate snapshot.
+			if !visible[last].Selected {
+				visible[last] = row
+			}
+		} else {
+			visible = append(visible, row)
+		}
+	}
+	return visible
+}
+
 // An explicit insertion reuses existing pages. Rewinds invalidate their producer
 // attempt, so carry the visible historical values into new revisions owned by the
 // current attempt. Never reactivate stale attempts or overwrite selected edits.

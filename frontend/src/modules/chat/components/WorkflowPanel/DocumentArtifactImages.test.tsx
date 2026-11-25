@@ -72,6 +72,18 @@ beforeEach(() => {
 afterEach(() => { cleanup(); useWorkflowStore.setState({ sessionByConversation: {} }); vi.unstubAllGlobals(); });
 
 describe('document artifact image previews', () => {
+  it('opens the clicked image directly without starting an export', async () => {
+    const url = 'https://example.test/illustration.png';
+    api.renderWriterDocument.mockResolvedValue(response(url));
+    render(<DocumentArtifactEditor sessionId='session' slot={slot} />);
+    const inline = await screen.findByAltText('Document illustration');
+    await waitFor(() => expect(inline).toHaveAttribute('src', url));
+    fireEvent.click(inline);
+    await waitFor(() => expect(document.querySelector('.ant-image-preview-img')).toHaveAttribute('src', url));
+    expect(document.querySelector('.document-image-downloads')).toBeNull();
+    expect(api.createDocumentImageExport).not.toHaveBeenCalled();
+  });
+
   it('exports an inline Markdown image from the current snapshot through the owned API', async () => {
     api.renderWriterDocument.mockResolvedValue(response('https://example.test/preview.jpg'));
     api.createDocumentImageExport.mockResolvedValue({ data: { data: { id: 'export', status: 'failed', total: 1, ready: 0, items: [] } } });

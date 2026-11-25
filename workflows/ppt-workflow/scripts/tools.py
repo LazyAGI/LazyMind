@@ -4593,7 +4593,14 @@ def _replace_visible_text_segments(
     # Replace from the end so earlier source offsets remain stable. HTMLParser
     # decodes entities in text_node['text'], therefore the raw node ends at the
     # next tag rather than at start + len(text).
-    for text_node, value in reversed(list(zip(text_nodes, clean_values))):
+    html = _write_text_nodes(html, text_nodes, clean_values)
+    return html, old_values, clean_values
+
+
+def _write_text_nodes(html: str, text_nodes: list[dict], values: list[str]) -> str:
+    for text_node, value in reversed(list(zip(text_nodes, values))):
+        if value == text_node['text'].strip():
+            continue
         start = text_node['start']
         end = html.find('<', start)
         if end < 0:
@@ -4603,7 +4610,7 @@ def _replace_visible_text_segments(
         trailing = raw[len(raw.rstrip()):]
         replacement = leading + _html_escape(value, quote=False) + trailing
         html = html[:start] + replacement + html[end:]
-    return html, old_values, clean_values
+    return html
 
 
 _EDIT_CONTEXT_MAX_CHARS = 30_000
@@ -10849,7 +10856,10 @@ def _patch_native_selection(source, destination, page, old_text, new_text, ops):
     from lxml import etree
     if any(op.get('op') not in {'replace_text', 'replace_text_segments'} for op in ops):
         raise ValueError('This native PPTX supports text polishing here; use the native PPTX editor for layout or structure changes')
-    replacements = list(zip(old_text.split('\n'), new_text.split('\n')))
+    if len(ops) == 1 and 'text_block' in ops[0]:
+        replacements = zip(ops[0]['text_block']['segments'], ops[0]['values'])
+    else:
+        replacements = zip(old_text.split('\n'), new_text.split('\n'))
     name = f'ppt/slides/slide{page}.xml'
     with zipfile.ZipFile(source) as deck:
         if name not in deck.namelist():
@@ -10869,6 +10879,48 @@ def _patch_native_selection(source, destination, page, old_text, new_text, ops):
         with zipfile.ZipFile(destination, 'w', zipfile.ZIP_DEFLATED) as output:
             for info in deck.infolist():
                 output.writestr(info, etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True) if info.filename == name else deck.read(info.filename))
+
+
+def _polish_text_block(tree: _HtmlTree, block: dict, instruction: str):
+    """Resolve the editor's source block and check every segment before requesting a rewrite."""
+    stale = ValueError('文案块已变化，请重新选择后再润色')
+    stale.error_code = 'SELECTION_STALE'
+    if not isinstance(block, dict):
+        raise stale
+    tag = block.get('tag')
+    occurrence = block.get('occurrence')
+    body = next((i for i, node in enumerate(tree.nodes) if node['tag'] == 'body'), None)
+    candidates = [i for i, node in enumerate(tree.nodes)
+                  if node['tag'] == tag and (i == body or body in tree.ancestors(i))]
+    if type(occurrence) is not int or not 0 <= occurrence < len(candidates):
+        raise stale
+    target = candidates[occurrence]
+    node = tree.nodes[target]
+    if node['el'] != block.get('el') or tag in {'style', 'script'}:
+        raise stale
+    nodes = _visible_text_segments(tree, target)
+    if 'direct_index' in block:
+        direct = [item for item in nodes if item['parent'] == target]
+        index = block['direct_index']
+        if type(index) is not int or not 0 <= index < len(direct):
+            raise stale
+        nodes = [direct[index]]
+    elif tree.is_protected(target):
+        raise stale
+    old = [item['text'].strip() for item in nodes]
+    if not old or old != block.get('segments'):
+        raise stale
+    details = [{'position': i, 'text': text} for i, text in enumerate(old, 1)]
+    values = _plan_compound_text_replacement(instruction, tree, target, details)
+    edited = _write_text_nodes(tree.html, nodes, values)
+    # Native-import slides reveal the corresponding editable proxy over the raster.
+    for index in [target, *tree.ancestors(target)]:
+        if _is_ppt_raster_proxy(tree.nodes[index]):
+            edited = _set_inline_styles(edited, tree.nodes[index], {'opacity': '1'})
+            break
+    if node['el'] == 'title' and 'direct_index' not in block:
+        edited = _sync_doc_title(edited, ''.join(old), _html_escape(''.join(values), quote=False), [])
+    return edited, old, values
 
 
 def ppt_preview_selection_edit(
@@ -10906,8 +10958,17 @@ def ppt_preview_selection_edit(
     original = _materialize_legacy_visual_anchors(original, selection)
     tree = _HtmlTree(original)
     edit_selection = {**selection, '_deck_dir': str(deck) if deck is not None else ''}
-    ops, old_text, new_text = _selection_edit_ops(instruction, edit_selection, tree)
-    edited, applied, notes, removed = _apply_html_ops(original, ops)
+    block = selection.get('text_block')
+    if block is not None:
+        if selection.get('el') != '__lazymind_text_block' or selection.get('targets'):
+            raise ValueError('Invalid PPT text block selection')
+        edited, old, values = _polish_text_block(tree, block, instruction)
+        old_text, new_text = '\n'.join(old), '\n'.join(values)
+        ops = [{'op': 'replace_text_segments', 'text_block': block, 'values': values}]
+        applied, notes, removed = ['polished selected text block'], [], old
+    else:
+        ops, old_text, new_text = _selection_edit_ops(instruction, edit_selection, tree)
+        edited, applied, notes, removed = _apply_html_ops(original, ops)
     edited = _normalize_html_newlines(edited)
     _validate_local_html_edit(base_original, edited)
 
@@ -10959,10 +11020,10 @@ def ppt_preview_selection_edit(
         'representation': 'ppt_html',
         'target': {
             'type': 'block',
-            'block_type': 'multi' if multi_targets else tree.nodes[
+            'block_type': block['tag'] if block is not None else 'multi' if multi_targets else tree.nodes[
                 _resolve_el(tree, primary_el, primary_ref)[0]
             ]['tag'],
-            'el': primary_el,
+            'el': (block.get('el') or block['tag']) if block is not None else primary_el,
             'index': _coerce_int(primary_selection.get('index'), 0, lo=1)
             if _coerce_str(primary_selection.get('index')) else None,
             'group': _coerce_str(primary_selection.get('group')) or None,

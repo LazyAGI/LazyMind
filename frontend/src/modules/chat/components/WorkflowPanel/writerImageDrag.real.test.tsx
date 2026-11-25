@@ -50,7 +50,11 @@ it.each([null, '', 'Original text '])('reorders images, retaining links, dimensi
     </WriterImageGroupContext.Provider>;
   }
   const view = render(<Editor />);
-  await waitFor(() => expect(view.container.querySelectorAll('img')).toHaveLength(3));
+  await waitFor(() => {
+    const grouped = view.container.querySelectorAll<HTMLImageElement>('.writer-image-group-images img');
+    expect(Array.from(grouped, image => image.alt)).toEqual(['A', 'B']);
+    expect(view.getByAltText('Single')).toBeInTheDocument();
+  });
   const viewport = view.getByTestId('viewport');
   vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 400, 240));
   Object.defineProperties(viewport, { clientHeight: { value: 240 }, scrollHeight: { value: 1200 } });

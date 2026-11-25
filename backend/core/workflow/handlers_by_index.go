@@ -110,6 +110,7 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		PageEdit         *pptPageEdit    `json:"ppt_page_edit"`
 		Value            json.RawMessage `json:"value"`
 		ContentType      string          `json:"content_type"`
 		Caption          *string         `json:"caption"`
@@ -117,7 +118,19 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		BaseRevision     *int            `json:"base_revision"`
 		BaseDraftVersion *int64          `json:"base_draft_version"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Value) == 0 {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.PageEdit != nil {
+		if slotID != "preview_html" || listIndex < 0 || body.PageEdit.Slide.Revision < 1 || len(body.Value) > 0 {
+			common.ReplyErr(w, "invalid page edit", http.StatusBadRequest)
+			return
+		}
+		handlePPTPageEdit(w, r, sessionID, listIndex, *body.PageEdit)
+		return
+	}
+	if len(body.Value) == 0 {
 		common.ReplyErr(w, "invalid body: value required", http.StatusBadRequest)
 		return
 	}
@@ -371,6 +384,10 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if slotID == "preview_html" {
+		revisions = visiblePPTRevisions(revisions)
+	}
+
 	// Build task_id lookup once for all revisions (avoids N+1 queries).
 	type stepKey struct {
 		stepID  string
@@ -397,7 +414,7 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 			"created_at":    rev.CreatedAt,
 			"selected":      rev.Selected,
 		}
-		if slotID == "draft_document" || slotID == "flat_draft_document" {
+		if slotID == "preview_html" || slotID == "draft_document" || slotID == "flat_draft_document" {
 			item["version"] = formalVersion
 		}
 		var artifactValue json.RawMessage

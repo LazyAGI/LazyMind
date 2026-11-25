@@ -1661,7 +1661,6 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    z-index: 1050;
     width: 640px;
     max-width: 94vw;
     max-height: 90vh;
@@ -3571,7 +3570,6 @@
   }
 
   &__edit-hint,
-  &__expand-button,
   &__edit-confirm {
     position: absolute;
     z-index: 2;
@@ -3596,10 +3594,49 @@
     opacity: 1;
   }
 
-  &__expand-button {
-    top: 10px;
-    right: 10px;
+  &__preview-actions {
+    position: absolute;
+    z-index: 3;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: none;
+
+    > button {
+      height: 28px;
+      white-space: nowrap;
+      pointer-events: auto;
+    }
+  }
+
+  &__ai-action {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
     padding: 6px 10px;
+    border: 1px solid #b6c9ff;
+    border-radius: 7px;
+    background: #f1f5ff;
+    color: #2449a6;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 18px;
+    cursor: pointer;
+    &:hover { background: #dbe7ff; }
+    &:focus-visible { outline: 2px solid #4683ff; outline-offset: 2px; }
+  }
+
+  &__expand-button {
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 7px;
+    color: #fff;
+    background: rgba(15, 23, 42, 0.82);
+    backdrop-filter: blur(5px);
+    font-size: 12px;
     cursor: zoom-in;
 
     &:hover {
@@ -3705,11 +3742,32 @@
     cursor: default;
   }
 
-  &__zoom-close {
-    position: fixed;
+  &__zoom-controls {
+    position: absolute;
     top: 16px;
     right: 20px;
-    z-index: 1;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__zoom-controls &__ai-action {
+    position: static;
+    height: 36px;
+    padding-inline: 16px;
+    border-color: #bfdbfe;
+    border-radius: 18px;
+    background: #dbeafe;
+    color: #1e40af;
+    font-size: 14px;
+
+    .anticon { font-size: 16px; }
+    &:hover { background: #eff6ff; }
+    &:focus-visible { outline-color: #fff; }
+  }
+
+  &__zoom-close {
     width: 36px;
     height: 36px;
     border: 1px solid rgba(255, 255, 255, 0.35);
@@ -5084,4 +5142,46 @@
   h1 { font-size: 24px; }
   h2 { font-size: 20px; }
   h3 { font-size: 17px; }
+}
+
+.workflow-slot__version-popover--visual {
+  width: min(960px, 94vw);
+  .workflow-slot__version-popover-body { height: min(540px, 70vh); max-height: none; }
+  .workflow-slot__version-list { width: clamp(112px, 24%, 210px); min-width: 0; }
+  .workflow-slot__version-compare { min-width: 0; }
+}
+.history-preview {
+  min-width: 0;
+  &--thumb { min-height: 40px; font-size: 11px; pointer-events: none; }
+  &--detail { flex: 1; overflow: auto; padding: 6px; }
+  &--slide.history-preview--thumb { aspect-ratio: 16 / 9; display: grid; align-items: center; }
+  &__slide { display: block; width: 100%; height: auto; }
+  &__placeholder { display: block; padding: 10px; color: #667085; }
+  &__excerpt { display: grid; gap: 3px; padding: 6px; background: white; color: #344054; }
+  &__excerpt > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &__actions { display: flex; gap: 8px; margin: 10px 0; }
+  &__actions button { color: #245bc2; background: transparent; border: 0; cursor: pointer; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+// Give the opened comparison the full reading area.
+.workflow-slot__version-compare:has(> .workflow-slot__history-comparison[open]) > .history-preview { display: none; }
+.workflow-slot__history-comparison {
+  min-height: 0;
+  overflow: auto;
+  summary { cursor: pointer; }
+}
+.writer-history-diff {
+  margin-top: 10px;
+  container-type: inline-size;
+  > [role=status] { display: block; margin-bottom: 8px; color: #475569; }
+  &__pages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  section { min-width: 0; }
+  header { font-weight: 600; padding: 6px; background: #f1f5f9; }
+  [data-history-added] { background-color: #e6f7ed; border-inline-start: 3px solid #25834a; }
+  [data-history-removed] { background-color: #fff0ef; border-inline-start: 3px dashed #bd4942; }
+  .history-preview { overflow-wrap: anywhere; }
+}
+@container (max-width: 480px) {
+  .writer-history-diff__pages { grid-template-columns: minmax(0, 1fr); }
 }

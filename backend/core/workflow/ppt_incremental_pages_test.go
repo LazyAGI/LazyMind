@@ -145,3 +145,26 @@ func TestPPTCarryForwardRollsBackWhenHistoricalPageIsMissing(t *testing.T) {
 		t.Fatalf("partially committed %d revisions", count)
 	}
 }
+
+func TestPPTVisibleVersionsFollowGenerationAndManualEdits(t *testing.T) {
+	page := 0
+	row := func(rev, attempt int, source string) orm.WorkflowSlotRevision {
+		return orm.WorkflowSlotRevision{Revision: rev, Attempt: attempt, ChangeSource: source, StepID: "generate_ppt", SlotID: "preview_html", ListIndex: &page}
+	}
+	rows := []orm.WorkflowSlotRevision{row(1, 1, "host"), row(2, 1, "host"), row(3, 1, "human"), row(4, 2, "ai"), row(5, 2, "host")}
+	check := func(want []int) {
+		t.Helper()
+		got := visiblePPTRevisions(rows)
+		if len(got) != len(want) {
+			t.Fatalf("visible versions: %v", got)
+		}
+		for i, rev := range want {
+			if got[i].Revision != rev {
+				t.Fatalf("v%d: storage revision %d, want %d", i+1, got[i].Revision, rev)
+			}
+		}
+	}
+	check([]int{2, 3, 5})
+	rows[0].Selected = true
+	check([]int{1, 3, 5})
+}

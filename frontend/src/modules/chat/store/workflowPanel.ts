@@ -754,6 +754,7 @@ interface WorkflowStore {
 
   setSession: (conversationId: string, session: WorkflowSession | null) => void;
   updateSlot: (conversationId: string, slot: SlotRevision) => void;
+  applySavedPptPage: (sessionId: string, stateVersion: number, changes: SlotRevision[]) => void;
   loadActiveSession: (
     conversationId: string,
     options?: { silentError?: boolean },
@@ -917,6 +918,23 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
           [conversationId]: { ...session, slots: nextSlots },
         },
       };
+    });
+  },
+
+  applySavedPptPage: (sessionId, stateVersion, changes) => {
+    if (!changes.length) return;
+    set(state => {
+      const sessions = { ...state.sessionByConversation };
+      let updated = false;
+      for (const [key, session] of Object.entries(sessions)) {
+        if (session?.session_id !== sessionId || (session.state_version ?? 0) > stateVersion) continue;
+        const slots = session.slots?.map(slot => slot.selected
+          ? changes.find(change => change.slot_id === slot.slot_id && change.list_index === slot.list_index) ?? slot
+          : slot);
+        sessions[key] = { ...session, slots, state_version: stateVersion };
+        updated = true;
+      }
+      return updated ? { sessionByConversation: sessions } : state;
     });
   },
 

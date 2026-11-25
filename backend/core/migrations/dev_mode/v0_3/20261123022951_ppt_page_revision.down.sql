@@ -1,0 +1,1 @@
+ALTER TABLE plugin_slot_revisions DROP COLUMN ppt_notes_revision_id;

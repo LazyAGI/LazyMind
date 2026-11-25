@@ -12,7 +12,7 @@ export async function resolveSlideAssets(html: string): Promise<string> {
 
 /** Raster captures carry font bytes; native PPTX export resolves the shared font IDs. */
 export async function embedSlideAssetsForExport(
-  html: string, { embedFonts = true }: { embedFonts?: boolean } = {},
+  html: string, { embedFonts = true, signal }: { embedFonts?: boolean; signal?: AbortSignal } = {},
 ): Promise<string> {
   const pattern = /(?<=["'(\s])(?:\/api\/core)?\/static-files\/[^\s"'<>\)]+/g;
   const paths = [...new Set(html.match(pattern) || [])];
@@ -20,7 +20,7 @@ export async function embedSlideAssetsForExport(
     const font = path.match(/^(?:\/api\/core)?\/static-files\/presentation-fonts\/[a-f0-9]{64}\.(ttf|otf)(?:\?|$)/);
     if (font && !embedFonts) return [path, path] as const;
     const url = await resolveMarkdownImageUrlAsync(path.replaceAll('&amp;', '&'));
-    const response = await fetch(url);
+    const response = signal ? await fetch(url, { signal }) : await fetch(url);
     if (!response.ok) throw new Error(`Slide ${font ? 'font' : 'image'} download failed (${response.status})`);
     let blob = await response.blob();
     if (font) {

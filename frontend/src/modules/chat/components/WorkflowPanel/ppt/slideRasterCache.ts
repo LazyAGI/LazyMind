@@ -17,6 +17,17 @@ export interface RasterCacheEntry {
 export const RASTER_EXPORT_PIXEL_RATIO = 2;
 
 const cache = new Map<string, RasterCacheEntry>();
+// PNG data URLs may contain several megabytes even for a single slide.
+const MAX_MEMORY_CHARS = 24 * 1024 * 1024;
+function remember(key: string, entry: RasterCacheEntry) {
+  cache.delete(key);
+  cache.set(key, entry);
+  let chars = 0;
+  for (const [id, shot] of [...cache].reverse()) {
+    chars += shot.pngDataUrl.length;
+    if (chars > MAX_MEMORY_CHARS) cache.delete(id);
+  }
+}
 const inflight = new Map<string, Promise<string>>();
 let captureQueue: Promise<void> = Promise.resolve();
 
@@ -62,7 +73,7 @@ export function fingerprintArtifact(raw: unknown): string {
 
 export function rasterCacheKey(sessionId: string, fingerprint: string): string {
   // Bump prefix when capture pipeline changes so stale/failed shots are not reused.
-  return `${sessionId || '_'}::v10::${fingerprint}`;
+  return `${sessionId || '_'}::v11::${fingerprint}`;
 }
 
 export function getRasterPng(key: string): string | null {
@@ -86,14 +97,14 @@ export async function loadRasterPng(key: string, pixelRatio = RASTER_EXPORT_PIXE
     const entry: RasterCacheEntry = await saved.json();
     if (typeof entry.pngDataUrl !== 'string' || !entry.pngDataUrl.startsWith('data:image/png;base64,')
         || !Number.isFinite(entry.pixelRatio) || entry.pixelRatio < pixelRatio) return null;
-    cache.set(key, entry);
+    remember(key, entry);
     return entry.pngDataUrl;
   } catch { return null; } // Unavailable/full browser storage must not block rendering.
 }
 
 export async function setRasterPng(key: string, pngDataUrl: string, pixelRatio = RASTER_EXPORT_PIXEL_RATIO): Promise<void> {
   const entry = { pngDataUrl, capturedAt: Date.now(), pixelRatio };
-  cache.set(key, entry);
+  remember(key, entry);
   try {
     const saved = await caches.open(DISK_CACHE);
     await saved.put(diskKey(key), new Response(JSON.stringify(entry), {
@@ -102,6 +113,24 @@ export async function setRasterPng(key: string, pngDataUrl: string, pixelRatio =
     const keys = await saved.keys();
     await Promise.all(keys.slice(0, Math.max(0, keys.length - MAX_SAVED_SHOTS)).map(k => saved.delete(k)));
   } catch { /* The in-memory image remains usable when storage is unavailable. */ }
+}
+
+/** A filmstrip button only needs a small copy of the export raster. */
+export async function filmstripImage(png: string): Promise<string> {
+  const image = new Image();
+  image.src = png;
+  await image.decode();
+  const scale = Math.min(1, 320 / Math.max(image.naturalWidth, image.naturalHeight));
+  if (scale === 1) return png;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext('2d');
+  if (!context) return png;
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  image.src = canvas.toDataURL('image/png');
+  await image.decode();
+  return image.src;
 }
 
 /** Drop one entry before forced re-capture, including its persistent copy. */
@@ -131,7 +160,7 @@ export async function invalidateRasterSession(sessionId: string): Promise<void> 
 export async function ensureRasterPng(
   key: string,
   html: string,
-  options?: { pixelRatio?: number; waitMs?: number; force?: boolean },
+  options?: { pixelRatio?: number; waitMs?: number; force?: boolean; staticOnly?: boolean },
 ): Promise<string> {
   const pixelRatio = options?.pixelRatio ?? RASTER_EXPORT_PIXEL_RATIO;
   if (!options?.force) {
@@ -151,6 +180,7 @@ export async function ensureRasterPng(
     const png = await captureHtmlSlidePng(html, {
       pixelRatio,
       waitMs: options?.waitMs ?? 320,
+      staticOnly: options?.staticOnly,
     });
     await setRasterPng(key, png, pixelRatio);
     return png;
