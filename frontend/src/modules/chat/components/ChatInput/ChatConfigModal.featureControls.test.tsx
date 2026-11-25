@@ -1,3 +1,4 @@
+import { message } from 'antd';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,7 +17,10 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 
-vi.mock('../../utils/workflowApprovalSettings', () => ({ applyWorkflowApprovalSettings: mocks.applyApproval }));
+vi.mock('../../utils/workflowApprovalSettings', async () => ({
+  ...await vi.importActual<typeof import('../../utils/workflowApprovalSettings')>('../../utils/workflowApprovalSettings'),
+  applyWorkflowApprovalSettings: mocks.applyApproval,
+}));
 
 vi.mock('antd', async () => {
   const actual = await vi.importActual<typeof import('antd')>('antd');
@@ -73,6 +77,7 @@ vi.mock('@/modules/user/uiPreferencesApi', () => ({
 
 describe('ChatConfigPopover feature control independence', () => {
   beforeEach(() => {
+    vi.mocked(message.error).mockClear();
     mocks.fetchUserUiPreferences.mockReset();
     mocks.fetchUserUiPreferences.mockResolvedValue({
       task_center_enabled: false,
@@ -355,7 +360,8 @@ describe('ChatConfigPopover feature control independence', () => {
     expect(disabledMode).toBeChecked();
   });
 
-  it('updates the active workflow mode and preserves remembered scope without changing conversation defaults', async () => {
+  it.each([false, true])('updates active settings without changing defaults; conflict=%s', async conflict => {
+    if (conflict) mocks.applyApproval.mockRejectedValue({ response: { status: 409, data: { error: { code: 'STATE_VERSION_CONFLICT' } } } });
     mocks.fetchUserUiPreferences.mockResolvedValue({
       task_center_enabled: true,
       workflows_enabled: true,
@@ -385,7 +391,14 @@ describe('ChatConfigPopover feature control independence', () => {
     });
     fireEvent.click(within(workflowControl).getByRole('radio', { name: '自动执行' }));
     await waitFor(() => expect(mocks.applyApproval).toHaveBeenCalledWith(active, 'auto', true, undefined));
-    expect(mocks.refresh).toHaveBeenCalledWith('conversation-1');
+    if (conflict) {
+      await waitFor(() => expect(message.error).toHaveBeenCalledOnce());
+      expect(mocks.refresh).toHaveBeenCalledWith('conversation-1', { silentError: true });
+      expect(within(workflowControl).getByRole('radio', { name: '按需审批' })).toBeChecked();
+      expect(mocks.applyApproval).toHaveBeenCalledOnce();
+    } else {
+      expect(mocks.refresh).toHaveBeenCalledWith('conversation-1');
+    }
     expect(mocks.patchConversationSettings).not.toHaveBeenCalled();
   });
 });

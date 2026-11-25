@@ -4896,6 +4896,7 @@ const zhCN = {
     workflowApprovalAutomatic: "自动执行",
     workflowApprovalRemember: "以后此工作流沿用此设置",
     workflowApprovalScopeHint: "默认仅本次运行。切换为自动执行会放行当前等待审批的步骤。",
+    workflowApprovalStateChanged: "工作流状态已更新，请确认设置后重新应用。",
     workflowApprovalSaved: "已切换为{{mode}}，仅本次运行生效。",
     workflowApprovalSavedRemembered: "已切换为{{mode}}，以后此工作流沿用此设置。",
     workflowApprovalContinueUnavailable: "未能继续执行，请刷新工作流后重试。",

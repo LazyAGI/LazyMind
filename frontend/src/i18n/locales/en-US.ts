@@ -4976,6 +4976,7 @@ const enUS = {
     workflowApprovalAutomatic: "Automatic",
     workflowApprovalRemember: "Use this setting for future runs",
     workflowApprovalScopeHint: "Applies to this run by default. Automatic mode also approves the current pending step.",
+    workflowApprovalStateChanged: "The workflow state has changed. Review the settings and apply again.",
     workflowApprovalSaved: "Switched to {{mode}} for this run only.",
     workflowApprovalSavedRemembered: "Switched to {{mode}} and saved for future runs of this workflow.",
     workflowApprovalContinueUnavailable: "Could not continue execution. Refresh the workflow and try again.",

@@ -43,6 +43,6 @@ it('uses external confirmation and continuation with the exact reviewed checkpoi
   const send = vi.fn();
   await applyWorkflowApprovalSettings({ ...session, controller_host: 'external-agent' }, 'auto', true, send);
   expect(api.control).toHaveBeenCalledWith('run', expect.objectContaining({ kind: 'confirm_and_continue',
-    expected_state_version: 8, review_id: 'review', review_version: 2, manifest_hash: 'hash', step_id: 'outline' }));
+    expected_state_version: 8, review_id: 'review', review_version: 2, manifest_hash: 'hash', step_id: 'outline' }), { silentError: true });
   expect(send).not.toHaveBeenCalled();
 });

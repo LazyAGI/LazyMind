@@ -17,8 +17,7 @@ import {
 import './ChatConfigModal.scss';
 import { useWorkflowStore } from '../../store/workflowPanel';
 import { WorkflowSessionApi } from '../../utils/request';
-import { applyWorkflowApprovalSettings, type SendWorkflowMessage } from '../../utils/workflowApprovalSettings';
-import { getLocalizedErrorMessage } from '@/components/request';
+import { applyWorkflowApprovalSettings, workflowApprovalErrorMessage, type SendWorkflowMessage } from '../../utils/workflowApprovalSettings';
 
 interface ChatConfigPopoverProps {
   menuHeight?: number;
@@ -342,7 +341,7 @@ export default function ChatConfigPopover({
       if (!workflowSession || nextMode === 'disabled' || savingWorkflowMode) return;
       setSavingWorkflowMode(true);
       try {
-        const result = await WorkflowSessionApi().getSession(workflowSession.session_id);
+        const result = await WorkflowSessionApi().getSession(workflowSession.session_id, { silentError: true } as never);
         const remember = Boolean(result.data.data.session.saved_approval_mode);
         await applyWorkflowApprovalSettings(workflowSession, nextMode, remember, onSendWorkflowMessage);
         await useWorkflowStore.getState().loadActiveSession(conversationId!);
@@ -350,7 +349,8 @@ export default function ChatConfigPopover({
           mode: t(nextMode === 'auto' ? 'chat.workflowApprovalAutomatic' : 'chat.workflowApprovalOnDemand'),
         }));
       } catch (error) {
-        message.error(getLocalizedErrorMessage(error));
+        message.error(await workflowApprovalErrorMessage(error, () =>
+          useWorkflowStore.getState().loadActiveSession(conversationId!, { silentError: true })));
       } finally { setSavingWorkflowMode(false); }
       return;
     }

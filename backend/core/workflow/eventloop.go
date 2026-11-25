@@ -644,6 +644,9 @@ func launchWorkflowAttempt(
 	}
 	if params.HandOff != nil {
 		rawParamsMap["hand_off"] = *params.HandOff
+		// A handoff without a required review is the user's requested stopping
+		// boundary. Freeze it at dispatch: approval policy can change mid-step.
+		rawParamsMap["wait_for_user"] = *params.HandOff && !reviewRequired
 	}
 	if params.HostedTaskID != "" {
 		rawParamsMap["hosted_task_id"] = params.HostedTaskID
@@ -947,12 +950,16 @@ func OnSubAgentDone(
 			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
 			return
 		}
-		if display.ApprovalRequired() {
+		if display.ApprovalRequired() || (session.WorkflowMode == "auto" && display.Reason == "next_step_required") {
 			if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting); err != nil {
 				onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
 				return
 			}
-			onSSE("step_waiting", map[string]any{"session_id": pctx.SessionID, "step_id": display.ApprovalStepID, "reason": "approval_required"})
+			waitingStepID := display.ApprovalStepID
+			if waitingStepID == "" {
+				waitingStepID = pctx.StepID
+			}
+			onSSE("step_waiting", map[string]any{"session_id": pctx.SessionID, "step_id": waitingStepID, "reason": display.Reason})
 			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 			return
 		}
@@ -1100,7 +1107,16 @@ func advanceAutoMode(
 		artifactsSummary = "Current artifacts could not be read. Do not infer missing evidence or rewind upstream from this unavailable context."
 		fmt.Printf("[Workflow] Driver artifact context unavailable session=%s err=%v\n", pctx.SessionID, artifactsErr)
 	}
-	driverInput := fmt.Sprintf("Terminal status: %s\nAttempt: %d\n%s", terminalStatus, attempt, summary)
+	checks, checksErr := buildWorkflowPostStepChecks(ctx, db, sessionBefore, pctx.StepID)
+	if checksErr != nil {
+		if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed); err != nil {
+			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+			return
+		}
+		onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": "Could not read post-step check evidence: " + checksErr.Error()})
+		return
+	}
+	driverInput := fmt.Sprintf("Terminal status: %s\nAttempt: %d\n%s\n%s", terminalStatus, attempt, summary, checks)
 	driverMsg, fallback := callWorkflowDriverAgent(
 		pctx.WorkflowID, pctx.StepID, driverInput, acceptance, driverPrompt, pctx.SessionID,
 		pctx.HistoryFilesPerTurn, llmConfig, artifactsSummary,

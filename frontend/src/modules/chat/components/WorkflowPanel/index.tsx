@@ -2436,7 +2436,6 @@ export function WorkflowPanel({
               <WorkflowToolbarIcon name={view.mode === 'following' ? 'following' : 'browse'} />
             </button>
           </Tooltip>}
-          <span className='workflow-panel__tool-spacer' />
           <div className='workflow-panel__intent-btn-wrap'>
             <Dropdown trigger={['click']} menu={{
               items: [

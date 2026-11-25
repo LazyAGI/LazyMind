@@ -420,7 +420,8 @@ func TestNativeColdStartSnapshotsSavedApprovalPolicy(t *testing.T) {
 			if err := db.Create(&orm.WorkflowApprovalPreference{UserID: "batch-user", WorkflowID: "batch-plugin", StepID: "*", ApprovalRequired: required}).Error; err != nil {
 				t.Fatal(err)
 			}
-			_, taskID, _, err := launchWorkflowAttempt(t.Context(), db.DB, nil, "cold-policy-chat", "history", "batch-user", "cold-policy-task", "run", "run", WorkflowStepParams{WorkflowID: "batch-plugin", RevisionID: revision.ID, StepID: "branch_b", IsColdStart: true, WorkflowMode: "dynamic"}, nil, nil, nil, nil, false, false)
+			handoff := true
+			_, taskID, _, err := launchWorkflowAttempt(t.Context(), db.DB, nil, "cold-policy-chat", "history", "batch-user", "cold-policy-task", "run", "run", WorkflowStepParams{WorkflowID: "batch-plugin", RevisionID: revision.ID, StepID: "branch_b", IsColdStart: true, WorkflowMode: "dynamic", HandOff: &handoff}, nil, nil, nil, nil, false, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -441,6 +442,12 @@ func TestNativeColdStartSnapshotsSavedApprovalPolicy(t *testing.T) {
 			}
 			if params.WorkflowMode != mode {
 				t.Fatalf("executor policy=%s want=%s", params.WorkflowMode, mode)
+			}
+			var boundary struct {
+				WaitForUser bool `json:"wait_for_user"`
+			}
+			if err := json.Unmarshal(task.Params, &boundary); err != nil || boundary.WaitForUser == required {
+				t.Fatalf("handoff must distinguish user boundary from required review: params=%s err=%v", task.Params, err)
 			}
 		})
 	}

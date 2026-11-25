@@ -159,7 +159,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession, completed bool) (View, 
 	if step.Status != "succeeded" {
 		return View{Status: "failed", Reason: step.Status}, nil
 	}
-	if session.Status == "waiting" && session.WorkflowMode == "dynamic" && session.ControllerHost == "lazymind" && session.ControlProtocol == "" {
+	if session.Status == "waiting" && session.ControllerHost == "lazymind" && session.ControlProtocol == "" {
 		for _, step := range current {
 			if step.Status != "succeeded" {
 				return View{Status: "failed", Reason: step.Status}, nil
@@ -173,6 +173,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession, completed bool) (View, 
 		if err == nil {
 			var request struct {
 				HandOff      bool   `json:"hand_off"`
+				WaitForUser  bool   `json:"wait_for_user"`
 				WorkflowMode string `json:"workflow_mode"`
 				SessionID    string `json:"session_id"`
 				StepID       string `json:"step_id"`
@@ -180,7 +181,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession, completed bool) (View, 
 			if err := json.Unmarshal(task.Params, &request); err != nil {
 				return View{}, err
 			}
-			if request.HandOff && request.WorkflowMode == "dynamic" && request.SessionID == session.ID && request.StepID == step.StepID {
+			if request.HandOff && (request.WaitForUser || (session.WorkflowMode == "dynamic" && request.WorkflowMode == "dynamic")) && request.SessionID == session.ID && request.StepID == step.StepID {
 				return View{Status: "waiting", Reason: "next_step_required"}, nil
 			}
 		}

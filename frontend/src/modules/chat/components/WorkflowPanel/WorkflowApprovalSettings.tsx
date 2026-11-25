@@ -4,7 +4,7 @@ import { WorkflowToolbarIcon } from './WorkflowToolbarIcon';
 import { useTranslation } from 'react-i18next';
 import { getLocalizedErrorMessage } from '@/components/request';
 import type { WorkflowSession } from '../../store/workflowPanel';
-import { applyWorkflowApprovalSettings, type SendWorkflowMessage } from '../../utils/workflowApprovalSettings';
+import { applyWorkflowApprovalSettings, workflowApprovalErrorMessage, type SendWorkflowMessage } from '../../utils/workflowApprovalSettings';
 import { WorkflowSessionApi } from '../../utils/request';
 
 export function WorkflowApprovalSettings({ session, onRefresh, disabled, onSendMessage, beforeApply }: {
@@ -33,7 +33,7 @@ export function WorkflowApprovalSettings({ session, onRefresh, disabled, onSendM
       }));
       setOpen(false);
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
+      message.error(await workflowApprovalErrorMessage(error, onRefresh));
     } finally { setSaving(false); }
   }
   async function changeOpen(next: boolean) {
@@ -43,7 +43,7 @@ export function WorkflowApprovalSettings({ session, onRefresh, disabled, onSendM
     setMode(currentMode);
     setLoading(true);
     try {
-      const result = await WorkflowSessionApi().getSession(session.session_id);
+      const result = await WorkflowSessionApi().getSession(session.session_id, { silentError: true } as never);
       setRemember(Boolean(result.data.data.session.saved_approval_mode));
     } catch (error) {
       setOpen(false);
