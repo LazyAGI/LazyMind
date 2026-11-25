@@ -721,6 +721,79 @@ describe('shared workflow compact layout', () => {
     expect(within(shortcuts).queryByRole('button', { name: 'stale_step' })).not.toBeInTheDocument();
   });
 
+  it.each(['completed', 'failed'] as const)('lets users review a PPT stage before explicitly retrying it in a %s run', async status => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.status = status;
+    fixture.session.projection!.display!.status = status;
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const stage = await screen.findByRole('tab', { name: '写作准备' });
+    expect(screen.queryByRole('group', { name: '回退到步骤：' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /执行图/ })).toBeVisible();
+    await act(async () => fireEvent.click(stage));
+    expect(stage).toHaveAttribute('aria-selected', 'true');
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重新执行' }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith('从「写作准备」开始重新执行，并继续执行后续步骤。', {
+      session_id: 'layout-test', kind: 'rewind', step_id: 'prepare', expected_state_version: 0,
+    }));
+  });
+
+  it('reruns a browsed PPT step and its successors from a paused native session', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display!.status = 'paused';
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    fireEvent.click(await screen.findByRole('tab', { name: '写作准备' }));
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('group', { name: '工作流会话操作' })).getByRole('button', { name: '重新执行' }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith('从「写作准备」开始重新执行，并继续执行后续步骤。'));
+  });
+
+  it('routes a failed PPT stage retry to its external agent using the step label', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.status = 'failed';
+    fixture.session.projection!.display!.status = 'failed';
+    fixture.session.projection!.past = ['prepare'];
+    fixture.session.steps![1].status = 'failed';
+    fixture.ui.stepLabels = { write_document: '生成演示文稿' };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    fireEvent.click(await screen.findByRole('button', { name: '重新执行' }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith('从「生成演示文稿」开始重新执行，并继续执行后续步骤。'));
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('lets PPT users browse, then retry the selected failed stage through the embedded host', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.status = 'failed';
+    fixture.session.projection!.display!.status = 'failed';
+    fixture.session.projection!.past = ['prepare'];
+    fixture.session.steps![1].status = 'failed';
+    const execute = vi.fn(async () => {});
+    render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={{ execute }} />);
+    await screen.findByRole('tab', { name: /^成稿/ });
+    fireEvent.click(screen.getByRole('button', { name: '自由浏览' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^成稿/ }));
+    expect(execute).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重新执行' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledWith({ kind: 'retry', stepId: 'write_document' }));
+  });
+
+  it('keeps the PPT run untouched when the active design cannot be saved', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.flush.mockResolvedValue(false);
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const retry = await screen.findByRole('button', { name: '重新执行' });
+    await screen.findByRole('button', { name: '发布' });
+    await act(async () => fireEvent.click(retry));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('does not rerun when saving the current edits fails', async () => {
     fixture.flush.mockResolvedValue(false);
     const send = vi.fn();

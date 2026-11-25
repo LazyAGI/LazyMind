@@ -188,7 +188,7 @@ func TestAcquireLockedPackageSourceFallback(t *testing.T) {
 				{name: modelScopeSource, url: server.URL + "/ms"},
 				{name: huggingFaceSource, url: server.URL + "/hf"},
 			}
-			pkg, err := acquireFromSources(context.Background(), "", entry, cache, server.Client(), sources, 500*time.Millisecond)
+			pkg, _, err := acquireFromSources(context.Background(), "", entry, cache, server.Client(), sources, 500*time.Millisecond)
 			mu.Lock()
 			got := slices.Clone(requested)
 			mu.Unlock()

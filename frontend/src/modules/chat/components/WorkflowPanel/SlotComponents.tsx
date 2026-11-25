@@ -2378,7 +2378,9 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   ) : null;
 
   return (
-    <div className={`workflow-slot workflow-slot--text${isJsonBlock ? ' workflow-slot--json-block' : ''}`}>
+    <div className={`workflow-slot workflow-slot--text${isJsonBlock ? ' workflow-slot--json-block' : ''}${widget?.widgetType === 'ppt-prompt' ? ' workflow-slot--ppt-prompt' : ''}`}
+      style={widget?.widgetType === 'ppt-prompt' && editing && editViewportRef.current
+        ? { '--ppt-prompt-edit-height': `${editViewportRef.current.height}px` } as React.CSSProperties : undefined}>
       {canEditMarkdown ? (
         <>
           <MarkdownArtifactEditor

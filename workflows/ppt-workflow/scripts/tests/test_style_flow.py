@@ -26,6 +26,7 @@ def _import_stubs() -> dict[str, types.ModuleType]:
     cancellation = types.ModuleType('lazymind.chat.engine.agent_runtime.cancellation')
     cancellation.make_cancel_stop_condition = lambda: None
     message_fields = types.ModuleType('lazymind.chat.engine.agent_runtime.message_fields')
+    message_fields.model_response_text = mock.Mock(name='model_response_text', spec_set=lambda response: '')
     message_fields.strip_leading_reasoning = str.strip
     subagent_tools = types.ModuleType('lazymind.chat.engine.subagent.tools')
     subagent_tools._resolve_artifact_text = lambda value: str(value or '')

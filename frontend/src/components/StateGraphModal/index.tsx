@@ -31,6 +31,7 @@ export interface StateGraphModalProps {
   onClose: () => void;
   sessionId: string;
   workflowId: string;
+  stepLabels?: Record<string, string>;
   liveRefresh?: boolean;
   conversationId?: string;
   fallbackSteps?: { step_id: string; status: string }[];
@@ -60,7 +61,7 @@ type ProjectionEnvelope = {
   }[]>;
 };
 
-function projectionToGraph(raw: ProjectionEnvelope, t: TFunction): StateGraphData {
+function projectionToGraph(raw: ProjectionEnvelope, t: TFunction, stepLabels?: Record<string, string>): StateGraphData {
   const projection = raw.projection ?? {};
   const graphNodes = raw.graph?.nodes ?? {};
   const order = raw.graph?.static_order ?? Object.keys(graphNodes);
@@ -89,7 +90,7 @@ function projectionToGraph(raw: ProjectionEnvelope, t: TFunction): StateGraphDat
       const latestAttempt = Math.max(0, ...attempts.filter(attempt => attempt.validity !== 'stale').map(attempt => attempt.attempt));
       return {
         id,
-        label: graphNodes[id]?.label || id,
+        label: stepLabels?.[id] || graphNodes[id]?.label || id,
         step_index: index + 1,
         status,
         status_notes: statusNotes,
@@ -113,12 +114,12 @@ function projectionToGraph(raw: ProjectionEnvelope, t: TFunction): StateGraphDat
   return { nodes, edges, initial: '__start__' };
 }
 
-function fallbackStepsToGraph(steps: { step_id: string; status: string }[]): StateGraphData {
+function fallbackStepsToGraph(steps: { step_id: string; status: string }[], stepLabels?: Record<string, string>): StateGraphData {
   const nodes: StateGraphData['nodes'] = [
     { id: '__start__', label: '__start__', step_index: 0, status: 'succeeded', is_current: false },
     ...steps.map((step, index) => ({
       id: `fallback-${index}`,
-      label: step.step_id || `Step ${index + 1}`,
+      label: stepLabels?.[step.step_id] || step.step_id || `Step ${index + 1}`,
       step_index: index + 1,
       status: step.status || 'pending',
       is_current: step.status === 'running',
@@ -144,6 +145,7 @@ export default function StateGraphModal({
   liveRefresh = false,
   conversationId,
   fallbackSteps = EMPTY_FALLBACK_STEPS,
+  stepLabels,
 }: StateGraphModalProps) {
   const { t } = useTranslation();
   const [data, setData] = useState<StateGraphData | null>(null);
@@ -161,7 +163,7 @@ export default function StateGraphModal({
         { silentError: true } as never,
       );
       // ReplyOK wraps the payload as { code, message, data: {...} }.
-      const incoming = projectionToGraph(resp.data?.data ?? resp.data, t);
+      const incoming = projectionToGraph(resp.data?.data ?? resp.data, t, stepLabels);
       // Merge: preserve topology reference if node/edge IDs haven't changed,
       // so StateGraphView's useMemo layout cache stays valid.
       if (cachedDataRef.current) {
@@ -191,7 +193,7 @@ export default function StateGraphModal({
       setError(null);
     } catch {
       if (fallbackSteps.length > 0) {
-        const fallback = fallbackStepsToGraph(fallbackSteps);
+        const fallback = fallbackStepsToGraph(fallbackSteps, stepLabels);
         cachedDataRef.current = fallback;
         setData(fallback);
         setError(null);
@@ -201,7 +203,7 @@ export default function StateGraphModal({
     } finally {
       setLoading(false);
     }
-  }, [fallbackSteps, sessionId, t]);
+  }, [fallbackSteps, sessionId, stepLabels, t]);
 
   // Fetch on open.
   useEffect(() => {

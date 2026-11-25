@@ -2165,6 +2165,7 @@ export function MarkdownArtifactEditor({
             onChange: groups => handleMarkdownChange(editorRef.current!.getMarkdown(), false, groups),
           }}><MDXEditor
             ref={editorRef}
+            autoFocus={contentKind === 'prompt' && !readOnly && { preventScroll: true }}
             className='writer-markdown-editor__surface'
             contentEditableClassName='writer-markdown-editor__content'
             markdown={stripImageGroupMarkdown(normalizeMarkdownForMdxEditor(draftMarkdown, literalHtml))}

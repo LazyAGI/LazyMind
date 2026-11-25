@@ -35,6 +35,7 @@ export default function Workbench({ active }: WorkbenchProps) {
   const [removingTask, setRemovingTask] = useState<Task | null>(null);
   const [selected, setSelected] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
+  const { stepLabels } = useTaskSteps(graphTask);
   const [activeCategory, setActiveCategory] = useState<WorkbenchCategory>('attention');
 
   useLayoutEffect(() => {
@@ -144,7 +145,7 @@ export default function Workbench({ active }: WorkbenchProps) {
       </Spin></div>
       <TaskRemovalDialog task={removingTask} onClose={() => setRemovingTask(null)} />
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenWorkflow={(sessionId) => navigate(`/workflow-runs/${encodeURIComponent(sessionId)}`)} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onDelete={setRemovingTask} />
-      {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
+      {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} stepLabels={stepLabels} />}
     </div>
   );
 }

@@ -63,7 +63,7 @@ from lazyllm import ThreadPoolExecutor
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.agent_runtime.cancellation import make_cancel_stop_condition
-from lazymind.chat.engine.agent_runtime.message_fields import strip_leading_reasoning
+from lazymind.chat.engine.agent_runtime.message_fields import model_response_text, strip_leading_reasoning
 from lazymind.chat.engine.subagent.context import get_context, require_context
 from lazymind.document_tools.artifacts import _markdown_heading_rows, normalize_generated_markdown
 from lazymind.chat.engine.subagent.tools import (
@@ -5051,7 +5051,9 @@ def _ppt_progress(message: str, progress: int = 10) -> None:
               'progress': progress, 'current_phase': message})
 
 
-def _page_attempt_guard(deck: Path, failure: dict | None = None) -> None:
+def _page_attempt_guard(
+    deck: Path, failure: dict | None = None, *, tool_name: str = 'ppt_generate_pages',
+) -> None:
     """A failed page batch cannot be restarted by the agent in the same Attempt."""
     try:
         ctx = require_context()
@@ -5061,12 +5063,12 @@ def _page_attempt_guard(deck: Path, failure: dict | None = None) -> None:
     if not isinstance(failures, dict):
         failures = {}
         ctx._ppt_page_failures = failures
-    key = str(deck.resolve())
+    key = (tool_name, str(deck.resolve()))
     if failure is not None:
         failures[key] = failure
     elif key in failures:
-        _tool_error('ppt_generate_pages',
-                    'Page generation already failed in this task. Stop and report the failure; '
+        _tool_error(tool_name,
+                    f'{tool_name} already failed in this task. Stop and report the failure; '
                     'a user-requested new workflow Attempt is required to retry.',
                     detail=json.dumps(failures[key], ensure_ascii=False))
 
@@ -5352,20 +5354,8 @@ def _batch_page_html_publish_progressive(
 
 
 def _model_response_text(response: Any) -> str:
-    """Read model content without stringifying response envelopes/reasoning."""
-    if isinstance(response, str):
-        return response.strip()
-    if isinstance(response, dict):
-        content = response.get('content')
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            return ''.join(
-                block['text'] for block in content
-                if isinstance(block, dict) and block.get('type') in ('text', 'output_text')
-                and isinstance(block.get('text'), str)
-            ).strip()
-    return ''
+    """Use the shared protocol projection, including structured text blocks."""
+    return model_response_text(response)
 
 
 def _agent_llm_call(
@@ -8918,9 +8908,20 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
             allow_empty=True,
         )
         try:
+            if not raw.strip():
+                raise ValueError(
+                    'PPT_PAGE_PROMPT_EMPTY: 模型未返回可用正文（可能只有思考内容）。'
+                    '请重试，或切换模型/调整思考与输出额度后重试。'
+                )
             if raw.startswith('```') and raw.endswith('```'):
                 raw = raw.partition('\n')[2][:-3].strip()
-            plan = json.loads(raw)
+            try:
+                plan = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    'PPT_PAGE_PROMPT_INVALID_JSON: 模型返回的页面规划不是有效 JSON '
+                    f'(line {exc.lineno}, column {exc.colno})。请重试或切换模型。'
+                ) from exc
             if not isinstance(plan, dict) or not all(
                 isinstance(plan.get(key), str) and plan[key].strip() for key in required
             ):
@@ -8938,6 +8939,9 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
             _validate_prompt_output_format(shared['output_format'], [brief])
             return {'brief': brief, 'note': prefix + note, 'published': False}
         except (ValueError, ToolExecutionError) as exc:
+            # Do not log generated copy, reasoning or raw provider responses.
+            _LOG.warning('[PPT] page prompt rejected: page=%s attempt=%s response_chars=%s',
+                         page_no, attempt + 1, len(raw))
             if attempt:
                 raise
             payload['repair'] = str(exc)
@@ -8945,6 +8949,12 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
 
 def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dict:
     """Author and publish one editable slide prompt at a time for a new deck or retry.
+
+    Only accepts global_style and output_format. Reads the approved outline,
+    timing, assets and speaker notes context from the bound workflow itself.
+    Do not pass pages, page_prompts, page_components, total_minutes, total_seconds
+    or speaker_notes_source_schema_version. Retry with these same two arguments;
+    completed pages and their original shared style are retained.
 
     Args:
         global_style: Shared audience, language, typography, colors and output rules.
@@ -8958,6 +8968,7 @@ def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dic
         raise ToolExecutionError('A non-empty global_style is required')
     output_format = _validate_prompt_output_format(output_format, [global_style])
     ctx = require_context()
+    _page_attempt_guard(deck, tool_name='ppt_plan_page_prompts')
     outline, _ = _resolve_artifact_text(ctx, 'deck_outline')
     pages = _split_text_outline(outline or '')
     evidence = {
@@ -9001,7 +9012,14 @@ def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dic
         try:
             if key not in saved:
                 timing = timings[page_no - 1] if page_no <= len(timings) else {}
-                saved[key] = _plan_one_page_prompt(shared, page_no, page, timing)
+                _ppt_progress(f'正在规划第 {page_no} 页提示词，共 {len(pages)} 页',
+                              10 + 70 * (page_no - 1) // len(pages))
+                try:
+                    saved[key] = _plan_one_page_prompt(shared, page_no, page, timing)
+                except Exception as exc:
+                    _page_attempt_guard(deck, {'page': page_no, 'error': str(exc)},
+                                        tool_name='ppt_plan_page_prompts')
+                    raise
                 _write_json_atomic(progress_path, checkpoint)
                 generated += 1
             item = saved[key]
@@ -9020,7 +9038,14 @@ def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dic
             _write_json_atomic(progress_path, checkpoint)
             published += 1
         except Exception as exc:
-            raise ToolExecutionError(f'Page {page_no} prompt failed: {exc}') from exc
+            error = ToolExecutionError(
+                f'Page {page_no} prompt failed: {exc} '
+                '已保留完成的页面提示词和已确认内容。'
+                '重试仅调用 ppt_plan_page_prompts(global_style=原共享风格, output_format=已保存格式)，'
+                '大纲、页数和计时由工具自动读取；不要传 pages、page_prompts 或其他额外参数。'
+            )
+            error.ppt_diagnostics = _model_failure_details(exc)
+            raise error from exc
 
     for position in range(len(order), len(pages), -1):
         if _tool_failed(_delete_ui_slot_item('slide_outline', position)):
