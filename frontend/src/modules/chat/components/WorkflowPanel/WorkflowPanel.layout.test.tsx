@@ -12,6 +12,8 @@ import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingCont
 import { WorkflowPanel } from './index';
 import { controlActions, externalPanelAction, externalContinuationStep, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
+import { applyWorkflowApprovalSettings } from '@/modules/chat/utils/workflowApprovalSettings';
+import { flushWorkflowEdits } from '@/modules/chat/utils/workflowEditFlush';
 import { ArtifactPreviewContext, useArtifactPreviewController } from '../ArtifactPreview/context';
 
 setupAntdStaticCleanup();
@@ -166,6 +168,23 @@ async function waitForCompletedContinueButton() {
 }
 
 describe('shared workflow compact layout', () => {
+  it('shows a failed native image step instead of waiting for a result', async () => {
+    fixture.ui = { name: 'AI 图片生成', tabs: [{ id: 'generate_image', step_id: 'generate_image', label: '生成',
+      layout: 'composite', slots: [{ id: 'image', label: '图片', type: 'image' }] }] };
+    fixture.session = { ...fixture.session, status: 'failed', current_step_id: 'generate_image', slots: [],
+      steps: [{ id: 'attempt', session_id: 'layout-test', step_id: 'generate_image', task_id: 'image-task',
+        attempt: 1, status: 'failed', created_at: '', updated_at: '' }],
+      projection: { ...fixture.session.projection!, current: ['generate_image'], nodes: { generate_image: {
+        execution: 'failed', validity: 'effective', branch: 'normal', requires_approval: false,
+        reachability: 'reachable', readiness: 'not_applicable',
+      } }, display: { status: 'failed', reason: 'execution_failed', approval_step_id: '' } },
+    };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const panel = await screen.findByRole('tabpanel', { name: /生成/ });
+    expect(within(panel).getByText('步骤执行失败')).toBeVisible();
+    expect(within(panel).queryByText('正在等待步骤结果…')).not.toBeInTheDocument();
+  });
+
   it('preserves a tab selected before the initial follow effect runs', async () => {
     fixture.ui.tabs!.push({ id: 'optional', label: '可选步骤', slots: [] });
     fixture.session.projection!.nodes = { optional: {
@@ -725,6 +744,19 @@ describe('shared workflow compact layout', () => {
     fireEvent.click(within(screen.getByRole('group', { name: '回退到步骤：' })).getByRole('button', { name: '成稿' }));
     await waitFor(() => expect(fixture.flush).toHaveBeenCalledOnce());
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('blocks approval from outside the panel when its editor cannot save and unregisters on unmount', async () => {
+    fixture.flush.mockResolvedValue(false);
+    const send = vi.fn();
+    const view = render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('button', { name: '发布' });
+    await expect(applyWorkflowApprovalSettings(fixture.session, 'auto', false, send)).rejects.toThrow('编辑内容尚未保存成功');
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    view.unmount();
+    expect(await flushWorkflowEdits(fixture.session.session_id)).toBe(true);
+    expect(fixture.flush).toHaveBeenCalledOnce();
   });
 
   it('keeps shortcuts available for completed workflows without document footer actions', async () => {

@@ -109,6 +109,40 @@ def test_workflow_terminal_error_can_recover_but_cannot_replace_outputs(completi
     model.share.assert_not_called()
 
 
+@pytest.mark.parametrize('retryable', [False, True])
+def test_workflow_preserves_image_error_instead_of_missing_artifacts(completion_case, retryable):
+    reason = 'image_generator failed (HTTP 400): param=size; size is invalid'
+    events = [{'tag': 'tool_results', 'tool_results': [{
+        'name': 'image_generator', 'result': {'ok': False, 'value': reason, 'retryable': retryable},
+    }]}]
+    result, _, _ = completion_case(
+        agent_type='workflow_step', output_slots=['image'],
+        params={'required_output_artifact_keys': ['image'], 'output_slot_types': {'image': 'image'}},
+        events=events,
+    )
+    terminal = _terminal(result)
+    assert terminal['status'] == 'failed'
+    assert reason in terminal['summary']
+    assert 'No saved artifact' not in terminal['summary']
+    if not retryable:
+        assert terminal['error_code'] == 'WORKFLOW_TOOL_NON_RETRYABLE'
+
+
+def test_workflow_clears_recovered_tool_failure(completion_case):
+    events = [{'tag': 'tool_results', 'tool_results': [{'name': 'image_generator', 'result': payload}]}
+              for payload in [{'ok': False, 'value': 'HTTP 500', 'retryable': True},
+                              {'ok': True, 'value': {'images': ['image.png']}}]]
+    result, _, _ = completion_case(
+        agent_type='workflow_step', output_slots=['image'],
+        params={'required_output_artifact_keys': ['image'], 'output_slot_types': {'image': 'image'}},
+        events=events,
+    )
+    terminal = _terminal(result)
+    assert terminal['status'] == 'failed'
+    assert 'HTTP 500' not in terminal['summary']
+    assert 'No saved artifact' in terminal['summary']
+
+
 def test_workflow_script_tool_is_loaded_from_pinned_revision():
     source = 'def create_list_fixtures():\n    return ["one", "two"]\n'
     response = MagicMock()

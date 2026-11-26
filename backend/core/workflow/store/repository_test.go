@@ -981,6 +981,7 @@ func TestAutomaticArgumentBudgetUsesTerminalCodeInsteadOfDisplayText(t *testing.
 		limit              int
 	}{
 		{"structured", "TOOL_ARGUMENT_RETRY_EXHAUSTED", `{"error":"参数修复次数已耗尽"}`, 2},
+		{"non_retryable_tool", "WORKFLOW_TOOL_NON_RETRYABLE", `{"error":"image size is invalid"}`, 0},
 		{"ordinary_failure", "LAZYMIND_EXECUTION_FAILED", `{"error":"network failure","debug":"TOOL_ARGUMENT_RETRY_EXHAUSTED: quoted example"}`, MaxAutomaticWorkflowStepAttempts},
 	} {
 		t.Run(test.name, func(t *testing.T) {

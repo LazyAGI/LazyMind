@@ -44,6 +44,29 @@ func TestApplyApprovalPreferencesOverridesOnlyStoredSteps(t *testing.T) {
 	}
 }
 
+func TestNewSessionUsesSelectedApprovalModeWithoutSavedPreference(t *testing.T) {
+	for _, mode := range []string{"auto", "dynamic"} {
+		t.Run(mode, func(t *testing.T) {
+			db := newTestDB(t)
+			session, err := CreateSession(t.Context(), db.DB, CreateSessionInput{
+				SessionID: "fresh", ConversationID: "fresh-chat", WorkflowID: "workflow", CreateUserID: "owner", WorkflowMode: mode,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(session, "id = ?", session.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if got := displaystate.SessionApprovalRequired(*session, true, "review"); got != (mode == "dynamic") {
+				t.Fatalf("mode=%s review=%v", mode, got)
+			}
+			if displaystate.SessionApprovalRequired(*session, false, "automatic") {
+				t.Fatal("automatic node acquired a review")
+			}
+		})
+	}
+}
+
 func TestSetWorkflowApprovalPreferencePersistsForFutureProjections(t *testing.T) {
 	db := newTestDB(t)
 	if err := db.AutoMigrate(

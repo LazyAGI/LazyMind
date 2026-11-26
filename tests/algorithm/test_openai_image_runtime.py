@@ -188,3 +188,54 @@ def test_dynamic_image_tool_returns_frontend_image_payload(monkeypatch, tmp_path
     finally:
         lazyllm.globals.clear()
         get_dynamic_role_slot_map.cache_clear()
+
+
+@pytest.mark.parametrize('size', ['512x512', '1000x1024', '4096x1024', '2048x512', '3840x3840', 'broken'])
+def test_image_tool_rejects_invalid_size_before_calling_model(monkeypatch, size):
+    from lazymind.chat.engine.tools.infra import image_generation_support as support
+    monkeypatch.setattr(support, 'get_model_role_runtime_identity', lambda _: {
+        'source': 'openai', 'model': 'gpt-image-2.5-flare',
+    })
+    monkeypatch.setattr(support, 'AutoModel', lambda **_: pytest.fail('Invalid size must not invoke the model'))
+    result = support.run_image_model('image_generator', 'cat', image_size=size)
+    assert result['ok'] is False and result['retryable'] is False
+    assert f'size={size}' in result['value'] and '1024x1024' in result['value']
+
+
+@pytest.mark.parametrize('status,retryable', [(400, False), (401, False), (403, False), (429, True), (500, True)])
+def test_image_tool_retains_provider_diagnosis_and_retry_policy(monkeypatch, status, retryable):
+    from lazyllm.tools import ToolManager
+    from lazymind.chat.engine.agent_runtime.tool_call_guard import FailureRetryPolicy, ToolExecutionMiddleware
+    from lazymind.chat.engine.tools import multimodal
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+    from lazymind.chat.engine.tools.infra import image_generation_support as support
+    monkeypatch.setattr(support, 'get_model_role_runtime_identity', lambda _: {'source': 'openai', 'model': MODELS[3]})
+    monkeypatch.setattr(multimodal, '_missing_media_model_result', lambda _: None)
+    module = lazyllm.OnlineModule(model=MODELS[3], source='openai', api_key='test-key')
+    monkeypatch.setattr(support, 'AutoModel', lambda **_: module)
+    calls = []
+
+    def post(*args, **kwargs):
+        calls.append(kwargs)
+        result = response({'error': {'message': 'size is invalid; token sk-private-test',
+                                     'code': 'invalid_value', 'param': 'size', 'type': 'invalid_request_error'}}, status)
+        return result
+
+    monkeypatch.setattr(requests, 'post', post)
+    middleware = ToolExecutionMiddleware(
+        ToolManager([multimodal.image_generator]),
+        workspace_permission=WorkspaceContext(local_runtime=False),
+        failure_policy=FailureRetryPolicy({'image_generator': 2}),
+    )
+    call = {'id': 'generate', 'function': {
+        'name': 'image_generator', 'arguments': {'prompt': 'cat', 'image_size': '1024x1024'},
+    }}
+    result = middleware.execute_with_records(call).results[0]
+    assert len(calls) == 1 and calls[0]['json']['size'] == '1024x1024'
+    assert result['retryable'] is retryable and result['ok'] is False
+    assert f'HTTP {status}' in result['value']
+    assert 'param=size' in result['value'] and 'code=invalid_value' in result['value']
+    assert 'size is invalid' in result['value'] and 'sk-private-test' not in result['value']
+    blocked = middleware.execute_with_records(call).results[0]
+    assert blocked['ok'] is False and 'exact call already failed' in blocked['value']
+    assert len(calls) == 1

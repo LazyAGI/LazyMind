@@ -734,6 +734,8 @@ func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
 		{"execution_failure", "retry", "model failed", "batch-revision", false},
 		{"changed_step_intent", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", false},
 		{"missing_snapshot", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", false},
+		{"changed_request", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", false},
+		{"same_request", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, hash := setupBatchTransitionSession(t)
@@ -749,7 +751,7 @@ func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
 				t.Fatal(err)
 			}
 			if test.name != "missing_snapshot" {
-				payload, err := json.Marshal(executor.AttemptContext{})
+				payload, err := json.Marshal(executor.AttemptContext{UserRequest: "生成512x512白猫插画"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -769,8 +771,14 @@ func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
 			if err := db.Model(&old).Updates(map[string]any{"status": status, "result_json": string(result)}).Error; err != nil {
 				t.Fatal(err)
 			}
+			input := "重试"
+			if test.name == "changed_request" {
+				input = "改为1024x1024黑猫，重新生成"
+			} else if test.name == "same_request" {
+				input = "生成512x512白猫插画"
+			}
 			w, _ := runBatchTransition(t, db, hash, test.operation, []map[string]any{
-				{"target_step_id": "branch_b", "task_id": "resume-analysis", "user_input": "已完成配置，继续工作流"},
+				{"target_step_id": "branch_b", "task_id": "resume-analysis", "user_input": input},
 			})
 			if w.Code != http.StatusOK {
 				t.Fatalf("transition failed: %d %s", w.Code, w.Body.String())
@@ -838,6 +846,47 @@ func TestParameterFailureAllowsOneAutomaticRerunAndExplicitManualRetry(t *testin
 			}
 			if tc.want == 409 && !strings.Contains(w.Body.String(), `"max_automatic_attempts":2`) {
 				t.Fatal(w.Body.String())
+			}
+		})
+	}
+}
+
+func TestNonRetryableToolFailureRequiresExplicitRetry(t *testing.T) {
+	for _, origin := range []string{"automatic", "user"} {
+		t.Run(origin, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			old, err := CreateSessionStep(t.Context(), db.DB, "batch-session", "branch_b", "old-task", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&old).Updates(map[string]any{"status": StepStatusFailed, "terminal_code": "WORKFLOW_TOOL_NON_RETRYABLE",
+				"result_json": `{"error":"image_generator failed: invalid size=512x512"}`}).Error; err != nil {
+				t.Fatal(err)
+			}
+			oldDB, oldState := store.DB(), store.State()
+			store.Init(db.DB, db.DB, nil)
+			t.Cleanup(func() { store.Init(oldDB, oldDB, oldState) })
+			body, _ := json.Marshal(map[string]any{"command_id": "new-retry", "operation": "retry", "retry_origin": origin,
+				"expected_state_version": 4, "graph_hash": hash, "target_step_id": "branch_b", "task_id": "new-task"})
+			req := mux.SetURLVars(httptest.NewRequest("POST", "/", bytes.NewReader(body)), map[string]string{"session_id": "batch-session"})
+			w := httptest.NewRecorder()
+			TransitionWorkflowSession(w, req)
+			want := http.StatusOK
+			if origin == "automatic" {
+				want = http.StatusConflict
+				if !strings.Contains(w.Body.String(), "WORKFLOW_RETRY_REQUIRES_USER") {
+					t.Fatal(w.Body.String())
+				}
+			}
+			if w.Code != want {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			var attempts int64
+			if err := db.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND step_id = ?", "batch-session", "branch_b").Count(&attempts).Error; err != nil {
+				t.Fatal(err)
+			}
+			if (origin == "automatic" && attempts != 1) || (origin == "user" && attempts != 2) {
+				t.Fatalf("retry origin %s created unexpected attempt count %d", origin, attempts)
 			}
 		})
 	}

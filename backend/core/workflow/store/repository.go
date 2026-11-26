@@ -56,6 +56,15 @@ const MaxAutomaticWorkflowStepAttempts = controlpolicy.MaxAutomaticStepAttempts
 // Format failures may restart once. Persisted attempts keep this budget across
 // agent recreation and service restarts; explicit user retries remain separate.
 func AutomaticWorkflowStepAttemptLimit(ctx context.Context, db *gorm.DB, sessionID, stepID string) (int, error) {
+	var latest orm.WorkflowSessionStep
+	result := db.WithContext(ctx).Where("session_id=? AND step_id=?", sessionID, stepID).
+		Order("attempt DESC").Limit(1).Find(&latest)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if latest.Status == "failed" && latest.TerminalCode == "WORKFLOW_TOOL_NON_RETRYABLE" {
+		return 0, nil
+	}
 	var count int64
 	err := db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
 		Where("session_id=? AND step_id=? AND status=? AND terminal_code=?", sessionID, stepID, "failed", "TOOL_ARGUMENT_RETRY_EXHAUSTED").Count(&count).Error

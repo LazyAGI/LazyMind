@@ -3,6 +3,7 @@ import { extractErrorCode, getLocalizedErrorMessage } from '@/components/request
 import type { WorkflowSession } from '../store/workflowPanel';
 import type { NativeWorkflowControl } from '../store/workflowStatus';
 import { WorkflowSessionApi } from './request';
+import { flushWorkflowEdits } from './workflowEditFlush';
 import { controlActions, externalPanelAction, type WorkflowControlView } from './workflowControl';
 
 export type SendWorkflowMessage = (text: string, control?: NativeWorkflowControl) => void | boolean | Promise<void | boolean>;
@@ -14,6 +15,9 @@ export async function applyWorkflowApprovalSettings(
   remember: boolean,
   onSendMessage?: SendWorkflowMessage,
 ) {
+  if (!await flushWorkflowEdits(session.session_id)) {
+    throw new Error(i18n.t('chat.workflowApprovalEditsUnsaved'));
+  }
   const api = WorkflowSessionApi();
   const stepId = session.projection?.display?.status === 'waiting'
     ? session.projection.display.approval_step_id : undefined;

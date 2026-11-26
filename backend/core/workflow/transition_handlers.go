@@ -774,7 +774,9 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 					if err := json.Unmarshal(previous.PayloadJSON, &payload); err != nil {
 						return err
 					}
-					if payload.LaunchRequest == launchInputs[targets[0].TaskID] {
+					input := strings.TrimSpace(currentInputs[targets[0].TaskID])
+					if payload.LaunchRequest == launchInputs[targets[0].TaskID] &&
+						(isBareRetryInput(input) || input == strings.TrimSpace(payload.UserRequest)) {
 						postStepCheckpoint = failedResult.Checkpoint
 					}
 				}
@@ -786,6 +788,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			automaticLimit, limitErr := workflowstore.AutomaticWorkflowStepAttemptLimit(ctx, tx, session.ID, latest.StepID)
 			if limitErr != nil {
 				return limitErr
+			}
+			if req.RetryOrigin != "user" && automaticLimit == 0 {
+				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict,
+					"WORKFLOW_RETRY_REQUIRES_USER", "The last tool request cannot succeed unchanged. Fix the reported parameters or configuration, then retry explicitly.", false,
+					map[string]any{"step_id": latest.StepID, "user_retry_available": true})
 			}
 			if req.RetryOrigin != "user" && (req.Operation == "retry" || automaticLimit < workflowstore.MaxAutomaticWorkflowStepAttempts) && automaticAttempts >= int64(automaticLimit) {
 				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict,

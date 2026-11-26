@@ -283,7 +283,7 @@
     display: grid;
     grid-template-areas: 'title actions' 'tabs tabs';
     grid-template-columns: minmax(0, 1fr) auto;
-    column-gap: 4px;
+    column-gap: 2px;
     flex: 0 0 auto;
     padding: 0 12px;
     border-bottom: 1px solid #f0f1f3;
@@ -330,7 +330,7 @@
       gap: 4px;
       height: 32px;
       min-height: 32px;
-      padding: 0 4px;
+      padding: 0 2px;
     }
 
     .workflow-panel__follow-button {
@@ -5090,12 +5090,48 @@
   .workflow-panel__graph-popout { width: 30px; height: 30px; padding: 0; }
 }
 .workflow-panel__graph > .state-graph-modal__content { flex: 1; min-height: 300px; height: 420px; }
+.workflow-approval-popover .ant-popover-inner {
+  padding: 8px;
+  border: 1px solid #e8edf3;
+  border-radius: 11px;
+  box-shadow: 0 7px 24px #22395514, 0 2px 5px #22395514;
+}
 .workflow-approval-settings {
-  width: 248px; display: flex; flex-direction: column; gap: 12px; padding: 4px;
-  .ant-radio-group { display: flex; flex-direction: column; gap: 10px; }
-  > .ant-checkbox-wrapper { border-top: 1px solid #f0f1f3; padding-top: 12px; font-size: 12px; }
-  > p { margin: 0; color: #94a3b8; font-size: 12px; line-height: 1.6; }
-  > .ant-btn { align-self: flex-end; }
+  width: 246px;
+  font-size: 14px;
+  .ant-radio-group { display: flex; flex-direction: column; gap: 4px; }
+  .ant-radio-wrapper {
+    position: relative; margin: 0; padding: 8px 11px; min-height: 39px;
+    border-radius: 6px; color: #394657; font-size: 14px; line-height: 22px;
+    .ant-radio { position: absolute; opacity: 0; }
+    .ant-radio + span { width: 100%; padding: 0; }
+    &:not(.ant-radio-wrapper-disabled):hover { background: #f7f9fc; }
+    &.ant-radio-wrapper-checked { background: #f1f6ff; color: #2673ef; }
+    &.ant-radio-wrapper-checked:not(.ant-radio-wrapper-disabled):hover { background: #f1f6ff; }
+    &:has(input:focus-visible) { outline: 2px solid #91caff; outline-offset: 1px; }
+    &.ant-radio-wrapper-disabled { color: #a1aab7; }
+  }
+  &__option {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    > .anticon { font-size: 16px; visibility: hidden; }
+  }
+  .ant-radio-wrapper-checked .workflow-approval-settings__option > .anticon { visibility: visible; }
+  &__footer {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    border-top: 1px solid #edf0f5; margin: 8px 3px 0; padding: 10px 1px 2px 8px;
+    .ant-checkbox-wrapper { min-height: 30px; align-items: center; color: #627187; font-size: 14px; line-height: 22px; }
+    .ant-checkbox-inner { width: 15px; height: 15px; border-radius: 3px; }
+    .ant-checkbox:not(.ant-checkbox-disabled) .ant-checkbox-inner { background: #fff; border-color: #97b6e0; }
+    .ant-checkbox-checked:not(.ant-checkbox-disabled) .ant-checkbox-inner::after { border-color: #2673ef; }
+    .ant-checkbox-wrapper:not(.ant-checkbox-wrapper-disabled):hover { color: #394657; }
+    .ant-checkbox-wrapper-disabled { color: #a1aab7; }
+  }
+  .workflow-approval-settings__apply {
+    height: 30px; padding: 4px 13px; border: 0; border-radius: 6px; box-shadow: none;
+    font-size: 14px; line-height: 22px;
+    &:not(:disabled) { color: #2673ef; background: #eaf2ff; }
+    &:not(:disabled):hover { color: #2673ef; background: #dceaff; }
+  }
 }
 
 .workflow-panel__tab-text {

@@ -7,7 +7,7 @@
  * - Dagre layout is cached; only node statuses are replaced on refresh.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Spin } from 'antd';
+import { Alert, Modal, Spin } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { axiosInstance, BASE_URL } from '@/components/request';
@@ -154,6 +154,7 @@ export default function StateGraphModal({
   const [data, setData] = useState<StateGraphData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [labelError, setLabelError] = useState(false);
   // Keep a cached layout anchor so dagre only re-runs when topology changes.
   const cachedDataRef = useRef<StateGraphData | null>(null);
 
@@ -167,11 +168,17 @@ export default function StateGraphModal({
       );
       // ReplyOK wraps the payload as { code, message, data: {...} }.
       let labels = stepLabels;
+      setLabelError(false);
       if (!labels) {
-        const detail = await axiosInstance.get(`${coreApiBase}/workflow-sessions/${encodeURIComponent(sessionId)}`, { silentError: true } as never);
-        const session = (detail.data?.data ?? detail.data).session;
-        const ui = await loadWorkflowUI(session.workflow_id, session.pinned_revision_id, { language: i18n.language, silentError: true });
-        labels = workflowStageLabels(ui);
+        try {
+          const detail = await axiosInstance.get(`${coreApiBase}/workflow-sessions/${encodeURIComponent(sessionId)}`, { silentError: true } as never);
+          const session = (detail.data?.data ?? detail.data).session;
+          const ui = await loadWorkflowUI(session.workflow_id, session.pinned_revision_id, { language: i18n.language, silentError: true });
+          labels = workflowStageLabels(ui);
+        } catch {
+          // Names enrich the authoritative graph; their failure must not replace it.
+          setLabelError(true);
+        }
       }
       const incoming = projectionToGraph(resp.data?.data ?? resp.data, t, labels);
       // Merge: preserve topology reference if node/edge IDs haven't changed,
@@ -224,6 +231,7 @@ export default function StateGraphModal({
       setData(null);
       cachedDataRef.current = null;
       setError(null);
+      setLabelError(false);
     }
   }, [open, sessionId, fetchGraph]);
 
@@ -258,6 +266,7 @@ export default function StateGraphModal({
         {error && !data && (
           <div className='state-graph-modal__error'>{error}</div>
         )}
+        {data && labelError && <Alert type='warning' showIcon message={t('chat.workflowGraph.labelsUnavailable')} />}
         {data && <StateGraphView data={data} />}
       </div>
   );

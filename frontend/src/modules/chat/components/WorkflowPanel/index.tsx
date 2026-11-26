@@ -3,6 +3,7 @@ import { hiddenUserSlots, workflowTabsForAudience, workflowUIForAudience } from 
 import { WorkflowExtensions } from '../../extensions/WorkflowExtensions';
 import { groupDownloadActions } from './groupDownloadActions';
 import { WorkflowApprovalSettings } from './WorkflowApprovalSettings';
+import { registerWorkflowEditFlush } from '../../utils/workflowEditFlush';
 import { WorkflowToolbarIcon } from './WorkflowToolbarIcon';
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
 import { CompactWorkflowEmptyStatesContext, type ExternalWorkflowPresentation } from './external/presentation';
@@ -229,11 +230,10 @@ function AutoSlotGrid({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
-  const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   if (!session.slots || session.slots.length === 0) {
     return (
       <div className='workflow-panel__empty' role='status' aria-live='polite'>
-        <span>{t(compactEmptyStates ? workflowEmptyStateKey(session, session.current_step_id) : 'chat.workflowWaitingForResults')}</span>
+        <span>{t(workflowEmptyStateKey(session, session.current_step_id))}</span>
       </div>
     );
   }
@@ -944,7 +944,6 @@ function CompositeSlotGrid({
   const { t } = useTranslation();
   const pageGroups = React.useContext(PageGroupContext);
   const tabActive = React.useContext(WorkflowPanelTabActiveContext);
-  const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const reorderSlotItems = useWorkflowStore((state) => state.reorderSlotItems);
   const session = usePptPreviewDuringRetry(activeSession, declaredTab, readOnly);
   const showingPreviousPreviews = session !== activeSession;
@@ -1050,7 +1049,7 @@ function CompositeSlotGrid({
   if (rows.length === 0 && fileDeliveries.length === 0) {
     return (
       <div className='workflow-panel__empty' role='status' aria-live='polite'>
-        <span>{t(compactEmptyStates ? workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)) : 'chat.workflowWaitingForResults')}</span>
+        <span>{t(workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)))}</span>
       </div>
     );
   }
@@ -1583,8 +1582,9 @@ function NamedTabSlot({
     ? ({ candidate_set: 'chat.paperSearching', screened_candidates: 'chat.paperScreening', relation_analysis: 'chat.paperVerifying',
       expansion_report: 'chat.paperComposing' } as Record<string, string>)[slotDef.id]
     : undefined;
-  const emptyStateKey = compactEmptyStates || paperPendingKey
-    ? workflowEmptyStateKey(session, slotStepId) : undefined;
+  const stepEmptyStateKey = workflowEmptyStateKey(session, slotStepId);
+  const emptyStateKey = compactEmptyStates || paperPendingKey || stepEmptyStateKey === 'chat.workflowEmptyFailed'
+    ? stepEmptyStateKey : undefined;
 
   const pendingMessageKey = emptyStateKey === 'chat.workflowEmptyRunning' && paperPendingKey
     ? paperPendingKey : emptyStateKey;
@@ -2019,6 +2019,10 @@ export function WorkflowPanel({
   }, []);
 
   useEffect(() => {
+    if (session?.session_id) return registerWorkflowEditFlush(session.session_id, flushPendingEdits);
+  }, [session?.session_id, flushPendingEdits]);
+
+  useEffect(() => {
     editingSlots.current.clear();
     flushFns.current.clear();
     clearFooterActions();
@@ -2423,7 +2427,7 @@ export function WorkflowPanel({
             <WorkflowToolbarIcon name='graph' />{t('chat.workflowExecutionGraph')}
           </button>
           {!resultsOnly && <WorkflowApprovalSettings session={session} onRefresh={refresh} disabled={actionPending}
-                onSendMessage={onSendMessage} beforeApply={() => flushPendingEdits()} />}
+                onSendMessage={onSendMessage} />}
           {uiReady && <Tooltip title={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}>
             <button type='button' className='workflow-panel__tool workflow-panel__follow-button'
               aria-label={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}

@@ -13,6 +13,11 @@ func ApplySavedApprovalMode(db *gorm.DB, session *orm.WorkflowSession) error {
 		return err
 	}
 	session.ApprovalPreferences = make(map[string]bool, len(preferences))
+	// Auto selected at launch must opt out of package reviews even when this
+	// workflow has no saved preference. Dynamic keeps package checkpoints.
+	if session.WorkflowMode == "auto" {
+		session.ApprovalMode = "auto"
+	}
 	for _, preference := range preferences {
 		session.ApprovalPreferences[preference.StepID] = preference.ApprovalRequired
 		if preference.StepID == "*" {

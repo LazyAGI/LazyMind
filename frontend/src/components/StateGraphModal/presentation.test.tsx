@@ -41,3 +41,16 @@ it('uses pinned localized panel labels when opened from the task center', async 
   expect(screen.queryByText('Generate PPT')).not.toBeInTheDocument();
   await waitFor(() => expect(fixture.loadUI).toHaveBeenCalledWith('ppt-workflow', 'pinned', { language: 'zh-CN', silentError: true }));
 });
+
+it.each(['detail', 'labels'])('keeps the authoritative graph and reports a %s lookup failure', async failure => {
+  if (failure === 'labels') fixture.loadUI.mockRejectedValue(new Error('labels unavailable'));
+  else fixture.get.mockImplementation(async (url: string) => {
+    if (!url.endsWith('/projection')) throw new Error('session unavailable');
+    return { data: { data: graph } };
+  });
+  render(<StateGraphModal open inline sessionId='run' workflowId='' onClose={vi.fn()}
+    fallbackSteps={[{ step_id: 'stale fallback', status: 'pending' }]} />);
+  expect(await screen.findByText('Generate PPT')).toBeVisible();
+  expect(screen.queryByText('stale fallback')).not.toBeInTheDocument();
+  expect(screen.getByText('阶段名称加载失败，当前显示工作流原始名称。执行状态不受影响。')).toBeVisible();
+});
