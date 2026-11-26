@@ -4,11 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 )
 
@@ -90,9 +89,10 @@ func TestProductFinishPersistsProposedDecisionAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := repo.RelayProductStage(t.Context(), "owner", "session", req)
-	if err != nil || string(first) != string(second) {
-		t.Fatalf("retry: %s %v", second, err)
+	if err != nil {
+		t.Fatal(err)
 	}
+	assertProductJSONEqual(t, first, second)
 	_, workspace, _, err := repo.productRelayState(t.Context(), "owner", "session")
 	if err != nil {
 		t.Fatal(err)
@@ -119,9 +119,10 @@ func TestProductDecisionExplicitApprovalChecksHashAndRestoresAfterRefresh(t *tes
 		t.Fatal(err)
 	}
 	second, err := repo.DecideProductDecision(t.Context(), "owner", "session", "D1", req)
-	if err != nil || string(first) != string(second) {
-		t.Fatalf("retry: %s %v", second, err)
+	if err != nil {
+		t.Fatal(err)
 	}
+	assertProductJSONEqual(t, first, second)
 	_, workspace, _, err := repo.productRelayState(t.Context(), "owner", "session")
 	if err != nil {
 		t.Fatal(err)
@@ -152,17 +153,26 @@ func TestProductLegacyAutoApprovalIsReopened(t *testing.T) {
 	}
 }
 
+func assertProductJSONEqual(t *testing.T, first, second json.RawMessage) {
+	t.Helper()
+	var firstValue, secondValue any
+	if err := json.Unmarshal(first, &firstValue); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(second, &secondValue); err != nil {
+		t.Fatal(err)
+	}
+	// PostgreSQL JSONB can change key order and whitespace on replay.
+	if !reflect.DeepEqual(firstValue, secondValue) {
+		t.Fatalf("retry changed response: first=%s second=%s", first, second)
+	}
+}
+
 func testRepo(t *testing.T) *Repository {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := New(db)
+	db := orm.MigrateTestDB(t, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowApprovalPreference{})
+	repo := New(db.DB)
 	if err := repo.AutoMigrate(); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}); err != nil {
 		t.Fatal(err)
 	}
 	return repo

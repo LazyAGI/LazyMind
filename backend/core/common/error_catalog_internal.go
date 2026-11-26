@@ -708,6 +708,8 @@ func init() {
 	// Reuse the public generic codes while preserving the source text as Detail.
 	registerAdditionalErrorPattern("call_mode must be '%s', '%s' or '%s'", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("workflow is paused", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("expected_state_version is required", "Invalid request", http.StatusUnprocessableEntity, 2000103)
+	registerAdditionalErrorAlias("use session or workflow scope to restore approval", "Invalid request", http.StatusUnprocessableEntity, 2000103)
 	for _, source := range []string{
 		"basic chat does not support background execution",
 		"basic chat does not support ask answers", "basic chat does not support plugin mentions",
@@ -784,6 +786,7 @@ func init() {
 		"no chat model configured", "failed to deliver tool-limit decision", "update search config failed",
 		"marshal writerdocument artifact failed", "artifact save failed", "decrypt api key failed",
 		"encrypt api key failed", "failed to create waiting task", "save approval preference failed",
+		"query approval preference failed", "decode post-step check evidence",
 		"copy failed",
 		"invalid workflow action response",
 		"unsupported model provider credential ciphertext", "decode sensitive-word check",
