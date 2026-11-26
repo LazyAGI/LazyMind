@@ -3,7 +3,9 @@ name: Diagnose PR 913 Windows owner restart tests
 on:
   push:
     branches: [feat-v05-1019]
-    paths: ['.github/workflows/diagnose-pr913-windows.yml']
+    paths:
+      - '.github/workflows/diagnose-pr913-windows.yml'
+      - 'desktop/scripts/update-v1-owner-restart.test.mjs'
 
 permissions:
   contents: read

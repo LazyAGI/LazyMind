@@ -102,8 +102,12 @@ function session(dir, owner, { crashAt, inspectBarrier, discardBarrier } = {}) {
   return { updater, events };
 }
 
-async function finish({ updater, events }) {
-  for (let i = 0; i < 150 && !events.includes("native") && !["error", "repair"].includes(updater.getState().phase); i++) await tick();
+async function finish({ updater, events }, detail) {
+  for (let i = 0; i < 150 && !events.includes("native") && !["error", "repair"].includes(updater.getState().phase); i++) {
+    detail?.(`before finish tick ${i + 1}, phase=${updater.getState().phase}`);
+    await tick();
+    detail?.(`after finish tick ${i + 1}`);
+  }
 }
 
 function trace(t, message) {
@@ -124,10 +128,14 @@ async function tracedCall(t, updater, method) {
   }
 }
 
-function directory(t) {
+function directory(t, detail) {
   trace(t, "case started");
   const dir = mkdtempSync(path.join(os.tmpdir(), "v1-owner-restart-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => {
+    detail?.("before directory cleanup");
+    rmSync(dir, { recursive: true, force: true });
+    detail?.("after directory cleanup");
+  });
   return dir;
 }
 
@@ -162,16 +170,29 @@ if (process.argv[2] === "--interrupt") {
   for (const point of ["after-prepare", "before-final"]) {
     for (const choice of ["continue", "later"]) {
       test(`source restart permits explicit ${choice} at ${point}`, async t => {
-        const dir = directory(t);
+        const detail = point === "before-final" && choice === "continue" ? message => trace(t, message) : undefined;
+        const dir = directory(t, detail);
         interrupt(t, dir, point);
         const prepared = readGo(dir);
+        detail?.("before prepared phase assertion");
         assert.equal(prepared?.phase, "prepared", "the interrupted source must leave only a recoverable preparation");
+        detail?.("after prepared phase assertion");
         const current = session(dir, "replacement");
-        t.after(() => current.updater.dispose());
+        t.after(() => {
+          detail?.("before updater.dispose()");
+          current.updater.dispose();
+          detail?.("after updater.dispose()");
+        });
         await tracedCall(t, current.updater, "start");
+        detail?.("before updater.getState()");
         const view = current.updater.getState();
+        detail?.("after updater.getState()");
+        detail?.("before recovery state assertion");
         assert.ok(view.pendingUpdate && view.phase !== "repair" && !view.updating, "renderer must expose both Continue and Later");
+        detail?.("after recovery state assertion");
+        detail?.("before startup events assertion");
         assert.ok(!current.events.some(event => ["download", "prepare", "authorize", "stop", "native"].includes(event)));
+        detail?.("after startup events assertion");
         if (choice === "later") {
           await tracedCall(t, current.updater, "later");
           assert.equal(readGo(dir), null);
@@ -179,10 +200,18 @@ if (process.argv[2] === "--interrupt") {
           assert.ok(!current.updater.getState().pendingUpdate);
           assert.ok(!current.events.includes("native"));
         } else {
+          detail?.("before updater.install()");
           await current.updater.install(view.releaseId);
-          await finish(current);
+          detail?.("after updater.install()");
+          detail?.("before finish(current)");
+          await finish(current, detail);
+          detail?.("after finish(current)");
+          detail?.("before handoff events assertion");
           assert.deepEqual(current.events.filter(event => ["prepare", "authorize", "stop", "native"].includes(event)), ["prepare", "authorize", "stop", "native"]);
+          detail?.("after handoff events assertion");
+          detail?.("before replacement owner assertion");
           assert.equal(readGo(dir).owner, "replacement");
+          detail?.("after replacement owner assertion");
         }
       });
     }
