@@ -23,11 +23,20 @@ on:
       source_build_run_id:
         required: false
         type: string
+      test_signed_updates:
+        description: "Use the isolated Windows test signing and publication settings"
+        required: false
+        type: boolean
+        default: false
       unsigned_update_test:
         required: false
         type: boolean
         default: false
     secrets:
+      WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY:
+        required: false
+      WINDOWS_TEST_MODELSCOPE_TOKEN:
+        required: false
       LAZYMIND_UPDATE_POLICY_PRIVATE_KEY:
         required: false
       MODELSCOPE_UPDATE_TOKEN:
@@ -56,9 +65,13 @@ jobs:
       - name: Validate publication platform
         shell: bash
         env:
+          WINDOWS_TEST_SIGNED: ${{ inputs.test_signed_updates }}
           PLATFORM: ${{ inputs.platform }}
           UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
         run: |
+          if [[ "${WINDOWS_TEST_SIGNED}" == true ]]; then
+            [[ "${PLATFORM}" == windows && "${UNSIGNED_TEST}" != true ]]
+          fi
           case "${PLATFORM}" in ""|macos) ;; windows) [[ "${UNSIGNED_TEST}" != true ]] ;; *) exit 1 ;; esac
       - uses: actions/checkout@v4
         with:
@@ -98,10 +111,35 @@ jobs:
           else
             echo "No successful source run available; verifying the signed public release."
           fi
+      - uses: actions/download-artifact@v8
+        if: inputs.test_signed_updates
+        with:
+          name: windows-rag-publication
+          path: windows-test-components
+      - name: Check the Windows test release before native verification
+        if: inputs.test_signed_updates
+        shell: bash
+        env:
+          UPDATE_REPO: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_REPO }}
+          LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
+        run: |
+          set -euo pipefail
+          node desktop/scripts/windows-test-channel.mjs check-release publication/current
+          cmp publication/current/*/components.json windows-test-components/python-components.json
+      - name: Trust the configured public Windows test certificate
+        if: inputs.test_signed_updates && matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_TEST_CERTIFICATE: ${{ vars.LAZYMIND_WINDOWS_TEST_CERT_DER_BASE64 }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
+        run: ./desktop/scripts/windows-test-certificate.ps1
+
       - name: Verify the published source and the actual target runtime
         shell: bash
         env:
           UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
+          WINDOWS_TEST_SIGNED: ${{ inputs.test_signed_updates }}
           PLATFORM: ${{ matrix.platform }}
           SOURCE_RUN: ${{ inputs.source_build_run_id }}
         run: |
@@ -115,6 +153,8 @@ jobs:
           fi
           (cd local/local-runtime-manager && go build "${build_flags[@]+"${build_flags[@]}"}" -o "${validator}" ./cmd/update-publisher)
           history=()
+          components=()
+          if [[ "${WINDOWS_TEST_SIGNED}" == true ]]; then components=(--target-components-dir windows-test-components); fi
           if [[ -d publication/source ]]; then history=(--history publication/source); fi
           uv run --no-project --python 3.11 python desktop/scripts/prepare-update-ci-plan.py \
             --verify-source-only --current publication/current "${history[@]+"${history[@]}"}" \
@@ -125,7 +165,7 @@ jobs:
           fi
           uv run --no-project --python 3.11 python desktop/scripts/verify-update-ci-pairs.py \
             --plan "${RUNNER_TEMP}/source-verification" --current publication/current --baseline publication/source \
-            --platform "${PLATFORM}" --output verification "${plan_flags[@]+"${plan_flags[@]}"}"
+            --platform "${PLATFORM}" --output verification "${plan_flags[@]+"${plan_flags[@]}"}" "${components[@]+"${components[@]}"}"
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-format-evidence-${{ matrix.platform }}-${{ github.run_id }}
@@ -135,7 +175,7 @@ jobs:
   publish:
     needs: verify
     if: ${{ !cancelled() && !failure() && (!inputs.use_current_run || needs.verify.result == 'success') }}
-    environment: ${{ inputs.unsigned_update_test && 'desktop_updates_test' || 'desktop_updates' }}
+    environment: ${{ (inputs.unsigned_update_test || inputs.test_signed_updates) && 'desktop_updates_test' || 'desktop_updates' }}
     runs-on: ${{ inputs.unsigned_update_test && 'macos-15' || 'ubuntu-latest' }}
     timeout-minutes: 120
     steps:
@@ -198,12 +238,19 @@ jobs:
           build_flags=()
           if [[ "${UNSIGNED_TEST}" == true ]]; then build_flags=(-tags lazymind_unsigned_test); fi
           (cd local/local-runtime-manager && go build "${build_flags[@]+"${build_flags[@]}"}" -o "${RUNNER_TEMP}/update-publisher" ./cmd/update-publisher)
+      - name: Check the Windows test release before planning publication
+        if: inputs.test_signed_updates
+        env:
+          UPDATE_REPO: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_REPO }}
+          LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
+        run: node desktop/scripts/windows-test-channel.mjs check-release publication/current-windows
       - name: Prepare plan from actual releases and signed history
         if: inputs.use_current_run
         env:
           UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
           PLATFORM: ${{ inputs.platform || '' }}
-          UPDATE_REPO: ${{ vars.LAZYMIND_UPDATE_MODELSCOPE_REPO }}
+          UPDATE_REPO: ${{ vars[inputs.test_signed_updates && 'LAZYMIND_WINDOWS_TEST_UPDATE_REPO' || 'LAZYMIND_UPDATE_MODELSCOPE_REPO'] }}
         run: |
           set -euo pipefail
           test -n "${UPDATE_REPO}"
@@ -224,8 +271,8 @@ jobs:
           done
       - name: Assemble and sign explicit update policy
         env:
-          UPDATE_PRIVATE_KEY: ${{ secrets.LAZYMIND_UPDATE_POLICY_PRIVATE_KEY }}
-          UPDATE_KEY_ID: ${{ vars.LAZYMIND_UPDATE_POLICY_KEY_ID }}
+          UPDATE_PRIVATE_KEY: ${{ secrets[inputs.test_signed_updates && 'WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY' || 'LAZYMIND_UPDATE_POLICY_PRIVATE_KEY'] }}
+          UPDATE_KEY_ID: ${{ vars[inputs.test_signed_updates && 'LAZYMIND_WINDOWS_TEST_UPDATE_POLICY_KEY_ID' || 'LAZYMIND_UPDATE_POLICY_KEY_ID'] }}
           USE_CURRENT_RUN: ${{ inputs.use_current_run }}
         run: |
           set -euo pipefail
@@ -270,10 +317,28 @@ jobs:
             python desktop/scripts/publish-python-components.py \
             --directory publication/current-macos/python-components --repo "${UPDATE_REPO}" \
             --signing-mode adhoc --prefix "${component_prefix}"
+      - uses: actions/download-artifact@v8
+        if: inputs.test_signed_updates
+        with:
+          name: windows-rag-publication
+          path: windows-test-components
+      - name: Publish components inside the Windows test round
+        if: inputs.test_signed_updates
+        env:
+          MODELSCOPE_API_TOKEN: ${{ secrets.WINDOWS_TEST_MODELSCOPE_TOKEN }}
+          UPDATE_REPO: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_REPO }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
+        run: |
+          set -euo pipefail
+          cmp publication/current-windows/*/components.json windows-test-components/python-components.json
+          component_prefix="$(node desktop/scripts/windows-test-channel.mjs component-prefix)"
+          uv run --no-project --python 3.11 --with modelscope-hub==0.4.6 \
+            python desktop/scripts/publish-python-components.py --directory windows-test-components --repo "${UPDATE_REPO}" \
+            --signing-mode windows-test --prefix "${component_prefix}"
       - name: Publish and verify files before policy
         env:
-          MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}
-          UPDATE_REPO: ${{ vars.LAZYMIND_UPDATE_MODELSCOPE_REPO }}
+          MODELSCOPE_API_TOKEN: ${{ secrets[inputs.test_signed_updates && 'WINDOWS_TEST_MODELSCOPE_TOKEN' || 'MODELSCOPE_UPDATE_TOKEN'] }}
+          UPDATE_REPO: ${{ vars[inputs.test_signed_updates && 'LAZYMIND_WINDOWS_TEST_UPDATE_REPO' || 'LAZYMIND_UPDATE_MODELSCOPE_REPO'] }}
           USE_CURRENT_RUN: ${{ inputs.use_current_run }}
         run: |
           set -euo pipefail
@@ -366,12 +431,20 @@ jobs:
         with:
           name: desktop-format-evidence-${{ matrix.platform }}-${{ github.run_id }}
           path: verification
+      - name: Trust the configured public Windows test certificate
+        if: inputs.test_signed_updates && matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_TEST_CERTIFICATE: ${{ vars.LAZYMIND_WINDOWS_TEST_CERT_DER_BASE64 }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
+        run: ./desktop/scripts/windows-test-certificate.ps1
+
       - name: Install verified A and use its normal updater
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}
           UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
-          SMOKE_PUBLIC_CONFIG: ${{ inputs.unsigned_update_test && vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON || (matrix.platform == 'macos' && vars.LAZYMIND_MAC_UPDATE_CONFIG_JSON || vars.LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON) }}
+          SMOKE_PUBLIC_CONFIG: ${{ vars[inputs.unsigned_update_test && 'LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON' || inputs.test_signed_updates && 'LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON' || matrix.platform == 'macos' && 'LAZYMIND_MAC_UPDATE_CONFIG_JSON' || 'LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON'] }}
           TEST_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
         run: |
           set -euo pipefail

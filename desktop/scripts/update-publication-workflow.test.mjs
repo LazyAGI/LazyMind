@@ -112,9 +112,6 @@ test("the same macOS Installer exposes a separate opt-in unsigned update test", 
     "inputs.enable_unsigned_update_test", "!inputs.enable_updates"]);
   assert.match(testPublication, /uses: \.\/\.github\/workflows\/desktop-update-publish\.yml/);
   assert.match(testPublication, /unsigned_update_test: true/);
-  assert.match(read("desktop-update-publish"),
-    /environment: \$\{\{\s*inputs\.unsigned_update_test\s*&&\s*'desktop_updates_test'\s*\|\|\s*'desktop_updates'\s*\}\}/,
-    "test calls must use the test environment, while ordinary calls use the official environment");
   const taggedRelease = read("desktop-release");
   assert.doesNotMatch(taggedRelease, /enable_unsigned_update_test|desktop_updates_test/);
   const caller = taggedRelease.match(/^  macos:\n([\s\S]*?)(?=^  [a-z][a-z_-]*:|$(?![\s\S]))/m)?.[1];

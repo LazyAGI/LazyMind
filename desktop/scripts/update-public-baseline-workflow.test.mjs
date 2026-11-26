@@ -16,14 +16,14 @@ const { jobs } = yaml.load(fs.readFileSync(new URL("../../.github/workflows/desk
 function enabled(condition, sourceRun, verification = "success") {
   if (condition === undefined) return true;
   return vm.runInNewContext(condition.replace(/^\$\{\{\s*|\s*\}\}$/g, ""), {
-    inputs: { use_current_run: true, unsigned_update_test: false, source_build_run_id: sourceRun },
+    inputs: { use_current_run: true, unsigned_update_test: false, test_signed_updates: false, source_build_run_id: sourceRun },
     needs: { verify: { result: verification } }, cancelled: () => false, failure: () => verification === "failure",
   });
 }
 
 function expand(value, context) {
-  return String(value).replace(/\$\{\{\s*([\w.]+)\s*\}\}/g, (_, name) => {
-    const bound = name.split(".").reduce((object, field) => object?.[field], context);
+  return String(value).replace(/\$\{\{\s*(.+?)\s*\}\}/g, (_, name) => {
+    const bound = vm.runInNewContext(name, context);
     assert.notEqual(bound, undefined, `Unbound workflow value ${name}`);
     return String(bound);
   });
@@ -85,7 +85,7 @@ for (const scenario of ["signed public baseline", "new channel (404)", "stale ma
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lm-baseline-flow-"));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const state = scenario.includes("404") ? "absent" : "1".repeat(64);
-    const ctx = { inputs: { use_current_run: true, unsigned_update_test: false, source_build_run_id: "" },
+    const ctx = { inputs: { use_current_run: true, unsigned_update_test: false, test_signed_updates: false, source_build_run_id: "" },
       github: { run_id: "45142962799" }, vars: { LAZYMIND_UPDATE_MODELSCOPE_REPO: "fixture/updates" } };
     const archives = new Map();
     for (const platform of ["macos", "windows"]) {

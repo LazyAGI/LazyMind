@@ -208,6 +208,54 @@ go test ./internal/desktopupdate ./cmd/update-publisher -run 'TestPublication|Te
 Real signing/notarization, ModelScope download redirects and A→B installation are release
 acceptance checks, not established by these unit tests.
 
+### Windows A → B with a dedicated test certificate
+
+Use **Windows Desktop Installer** on the fork. Both packages install and appear as **LazyMind**. Run this on a dedicated Windows test account or VM with a clean installation. The test build uses the normal Authenticode and signed-policy checks. It has its own publisher certificate, Ed25519 public keys, trust domain and ModelScope prefix.
+
+Create one self-signed RSA code-signing certificate for the test channel on a Windows signing workstation. Retain that same key pair for A and B. For example, use PowerShell in a private directory:
+
+```powershell
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Desktop QA Publisher" -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -CertStoreLocation Cert:\CurrentUser\My
+Export-Certificate -Cert $cert -FilePath windows-qa.cer | Out-Null
+Export-PfxCertificate -Cert $cert -FilePath windows-qa.pfx -Password (Read-Host -AsSecureString 'Choose PFX password') | Out-Null
+```
+
+Configure the fork under **Settings → Secrets and variables → Actions**:
+
+| Repository setting | Value |
+| --- | --- |
+| Secret `WINDOWS_TEST_CSC_LINK` | Single-line Base64 of the PFX containing the test private key |
+| Secret `WINDOWS_TEST_CSC_KEY_PASSWORD` | PFX password |
+| Variable `LAZYMIND_WINDOWS_TEST_CERT_DER_BASE64` | Single-line Base64 of the **public DER .cer** |
+| Variable `LAZYMIND_WINDOWS_TEST_UPDATE_REPO` | Writable ModelScope dataset in `OWNER/REPO` form |
+| Variable `LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON` | Public v2 configuration below |
+| Variable `LAZYMIND_WINDOWS_UPDATE_MINIMUM_SYSTEM_VERSION` | Lowest supported Windows version, e.g. `10.0.19045` |
+
+In the **desktop_updates_test** environment store secrets `WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY` (PKCS#8 Ed25519 PEM) and `WINDOWS_TEST_MODELSCOPE_TOKEN` (dataset write access), and variable `LAZYMIND_WINDOWS_TEST_UPDATE_POLICY_KEY_ID` matching the public key ID. These settings are separate from both the production publisher and the macOS ad-hoc publisher. Only the signing job receives the PFX.
+
+Example public JSON for a fresh round; replace the dataset, public key and signer before use:
+
+```json
+{
+  "trustDomain": "windows-test-trial-1",
+  "audience": "official",
+  "channel": "canary",
+  "mode": "official",
+  "signingIdentity": "Desktop QA Publisher",
+  "updaterProtocol": 2,
+  "policyURL": "https://modelscope.cn/datasets/OWNER/REPO/resolve/master/updates/windows-test/trial-1/policy.json",
+  "allowedOrigins": ["https://modelscope.cn"],
+  "publicKeys": {"qa-1": "BASE64_RAW_32_BYTE_ED25519_TEST_PUBLIC_KEY"}
+}
+```
+
+Use the same configuration for A and B. Include the exact HTTPS CDN origins used by the dataset for redirects. The policy, EXE, feed, component catalog and RAG bundles use the test round's prefix. Choose a fresh round by changing the folder and trust domain together. Ordinary and official builds keep their existing release settings.
+
+1. On the designated test machine, compare the public certificate fingerprint with the signing workstation's copy. Once per certificate, import the public `.cer` into the test user's trusted roots: `Import-Certificate -FilePath .\windows-qa.cer -CertStoreLocation Cert:\CurrentUser\Root`. The disposable GitHub-hosted runners use their machine root store to avoid an interactive trust prompt. Never distribute the PFX to installation or verification machines.
+2. In **Run workflow**, select the desired branch, leave `git_ref` empty, select `enable_test_signed_updates` only and enter the A version (e.g. `0.5.301`) in `test_version`. Wait for test publication. Install the resulting LazyMind EXE in the test account.
+3. Run Windows Desktop Installer again with the same settings and a higher version (e.g. `0.5.302`). Open **Check for updates** in A. For the first publication CI records that no predecessor exists. For B the installed-upgrade job installs the verified A on a fresh Windows runner, creates a knowledge base, uses A's own updater to install B, then opens the same knowledge base. Its evidence is the `desktop-installed-upgrade-windows-<run-id>` artifact.
+4. To run a normal signed publication, use `enable_updates` with the production settings instead. Neither Windows mode needs a macOS build.
+
 ### In-place macOS ad-hoc update test
 
 Configure the `desktop_updates_test` environment with its own `MODELSCOPE_UPDATE_TOKEN`,

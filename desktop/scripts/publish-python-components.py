@@ -16,7 +16,10 @@ spec.loader.exec_module(verify)
 def publish(directory, repo, python=None, api=None, host='ms', signing_mode='developer-id', prefix='RAG'):
     verify.require(host in ('ms', 'hf'), 'Invalid publication host')
     isolated_test = prefix != 'RAG'
-    if isolated_test:
+    if signing_mode == 'windows-test':
+        verify.require(host == 'ms' and re.fullmatch(r'updates/windows-test/(?:[A-Za-z0-9][A-Za-z0-9._-]*/)+RAG', prefix),
+                       'Windows test components require the isolated Windows test prefix')
+    elif isolated_test:
         verify.require(host == 'ms' and signing_mode == 'adhoc' and
                        re.fullmatch(r'updates/unsigned-test(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*/RAG', prefix),
                        'Test components require the isolated ad-hoc ModelScope prefix')
@@ -29,6 +32,8 @@ def publish(directory, repo, python=None, api=None, host='ms', signing_mode='dev
         archives = {}
         for component_id in sorted(entries, key=lambda name: name != 'rag'):
             entry = entries[component_id]
+            if signing_mode == 'windows-test':
+                verify.require(entry['platform'] == 'windows', 'Expected a Windows test component')
             tag = entry.get('tag', '')
             verify.require(entry.get('id') == component_id and re.fullmatch(r'[a-f0-9]{64}', tag),
                            'Invalid component ID or tag')
@@ -94,7 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--repo', required=True)
     parser.add_argument('--python', type=Path)
     parser.add_argument('--host', choices=('ms', 'hf'), default='ms')
-    parser.add_argument('--signing-mode', choices=('developer-id', 'adhoc'), default='developer-id')
+    parser.add_argument('--signing-mode', choices=('developer-id', 'adhoc', 'windows-test'), default='developer-id')
     parser.add_argument('--prefix', default='RAG')
     args = parser.parse_args()
     publish(args.directory, args.repo, args.python, host=args.host, signing_mode=args.signing_mode, prefix=args.prefix)

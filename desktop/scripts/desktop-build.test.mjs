@@ -418,7 +418,7 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   );
   assert.match(
     source,
-    /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
+    /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.enable_test_signed_updates && github\.sha \|\| inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
   );
   assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList \$env:INSTALL_ARGUMENTS -Wait/);
   assert.match(source, /!matrix\.verify_installer_warmup \|\| steps\.installer_warmup\.outcome == 'success'/);

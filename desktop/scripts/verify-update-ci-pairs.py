@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 
-def verify_pairs(plan, current, baseline, output, platform, unsigned_test):
+def verify_pairs(plan, current, baseline, output, platform, unsigned_test, target_components_dir=None):
     reports = output / 'evidence' / platform
     reports.mkdir(parents=True)
     probe = Path(__file__).with_name('verify-update-format.py')
@@ -24,6 +24,8 @@ def verify_pairs(plan, current, baseline, output, platform, unsigned_test):
                        '--output', str(reports / (source + '.json'))]
             if unsigned_test:
                 command.extend(['--unsigned-test', '--target-components-dir', str(current / 'python-components')])
+            elif target_components_dir is not None:
+                command.extend(['--target-components-dir', str(target_components_dir)])
             local_source = baseline / source
             use_build_artifact = pair['baseline'] and (local_source / 'release.json').is_file()
             if use_build_artifact:
@@ -56,5 +58,6 @@ if __name__ == '__main__':
     for name in ['plan', 'current', 'baseline', 'output']:
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--platform', required=True, choices=['macos', 'windows'])
+    parser.add_argument('--target-components-dir', type=Path)
     parser.add_argument('--unsigned-test', action='store_true')
     verify_pairs(**vars(parser.parse_args()))

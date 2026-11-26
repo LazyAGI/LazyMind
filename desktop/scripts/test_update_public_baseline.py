@@ -224,13 +224,17 @@ class PublicBaselineTests(unittest.TestCase):
             condition = re.search(r'^        if: (.+)$', step, re.M)
             if condition:
                 gate = condition[1].strip("'")
-                self.assertIn(gate, ('inputs.use_current_run', '!inputs.use_current_run'), 'unknown manual step gate')
-                if gate == 'inputs.use_current_run':
+                self.assertIn(gate, ('inputs.use_current_run', '!inputs.use_current_run', 'inputs.test_signed_updates'), 'unknown manual step gate')
+                if gate in ('inputs.use_current_run', 'inputs.test_signed_updates'):
                     continue
             if step.startswith('name: Build the offline update publisher'):
                 continue
             self.assertIn('        run: |\n', step, 'unexpected manual publication step')
             header, shell = step.split('        run: |\n', 1)
+            # Manual publication uses the ordinary credentials. Resolve the same key
+            # selection as Actions when the call-only test signing input is absent.
+            header = re.sub(r"(vars|secrets)\[inputs\.test_signed_updates && '[A-Za-z0-9_]+' \|\| '([A-Za-z0-9_]+)'\]",
+                            r'\1.\2', header)
             bindings = re.findall(r'^          (\w+): \$\{\{\s*([\w.]+)\s*\}\}$', header, re.M)
             scripts.append((bindings, '\n'.join(line.removeprefix('          ') for line in shell.splitlines())))
 

@@ -35,6 +35,15 @@ on:
         required: false
         type: boolean
         default: false
+      enable_test_signed_updates:
+        description: "Publish a Windows test-certificate update (use instead of enable_updates)"
+        required: false
+        type: boolean
+        default: false
+      test_version:
+        description: "Windows test-signed package version, e.g. 0.5.301 for A and 0.5.302 for B"
+        required: false
+        type: string
       git_ref:
         description: "Branch, tag, or commit SHA to build; leave empty to build the selected workflow branch"
         required: false
@@ -44,8 +53,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-installer-${{ inputs.git_ref || github.ref }}
-  cancel-in-progress: true
+  group: windows-installer-${{ inputs.enable_test_signed_updates && 'test-signed-' || '' }}${{ inputs.git_ref || github.ref }}
+  cancel-in-progress: ${{ !inputs.enable_test_signed_updates }}
 
 env:
   CI: "true"
@@ -68,7 +77,7 @@ env:
 jobs:
   publish_windows_update:
     name: Publish signed Windows update
-    if: github.event_name == 'workflow_dispatch' && inputs.enable_updates && vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.enable_updates && !inputs.enable_test_signed_updates && vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'
     needs: [build-windows-installer, test-windows-installer]
     permissions:
       contents: read
@@ -78,6 +87,19 @@ jobs:
       use_current_run: true
       platform: windows
       source_build_run_id: ${{ vars.LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID }}
+
+  publish_windows_test_update:
+    name: Publish Windows test-certificate update
+    if: github.event_name == 'workflow_dispatch' && inputs.enable_test_signed_updates && !inputs.enable_updates
+    needs: [build-windows-installer, test-windows-installer]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/desktop-update-publish.yml
+    with:
+      use_current_run: true
+      platform: windows
+      test_signed_updates: true
 
   build-windows-installer:
     name: Build Windows x64 installer
@@ -91,10 +113,22 @@ jobs:
       is_release: ${{ steps.release.outputs.is_tag }}
 
     steps:
+      - name: Validate manual test signing selection
+        if: inputs.enable_test_signed_updates
+        shell: pwsh
+        env:
+          OFFICIAL: ${{ inputs.enable_updates }}
+          SELECTED_REF: ${{ inputs.git_ref }}
+        run: |
+          if ($env:OFFICIAL -eq 'true') { throw 'Choose either official or test-signed updates' }
+          if ($env:SELECTED_REF -and $env:SELECTED_REF -cne $env:GITHUB_SHA) {
+            throw 'Choose the test signing revision in Run workflow; leave git_ref empty or supply that commit SHA'
+          }
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.git_ref || github.ref }}
+          ref: ${{ inputs.enable_test_signed_updates && github.sha || inputs.git_ref || github.ref }}
           fetch-depth: 1
           fetch-tags: true
           persist-credentials: false
@@ -179,9 +213,18 @@ jobs:
         shell: pwsh
         env:
           RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+          TEST_SIGNED: ${{ inputs.enable_test_signed_updates }}
+          TEST_VERSION: ${{ inputs.test_version }}
+          UPDATE_REPO: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_REPO }}
+          LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
         run: |
           $ErrorActionPreference = "Stop"
           $packagePath = Join-Path $env:GITHUB_WORKSPACE "desktop\electron\package.json"
+          if ($env:TEST_SIGNED -eq 'true') {
+            node desktop/scripts/windows-test-channel.mjs configure
+            exit $LASTEXITCODE
+          }
           if ($env:RELEASE_TAG) {
             node desktop/scripts/resolve-release-version.mjs `
               --tag $env:RELEASE_TAG `
@@ -280,20 +323,28 @@ jobs:
             doctor
 
       - name: Validate update publication inputs
-        if: inputs.enable_updates
+        if: inputs.enable_updates || inputs.enable_test_signed_updates
         shell: pwsh
         env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_LINK: ${{ secrets[inputs.enable_test_signed_updates && 'WINDOWS_TEST_CSC_LINK' || 'WIN_CSC_LINK'] }}
         run: |
           foreach ($name in @('LAZYMIND_UPDATE_BUILD_CONFIG_JSON', 'LAZYMIND_UPDATE_BASE_URL', 'LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION', 'WIN_CSC_LINK')) {
             if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Missing update build input: $name" }
           }
 
+      - name: Trust the configured public Windows test certificate
+        if: inputs.enable_test_signed_updates
+        shell: pwsh
+        env:
+          WINDOWS_TEST_CERTIFICATE: ${{ vars.LAZYMIND_WINDOWS_TEST_CERT_DER_BASE64 }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
+        run: ./desktop/scripts/windows-test-certificate.ps1
+
       - name: Build Windows installer
         env:
           LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ env.LAZYMIND_UPDATE_BUILD_CONFIG_JSON }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          WIN_CSC_LINK: ${{ secrets[inputs.enable_test_signed_updates && 'WINDOWS_TEST_CSC_LINK' || 'WIN_CSC_LINK'] }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets[inputs.enable_test_signed_updates && 'WINDOWS_TEST_CSC_KEY_PASSWORD' || 'WIN_CSC_KEY_PASSWORD'] }}
           LAZYMIND_RELEASE_BUILD: ${{ steps.release.outputs.is_tag }}
         shell: pwsh
         run: |
@@ -341,7 +392,7 @@ jobs:
 
           $hash = Get-FileHash -LiteralPath $outputPath -Algorithm SHA256
           $signature = Get-AuthenticodeSignature -LiteralPath $outputPath
-          if ('${{ inputs.enable_updates }}' -eq 'true') {
+          if ('${{ inputs.enable_updates || inputs.enable_test_signed_updates }}' -eq 'true') {
             if ($signature.Status -ne 'Valid') { throw 'Update installer must have a valid Authenticode signature' }
             $helperConfig = & 'desktop/dist/win-unpacked/resources/runtime/bin/lazymind-update-helper.exe' config | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or $helperConfig.status -ne 'enabled') { throw 'Invalid built update helper' }
@@ -385,8 +436,17 @@ jobs:
 
           Get-ChildItem -LiteralPath $publishDir | Format-Table Name, Length
 
+      - name: Verify the Windows test installer against its configured certificate
+        if: inputs.enable_test_signed_updates
+        shell: bash
+        env:
+          WINDOWS_TEST_CERTIFICATE: ${{ vars.LAZYMIND_WINDOWS_TEST_CERT_DER_BASE64 }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
+          UPDATE_INSTALLER: ${{ steps.package.outputs.installer_path }}
+        run: pwsh -NoProfile -NonInteractive -File desktop/scripts/windows-test-certificate.ps1 -SignedFile "$UPDATE_INSTALLER"
+
       - name: Prepare immutable update artifacts
-        if: inputs.enable_updates
+        if: inputs.enable_updates || inputs.enable_test_signed_updates
         shell: pwsh
         env:
           UPDATE_INSTALLER: ${{ steps.package.outputs.installer_path }}
@@ -400,7 +460,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Update artifact preparation failed' }
 
       - name: Upload immutable update artifacts
-        if: inputs.enable_updates
+        if: inputs.enable_updates || inputs.enable_test_signed_updates
         uses: actions/upload-artifact@v7
         with:
           name: desktop-update-windows-${{ github.run_id }}
@@ -476,6 +536,7 @@ jobs:
 
 
   mirror-windows-installer:
+    if: ${{ !inputs.enable_test_signed_updates }}
     name: Mirror windows installer to ${{ matrix.host }} (non-blocking)
     needs: build-windows-installer
     runs-on: ubuntu-latest
@@ -520,6 +581,7 @@ jobs:
             --file "installer-mirror/${INSTALLER_NAME}"
 
   publish-windows-rag:
+    if: ${{ !inputs.enable_test_signed_updates }}
     name: Publish verified windows RAG (independent of installation tests)
     needs: build-windows-installer
     strategy:
@@ -589,7 +651,7 @@ jobs:
       - name: Checkout smoke test scripts
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.git_ref || github.ref }}
+          ref: ${{ inputs.enable_test_signed_updates && github.sha || inputs.git_ref || github.ref }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -617,6 +679,14 @@ jobs:
           }
           "path=$($installer[0].FullName)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
 
+      - name: Trust the configured public Windows test certificate
+        if: inputs.enable_test_signed_updates
+        shell: pwsh
+        env:
+          WINDOWS_TEST_CERTIFICATE: ${{ vars.LAZYMIND_WINDOWS_TEST_CERT_DER_BASE64 }}
+          LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
+        run: ./desktop/scripts/windows-test-certificate.ps1
+
       - name: Install
         id: install
         continue-on-error: true
@@ -641,7 +711,7 @@ jobs:
         shell: pwsh
         env:
           EXPECTED_VERSION: ${{ needs.build-windows-installer.outputs.package_version }}
-          EXPECT_SIGNED_RUNTIME: ${{ inputs.enable_updates }}
+          EXPECT_SIGNED_RUNTIME: ${{ inputs.enable_updates || inputs.enable_test_signed_updates }}
         run: |
           $ErrorActionPreference = "Stop"
           $installDir = Join-Path $env:LOCALAPPDATA "Programs\LazyMind"
