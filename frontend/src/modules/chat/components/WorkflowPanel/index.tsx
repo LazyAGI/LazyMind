@@ -66,13 +66,15 @@ import {
   SlotDownloadContext,
   SlotMarkdownStream,
 } from './SlotComponents';
+import { PptPageEditor } from './ppt/PptPageEditor';
+import { isSlideSpecArtifact } from './ppt/slideSchema';
 import { SlideThumb, type SlideThumbHandle } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import { findWriterArtifactStream, shouldShowArtifactStream } from './writerArtifactStream';
 import { PaperAnalysisProgress } from './PaperAnalysisProgress';
 import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
-import { workflowTabStatus } from './workflowStepStatus';
+import { pptStageRetryKind, workflowTabStatus } from './workflowStepStatus';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import type { WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
 import {
@@ -989,6 +991,7 @@ function CompositeSlotGrid({
       && !Array.isArray(tab.composite_layout)
       && tab.composite_layout.direction === 'column',
   );
+  const flushPptPage = useRef<(() => Promise<boolean>) | null>(null);
   const [slideExpanded, setSlideExpanded] = useState(false);
   const [localPage, setLocalPage] = useState<number | null>(null);
   const currentPage = tab.page_group ? (pageGroups.pages[tab.page_group] ?? null) : localPage;
@@ -1013,6 +1016,15 @@ function CompositeSlotGrid({
   }, [paged, tabActive, currentPage, onFocusSortOrder]);
 
   const activePage = currentPage != null && rows.includes(currentPage) ? currentPage : rows[0];
+  const pageSlide = session.workflow_id === 'ppt-workflow' && tab.step_id === 'generate_ppt'
+    ? findSlotRevision(session, tab, 'preview_html', activePage) : undefined;
+  const pageNotes = pageSlide ? findSlotRevision(session, tab, 'preview_notes', activePage) : undefined;
+  const pptRunning = Boolean(pageSlide && workflowTabStatus(tab, session) !== 'succeeded');
+  const editPage = pageSlide?.selected && pageSlide.list_index != null && !pptRunning && !readOnly
+    && !isSlideSpecArtifact(pageSlide.artifact_value);
+  const changePage = async (page: number) => {
+    if (!flushPptPage.current || await flushPptPage.current()) setCurrentPage(page);
+  };
   const reorderableCompositeSlotIds = tab.slots
     .filter((slot) => slot.cardinality === 'list' && slot.ordered)
     .map((slot) => slot.id)
@@ -1027,6 +1039,7 @@ function CompositeSlotGrid({
 
   const handlePageReorder = useCallback(async (nextPages: number[]) => {
     if (!canReorderPages || reordering || nextPages.length !== rows.length) return;
+    if (flushPptPage.current && !await flushPptPage.current()) return;
     if (nextPages.every((page, index) => page === rows[index])) return;
 
     const focusedVisualIdx = Math.max(0, nextPages.indexOf(activePage));
@@ -1106,7 +1119,7 @@ function CompositeSlotGrid({
                 expanded: slideExpanded,
                 onExpandedChange: setSlideExpanded,
                 onChange: (index) => {
-                  if (index >= 0 && index < rows.length) setCurrentPage(rows[index]);
+                  if (index >= 0 && index < rows.length) void changePage(rows[index]);
                 },
               } : undefined}
               expectedType={def?.type}
@@ -1116,7 +1129,7 @@ function CompositeSlotGrid({
               onRefresh={onRefresh}
               onReference={onReference}
               hideImageMutationActions={hideImageMutationActions}
-              readOnly={readOnly || (session.workflow_id === 'ppt-workflow' && isPptPreviewRevision(rev) && !rev.selected)}
+              readOnly={readOnly || (pptRunning && isPptPreviewRevision(rev)) || (session.workflow_id === 'ppt-workflow' && isPptPreviewRevision(rev) && !rev.selected)}
             />
           </DocumentActionScope>
         ) : (
@@ -1272,7 +1285,7 @@ function CompositeSlotGrid({
       position={pageBarPosition!}
       pages={rows}
       currentPage={activePage}
-      onChange={setCurrentPage}
+      onChange={changePage}
       onReorder={canReorderPages ? handlePageReorder : undefined}
       reordering={reordering}
       tab={tab}
@@ -1294,7 +1307,12 @@ function CompositeSlotGrid({
             <div role='status'>{t('chat.workflowStalePreview')}</div>
           )}
           {reorderError && <span className='composite-toolbar__error'>{reorderError}</span>}
-          <div className='composite-grid composite-grid--paged'>{renderRow(activePage)}</div>
+          <div className='composite-grid composite-grid--paged'>{editPage && pageSlide
+            ? <PptPageEditor key={session.session_id + ':' + pageSlide.list_index} sessionId={session.session_id}
+                stateVersion={session.state_version} slide={pageSlide} notes={pageNotes?.selected ? pageNotes : undefined} flushRef={flushPptPage} refresh={onRefresh}>
+                {renderRow(activePage)}
+              </PptPageEditor>
+            : renderRow(activePage)}</div>
         </div>
         {(pageBarPosition === 'bottom' || pageBarPosition === 'right') && rail}
       </div>
@@ -2195,7 +2213,13 @@ export function WorkflowPanel({
   );
   const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx], controlAdapter?.continuationStep?.());
   const showContinue = Boolean(continueAction);
-  const showStepRollback =
+  const isPpt = session.workflow_id === 'ppt-workflow';
+  const selectedStage = tabs[visibleActiveTabIdx];
+  const selectedStepId = selectedStage?.step_id ?? selectedStage?.id;
+  const showPptRerun = isPpt && Boolean(onSendMessage || controlAdapter) && selectedStepId
+    && !stopping && (displayStatus === 'stopped' || displayStatus === 'completed' || displayStatus === 'failed');
+  const selectedRetryKind = selectedStepId && pptStageRetryKind(session, selectedStepId);
+  const showStepRollback = !isPpt &&
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0);
 
@@ -2217,12 +2241,17 @@ export function WorkflowPanel({
     && step.validity !== 'stale'
     && all.findIndex((candidate) => candidate.step_id === step.step_id && candidate.validity !== 'stale') === index) : [];
   const stepLabel = (stepId: string) => {
-    const label = graphStepLabels[stepId]?.trim();
+    const label = ui.stepLabels?.[stepId]?.trim();
     if (label && label !== stepId) return label;
     return tabs.find(tab => getTabStepId(tab) === stepId)?.label
       ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
   };
   const continueDisabled = (continueAction?.kind === 'advance' ? chatBusy || actionPending : buttonsDisabled) || currentStepStatus === 'failed';
+
+  const showSessionRetry = (displayStatus === 'failed' && !(isPpt && (controlAdapter || onSendMessage)
+    && tabs.some(tab => pptStageRetryKind(session, tab.step_id ?? tab.id) === 'retry')))
+    || (displayStatus === 'stopped' && Object.values(session.projection?.nodes ?? {})
+      .some(node => node.validity !== 'stale' && node.execution === 'failed'));
 
   async function refreshBeforeAction() {
     if (controlAdapter) {
@@ -2364,20 +2393,26 @@ export function WorkflowPanel({
     });
   }
 
-  function handleRollback(stepId: string) {
+  function handleStageRetry(stepId: string, kind: 'rewind' | 'retry' = 'rewind') {
     if (!session) return;
     const sessionId = session.session_id;
     void runFooterAction(async () => {
       try {
         if (!await refreshBeforeAction()) return;
         const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
-        if (!latest || latest.session_id !== sessionId) return;
+        if (!latest || latest.session_id !== sessionId || (isPpt && pptStageRetryKind(latest, stepId) !== kind)) return;
         if (controlAdapter) {
-          await controlAdapter.execute({ kind: 'rewind', stepId });
+          await controlAdapter.execute({ kind, stepId });
           return;
         }
-        await onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepLabel(stepId)}`, {
-          session_id: sessionId, kind: 'rewind', step_id: stepId, expected_state_version: latest.state_version ?? 0,
+        const message = isPpt ? t('chat.workflowRerunFromStage', { stage: stepLabel(stepId) })
+          : `${t('chat.workflowRollbackPrefix')}${stepLabel(stepId)}`;
+        if (isPpt && (latest.controller_host === 'external-agent' || latest.projection?.display?.status === 'paused')) {
+          await onSendMessage?.(message);
+          return;
+        }
+        await onSendMessage?.(message, {
+          session_id: sessionId, kind, step_id: stepId, expected_state_version: latest.state_version ?? 0,
         });
       } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
     });
@@ -2599,6 +2634,7 @@ export function WorkflowPanel({
                   aria-controls={`workflow-tab-panel-${tab.id}`}
                   className={`workflow-panel__tab${idx === visibleActiveTabIdx ? ' workflow-panel__tab--active' : ''}`}
                   onClick={() => handleTabChange(idx, tab.id)}
+                  title={stepStatusLabel}
                   type='button'
                 >
                   {!ui.task_presentation?.grouped && (
@@ -2731,7 +2767,7 @@ export function WorkflowPanel({
 
       {/* Footer */}
       {!collapsed && showActions && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0
-        || rollbackSteps.length > 0 || sessionBusy || (showContinue && !approvalStepId) || displayStatus === 'failed' || displayStatus === 'stopped') && (
+        || showPptRerun || rollbackSteps.length > 0 || sessionBusy || (showContinue && !approvalStepId) || showSessionRetry || displayStatus === 'stopped') && (
         <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
           {!previewTarget && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0) ? (
             <DocumentActions documentFooter={documentFooter} actionPending={actionPending} runFooterAction={runFooterAction} />
@@ -2756,8 +2792,7 @@ export function WorkflowPanel({
               {t(stopping ? 'chat.workflowStopping' : 'chat.workflowStop')}
             </button>
           )}
-          {(displayStatus === 'failed' || (displayStatus === 'stopped' && Object.values(session.projection?.nodes ?? {})
-            .some(node => node.validity !== 'stale' && node.execution === 'failed'))) && (
+          {showSessionRetry && (
             <button
               type='button'
               className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
@@ -2775,6 +2810,14 @@ export function WorkflowPanel({
               }
             >
               {actionPending ? t('chat.workflowSavingBeforeAction') : t('chat.workflowRetry')}
+            </button>
+          )}
+          {showPptRerun && (
+            <button type='button' className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
+              disabled={buttonsDisabled || !selectedRetryKind}
+              title={t('chat.workflowRerunFromStage', { stage: selectedStage.label })}
+              onClick={() => selectedRetryKind && handleStageRetry(selectedStepId, selectedRetryKind)}>
+              {t('chat.workflowRerun')}
             </button>
           )}
           {showContinue && !approvalStepId && (
@@ -2809,7 +2852,7 @@ export function WorkflowPanel({
                   <button key={step.step_id} type='button'
                     className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
                     disabled={buttonsDisabled}
-                    onClick={() => handleRollback(step.step_id)}
+                    onClick={() => handleStageRetry(step.step_id)}
                     title={actionPending ? t('chat.workflowSavingBeforeAction')
                       : buttonsDisabled ? t('chat.workflowBtnDisabledHint')
                         : `${t('chat.workflowRollbackPrefix')}${stepLabel(step.step_id)}`}>

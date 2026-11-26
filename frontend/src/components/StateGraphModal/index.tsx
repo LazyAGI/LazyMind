@@ -116,12 +116,12 @@ function projectionToGraph(raw: ProjectionEnvelope, t: TFunction, stepLabels?: R
   return { nodes, edges, initial: '__start__' };
 }
 
-function fallbackStepsToGraph(steps: { step_id: string; status: string }[]): StateGraphData {
+function fallbackStepsToGraph(steps: { step_id: string; status: string }[], stepLabels?: Record<string, string>): StateGraphData {
   const nodes: StateGraphData['nodes'] = [
     { id: '__start__', label: '__start__', step_index: 0, status: 'succeeded', is_current: false },
     ...steps.map((step, index) => ({
       id: `fallback-${index}`,
-      label: step.step_id || `Step ${index + 1}`,
+      label: stepLabels?.[step.step_id] || step.step_id || `Step ${index + 1}`,
       step_index: index + 1,
       status: step.status || 'pending',
       is_current: step.status === 'running',
@@ -210,7 +210,7 @@ export default function StateGraphModal({
       setError(null);
     } catch {
       if (fallbackSteps.length > 0) {
-        const fallback = fallbackStepsToGraph(fallbackSteps);
+        const fallback = fallbackStepsToGraph(fallbackSteps, stepLabels);
         cachedDataRef.current = fallback;
         setData(fallback);
         setError(null);

@@ -10,13 +10,14 @@ import {
   message,
 } from "antd";
 import SkillCallModeControl from "./components/SkillManagementSection/SkillCallModeControl";
+import WorkflowIcon from "@/modules/workflow/components/WorkflowIcon";
+import { useSkillLaunch } from "./hooks/useSkillLaunch";
 import {
   OriginMark,
   resolveSkillOriginKind,
 } from "./components/SkillManagementSection/OriginMark";
 import type { ColumnsType } from "antd/es/table";
 import {
-  AppstoreOutlined,
   BookOutlined,
   CloudUploadOutlined,
   CloudDownloadOutlined,
@@ -57,7 +58,7 @@ import MemoryDraftModal, {
 } from "./components/MemoryDraftModal";
 import ShareModal from "./components/ShareModal";
 import SkillShareCenterModal from "./components/SkillShareCenterModal";
-import { renderSkillCategoryIcon } from "./components/SkillManagementSection/skillCategoryIcon";
+import SkillSourceIcon from "./components/SkillManagementSection/SkillSourceIcon";
 import {
   acceptSkillShare,
   buildSkillUpdatePayload,
@@ -249,6 +250,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const { launchSkill, launchingId: launchingSkillId } = useSkillLaunch();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabRouteMatch = useMatch(`${MEMORY_BASE_PATH}/:tab`);
   const skillDetailMatch = useMatch(`${MEMORY_BASE_PATH}/skills/:itemId`);
@@ -509,7 +511,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       title: t("admin.memoryTabSkills"),
       description: t("admin.memoryTabSkillsDesc"),
       unit: t("admin.memoryUnitSkill"),
-      icon: <AppstoreOutlined />,
+      icon: <WorkflowIcon name="component" size={14} />,
     },
     experience: {
       title: t("admin.memoryTabExperience"),
@@ -919,13 +921,13 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   );
 
   useEffect(() => {
-    if (activeTab !== "skills") {
+    if (activeTab !== "skills" || skillView === "workflows") {
       return;
     }
     const silent = manualSkillReviewSummaryLoadedRef.current;
     manualSkillReviewSummaryLoadedRef.current = true;
     void refreshManualSkillReviewSummary({ silent });
-  }, [activeTab, refreshManualSkillReviewSummary]);
+  }, [activeTab, skillView, refreshManualSkillReviewSummary]);
 
   useEffect(() => {
     if (activeTab !== "skills") {
@@ -1328,9 +1330,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     const shouldRefreshSkillAssets =
       Boolean(skillRouteItemId) ||
       reviewRouteTab === "skills" ||
-      routeMemoryTab === "skills";
+      (routeMemoryTab === "skills" && skillView !== "workflows");
 
     if (!shouldRefreshSkillAssets) {
+      skillListRefreshKeyRef.current = "";
       return;
     }
 
@@ -1396,7 +1399,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     const shouldLoadSkillTags =
       Boolean(skillRouteItemId) ||
       reviewRouteTab === "skills" ||
-      routeMemoryTab === "skills";
+      (routeMemoryTab === "skills" && skillView !== "workflows");
 
     if (!shouldLoadSkillTags) {
       return undefined;
@@ -1429,13 +1432,13 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     return () => {
       ignore = true;
     };
-  }, [reviewRouteTab, routeMemoryTab, skillRouteItemId, skillTagsRefreshKey]);
+  }, [reviewRouteTab, routeMemoryTab, skillRouteItemId, skillTagsRefreshKey, skillView]);
 
   useEffect(() => {
     const shouldLoadSkillCategories =
       Boolean(skillRouteItemId) ||
       reviewRouteTab === "skills" ||
-      routeMemoryTab === "skills";
+      (routeMemoryTab === "skills" && skillView !== "workflows");
 
     if (!shouldLoadSkillCategories) {
       return undefined;
@@ -1447,6 +1450,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     reviewRouteTab,
     routeMemoryTab,
     skillRouteItemId,
+    skillView,
   ]);
 
   useEffect(() => {
@@ -4467,6 +4471,21 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       setGlossaryInboxSubmitting("");
     }
   };
+  const renderSkillUseAction = (record: StructuredAsset, asLogo = false) => {
+    const unavailable = record.cloudResourceId ? t("admin.memorySkillUseDownloadHint")
+      : record.isEnabled === false || record.isAvailable === false ? t("chat.mentionCapabilityDisabled") : undefined;
+    return (
+      <Tooltip placement="top" title={unavailable || t("admin.memorySkillActionUse")}>
+        <Button type="text" size="small"
+          className={asLogo ? "memory-table-main-icon memory-skill-use-icon" : undefined}
+          aria-label={asLogo ? `${t("admin.memorySkillActionUse")}: ${record.name}` : t("admin.memorySkillActionUse")}
+          disabled={Boolean(unavailable) || Boolean(launchingSkillId && launchingSkillId !== record.id)}
+          loading={launchingSkillId === record.id}
+          icon={asLogo ? <SkillSourceIcon skill={record} /> : <WorkflowIcon name="circle-arrow-right" size={16} />}
+          onClick={() => void launchSkill(record)} />
+      </Tooltip>
+    );
+  };
   const structuredInfoColumns: ColumnsType<StructuredAsset> = [
     {
       title: t("admin.memoryNameDesc"),
@@ -4490,9 +4509,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
             }`}
           >
             {activeTab === "skills" ? (
-              <span className="memory-table-main-icon" aria-hidden="true">
-                {renderSkillCategoryIcon(record.category)}
-              </span>
+              renderSkillUseAction(record, true)
             ) : null}
             <div className="memory-table-main-copy">
               <div className="memory-table-main-title">
@@ -4720,10 +4737,11 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     {
       title: t("admin.memoryOperations"),
       key: "actions",
-      width: 148,
+      width: 180 + (cloudSkills.available ? 32 : 0) + (hideUserGroupSurfaces ? 0 : 32),
       fixed: "right",
       render: (_value, record) => record.cloudResourceId ? (
-        <div className="memory-resource-actions">
+        <div className="memory-resource-actions memory-skill-actions">
+          {renderSkillUseAction(record)}
           <Tooltip title={t("admin.memoryCloudViewDetail")}>
             <Button type="text" size="small" icon={<EyeOutlined />} aria-label={t("admin.memoryCloudViewDetail")} onClick={() => navigate(`/memory-management/skills/cloud/${encodeURIComponent(record.cloudResourceId!)}`)} />
           </Tooltip>
@@ -4742,7 +4760,8 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           </Tooltip>
         </div>
       ) : (
-        <div className="memory-resource-actions">
+        <div className="memory-resource-actions memory-skill-actions">
+          {renderSkillUseAction(record)}
           <Tooltip title={t("admin.memoryViewItem")}>
             <Button
               type="text"

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -226,8 +227,7 @@ func (s *Server) routes() http.Handler {
 			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "shared bridge lifecycle credentials required"})
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
-		go s.stop()
+		s.respondAndStop(writer, map[string]any{"ok": true})
 	})
 	handler := http.Handler(mux)
 	if s.shared != nil {
@@ -775,4 +775,23 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(value)
+}
+
+func (s *Server) respondAndStop(writer http.ResponseWriter, value map[string]any) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	body = append(body, '\n')
+
+	// The process can exit before the handler returns. Send a complete response
+	// without relying on the final chunk or buffered writes from handler cleanup.
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = writer.Write(body)
+	_ = http.NewResponseController(writer).Flush()
+	if s.stop != nil {
+		go s.stop()
+	}
 }

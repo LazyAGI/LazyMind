@@ -3935,3 +3935,6 @@ UPDATE plugin_sessions SET approval_preferences = COALESCE((
     SELECT json_group_object(step_id, json(CASE WHEN approval_required THEN 'true' ELSE 'false' END)) FROM workflow_approval_preferences
     WHERE user_id = plugin_sessions.create_user_id AND workflow_id = plugin_sessions.plugin_id
 ), '{}');
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE plugin_slot_revisions ADD COLUMN ppt_notes_revision_id VARCHAR(36);

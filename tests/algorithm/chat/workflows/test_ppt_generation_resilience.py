@@ -55,7 +55,9 @@ class AdapterModel:
         return self.respond(prompt, control)
 
 
-@pytest.mark.parametrize('response_kind', ['separate_reasoning', 'tagged_reasoning', 'empty_content'])
+@pytest.mark.parametrize('response_kind', [
+    'separate_reasoning', 'tagged_reasoning', 'empty_content', 'text_blocks', 'input_text', 'message_ir',
+])
 def test_page_prompt_parses_only_model_content(monkeypatch, tools, response_kind):
     from lazyllm.components import EmptyFormatter
 
@@ -67,6 +69,14 @@ def test_page_prompt_parses_only_model_content(monkeypatch, tools, response_kind
     message = {'role': role, 'content': plan, 'reasoning_content': '分析标签 </think> 和示例 {invalid}'}
     if response_kind == 'tagged_reasoning':
         message = {'role': role, 'content': f'<think>草稿 {{invalid}}</think>\n```json\n{plan}\n```'}
+    if response_kind in ('text_blocks', 'input_text'):
+        message['content'] = [
+            {'type': 'reasoning', 'text': 'DO-NOT-USE {invalid}'},
+            {'type': 'input_text' if response_kind == 'input_text' else 'text', 'text': plan},
+        ]
+    if response_kind == 'message_ir':
+        from lazyllm.module.llms.onlinemodule.base.protocol_ir import MessageIR
+        message = MessageIR.from_chat(message)
     responses = [message]
     if response_kind == 'empty_content':
         responses.insert(0, {**message, 'content': ''})
@@ -89,6 +99,22 @@ def test_page_prompt_parses_only_model_content(monkeypatch, tools, response_kind
     assert [request['page'] for request in requests] == ([2, 2] if response_kind == 'empty_content' else [2])
     if response_kind == 'empty_content':
         assert 'repair' in requests[1]
+
+
+@pytest.mark.parametrize(('response', 'code'), [
+    ('', 'PPT_PAGE_PROMPT_EMPTY'),
+    ('<think>DO-NOT-LOG reasoning</think>', 'PPT_PAGE_PROMPT_EMPTY'),
+    ('DO-NOT-LOG invalid body', 'PPT_PAGE_PROMPT_INVALID_JSON'),
+])
+def test_page_prompt_exhaustion_reports_model_output_failure(monkeypatch, tools, caplog, response, code):
+    model = AdapterModel(lambda *_: {'content': response})
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_: model)
+    with pytest.raises(ValueError, match=code) as failure:
+        tools._plan_one_page_prompt({'global_style': '已确认', 'output_format': 'html'}, 1, '封面', {})
+    assert len(model.calls) == 2
+    assert 'Expecting value' not in str(failure.value)
+    assert 'DO-NOT-LOG' not in str(failure.value) + caplog.text
+    assert 'page=1 attempt=2' in caplog.text
 
 
 @pytest.mark.parametrize('kind', ['timeout', 'length'])

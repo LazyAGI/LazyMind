@@ -1130,6 +1130,20 @@ func selectSlotRevision(ctx context.Context, db *gorm.DB,
 			First(&target).Error; err != nil {
 			return err
 		}
+		if target.PPTNotesRevisionID != nil && slotID == "preview_html" {
+			var notes orm.WorkflowSlotRevision
+			if err := tx.Where("id = ? AND session_id = ? AND slot_id = ?", *target.PPTNotesRevisionID, sessionID, "preview_notes").First(&notes).Error; err != nil {
+				return err
+			}
+			if _, err := selectSlotRevision(ctx, tx, sessionID, notes.SlotID, notes.ListIndex, notes.Revision, changeSource); err != nil {
+				return err
+			}
+			// Selecting the notes may advance the session event version.
+			session, err = lockArtifactMutationSession(tx, sessionID)
+			if err != nil {
+				return err
+			}
+		}
 		if target.Selected {
 			return nil
 		}
@@ -1526,6 +1540,12 @@ func WriteSlotRevisionWithHumanArtifact(
 	return writeSlotRevisionWithHumanArtifact(ctx, db, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, changeSource, expectedRevision, expectedDraftVersion, false, nil)
 }
 
+type slotWriteOptions struct {
+	outlineScope      bool
+	numberingOnly     bool
+	preserveNotesFile bool
+}
+
 func writeSlotRevisionWithHumanArtifact(
 	ctx context.Context, db *gorm.DB,
 	sessionID, slotID, artifactKey, stepID string, attempt int,
@@ -1535,10 +1555,12 @@ func writeSlotRevisionWithHumanArtifact(
 	expectedRevision *int, expectedDraftVersion *int64,
 	preserveConsumers bool,
 	preservedProducer *orm.WorkflowSlotRevision,
-	outlineSave ...bool,
+	options ...slotWriteOptions,
 ) (*orm.WorkflowSlotRevision, error) {
-	outlineScope := len(outlineSave) > 0 && outlineSave[0]
-	numberingOnly := len(outlineSave) > 1 && outlineSave[1]
+	var opts slotWriteOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 
 	if changeSource == "" {
 		changeSource = "human"
@@ -1595,7 +1617,12 @@ func writeSlotRevisionWithHumanArtifact(
 				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 					return err
 				}
-				value, err = document.PreserveProviderMetadata(previous, value, contentType)
+				if opts.preserveNotesFile {
+					// The page editor has verified this upload and retained the original carrier metadata.
+					value = common.PreserveDocumentProviderMetadata(previous, value)
+				} else {
+					value, err = document.PreserveProviderMetadata(previous, value, contentType)
+				}
 				if err != nil {
 					return err
 				}
@@ -1625,11 +1652,11 @@ func writeSlotRevisionWithHumanArtifact(
 		if err != nil {
 			return err
 		}
-		replacedRevisionIDs, err = outlineSaveRevisionIDs(tx, sessionID, outlineScope, replacedRevisionIDs...)
+		replacedRevisionIDs, err = outlineSaveRevisionIDs(tx, sessionID, opts.outlineScope, replacedRevisionIDs...)
 		if err != nil {
 			return err
 		}
-		if numberingOnly || preserveConsumers && slotID == "target_document" && changeSource == "provider_sync" {
+		if opts.numberingOnly || preserveConsumers && slotID == "target_document" && changeSource == "provider_sync" {
 			err = artifactgraph.CheckConsumers(ctx, tx, sessionID, replacedRevisionIDs...)
 		} else if preservedProducer == nil {
 			err = artifactgraph.InvalidateConsumers(ctx, tx, sessionID, replacedRevisionIDs...)
@@ -1846,7 +1873,7 @@ func saveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 			}
 		}
 		var err error
-		revision, err = writeSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft, false, nil, outlineScope, numberingOnly)
+		revision, err = writeSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft, false, nil, slotWriteOptions{outlineScope: outlineScope, numberingOnly: numberingOnly})
 		if err == nil {
 			version = 1
 		}

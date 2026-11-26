@@ -700,6 +700,19 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 		t.Fatalf("patched script = %q", got)
 	}
 
+	finalArchive := filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile))
+	verifyMirror := func() error {
+		patches, err := skillpatch.LoadCatalog(filepath.Join(root, "patches", "catalog.yaml"))
+		if err != nil {
+			return err
+		}
+		_, _, err = inspectFrozenMirror(spec, entry, patches, finalArchive)
+		return err
+	}
+	if err := verifyMirror(); err != nil {
+		t.Fatalf("locked final mirror failed verification: %v", err)
+	}
+
 	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
 	opts.FrozenLockfile = true
 	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
@@ -724,6 +737,10 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 	if err := os.WriteFile(payload, []byte("print('drifted')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := verifyMirror(); err == nil || !strings.Contains(err.Error(), "patch provenance changed") {
+		t.Fatalf("mirror verification with changed patch payload = %v", err)
+	}
+
 	opts.Output = filepath.Join(root, "runtime-frozen-drift", "builtin-skills")
 	opts.CatalogOnly = false
 	if err := run(context.Background(), opts, http.DefaultClient); err == nil {

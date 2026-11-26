@@ -355,10 +355,11 @@ def test_planning_authors_scripts_and_generation_only_references_them():
     assert 'PR/issue/work-log identifiers and evidence citations in notes' in shared
 
 
-@pytest.mark.parametrize('failure', ['model', 'publish'])
+@pytest.mark.parametrize('failure', ['model', 'empty', 'publish'])
 def test_page_prompt_retry_keeps_published_pages_and_resumes_missing_work(monkeypatch, tmp_path, failure):
     tools = _load_ppt_tools()
-    ctx = SimpleNamespace(params={'launch_user_input': '设计一份三页 PPT'})
+    progress = []
+    ctx = SimpleNamespace(params={'launch_user_input': '设计一份三页 PPT'}, task_id='plan', emit=progress.append)
     monkeypatch.setattr(tools, 'require_context', lambda: ctx)
     monkeypatch.setattr(tools, '_bound_workflow_deck', lambda: tmp_path)
     monkeypatch.setattr(tools, '_required_output_format', lambda: 'html')
@@ -378,8 +379,8 @@ def test_page_prompt_retry_keeps_published_pages_and_resumes_missing_work(monkey
         requested.append(page)
         if page > 1:
             assert 0 in visible, 'first prompt must be published before the next model call'
-        if page == 2 and interrupted and failure == 'model':
-            return 'malformed response'
+        if page == 2 and interrupted and failure in ('model', 'empty'):
+            return '' if failure == 'empty' else 'malformed response'
         assert data['shared']['global_style'] == '已确认风格'
         return json.dumps({
             'content': f'页面 {page} 的可见正文', 'layout': '标题与证据两列',
@@ -401,17 +402,29 @@ def test_page_prompt_retry_keeps_published_pages_and_resumes_missing_work(monkey
     monkeypatch.setattr(tools, '_save_artifact', save)
     monkeypatch.setattr(tools, '_ui_slot_order_list', lambda _: list(visible))
     monkeypatch.setattr(tools, '_selected_slide_outline_items', lambda: list(visible.items()))
-    with pytest.raises(tools.ToolExecutionError, match='Page 2 prompt failed'):
+    with pytest.raises(tools.ToolExecutionError, match='Page 2 prompt failed') as error:
         tools.ppt_plan_page_prompts('已确认风格', 'html')
+    assert '不要传 pages' in str(error.value)
+    if failure == 'empty':
+        assert 'PPT_PAGE_PROMPT_EMPTY' in str(error.value)
     assert list(visible) == [0]
     assert not notes
     assert tools._prepare_deferred_outline(tmp_path)['status'] == 'failed'
-    assert requested == ([1, 2, 2] if failure == 'model' else [1, 2])
+    assert requested == ([1, 2, 2] if failure in ('model', 'empty') else [1, 2])
+    assert progress[0]['current_phase'] == '正在规划第 1 页提示词，共 3 页'
+    if failure in ('model', 'empty'):
+        # The agent cannot turn one failed attempt into repeated paid model calls.
+        before = requested.copy()
+        with pytest.raises(tools.ToolExecutionError, match='user-requested new workflow Attempt'):
+            tools.ppt_plan_page_prompts('已确认风格', 'html')
+        assert requested == before
+        # User Retry starts a fresh task context; durable checkpoints survive it.
+        ctx = SimpleNamespace(params=ctx.params, task_id='retry', emit=progress.append)
     visible[0] = '保留用户编辑后的第一页'
     interrupted = False
     requested.clear()
     result = tools.ppt_plan_page_prompts('重试时模型改写的风格', 'html')
-    assert requested == ([2, 3] if failure == 'model' else [3])
+    assert requested == ([2, 3] if failure in ('model', 'empty') else [3])
     assert result['page_count'] == 3 and result['published_count'] == 2
     assert visible[0] == '保留用户编辑后的第一页'
     assert list(visible) == [0, 1, 2]

@@ -3,6 +3,7 @@ DROP TABLE IF EXISTS paper_guide_steps;
 DROP TABLE IF EXISTS paper_guide_revisions;
 DROP TABLE IF EXISTS paper_guides;
 
+ALTER TABLE plugin_slot_revisions DROP COLUMN ppt_notes_revision_id;
 -- +migrate Dialect postgres,sqlite
 DROP INDEX IF EXISTS idx_reading_job_source;
 DROP INDEX IF EXISTS idx_reading_job_enrollment;

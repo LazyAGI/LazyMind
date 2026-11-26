@@ -14,6 +14,7 @@ export type OrdinaryTaskState =
   | "outdated";
 
 export interface OrdinaryTaskItem {
+  stageLabel?: string;
   id: string;
   task?: SubAgentTask;
   ordinary?: OrdinaryTaskView;
@@ -169,6 +170,7 @@ export function buildOrdinaryTaskTimeline(
   now = Date.now(),
   plannedCount?: number,
   pausedWorkflowSessionId?: string,
+  stages?: { sessionId: string; labels: Record<string, string> },
 ): OrdinaryTaskTimeline {
   const scopedTasks = currentExecutionTasks(tasks, workflowSteps);
   const taskById = new Map(scopedTasks.map((task) => [task.task_id, task]));
@@ -229,6 +231,10 @@ export function buildOrdinaryTaskTimeline(
   items.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   items.forEach((item, index) => {
     item.ordinal = index + 1;
+    const stepId = item.step?.step_id ?? item.ordinary?.workflow_step_id;
+    if (stages && stepId && (item.step?.session_id ?? item.ordinary?.session_id) === stages.sessionId) {
+      item.stageLabel = stages.labels[stepId];
+    }
   });
 
 

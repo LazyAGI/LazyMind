@@ -1390,14 +1390,27 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 	expectedOriginHash, expectedOriginSize, expectedOriginTree := lockedOriginArtifact(locked)
 	originPath := filepath.Join(cacheDir, expectedOriginHash+".zip")
 	if hash, size, err := fileDigest(originPath); err != nil || hash != expectedOriginHash || expectedOriginSize > 0 && size != expectedOriginSize {
-		tempPath, err := download(ctx, client, downloadURL, cacheDir)
+		fallback := func(originErr error) (skillbuiltin.CatalogSkill, string, []skillpatch.AppliedPatch, error) {
+			var localErr *os.PathError
+			if !verifyArtifacts || ctx.Err() != nil || errors.As(originErr, &localErr) {
+				return skillbuiltin.CatalogSkill{}, "", nil, originErr
+			}
+			return materializeFrozenMirror(ctx, client, spec, locked, cacheDir, patchCatalog, originErr)
+		}
+		downloadCtx := ctx
+		if verifyArtifacts && client.Timeout > 0 {
+			var cancel context.CancelFunc
+			downloadCtx, cancel = context.WithTimeout(ctx, client.Timeout)
+			defer cancel()
+		}
+		tempPath, err := download(downloadCtx, client, downloadURL, cacheDir)
 		if err != nil {
-			return skillbuiltin.CatalogSkill{}, "", nil, err
+			return fallback(err)
 		}
 		defer os.Remove(tempPath)
 		preparedPath, selectedPrefix, cleanup, err := prepareOriginArchive(tempPath, spec.PathPrefix, spec.PathPrefixes, cacheDir)
 		if err != nil {
-			return skillbuiltin.CatalogSkill{}, "", nil, err
+			return fallback(err)
 		}
 		defer cleanup()
 		spec = withGitHubPathPrefix(spec, selectedPrefix)
@@ -1406,7 +1419,7 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
 		if hash != expectedOriginHash || expectedOriginSize > 0 && size != expectedOriginSize {
-			return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("download does not match frozen lock origin")
+			return fallback(bundleFailure("download does not match frozen lock origin"))
 		}
 		if err := copyFile(preparedPath, originPath); err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, err
@@ -1430,6 +1443,55 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	return current, archivePath, appliedPatches, nil
+}
+
+func materializeFrozenMirror(ctx context.Context, client *http.Client, spec sourceSpec, locked skillbuiltin.CatalogSkill, cacheDir string, patchCatalog skillpatch.Catalog, originErr error) (skillbuiltin.CatalogSkill, string, []skillpatch.AppliedPatch, error) {
+	pkg, source, err := skillbuiltin.AcquireLockedMirror(ctx, locked, cacheDir, client)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, errors.Join(bundleFailure("origin: %v", originErr), err)
+	}
+	entry, applied, err := inspectFrozenMirror(spec, locked, patchCatalog, pkg.ArchivePath)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	fmt.Fprintf(os.Stderr, "builtin skill bundle: %s: verified locked archive from %s (origin: %v)\n", locked.SourceURL, source, originErr)
+	return entry, pkg.ArchivePath, applied, nil
+}
+
+// The mirror downloader checks the locked ZIP and file tree. Check the catalog
+// metadata and current patch provenance for the already-patched final archive.
+func inspectFrozenMirror(spec sourceSpec, locked skillbuiltin.CatalogSkill, patchCatalog skillpatch.Catalog, archivePath string) (skillbuiltin.CatalogSkill, []skillpatch.AppliedPatch, error) {
+	pkg, err := skillpackage.ReadZip(archivePath)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, nil, err
+	}
+	originVersion := locked.Version
+	if len(locked.AppliedPatches) > 0 {
+		originVersion = locked.OriginVersion
+	}
+	_, _, originTree := lockedOriginArtifact(locked)
+	patches, err := patchCatalog.Describe(skillpatch.Target{
+		UID: locked.UID, Version: originVersion, OriginTreeHash: originTree,
+	})
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, nil, err
+	}
+	entry, err := inspectEntry(spec, archivePath, pkg.Files, pkg.PackageRoot, patches.SkillMDPatched)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, nil, err
+	}
+	if len(patches.AppliedPatches) > 0 {
+		entry.OriginVersion = originVersion
+		entry.OriginArchiveSHA256 = locked.OriginArchiveSHA256
+		entry.OriginArchiveSize = locked.OriginArchiveSize
+		entry.OriginTreeSHA256 = originTree
+		entry.PatchSetSHA256 = patches.PatchSetSHA256
+		entry.AppliedPatches = catalogPatches(patches.AppliedPatches)
+	}
+	if err := validateFrozenEntry(entry, locked); err != nil {
+		return skillbuiltin.CatalogSkill{}, nil, err
+	}
+	return entry, patches.AppliedPatches, nil
 }
 
 func validateFeaturedRequiredVersion(featuredID, requiredVersion string, entry skillbuiltin.CatalogSkill) error {
@@ -1547,6 +1609,9 @@ func download(ctx context.Context, client *http.Client, rawURL, cacheDir string)
 		path, err := downloadOnce(ctx, client, rawURL, cacheDir)
 		if err == nil {
 			return path, nil
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
 		}
 		lastErr = err
 		if attempt < 3 {

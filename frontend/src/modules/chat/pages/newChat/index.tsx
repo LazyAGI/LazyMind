@@ -21,7 +21,7 @@ import {
 } from "@/modules/chat/constants/chat";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 import { localizeErrorCode } from "@/components/request";
 import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
@@ -54,6 +54,9 @@ import { useFeaturedCapabilityBinding } from "@/modules/showcase/useFeaturedCapa
 import { getKnowledgeMarketItem } from "@/modules/knowledge/api/knowledgeMarket";
 import { openCloudTokenPlan } from "@/runtime/desktopBridge";
 
+import { readWorkflowLaunch } from "../../utils/workflowLaunch";
+import { readSkillLaunch } from "../../utils/skillLaunch";
+
 const FULL_CAPABILITY_TASK_VALUE = "__full_capability__";
 const QUICK_SELECT_CAPABILITY_LIMIT = 5;
 
@@ -83,6 +86,10 @@ const NewChatPage = () => {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
   const navigate = useNavigate();
+  const location = useLocation();
+  const [workflowLaunch] = useState(() => readWorkflowLaunch(location.state));
+  const [skillLaunch] = useState(() => readSkillLaunch(location.state));
+  const capabilityLaunchStarted = useRef(false);
   // Mount the conversation view from the route instead of browser storage.
   const { conversationId: routeConversationId = "" } = useParams<{
     conversationId: string;
@@ -111,10 +118,10 @@ const NewChatPage = () => {
       ?? (pendingConversationPrompt || savedWelcomeDraft.current);
   });
   const shouldAutoSendGroupPromptRef = useRef(
-    !incomingModeDraft.current && Boolean(pendingConversationPrompt),
+    !workflowLaunch && !skillLaunch && !incomingModeDraft.current && Boolean(pendingConversationPrompt),
   );
   const [isChatContent, setIsChatContent] = useState(
-    Boolean(routeConversationId || useChatMessageStore.getState().pendingMessage),
+    !workflowLaunch && !skillLaunch && Boolean(routeConversationId || useChatMessageStore.getState().pendingMessage),
   );
 
   useEffect(() => {
@@ -134,7 +141,7 @@ const NewChatPage = () => {
     Boolean(routeConversationId),
   );
   const [runInBackground, setRunInBackground] = useState(
-    requestedShowcaseEntry
+    skillLaunch ? skillLaunch.entryType === "work" : workflowLaunch ? true : requestedShowcaseEntry
       ? requestedShowcaseEntry === "work"
       : readRunInBackgroundMode,
   );
@@ -271,6 +278,23 @@ const NewChatPage = () => {
     || isShowcaseCapabilityPreparing
     || showcaseCapabilityFailed
     || entryDefaultsUnavailable;
+  useEffect(() => {
+    if ((!workflowLaunch && !skillLaunch) || isWelcomeInputDisabled || capabilityLaunchStarted.current) return;
+    // Wait for the ready composer and its selection scope to mount (also safe in StrictMode).
+    const timer = window.setTimeout(() => {
+      if (!newChatInputRef.current) return;
+      capabilityLaunchStarted.current = true;
+      persistRunInBackgroundMode(skillLaunch ? skillLaunch.entryType === "work" : true);
+      useFeaturedSelectionStore.getState().setSelection("new", undefined);
+      if (skillLaunch) void newChatInputRef.current.selectSkill(skillLaunch);
+      else if (workflowLaunch) void newChatInputRef.current.selectWorkflow(workflowLaunch);
+      // Consume immediately, without navigating again after an asynchronous confirmation.
+      // Back/refresh must not restore a removed selection.
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [workflowLaunch, skillLaunch, isWelcomeInputDisabled, location.pathname, location.search, navigate]);
+
   const runtimeInitializingReason = runInBackground
     ? t("runtime.aiServiceInitializingWorkflow")
     : t("runtime.aiServiceInitializingMessage");

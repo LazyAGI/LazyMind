@@ -5,7 +5,7 @@ import { mergeRun } from "../../utils/ordinaryTaskState";
 import i18n from "i18next";
 import { formatTaskDuration, useRunTiming } from "./runTiming";
 import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
-import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import { useWorkflowStore, workflowStageLabels } from "@/modules/chat/store/workflowPanel";
 import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import { reconcileWorkflowTasks, workflowTaskDisplayStatus, taskBelongsToWorkflow } from "@/modules/chat/utils/workflowTaskStatus";
 import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
@@ -674,6 +674,7 @@ function StateMarker({
 }
 
 function publicTaskTitle(item: OrdinaryTaskItem, t: TFunction): string {
+  if (item.stageLabel) return item.stageLabel;
   if (item.ordinary?.title.trim()) return item.ordinary.title;
   const title = item.task?.title?.trim();
   return title && !/^[\w-]+-workflow:|^[\w-]+:[\w_]+$/.test(title)
@@ -1187,7 +1188,10 @@ const TaskCenter = (props: Props) => {
   const workflowSession = useWorkflowStore((s) => sessionId ? s.sessionByConversation[sessionId] : undefined);
   const workflowPaused = workflowSession?.projection?.display?.status === 'paused';
   const { i18n } = useTranslation();
-  const taskPresentation = useWorkflowStore(s => workflowSession ? s.workflowUIByWorkflow[workflowUICacheKey(workflowSession.workflow_id, workflowSession.pinned_revision_id, i18n.language || "")]?.task_presentation : undefined);
+  const workflowUI = useWorkflowStore(s => workflowSession ? s.workflowUIByWorkflow[workflowUICacheKey(workflowSession.workflow_id, workflowSession.pinned_revision_id, i18n.language || "")] : undefined);
+  const taskPresentation = workflowUI?.task_presentation;
+  const stageLabels = useMemo(() => workflowSession?.workflow_id === 'ppt-workflow' && workflowUI
+    ? workflowStageLabels(workflowUI) : undefined, [workflowSession?.workflow_id, workflowUI]);
   const tasks = useMemo(() => reconcileWorkflowTasks(storedTasks, workflowSession?.steps), [storedTasks, workflowSession?.steps]);
   const loading = useTaskCenterStore((s) =>
     sessionId ? Boolean(s._loadingTasks[sessionId]) : false,
@@ -1233,9 +1237,10 @@ const TaskCenter = (props: Props) => {
       currentRun && workflowSession?.session_id !== currentRun.run_id ? [] : workflowSteps,
       now, plannedCount,
       workflowPaused ? workflowSession?.session_id : undefined,
+      stageLabels && workflowSession ? { sessionId: workflowSession.session_id, labels: stageLabels } : undefined,
     ),
     ...runTiming,
-  }), [currentRun, now, plannedCount, tasks, workflowPaused, workflowSession?.session_id, workflowSteps, runTiming.elapsedSeconds, runTiming.cumulativeExecutionSeconds]);
+  }), [currentRun, now, plannedCount, tasks, stageLabels, workflowPaused, workflowSession?.session_id, workflowSteps, runTiming.elapsedSeconds, runTiming.cumulativeExecutionSeconds]);
 
   const filteredTasks = useMemo(() => {
     if (filter === "all") return tasks;

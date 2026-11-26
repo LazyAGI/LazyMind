@@ -4,7 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { SlotEditingContext } from './slotEditingContext';
-import { SlotRenderer } from './SlotComponents';
+import { SlotRenderer, SlotVersionPopover } from './SlotComponents';
+import { DocumentArtifactEditor } from './DocumentArtifactEditor';
 
 const api = vi.hoisted(() => ({ getSlotItemVersions: vi.fn(), rollbackSlotItem: vi.fn(), getSlots: vi.fn(), saveDocumentArtifact: vi.fn() }));
 vi.mock('@/modules/chat/utils/request', async original => ({
@@ -66,6 +67,41 @@ async function applyFirstVersion() {
   fireEvent.click(within(dialog).getAllByRole('option').at(-1)!);
   fireEvent.click(within(dialog).getByRole('button', { name: /应用.*1/ }));
 }
+
+it('resolves the illustration referenced by each historical Markdown snapshot', async () => {
+  const mediaUrls = {
+    '/Application Support/v1/image.png': '/preview/first.png',
+    '/Application Support/v2/image.png': '/preview/second.png',
+  };
+  api.getSlotItemVersions.mockResolvedValueOnce({ data: { data: { versions: [1, 2].map(revision => ({
+    revision, selected: revision === 2, created_at: '2026-09-16T00:00:00Z', change_source: 'ai',
+    content_snapshot: { text: `![Illustration ${revision}](</Application Support/v${revision}/image.png>)` },
+  })) } } });
+  render(<DocumentArtifactEditor slot={slotFor('markdown', 2)} sessionId='history-fixture' revisionCount={2}
+    boundMediaUrls={mediaUrls} VersionHistory={SlotVersionPopover} />);
+  const dialog = await openHistory();
+  fireEvent.click(await within(dialog).findByText('对比上一版'));
+  const comparison = await waitFor(() => {
+    const diff = dialog.querySelector<HTMLElement>('.writer-history-diff');
+    expect(diff).not.toBeNull();
+    return diff!;
+  });
+  await waitFor(() => {
+    expect(comparison.querySelector('[data-history-removed] img')).toHaveAttribute('src', '/preview/first.png');
+    expect(comparison.querySelector('[data-history-added] img')).toHaveAttribute('src', '/preview/second.png');
+  });
+  expect(comparison).not.toHaveTextContent('/Application Support/');
+  fireEvent.click(within(dialog).getByText('对比上一版'));
+  for (const [revision, url] of [[2, '/preview/second.png'], [1, '/preview/first.png']] as const) {
+    fireEvent.click(within(dialog).getByRole('option', { name: new RegExp(`v${revision}`) }));
+    const image = await within(dialog).findByAltText(`Illustration ${revision}`);
+    await waitFor(() => expect(image).toHaveAttribute('src', url));
+  }
+  fireEvent.click(within(dialog).getByAltText('Illustration 1'));
+  const overlay = dialog.closest('.workflow-slot__version-overlay');
+  await waitFor(() => expect(overlay?.querySelector('.ant-image-preview-wrap')).toBeVisible());
+  expect(dialog.querySelector('.ant-image-preview-wrap')).toBeNull();
+});
 
 it.each(['markdown', 'ir'] as const)('shows history in the %s toolbar and previews version differences', async representation => {
   const view = show(slotFor(representation));

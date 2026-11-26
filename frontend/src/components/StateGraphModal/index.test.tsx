@@ -46,6 +46,19 @@ it('keeps readiness and invalidated results as pending explanations, preserving 
   expect(graph.edges[0]).toMatchObject({ edge_type: 'inactive', condition: '旧分支条件' });
 });
 
+it('presents the same localized stage label as the panel while retaining the producer ID', async () => {
+  vi.mocked(axiosInstance.get).mockResolvedValue({ data: { graph: { nodes: {
+    prepare: { label: 'Prepare' }, legacy: { label: 'Legacy' },
+  } }, projection: {} } });
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow'
+    stepLabels={{ prepare: '准备' }} />);
+  const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
+  expect(graph.nodes).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'prepare', label: '准备' }),
+    expect.objectContaining({ id: 'legacy', label: 'Legacy' }),
+  ]));
+});
+
 it.each(['pruned', 'bypassed'])('shows %s only for a skipped node and preserves completed execution', async branch => {
   vi.mocked(axiosInstance.get).mockResolvedValue({ data: { projection: { nodes: {
     prompts: { execution: 'none', readiness: 'not_applicable', branch },

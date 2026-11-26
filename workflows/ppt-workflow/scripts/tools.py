@@ -63,7 +63,7 @@ from lazyllm import ThreadPoolExecutor
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.agent_runtime.cancellation import make_cancel_stop_condition
-from lazymind.chat.engine.agent_runtime.message_fields import strip_leading_reasoning
+from lazymind.chat.engine.agent_runtime.message_fields import model_response_text, strip_leading_reasoning
 from lazymind.chat.engine.subagent.context import get_context, require_context
 from lazymind.document_tools.artifacts import _markdown_heading_rows, normalize_generated_markdown
 from lazymind.chat.engine.subagent.tools import (
@@ -4593,7 +4593,14 @@ def _replace_visible_text_segments(
     # Replace from the end so earlier source offsets remain stable. HTMLParser
     # decodes entities in text_node['text'], therefore the raw node ends at the
     # next tag rather than at start + len(text).
-    for text_node, value in reversed(list(zip(text_nodes, clean_values))):
+    html = _write_text_nodes(html, text_nodes, clean_values)
+    return html, old_values, clean_values
+
+
+def _write_text_nodes(html: str, text_nodes: list[dict], values: list[str]) -> str:
+    for text_node, value in reversed(list(zip(text_nodes, values))):
+        if value == text_node['text'].strip():
+            continue
         start = text_node['start']
         end = html.find('<', start)
         if end < 0:
@@ -4603,7 +4610,7 @@ def _replace_visible_text_segments(
         trailing = raw[len(raw.rstrip()):]
         replacement = leading + _html_escape(value, quote=False) + trailing
         html = html[:start] + replacement + html[end:]
-    return html, old_values, clean_values
+    return html
 
 
 _EDIT_CONTEXT_MAX_CHARS = 30_000
@@ -5044,7 +5051,9 @@ def _ppt_progress(message: str, progress: int = 10) -> None:
               'progress': progress, 'current_phase': message})
 
 
-def _page_attempt_guard(deck: Path, failure: dict | None = None) -> None:
+def _page_attempt_guard(
+    deck: Path, failure: dict | None = None, *, tool_name: str = 'ppt_generate_pages',
+) -> None:
     """A failed page batch cannot be restarted by the agent in the same Attempt."""
     try:
         ctx = require_context()
@@ -5054,12 +5063,12 @@ def _page_attempt_guard(deck: Path, failure: dict | None = None) -> None:
     if not isinstance(failures, dict):
         failures = {}
         ctx._ppt_page_failures = failures
-    key = str(deck.resolve())
+    key = (tool_name, str(deck.resolve()))
     if failure is not None:
         failures[key] = failure
     elif key in failures:
-        _tool_error('ppt_generate_pages',
-                    'Page generation already failed in this task. Stop and report the failure; '
+        _tool_error(tool_name,
+                    f'{tool_name} already failed in this task. Stop and report the failure; '
                     'a user-requested new workflow Attempt is required to retry.',
                     detail=json.dumps(failures[key], ensure_ascii=False))
 
@@ -5345,20 +5354,8 @@ def _batch_page_html_publish_progressive(
 
 
 def _model_response_text(response: Any) -> str:
-    """Read model content without stringifying response envelopes/reasoning."""
-    if isinstance(response, str):
-        return response.strip()
-    if isinstance(response, dict):
-        content = response.get('content')
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            return ''.join(
-                block['text'] for block in content
-                if isinstance(block, dict) and block.get('type') in ('text', 'output_text')
-                and isinstance(block.get('text'), str)
-            ).strip()
-    return ''
+    """Use the shared protocol projection, including structured text blocks."""
+    return model_response_text(response)
 
 
 def _agent_llm_call(
@@ -8911,9 +8908,20 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
             allow_empty=True,
         )
         try:
+            if not raw.strip():
+                raise ValueError(
+                    'PPT_PAGE_PROMPT_EMPTY: 模型未返回可用正文（可能只有思考内容）。'
+                    '请重试，或切换模型/调整思考与输出额度后重试。'
+                )
             if raw.startswith('```') and raw.endswith('```'):
                 raw = raw.partition('\n')[2][:-3].strip()
-            plan = json.loads(raw)
+            try:
+                plan = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    'PPT_PAGE_PROMPT_INVALID_JSON: 模型返回的页面规划不是有效 JSON '
+                    f'(line {exc.lineno}, column {exc.colno})。请重试或切换模型。'
+                ) from exc
             if not isinstance(plan, dict) or not all(
                 isinstance(plan.get(key), str) and plan[key].strip() for key in required
             ):
@@ -8931,6 +8939,9 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
             _validate_prompt_output_format(shared['output_format'], [brief])
             return {'brief': brief, 'note': prefix + note, 'published': False}
         except (ValueError, ToolExecutionError) as exc:
+            # Do not log generated copy, reasoning or raw provider responses.
+            _LOG.warning('[PPT] page prompt rejected: page=%s attempt=%s response_chars=%s',
+                         page_no, attempt + 1, len(raw))
             if attempt:
                 raise
             payload['repair'] = str(exc)
@@ -8938,6 +8949,12 @@ def _plan_one_page_prompt(shared: dict, page_no: int, outline: str, timing: dict
 
 def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dict:
     """Author and publish one editable slide prompt at a time for a new deck or retry.
+
+    Only accepts global_style and output_format. Reads the approved outline,
+    timing, assets and speaker notes context from the bound workflow itself.
+    Do not pass pages, page_prompts, page_components, total_minutes, total_seconds
+    or speaker_notes_source_schema_version. Retry with these same two arguments;
+    completed pages and their original shared style are retained.
 
     Args:
         global_style: Shared audience, language, typography, colors and output rules.
@@ -8951,6 +8968,7 @@ def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dic
         raise ToolExecutionError('A non-empty global_style is required')
     output_format = _validate_prompt_output_format(output_format, [global_style])
     ctx = require_context()
+    _page_attempt_guard(deck, tool_name='ppt_plan_page_prompts')
     outline, _ = _resolve_artifact_text(ctx, 'deck_outline')
     pages = _split_text_outline(outline or '')
     evidence = {
@@ -8994,7 +9012,14 @@ def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dic
         try:
             if key not in saved:
                 timing = timings[page_no - 1] if page_no <= len(timings) else {}
-                saved[key] = _plan_one_page_prompt(shared, page_no, page, timing)
+                _ppt_progress(f'正在规划第 {page_no} 页提示词，共 {len(pages)} 页',
+                              10 + 70 * (page_no - 1) // len(pages))
+                try:
+                    saved[key] = _plan_one_page_prompt(shared, page_no, page, timing)
+                except Exception as exc:
+                    _page_attempt_guard(deck, {'page': page_no, 'error': str(exc)},
+                                        tool_name='ppt_plan_page_prompts')
+                    raise
                 _write_json_atomic(progress_path, checkpoint)
                 generated += 1
             item = saved[key]
@@ -9013,7 +9038,14 @@ def ppt_plan_page_prompts(global_style: str, output_format: str = 'auto') -> dic
             _write_json_atomic(progress_path, checkpoint)
             published += 1
         except Exception as exc:
-            raise ToolExecutionError(f'Page {page_no} prompt failed: {exc}') from exc
+            error = ToolExecutionError(
+                f'Page {page_no} prompt failed: {exc} '
+                '已保留完成的页面提示词和已确认内容。'
+                '重试仅调用 ppt_plan_page_prompts(global_style=原共享风格, output_format=已保存格式)，'
+                '大纲、页数和计时由工具自动读取；不要传 pages、page_prompts 或其他额外参数。'
+            )
+            error.ppt_diagnostics = _model_failure_details(exc)
+            raise error from exc
 
     for position in range(len(order), len(pages), -1):
         if _tool_failed(_delete_ui_slot_item('slide_outline', position)):
@@ -10849,7 +10881,10 @@ def _patch_native_selection(source, destination, page, old_text, new_text, ops):
     from lxml import etree
     if any(op.get('op') not in {'replace_text', 'replace_text_segments'} for op in ops):
         raise ValueError('This native PPTX supports text polishing here; use the native PPTX editor for layout or structure changes')
-    replacements = list(zip(old_text.split('\n'), new_text.split('\n')))
+    if len(ops) == 1 and 'text_block' in ops[0]:
+        replacements = zip(ops[0]['text_block']['segments'], ops[0]['values'])
+    else:
+        replacements = zip(old_text.split('\n'), new_text.split('\n'))
     name = f'ppt/slides/slide{page}.xml'
     with zipfile.ZipFile(source) as deck:
         if name not in deck.namelist():
@@ -10869,6 +10904,48 @@ def _patch_native_selection(source, destination, page, old_text, new_text, ops):
         with zipfile.ZipFile(destination, 'w', zipfile.ZIP_DEFLATED) as output:
             for info in deck.infolist():
                 output.writestr(info, etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True) if info.filename == name else deck.read(info.filename))
+
+
+def _polish_text_block(tree: _HtmlTree, block: dict, instruction: str):
+    """Resolve the editor's source block and check every segment before requesting a rewrite."""
+    stale = ValueError('文案块已变化，请重新选择后再润色')
+    stale.error_code = 'SELECTION_STALE'
+    if not isinstance(block, dict):
+        raise stale
+    tag = block.get('tag')
+    occurrence = block.get('occurrence')
+    body = next((i for i, node in enumerate(tree.nodes) if node['tag'] == 'body'), None)
+    candidates = [i for i, node in enumerate(tree.nodes)
+                  if node['tag'] == tag and (i == body or body in tree.ancestors(i))]
+    if type(occurrence) is not int or not 0 <= occurrence < len(candidates):
+        raise stale
+    target = candidates[occurrence]
+    node = tree.nodes[target]
+    if node['el'] != block.get('el') or tag in {'style', 'script'}:
+        raise stale
+    nodes = _visible_text_segments(tree, target)
+    if 'direct_index' in block:
+        direct = [item for item in nodes if item['parent'] == target]
+        index = block['direct_index']
+        if type(index) is not int or not 0 <= index < len(direct):
+            raise stale
+        nodes = [direct[index]]
+    elif tree.is_protected(target):
+        raise stale
+    old = [item['text'].strip() for item in nodes]
+    if not old or old != block.get('segments'):
+        raise stale
+    details = [{'position': i, 'text': text} for i, text in enumerate(old, 1)]
+    values = _plan_compound_text_replacement(instruction, tree, target, details)
+    edited = _write_text_nodes(tree.html, nodes, values)
+    # Native-import slides reveal the corresponding editable proxy over the raster.
+    for index in [target, *tree.ancestors(target)]:
+        if _is_ppt_raster_proxy(tree.nodes[index]):
+            edited = _set_inline_styles(edited, tree.nodes[index], {'opacity': '1'})
+            break
+    if node['el'] == 'title' and 'direct_index' not in block:
+        edited = _sync_doc_title(edited, ''.join(old), _html_escape(''.join(values), quote=False), [])
+    return edited, old, values
 
 
 def ppt_preview_selection_edit(
@@ -10906,8 +10983,17 @@ def ppt_preview_selection_edit(
     original = _materialize_legacy_visual_anchors(original, selection)
     tree = _HtmlTree(original)
     edit_selection = {**selection, '_deck_dir': str(deck) if deck is not None else ''}
-    ops, old_text, new_text = _selection_edit_ops(instruction, edit_selection, tree)
-    edited, applied, notes, removed = _apply_html_ops(original, ops)
+    block = selection.get('text_block')
+    if block is not None:
+        if selection.get('el') != '__lazymind_text_block' or selection.get('targets'):
+            raise ValueError('Invalid PPT text block selection')
+        edited, old, values = _polish_text_block(tree, block, instruction)
+        old_text, new_text = '\n'.join(old), '\n'.join(values)
+        ops = [{'op': 'replace_text_segments', 'text_block': block, 'values': values}]
+        applied, notes, removed = ['polished selected text block'], [], old
+    else:
+        ops, old_text, new_text = _selection_edit_ops(instruction, edit_selection, tree)
+        edited, applied, notes, removed = _apply_html_ops(original, ops)
     edited = _normalize_html_newlines(edited)
     _validate_local_html_edit(base_original, edited)
 
@@ -10959,10 +11045,10 @@ def ppt_preview_selection_edit(
         'representation': 'ppt_html',
         'target': {
             'type': 'block',
-            'block_type': 'multi' if multi_targets else tree.nodes[
+            'block_type': block['tag'] if block is not None else 'multi' if multi_targets else tree.nodes[
                 _resolve_el(tree, primary_el, primary_ref)[0]
             ]['tag'],
-            'el': primary_el,
+            'el': (block.get('el') or block['tag']) if block is not None else primary_el,
             'index': _coerce_int(primary_selection.get('index'), 0, lo=1)
             if _coerce_str(primary_selection.get('index')) else None,
             'group': _coerce_str(primary_selection.get('group')) or None,

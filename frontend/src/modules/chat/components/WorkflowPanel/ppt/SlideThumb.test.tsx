@@ -4,10 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SlideThumb, type SlideThumbHandle } from './SlideThumb';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 
-const raster = vi.hoisted(() => vi.fn());
+const { raster, resize } = vi.hoisted(() => ({ raster: vi.fn(), resize: vi.fn() }));
 vi.mock('./exportHtmlToPptx', () => ({ extractHtmlFromArtifact: (raw: string) => raw }));
 vi.mock('./slideRasterCache', () => ({
-  RASTER_EXPORT_PIXEL_RATIO: 2, ensureRasterPng: raster,
+  RASTER_EXPORT_PIXEL_RATIO: 2, ensureRasterPng: raster, filmstripImage: resize,
   fingerprintArtifact: JSON.stringify, fingerprintText: (s: string) => s,
   rasterCacheKey: (s: string, k: string) => s + k,
   getRasterPng: () => null, loadRasterPng: async () => null, setRasterPng: async () => {},
@@ -16,7 +16,10 @@ let observers: { callback: (entries: { isIntersecting: boolean }[]) => void; dis
 const slot = { slot_id: 'preview_html', slot: 'preview_html', list_index: 3, revision: 1,
   artifact_value: { text: '<html><body>Page 4</body></html>' } } as SlotRevision;
 const image = 'data:image/png;base64,YQ==';
+let sessionId: string;
 beforeEach(() => {
+  sessionId = crypto.randomUUID();
+  resize.mockReset().mockImplementation(async (png: string) => png);
   raster.mockReset(); observers = [];
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.stubGlobal('IntersectionObserver', class {
@@ -30,7 +33,7 @@ const failed = async () => waitFor(() => expect(observers.length).toBeGreaterTha
 
 it('recovers a failed cross-origin hidden thumbnail when it becomes visible', async () => {
   raster.mockRejectedValueOnce(new Error('slide capture timed out')).mockResolvedValue(image);
-  const view = render(<SlideThumb slot={slot} sessionId="run" />);
+  const view = render(<SlideThumb slot={slot} sessionId={sessionId} />);
   await failed();
   intersect(false);
   expect(raster).toHaveBeenCalledTimes(1);
@@ -43,7 +46,7 @@ it('recovers a failed cross-origin hidden thumbnail when it becomes visible', as
 it('bounds automatic retries and still allows keyboard/page-button retry', async () => {
   raster.mockRejectedValue(new Error('offline'));
   const ref = createRef<SlideThumbHandle>();
-  const view = render(<button onClick={() => ref.current?.retry()}><SlideThumb ref={ref} slot={slot} sessionId="run" /></button>);
+  const view = render(<button onClick={() => ref.current?.retry()}><SlideThumb ref={ref} slot={slot} sessionId={sessionId} /></button>);
   await failed(); intersect(true);
   await waitFor(() => expect(observers.length).toBe(2)); intersect(true);
   await waitFor(() => expect(raster).toHaveBeenCalledTimes(3));
@@ -59,12 +62,34 @@ it('bounds automatic retries and still allows keyboard/page-button retry', async
 it('does not apply a late capture to a different artifact or after unmount', async () => {
   let finish!: (png: string) => void;
   raster.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(image);
-  const view = render(<SlideThumb slot={slot} sessionId="run" />);
+  const view = render(<SlideThumb slot={slot} sessionId={sessionId} />);
   await waitFor(() => expect(raster).toHaveBeenCalledTimes(1));
-  view.rerender(<SlideThumb slot={{...slot, revision: 2}} sessionId="run" />);
+  view.rerender(<SlideThumb slot={{...slot, revision: 2}} sessionId={sessionId} />);
   await waitFor(() => expect(view.container.querySelector('img')).toHaveAttribute('src', image));
   await act(async () => finish('data:image/png;base64,OLD'));
   expect(view.container.querySelector('img')).toHaveAttribute('src', image);
   view.unmount();
   expect(console.warn).not.toHaveBeenCalled();
+});
+
+it('retains the same page image across edits and remounts until the replacement is decoded', async () => {
+  const next = 'data:image/png;base64,Qg==';
+  raster.mockResolvedValueOnce(image).mockResolvedValue(next);
+  const view = render(<SlideThumb slot={slot} sessionId={sessionId} />);
+  await waitFor(() => expect(view.container.querySelector('img')).toHaveAttribute('src', image));
+  const updated = { ...slot, revision: 2, artifact_value: {text: '<html>Updated</html>'} };
+  let decoded!: () => void;
+  const pending = new Promise<string>(resolve => { decoded = () => resolve(next); });
+  resize.mockReturnValue(pending);
+  view.rerender(<SlideThumb slot={updated} sessionId={sessionId} />);
+  await waitFor(() => expect(resize).toHaveBeenCalledWith(next));
+  expect(view.container.querySelector('img')).toHaveAttribute('src', image);
+  view.unmount();
+  const back = render(<SlideThumb slot={updated} sessionId={sessionId} />);
+  expect(back.container.querySelector('img')).toHaveAttribute('src', image);
+  await act(async () => decoded());
+  await waitFor(() => expect(back.container.querySelector('img')).toHaveAttribute('src', next));
+  raster.mockImplementation(() => new Promise(() => {}));
+  back.rerender(<SlideThumb slot={{...updated, list_index: 4}} sessionId={sessionId} />);
+  expect(back.container.querySelector('img')).toBeNull();
 });

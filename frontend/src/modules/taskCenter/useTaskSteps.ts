@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { axiosInstance, BASE_URL } from '@/components/request';
-import { loadWorkflowUI, workflowSnapshotSteps, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
+import { loadWorkflowUI, workflowSnapshotSteps, workflowStageLabels, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { workflowTabsForAudience } from '@/modules/chat/components/WorkflowPanel/workflowAudience';
 import { workflowNodeStatus, workflowTabStatus } from '@/modules/chat/components/WorkflowPanel/workflowStepStatus';
 import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developerMode';
@@ -66,7 +66,7 @@ export function workflowPlannedSteps(ui: WorkflowUI, session: WorkflowSession, p
 export function useTaskSteps(task: Task | null, refreshVersion = 0) {
   const { i18n } = useTranslation();
   const [developer, setDeveloper] = useState(isDeveloperModeActive);
-  const [snapshot, setSnapshot] = useState<{ sessionID: string; steps: TaskStep[] | null; failed: boolean }>();
+  const [snapshot, setSnapshot] = useState<{ sessionID: string; steps: TaskStep[] | null; stepLabels?: Record<string, string>; failed: boolean }>();
   const runtimeCache = useRef<{ key: string; entry: RuntimeLoad }>();
   const sessionID = task?.workflow_session_id;
   // Polling creates new arrays even when execution facts have not changed.
@@ -107,7 +107,8 @@ export function useTaskSteps(task: Task | null, refreshVersion = 0) {
             status: workflowNodeStatus(node, payload.display, id) };
         });
       }
-      if (active) setSnapshot({ sessionID, steps, failed: false });
+      const stepLabels = session?.workflow_id === 'ppt-workflow' && ui ? workflowStageLabels(ui) : undefined;
+      if (active) setSnapshot({ sessionID, steps, stepLabels, failed: false });
     }).catch(() => { if (active) setSnapshot(previous => ({ sessionID, steps: previous?.sessionID === sessionID ? previous.steps : null, failed: true })); });
     return () => {
       active = false;
@@ -121,7 +122,7 @@ export function useTaskSteps(task: Task | null, refreshVersion = 0) {
     // A successful read can still lack a plan. Only an executing task can be
     // actively generating it; pauses and terminal states must not keep spinning.
     const planPending = Boolean(current && !current.failed && current.steps === null);
-    return { steps: current?.steps ?? [], loading: !current || (planPending && task?.status === 'running'),
+    return { stepLabels: current?.stepLabels, steps: current?.steps ?? [], loading: !current || (planPending && task?.status === 'running'),
       failed: current?.failed ?? false, planPending };
   }
   const steps: TaskStep[] = task?.steps.length ? task.steps : task?.task_type === 'background_chat'

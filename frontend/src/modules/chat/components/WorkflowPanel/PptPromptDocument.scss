@@ -68,3 +68,14 @@
     &__body { padding: 0 14px; }
   }
 }
+
+.workflow-slot--text.workflow-slot--ppt-prompt {
+  border: 0;
+  background: transparent;
+  padding: 0;
+
+  > .writer-markdown-editor {
+    width: 100%;
+    min-height: min(var(--ppt-prompt-edit-height, 0px), var(--writer-markdown-max-height, 620px));
+  }
+}

@@ -477,7 +477,16 @@ export interface PptHtmlComputedStyle {
   font_weight?: string;
 }
 
+export interface PptTextBlock {
+  occurrence: number;
+  el: string;
+  tag: string;
+  segments: string[];
+  direct_index?: number;
+}
+
 export interface PptHtmlSelectionTarget {
+  text_block?: PptTextBlock;
   el: string;
   index?: number;
   dom_path?: number[];
@@ -492,6 +501,7 @@ export type RewriteSelection =
   | { type: 'markdown'; selected_text: string }
   | {
     type: 'ppt_html';
+    text_block?: PptTextBlock;
     page: number;
     el: string;
     /** 1-based occurrence among elements carrying the same data-el. */
@@ -730,6 +740,12 @@ export function WorkflowSessionApi() {
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
         { ...options, data: orderVersion !== undefined ? { order_version: orderVersion } : undefined },
       );
+    },
+    savePptPage(sessionId: string, index: number, body: {
+      slide: {revision: number; draft_version?: number; text?: string};
+      notes?: {list_index: number; revision: number; draft_version?: number; text?: string; file?: {path: string; size: number}};
+    }) {
+      return axiosInstance.patch(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/preview_html/items/idx/${index}`, {ppt_page_edit: body});
     },
     patchSlotItem(
       sessionId: string,

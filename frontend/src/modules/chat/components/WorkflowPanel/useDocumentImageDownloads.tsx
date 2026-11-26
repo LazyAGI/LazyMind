@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Modal, Progress, Spin } from 'antd';
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -160,10 +160,6 @@ export function useDocumentImageDownloads({ scopeKey, readSource, resolveImage }
     gallerySource.current = { ...source, document: JSON.parse(JSON.stringify(source.document)) };
     setGallery(documentImages(source.document)); setOpen(true);
   }, []);
-  const onImageClick = useCallback((event: MouseEvent<HTMLElement>) => {
-    if (!(event.target instanceof HTMLImageElement)) return;
-    event.preventDefault(); showGallery();
-  }, [showGallery]);
   const menu: NonNullable<SlotFooterAction['menu']> = [
     { key: 'images', label: t('chat.writerImages.downloadAll'), icon: <DownloadOutlined aria-hidden />, disabled: busy, onClick: () => { void start(); } },
   ];
@@ -194,5 +190,5 @@ export function useDocumentImageDownloads({ scopeKey, readSource, resolveImage }
       </div>}
     </div>
   </Modal>;
-  return { menu, dialog, busy, onImageClick, showGallery, downloadImage: (image: string) => start(image) };
+  return { menu, dialog, busy, showGallery, downloadImage: (image: string) => start(image) };
 }

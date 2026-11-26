@@ -64,7 +64,7 @@ export function externalPanelAction(
     if (!review) throw new ReviewRefreshRequired('Review is no longer available');
     return { ...intent, kind: 'confirm_and_continue', review };
   }
-  if (intent.kind === 'retry') {
+  if (intent.kind === 'retry' && !intent.stepId) {
     // Browsing another tab never changes which failed execution is retried.
     const failedStep = session.projection?.current?.find(id => {
       const node = session.projection?.nodes?.[id];

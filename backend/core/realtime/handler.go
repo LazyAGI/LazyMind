@@ -17,7 +17,7 @@ import (
 
 const maxStreams = 64
 
-var subscriptionPath = regexp.MustCompile(`^/(conversations/[A-Za-z0-9_-]+/events|tasks/[A-Za-z0-9_-]+:stream|workflow-sessions/[A-Za-z0-9_-]+/events)$`)
+var subscriptionPath = regexp.MustCompile(`^/(conversations/[A-Za-z0-9_-]+/events|tasks/[A-Za-z0-9_-]+:stream|workflow-sessions/[A-Za-z0-9_-]+/events|task-center/workflow-events)$`)
 
 func allowed(method, path string) bool {
 	return method == http.MethodGet && subscriptionPath.MatchString(path) ||

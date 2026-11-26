@@ -312,7 +312,7 @@ const ImageComponent = (props: any) => {
   const { node: _node, src: _src, ...imageProps } = props;
 
   return (
-    <figure className="md-image-figure">
+    <figure className="md-image-figure" data-image-source={props.src}>
       <Image
         {...imageProps}
         src={resolvedSrc}

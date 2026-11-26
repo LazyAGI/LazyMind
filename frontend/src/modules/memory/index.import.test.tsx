@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useOutletContext } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useOutletContext } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatInputStore } from '@/modules/chat/store/chatInput';
 import { desktopTestTranslation } from '@/test/desktopResourceFixtures';
@@ -15,20 +15,25 @@ vi.mock('./components/ShareModal', () => ({ default: () => null }));
 vi.mock('./components/SkillShareCenterModal', () => ({ default: () => null }));
 vi.mock('./components/GlossaryInboxModal', () => ({ default: () => null }));
 vi.mock('./pages/list', () => ({ default: () => null }));
+vi.mock('@/modules/showcase/api', () => ({
+  listShowcaseCases: vi.fn().mockResolvedValue({ cases: [{ type: 'work', builtin_skill_uid: 'builtin-1' }] }),
+}));
 
 function Controls() {
   const context = useOutletContext<any>();
   return <>
     <button onClick={() => context.openSkillCreateModal('url')}>Import URL</button>
     <button onClick={() => context.setCategory('current')}>Change category</button>
+    <button onClick={() => context.setSkillView('installed')}>Show skills</button>
+    <button onClick={() => context.setSkillView('workflows')}>Show workflows</button>
     <p aria-label='Loaded rows'>{context.skillAssets.map((item: { name: string }) => item.name).join(',')}</p>
     <p aria-label='Available tags'>{context.availableTags.join(',')}</p>
   </>;
 }
-function mount() {
-  return render(<MemoryRouter initialEntries={['/memory-management/skills']}><Routes>
-    <Route path='/memory-management' element={<MemoryManagement />}><Route path='skills' element={<Controls />} /></Route>
-    <Route path='/agent/chat/home' element={<div>Chat home</div>} />
+function mount(controls = <Controls />, destination = <div>Chat home</div>, url = '/memory-management/skills') {
+  return render(<MemoryRouter initialEntries={[url]}><Routes>
+    <Route path='/memory-management' element={<MemoryManagement />}><Route path='skills' element={controls} /></Route>
+    <Route path='/agent/chat/home' element={destination} />
   </Routes></MemoryRouter>);
 }
 beforeEach(() => {
@@ -42,6 +47,55 @@ beforeEach(() => {
 });
 
 describe('personal skill import', () => {
+  it('loads skill data on entering skills, not on the workflow tab, and refreshes on return', async () => {
+    mount(<Controls />, undefined, '/memory-management/skills?skillView=workflows');
+    await act(async () => {});
+    expect(api.listSkillAssetsPage).not.toHaveBeenCalled();
+    expect(api.listSkillTags).not.toHaveBeenCalled();
+    expect(api.listSkillCategories).not.toHaveBeenCalled();
+    expect(api.getSkillReviewSummary).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Show skills' }));
+    await waitFor(() => expect(screen.getByLabelText('Loaded rows')).toHaveTextContent('initial'));
+    expect(api.listSkillTags).toHaveBeenCalled();
+    expect(api.listSkillCategories).toHaveBeenCalled();
+    expect(api.getSkillReviewSummary).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Show workflows' }));
+    api.listSkillAssetsPage.mockClear();
+    api.listSkillAssetsPage.mockResolvedValue({ records: [{ id: 'new', name: 'new', tags: [] }], total: 1, page: 1, pageSize: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'Show skills' }));
+    await waitFor(() => expect(screen.getByLabelText('Loaded rows')).toHaveTextContent('new'));
+    expect(api.listSkillAssetsPage).toHaveBeenCalled();
+  });
+  it.each([
+    { logo: false, metadata: { category: 'external' }, icon: 'package-open' },
+    { logo: true, metadata: { category: 'external' }, icon: 'package-open' },
+    { logo: true, metadata: { category: 'internal' }, icon: 'sprout' },
+    { logo: true, metadata: { category: 'external', originBuiltinSkillUid: 'builtin-1' }, icon: 'badge-check' },
+    { logo: true, metadata: { category: 'writing', sourceRefType: 'url' }, icon: 'package-open' },
+    { logo: true, metadata: { category: 'internal', sourceRefType: 'upload' }, icon: 'package-open' },
+  ])('launches the row skill with its source icon ($icon, logo=$logo)', async ({ logo, metadata, icon }) => {
+    api.listSkillAssetsPage.mockResolvedValue({
+      records: [{ id: 'initial', name: 'initial', description: '', tags: [], content: '', ...metadata }],
+      total: 1, page: 1, pageSize: 20,
+    });
+    function SkillRow() {
+      const context = useOutletContext<any>();
+      const row = context.skillAssets[0];
+      return row ? <>{context.genericColumns.find((column: { key: string }) => column.key === (logo ? 'name' : 'actions')).render(undefined, row)}</> : null;
+    }
+    function Destination() {
+      return <pre data-testid="launch">{JSON.stringify(useLocation().state)}</pre>;
+    }
+    mount(<SkillRow />, <Destination />);
+    const label = desktopTestTranslation('admin.memorySkillActionUse');
+    const action = await screen.findByRole('button', { name: logo ? `${label}: initial` : label });
+    if (logo) expect(action.querySelector(`[data-skill-icon="${icon}"]`)).toBeInTheDocument();
+    fireEvent.click(action);
+    expect(JSON.parse((await screen.findByTestId('launch')).textContent!)).toEqual({
+      skillLaunch: { skillId: 'initial', name: 'initial', entryType: icon === 'badge-check' ? 'work' : 'chat' },
+    });
+  });
+
   it('shows local upload progress and cancels without creating a skill from a late upload', async () => {
     let finish!: (value: { uploadId: string; storedPath: string }) => void;
     api.uploadSkillTempFile.mockImplementation((_file, options) => {

@@ -1,6 +1,7 @@
-"""Verify sandbox setup uses the supported RPC and fails closed."""
+"""Verify hosted Agent installation and sandbox setup."""
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -11,6 +12,38 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import agent_e2e_hosted as hosted
+
+
+class HostedAgentInstallTests(unittest.TestCase):
+    def test_windows_install_only_prepares_selected_agents(self):
+        for selected in (*hosted.e2e.AGENTS, 'all'):
+            with (
+                self.subTest(agent=selected),
+                tempfile.TemporaryDirectory() as tmp,
+                patch.object(hosted.platform, 'IS_WINDOWS', True),
+                patch.object(hosted.shutil, 'which', return_value='node.exe'),
+                patch.object(hosted, 'install_npm_agent', side_effect=lambda p, agent, node: [node, agent]) as npm,
+                patch.object(hosted, 'install_workbuddy', return_value=(['node.exe', 'workbuddy'], 'digest')) as buddy,
+                patch.object(hosted.subprocess, 'run') as init_profile,
+                patch.object(hosted.e2e, 'version', return_value='test-version'),
+                patch.object(hosted, 'setup_codex_windows_sandbox', return_value=Path(tmp) / 'codex-home') as sandbox,
+            ):
+                root = Path(tmp)
+                p = SimpleNamespace(root=root, output=root / 'results')
+                exported = root / 'github-env'
+                with patch.dict(os.environ, {'GITHUB_ENV': str(exported)}):
+                    hosted.install_agents(p, selected)
+
+                expected = set(hosted.e2e.AGENTS) if selected == 'all' else {selected}
+                commands = json.loads((root / 'agent-commands.json').read_text())
+                versions = json.loads((p.output / 'installed-agents.json').read_text())
+                self.assertEqual(set(commands), expected)
+                self.assertEqual(set(versions['versions']), expected)
+                self.assertEqual({call.args[1] for call in npm.call_args_list}, expected - {'workbuddy'})
+                self.assertEqual(buddy.call_count, int('workbuddy' in expected))
+                self.assertEqual(init_profile.call_count, int('deepseek-harness' in expected))
+                self.assertEqual(sandbox.call_count, int('codex' in expected))
+                self.assertEqual('LAZYMIND_CI_CODEX_HOME=' in exported.read_text(), 'codex' in expected)
 
 
 class HostedSandboxSetupTests(unittest.TestCase):

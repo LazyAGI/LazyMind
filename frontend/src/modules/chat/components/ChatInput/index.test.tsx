@@ -83,6 +83,12 @@ vi.mock("./MentionEditor", async () => {
       ref,
     ) {
       React.useImperativeHandle(ref, () => ({ focus: vi.fn(), focusAtEnd: editorFocus.atEnd,
+        selectWorkflow: async (workflow: { workflowRef: string; name: string }) => props.onMentionsChange?.([
+          { mention_id: 'list-selection', type: 'workflow', resource_id: workflow.workflowRef, display_name: workflow.name },
+        ]),
+        selectSkill: async (skill: { skillId: string; name: string }) => props.onMentionsChange?.([
+          { mention_id: 'list-selection', type: 'skill', resource_id: skill.skillId, display_name: skill.name },
+        ]),
         getDraftWithoutMentions: (excluded: ChatMention[]) => editorFocus.draftWithoutMentions(excluded) ?? { text: props.value || '', mentions: props.initialMentions || [] },
         setPlainText: () => props.onMentionsChange?.([]) }));
       React.useEffect(() => { if (props.initialMentions?.length) props.onMentionsChange?.(props.initialMentions); }, []);
@@ -96,6 +102,7 @@ vi.mock("./MentionEditor", async () => {
             if (event.key === "Enter") props.onSend?.();
           }}
         />
+        <button onClick={() => props.onMentionsChange?.([])}>remove selected workflow</button>
         {props.onEntryModeChange && <button onClick={() => props.onEntryModeChange?.(props.runInBackground ? 'chat' : 'work', {
           text: 'Keep Chosen', mentions: [{ mention_id: 'chosen', type: 'skill', resource_id: 'chosen', display_name: 'Chosen', start: 5, end: 11 }],
           featuredSelection: { caseId: 'chosen-case' },
@@ -1298,4 +1305,32 @@ it('paper draft uses its isolated model selection on the first send',async()=>{
  const send=vi.fn();render(<ChatInput composerVariant="paper" modelSelectionDraft sessionId="pdf-draft" value="Explain this paper" onChange={vi.fn()} onSend={send} isChatContent showConversationConfig={false}/>);
  fireEvent.click(screen.getByRole('button',{name:'chat.send'}));
  await waitFor(()=>expect(send).toHaveBeenCalledWith(expect.objectContaining({initial_model_selection:{mode:'fixed',model_id:'paper-model',source:'own'}})));
+});
+
+
+it.each([false, true])('skill list selection waits for send and removal=%s clears its identity', async (remove) => {
+  const ref = createRef<ChatInputImperativeProps>();
+  const onSend = vi.fn();
+  vi.mocked(listSkillLinkedWorkflows).mockResolvedValue({ skill_id: 'installed-skill', skill_name: '技能', workflows: [] });
+  render(<ChatInput ref={ref} value="补充要求" onChange={vi.fn()} onSend={onSend} isChatContent
+    showConversationConfig={false} showPromptSuggestions={false} />);
+  await act(async () => ref.current!.selectSkill({ skillId: 'installed-skill', name: '技能' }));
+  expect(onSend).not.toHaveBeenCalled();
+  if (remove) fireEvent.click(screen.getByRole('button', { name: 'remove selected workflow' }));
+  fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+  await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+  expect(onSend.mock.calls[0][0].mentions).toEqual(remove ? [] : [expect.objectContaining({ resource_id: 'installed-skill', type: 'skill' })]);
+});
+
+it.each([false, true])('list selection is sent only on confirmation and removal=%s clears the request', async (remove) => {
+  const ref = createRef<ChatInputImperativeProps>();
+  const onSend = vi.fn();
+  render(<ChatInput ref={ref} value="补充任务要求" onChange={vi.fn()} onSend={onSend} isChatContent runInBackground
+    initialConversationSettings={{ enable_workflow: true }} showConversationConfig={false} showPromptSuggestions={false} />);
+  await act(async () => ref.current!.selectWorkflow({ workflowRef: 'builtin:paper-writing', name: '论文写作' }));
+  expect(onSend).not.toHaveBeenCalled();
+  if (remove) fireEvent.click(screen.getByRole('button', { name: 'remove selected workflow' }));
+  fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+  await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+  expect(onSend.mock.calls[0][0].mentions).toEqual(remove ? [] : [expect.objectContaining({ resource_id: 'builtin:paper-writing', type: 'workflow' })]);
 });

@@ -372,7 +372,7 @@ export default function SkillManagementToolbar({
         {headingExtra}
       </div>
 
-      <div className="memory-skill-toolbar-actions">{renderViewActions()}</div>
+      <div className={`memory-skill-toolbar-actions${skillView === "market" ? " is-market" : ""}`}>{renderViewActions()}</div>
     </div>
   );
 }

@@ -487,6 +487,7 @@ export type MarkdownSaveMode = 'draft' | 'checkpoint';
 
 interface MarkdownArtifactEditorProps {
   savePaused?: boolean;
+  pageManaged?: boolean;
   toolbarActions?: ReactNode;
   markdown: string;
   /** Prompts keep HTML examples literal and do not acquire document navigation metadata. */
@@ -511,7 +512,7 @@ interface MarkdownArtifactEditorProps {
   onRefresh?: () => void;
   onDownload?: () => void;
   /** Reports the current draft so the write-back action can compare it with its Feishu baseline. */
-  onContentChange?: (markdown: string) => void;
+  onContentChange?: (markdown: string, dirty?: boolean) => void;
   /** Chat-only action that sends the current selection to the composer as a citation. */
   onCiteSelection?: (text: string) => void;
   /** Chat-only action that opens the source represented by an inline citation. */
@@ -566,6 +567,7 @@ function isMarkdownToolbarDropdownOpen(): boolean {
 
 export function MarkdownArtifactEditor({
   savePaused = false,
+  pageManaged = false,
   toolbarActions,
   markdown,
   contentKind = 'document',
@@ -709,12 +711,11 @@ export function MarkdownArtifactEditor({
   conflictRef.current = conflict;
 
   useEffect(() => {
-    onContentChange?.(
-      dirty
-        ? writerMarkdownForSave(materializedDraftMarkdown)
-        : anchorSourceMarkdown,
-    );
-  }, [anchorSourceMarkdown, dirty, materializedDraftMarkdown, onContentChange]);
+    if (!onContentChange) return;
+    const content = dirty ? writerMarkdownForSave(materializedDraftMarkdown) : anchorSourceMarkdown;
+    if (pageManaged) onContentChange(content, dirty);
+    else onContentChange(content);
+  }, [anchorSourceMarkdown, dirty, materializedDraftMarkdown, onContentChange, pageManaged]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -1373,7 +1374,7 @@ export function MarkdownArtifactEditor({
       window.clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = undefined;
     }
-    if (!dirty || readOnly || savePaused || saving || saveError || conflict) return undefined;
+    if (pageManaged || !dirty || readOnly || savePaused || saving || saveError || conflict) return undefined;
 
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = undefined;
@@ -1386,7 +1387,7 @@ export function MarkdownArtifactEditor({
         autoSaveTimerRef.current = undefined;
       }
     };
-  }, [conflict, dirty, draftMarkdown, readOnly, savePaused, saveError, saving]);
+  }, [pageManaged, conflict, dirty, draftMarkdown, readOnly, savePaused, saveError, saving]);
 
   const useRemoteVersion = () => {
     if (!pendingSource || savingRef.current) return;
@@ -2164,6 +2165,7 @@ export function MarkdownArtifactEditor({
             onChange: groups => handleMarkdownChange(editorRef.current!.getMarkdown(), false, groups),
           }}><MDXEditor
             ref={editorRef}
+            autoFocus={contentKind === 'prompt' && !readOnly && { preventScroll: true }}
             className='writer-markdown-editor__surface'
             contentEditableClassName='writer-markdown-editor__content'
             markdown={stripImageGroupMarkdown(normalizeMarkdownForMdxEditor(draftMarkdown, literalHtml))}

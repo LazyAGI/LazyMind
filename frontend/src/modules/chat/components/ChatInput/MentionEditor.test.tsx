@@ -1022,3 +1022,62 @@ describe("mention text boundaries", () => {
 });
 
 });
+
+describe('workflow list selection', () => {
+  it('inserts a removable workflow chip without submitting and preserves task text', async () => {
+    const ref = createRef<MentionEditorRef>();
+    const onSend = vi.fn();
+    const onMentionsChange = vi.fn();
+    const consent = vi.fn().mockResolvedValue(true);
+    const { container } = render(<MentionEditor ref={ref} value="补充要求" onChange={vi.fn()}
+      placeholder="" onPaste={vi.fn()} onCompositionChange={vi.fn()}
+      onMentionsChange={onMentionsChange} onSend={onSend} beforeWorkflowSelect={consent} />);
+    await act(async () => ref.current!.selectWorkflow({ workflowRef: 'builtin:writer-workflow', name: 'AI 写作' }));
+    expect(consent).toHaveBeenCalledOnce();
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    expect(screen.getByRole('textbox')).toHaveTextContent('补充要求');
+    expect(ref.current!.getMentions()).toEqual([expect.objectContaining({ resource_id: 'builtin:writer-workflow', display_name: 'AI 写作' })]);
+    expect(onSend).not.toHaveBeenCalled();
+    const remove = container.querySelector<HTMLElement>('.chat-mention-chip [data-remove-mention]');
+    expect(remove).not.toBeNull();
+    fireEvent.click(remove!);
+    expect(ref.current!.getMentions()).toEqual([]);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it('replaces an existing workflow with the requested identity, even when names match', async () => {
+    const ref = createRef<MentionEditorRef>();
+    render(<MentionEditor ref={ref} value="同名工作流 要求" initialMentions={[{ mention_id: 'old', type: 'workflow', resource_id: 'user:owner:old', display_name: '同名工作流', start: 0, end: 5 }]}
+      placeholder="" onPaste={vi.fn()} onCompositionChange={vi.fn()} onSend={vi.fn()}
+      onChange={vi.fn()} onMentionsChange={vi.fn()} beforeWorkflowSelect={async () => true} />);
+    await act(async () => ref.current!.selectWorkflow({ workflowRef: 'user:owner:new', name: '同名工作流' }));
+    expect(ref.current!.getMentions()).toEqual([expect.objectContaining({ resource_id: 'user:owner:new' })]);
+    expect(screen.getByRole('textbox')).toHaveTextContent('要求');
+  });
+
+  it('selects a skill once, focuses the composer and removes its selected state without sending', async () => {
+    const ref = createRef<MentionEditorRef>();
+    const onSend = vi.fn();
+    const onMentionsChange = vi.fn();
+    const { container } = render(<MentionEditor ref={ref} value="补充要求" onChange={vi.fn()} onSend={onSend} onMentionsChange={onMentionsChange}
+      placeholder="" onPaste={vi.fn()} onCompositionChange={vi.fn()} />);
+    await act(async () => ref.current!.selectSkill({ skillId: 'installed-skill', name: '技能' }));
+    await act(async () => ref.current!.selectSkill({ skillId: 'installed-skill', name: '技能' }));
+    expect(ref.current!.getMentions()).toEqual([expect.objectContaining({ type: 'skill', resource_id: 'installed-skill' })]);
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    expect(screen.getByRole('textbox')).toHaveTextContent('补充要求');
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(container.querySelector('[data-remove-mention]')!);
+    expect(ref.current!.getMentions()).toEqual([]);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it('does not insert when workflow enablement is declined', async () => {
+    const ref = createRef<MentionEditorRef>();
+    render(<MentionEditor ref={ref} value="要求" onChange={vi.fn()} onMentionsChange={vi.fn()} beforeWorkflowSelect={async () => false}
+      placeholder="" onPaste={vi.fn()} onCompositionChange={vi.fn()} onSend={vi.fn()} />);
+    await act(async () => ref.current!.selectWorkflow({ workflowRef: 'builtin:writer-workflow', name: 'AI 写作' }));
+    expect(ref.current!.getMentions()).toEqual([]);
+    expect(screen.getByRole('textbox')).toHaveTextContent('要求');
+  });
+});

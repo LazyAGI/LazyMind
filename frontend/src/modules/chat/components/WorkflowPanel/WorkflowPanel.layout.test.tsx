@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { message } from 'antd';
 import { setupAntdStaticCleanup } from '@/test/antdStatic';
 import i18n from '@/i18n';
-import { hydrateWorkflowUI, type SlotRevision, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
+import { hydrateWorkflowUI, type SlotRevision, type TabDef, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
 import { WorkflowPanel } from './index';
 import { controlActions, externalPanelAction, externalContinuationStep, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
@@ -138,7 +138,7 @@ beforeEach(async () => {
   fixture.focusedTab = undefined;
   fixture.setFocusedTab.mockImplementation((_id: string, tab: string) => { fixture.focusedTab = tab; });
   localStorage.clear();
-  fixture.ui = { name: '示例工作流', tabs: [
+  fixture.ui = { name: '示例工作流', stepLabels: { prepare: '写作准备', write_document: '成稿' }, tabs: [
     { id: 'prepare', step_id: 'prepare', label: '写作准备', layout: 'list', slots: [] },
     { id: 'draft', step_id: 'write_document', label: '成稿', layout: 'list', slots: [
       { id: 'document', label: '成稿', type: 'text', widget: { widgetType: 'writer-document' } },
@@ -184,6 +184,32 @@ describe('shared workflow compact layout', () => {
     expect(within(panel).getByText('步骤执行失败')).toBeVisible();
     expect(within(panel).queryByText('正在等待步骤结果…')).not.toBeInTheDocument();
   });
+
+  it.each(['missing', 'stale', 'composite', 'hidden'])(
+    'uses the saved step name for rollback with a %s result tab and targets the stable ID', async (tabKind) => {
+      const stepId = 'step_dfb9f0';
+      const tab: TabDef = { id: 'auxiliary', step_id: stepId, label: '旧页签名称', slots: [] };
+      if (tabKind === 'stale') fixture.ui.tabs!.push(tab);
+      if (tabKind === 'composite') fixture.ui.tabs!.push({ ...tab, step_id: undefined, status_step_ids: [stepId, 'write_document'] });
+      if (tabKind === 'hidden') fixture.ui.tabs!.push({ ...tab, slots: [{ id: 'internal', type: 'text', user_visible: false }] });
+      fixture.ui = hydrateWorkflowUI({
+        steps: [{ id: stepId, label: '整理辅助文档' }], ui: fixture.ui,
+      });
+      fixture.session.steps!.push({ ...fixture.session.steps![0], id: stepId, step_id: stepId });
+      fixture.session.projection!.past!.push(stepId);
+      const send = vi.fn();
+      render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+      await screen.findByRole('tab', { name: '成稿' });
+      const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
+      const rollback = within(shortcuts).getByRole('button', { name: '整理辅助文档' });
+      expect(within(shortcuts).queryByRole('button', { name: stepId })).not.toBeInTheDocument();
+      expect(within(shortcuts).queryByRole('button', { name: '旧页签名称' })).not.toBeInTheDocument();
+      fireEvent.click(rollback);
+      await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 整理辅助文档', {
+        session_id: 'layout-test', kind: 'rewind', step_id: stepId, expected_state_version: 0,
+      }));
+    },
+  );
 
   it('preserves a tab selected before the initial follow effect runs', async () => {
     fixture.ui.tabs!.push({ id: 'optional', label: '可选步骤', slots: [] });
@@ -727,13 +753,87 @@ describe('shared workflow compact layout', () => {
     await screen.findByRole('button', { name: '发布' });
     const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
     expect(shortcuts).toBeVisible();
-    expect(within(shortcuts).getByRole('button', { name: '写作准备' })).toBeVisible();
+    expect(within(shortcuts).getByRole('button', { name: '整理验收清单' })).toBeVisible();
     fireEvent.click(within(shortcuts).getByRole('button', { name: '成稿' }));
     await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 成稿', {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     }));
     expect(fixture.flush).toHaveBeenCalledOnce();
     expect(within(shortcuts).queryByRole('button', { name: 'stale_step' })).not.toBeInTheDocument();
+  });
+
+  it.each(['completed', 'failed'] as const)('lets users review a PPT stage before explicitly retrying it in a %s run', async status => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.status = status;
+    fixture.session.projection!.display!.status = status;
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const stage = await screen.findByRole('tab', { name: '写作准备' });
+    expect(screen.queryByRole('group', { name: '回退到步骤：' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /执行图/ })).toBeVisible();
+    await act(async () => fireEvent.click(stage));
+    expect(stage).toHaveAttribute('aria-selected', 'true');
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重新执行' }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith('从「写作准备」开始重新执行，并继续执行后续步骤。', {
+      session_id: 'layout-test', kind: 'rewind', step_id: 'prepare', expected_state_version: 0,
+    }));
+  });
+
+  it('reruns a browsed PPT step and its successors from a paused native session', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display!.status = 'paused';
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    fireEvent.click(await screen.findByRole('tab', { name: '写作准备' }));
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('group', { name: '工作流会话操作' })).getByRole('button', { name: '重新执行' }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith('从「写作准备」开始重新执行，并继续执行后续步骤。'));
+  });
+
+  it('routes a failed PPT stage retry to its external agent using the step label', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.controller_host = 'external-agent';
+    fixture.session.status = 'failed';
+    fixture.session.projection!.display!.status = 'failed';
+    fixture.session.projection!.past = ['prepare'];
+    fixture.session.steps![1].status = 'failed';
+    fixture.ui.stepLabels = { write_document: '生成演示文稿' };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    fireEvent.click(await screen.findByRole('button', { name: '重新执行' }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith('从「生成演示文稿」开始重新执行，并继续执行后续步骤。'));
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('lets PPT users browse, then retry the selected failed stage through the embedded host', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.session.status = 'failed';
+    fixture.session.projection!.display!.status = 'failed';
+    fixture.session.projection!.past = ['prepare'];
+    fixture.session.steps![1].status = 'failed';
+    const execute = vi.fn(async () => {});
+    render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={{ execute }} />);
+    await screen.findByRole('tab', { name: /^成稿/ });
+    fireEvent.click(screen.getByRole('button', { name: '跟随进度' }));
+    expect(screen.getByRole('button', { name: '自由浏览' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('tab', { name: /^成稿/ }));
+    expect(execute).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重新执行' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledWith({ kind: 'retry', stepId: 'write_document' }));
+  });
+
+  it('keeps the PPT run untouched when the active design cannot be saved', async () => {
+    fixture.session.workflow_id = 'ppt-workflow';
+    fixture.flush.mockResolvedValue(false);
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const retry = await screen.findByRole('button', { name: '重新执行' });
+    await screen.findByRole('button', { name: '发布' });
+    await act(async () => fireEvent.click(retry));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('does not rerun when saving the current edits fails', async () => {

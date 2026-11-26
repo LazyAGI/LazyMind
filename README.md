@@ -2,7 +2,7 @@
 
 **[中文](README.CN.md)** | **English**
 
-> **External Agent CI setup:** Configure your own model access and keys using the [setup guide](scripts/agent_e2e.md). Keep local credentials outside the repository and use GitHub Actions Secrets for CI. Never commit keys or login files.
+> **External Agent CI setup:** Follow the [hosted CI setup guide](scripts/agent_e2e_hosted.md#首次配置) to configure model access and add your keys to GitHub Actions Secrets.
 
 <img width="1672" height="600" alt="LazyMind logo" src="docs/assets/lazymind-banner.png" />
 
@@ -13,6 +13,7 @@
 [![macOS](https://img.shields.io/badge/macOS-arm64-111827?style=flat-square&logo=apple)](desktop/README.md)
 [![Windows](https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square&logo=windows)](desktop/README.md)
 [![Local first](https://img.shields.io/badge/deployment-local--first-16a34a?style=flat-square)](docs/quick_start.md)
+[![Featured in Awesome AI Agents](https://img.shields.io/badge/Featured_in-Awesome_AI_Agents-2ea44f?style=flat-square)](https://github.com/NipunaRanasinghe/awesome-ai-agents)
 
 LazyMind is an **AI Skill Runtime** for knowledge-intensive work: an environment that turns knowledge, expert practice, and tools into executable, recoverable tasks. It connects reusable knowledge, executable Skills, observable workflows, editable artifacts, and evaluation-driven improvement in one workspace.
 

@@ -2,7 +2,7 @@
 
 **[English](README.md)** | **中文**
 
-> **外部 Agent CI 首次运行提醒：** 请先按[配置说明](scripts/agent_e2e.md#首次运行请配置自己的模型和密钥)填写自己的模型和 Key。本地密钥保存在仓库外；GitHub 使用 Actions Secrets，勿提交密钥或登录配置。
+> **外部 Agent CI 首次运行提醒：** 请按[托管 CI 配置说明](scripts/agent_e2e_hosted.md#首次配置)配置模型，并在 GitHub Actions Secrets 中添加自己的 Key。
 
 <img width="1672" height="600" alt="LazyMind 标志" src="docs/assets/lazymind-banner.png" />
 

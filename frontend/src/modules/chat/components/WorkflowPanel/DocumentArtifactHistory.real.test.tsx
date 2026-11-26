@@ -152,7 +152,7 @@ it.each([false, true])('normalizes historical paper headings only in the paper w
 });
 
 
-it('resolves a paper outline placeholder in the editor and article image gallery', async () => {
+it('opens the resolved paper outline image directly from the editor', async () => {
   // jsdom does not load image resources; let the real editor finish its image preload.
   vi.stubGlobal('Image', class {
     onload?: () => void;
@@ -171,8 +171,9 @@ it('resolves a paper outline placeholder in the editor and article image gallery
   const image = await screen.findByRole('img', { name: 'Observed scores' });
   await waitFor(() => expect(image.getAttribute('src')).toContain('/api/core/static-files/means.svg?'));
   fireEvent.click(image);
-  const dialog = await screen.findByRole('dialog', { name: '文章图片' });
+  const dialog = await screen.findByRole('dialog');
   const preview = await within(dialog).findByRole('img', { name: 'Observed scores' });
-  expect(preview.getAttribute('src')).toContain('/api/core/static-files/means.svg?');
+  expect(preview).toHaveAttribute('src', image.getAttribute('src'));
+  expect(screen.queryByRole('dialog', { name: '文章图片' })).not.toBeInTheDocument();
   expect(api.saveDocumentArtifact).not.toHaveBeenCalled();
 });

@@ -967,6 +967,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           clearPendingMessage();
         },
         element: innerRef.current,
+        selectWorkflow: async (workflow) => { await textAreaRef.current?.selectWorkflow(workflow); },
+        selectSkill: async (skill) => { await textAreaRef.current?.selectSkill(skill); },
         focus: () => {
           textAreaRef.current?.focus?.();
         },

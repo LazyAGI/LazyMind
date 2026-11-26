@@ -327,6 +327,61 @@ class ConnectionFallbackTests(unittest.TestCase):
             self.assertFalse(upstream_log.exists())
             self.assertIn("read_only_connection_probe", (root / "mcp.jsonl").read_text())
 
+    def test_relay_binds_native_pptx_in_actual_start_and_preserves_other_inputs(self):
+        scenarios = [
+            ('ppt-workflow', 'workflow.start', None),
+            ('ppt-workflow', 'workflow.start', {'slide_count': '3'}),
+            ('ppt-workflow', 'workflow.start', {'presentation_output_format': 'html', 'slide_count': '3'}),
+            ('ppt-workflow', 'workflow.start', {'presentation_output_format': 'native_pptx'}),
+            ('paper-writing', 'workflow.start', {'presentation_output_format': 'html'}),
+            ('image-workflow', 'workflow.start', None),
+            ('ppt-workflow', 'workflow.get', None),
+            ('ppt-workflow', 'workflow.start', []),
+        ]
+        for workflow_id, tool, values in scenarios:
+            with self.subTest(workflow_id=workflow_id, tool=tool, values=values), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                args = connection_fixture(root)
+                args.cli = str(root / 'fixture-connector.py')
+                upstream_log = root / 'upstream.jsonl'
+                Path(args.cli).write_text('import sys,json\n'
+                    f'log={str(upstream_log)!r}\n'
+                    'for line in sys.stdin:\n'
+                    ' r=json.loads(line)\n'
+                    ' with open(log,"a") as f:f.write(json.dumps(r)+"\\n")\n'
+                    ' a=r["params"]["arguments"]\n'
+                    ' print(json.dumps({"jsonrpc":"2.0","id":r["id"],"result":{'
+                    '"structuredContent":{"session_id":"run","workflow_id":a["workflow_id"],'
+                    '"revision_id":a["revision_id"]}}}),flush=True)\n')
+                runner.prepare_connection(args, root, workflow_id, 'revision', 'business')
+                arguments = {'workflow_id': workflow_id, 'revision_id': 'revision'}
+                if tool == 'workflow.start':
+                    arguments.update(request_context='fixed CI task', idempotency_key='fixture-start-1234',
+                                     inputs={'uploaded_materials': [{'local_path': str(root / 'materials.md')}]})
+                if values is not None:
+                    arguments['clarification_values'] = values
+                request = {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {
+                    'name': tool, 'arguments': arguments}}
+                process = subprocess.run([sys.executable, str(runner.SCRIPT), 'observe', '--cli', args.cli,
+                    '--trace', str(root / 'mcp.jsonl'), '--connection-context', str(root / 'connection.json')],
+                    input=json.dumps(request) + '\n', capture_output=True, text=True, timeout=5)
+                self.assertTrue(process.stdout, process.stderr)
+                response = json.loads(process.stdout.splitlines()[0])
+                if values == []:
+                    self.assertTrue(response['result']['isError'])
+                    self.assertIn('invalid_ppt_start_answers', json.dumps(response))
+                    self.assertFalse(upstream_log.exists())
+                    continue
+                self.assertFalse(response['result'].get('isError'))
+                forwarded = json.loads(upstream_log.read_text().splitlines()[0])
+                expected = json.loads(json.dumps(request))
+                if workflow_id == 'ppt-workflow' and tool == 'workflow.start':
+                    expected['params']['arguments']['clarification_values'] = {
+                        **(values or {}), 'presentation_output_format': 'native_pptx'}
+                    events = runner.trace_events(root)
+                    self.assertTrue(any(e.get('presentation_output_format') == 'native_pptx' for e in events))
+                self.assertEqual(forwarded, expected)
+
     def test_live_relay_forwards_reads_and_rejects_account_switch_before_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

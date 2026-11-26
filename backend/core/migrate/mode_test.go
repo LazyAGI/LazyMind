@@ -102,8 +102,11 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 151 {
-		t.Fatalf("v0_3 dev migration count=%d, want 151", len(v03.Dev))
+	if len(v03.Dev) != 152 {
+		t.Fatalf("v0_3 dev migration count=%d, want 152", len(v03.Dev))
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20261123022951) {
+		t.Fatal("v0_3 dev migrations are missing the PPT page revision association")
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20261116090000) {
 		t.Fatal("v0_3 dev migrations are missing the reading usage table")

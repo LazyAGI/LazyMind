@@ -24,6 +24,18 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('step card authoring details', () => {
+  it('uses the editable name in the header while keeping a generated ID out of the card', () => {
+    const generated = { ...data, id: 'step_dfb9f0', label: '生成辅助文档' };
+    const view = render(<ReactFlowProvider><StepNodeRenderer {...props} id={generated.id} data={generated} /></ReactFlowProvider>);
+    expect(screen.getByText('生成辅助文档').closest('.step-node-header')).not.toBeNull();
+    expect(screen.queryByText(generated.id)).not.toBeInTheDocument();
+
+    view.rerender(<ReactFlowProvider><StepNodeRenderer {...props} id={generated.id} data={{ ...generated, label: '整理辅助文档' }} /></ReactFlowProvider>);
+    expect(screen.getByText('整理辅助文档').closest('.step-node-header')).not.toBeNull();
+    expect(screen.queryByText('生成辅助文档')).not.toBeInTheDocument();
+    expect(screen.queryByText(generated.id)).not.toBeInTheDocument();
+  });
+
   it('shows the input labels and confirmation mode alongside output labels', () => {
     render(<ReactFlowProvider><StepNodeRenderer {...props} /></ReactFlowProvider>);
     expect(screen.getByText('selfEvolutionRun.sgeNodeInputs: Notes、Backup')).toBeInTheDocument();

@@ -601,11 +601,10 @@ func (b *sharedBridge) handleManagement(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			b.stopping = true
+			b.server.respondAndStop(w, map[string]any{"ok": true, "running": false, "remaining_clients": 0})
+			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "running": len(b.clients) > 0, "remaining_clients": len(b.clients)})
-		if b.stopping && b.server.stop != nil {
-			go b.server.stop()
-		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "running": true, "remaining_clients": len(b.clients)})
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown lifecycle action"})
 	}

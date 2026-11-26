@@ -52,7 +52,10 @@ it('edits a PPT design in the real Markdown editor and saves its source metadata
 
   fireEvent.click(view.container.querySelector('summary')!);
   expect(capture.editor).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '编辑文本' }));
+  const slotFrame = view.container.querySelector<HTMLElement>('.workflow-slot--ppt-prompt')!;
+  vi.spyOn(slotFrame, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 760, 380));
+  fireEvent.doubleClick(screen.getByText('浅色背景'));
+  expect(slotFrame.style.getPropertyValue('--ppt-prompt-edit-height')).toBe('380px');
   expect(capture.importError).toBe('');
   await waitFor(() => expect(view.container.querySelector('[contenteditable="true"]')).toBeInTheDocument());
   expect(view.container.querySelector('.workflow-slot__text-editor')).toBeNull();
@@ -93,6 +96,7 @@ it.each(['panel', 'widget', 'unselected', 'descriptor'] as const)('keeps %s read
   } : {}) } as SlotRevision;
   const { container } = render(<SlotRenderer slot={current} sessionId='ppt-editor' readOnly={reason === 'panel'}
     widget={{ widgetType: 'ppt-prompt', readOnly: reason === 'widget' }} />);
+  fireEvent.doubleClick(screen.getByText('浅色背景'));
   expect(screen.queryByRole('button', { name: '编辑文本' })).not.toBeInTheDocument();
   expect(container.querySelector('[contenteditable="true"], .workflow-slot__text-editor')).toBeNull();
 });

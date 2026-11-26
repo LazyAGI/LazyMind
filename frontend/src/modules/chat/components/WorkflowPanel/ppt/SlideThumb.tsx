@@ -8,7 +8,7 @@ import {
   ensureRasterPng,
   fingerprintArtifact,
   fingerprintText,
-  getRasterPng,
+  filmstripImage,
   loadRasterPng,
   rasterCacheKey,
   setRasterPng,
@@ -50,6 +50,10 @@ function aliasKey(sessionId: string, slot: SlotRevision): string {
   );
 }
 
+// Keep the last painted thumbnail for each page across panel unmounts.
+type Thumbnail = { pageKey: string; revisionKey: string; src: string };
+const recent = new Map<string, Thumbnail>();
+
 /**
  * Filmstrip thumb: capture export-quality PNG once (global serial queue), show
  * static <img>. Shared cache with raster PPTX export. Edit / regenerate bumps
@@ -66,9 +70,10 @@ export const SlideThumb = forwardRef<SlideThumbHandle, { slot: SlotRevision; ses
   const autoRetries = useRef(0);
   const [retry, setRetry] = useState(0);
   const aKey = aliasKey(sessionId, slot);
-  const [previewSrc, setPreviewSrc] = useState<string | null>(() => getRasterPng(aKey));
+  const pageKey = rasterCacheKey(sessionId, JSON.stringify([slot.slot_id || slot.slot, slot.list_index ?? 0]));
+  const [painted, setPainted] = useState(() => recent.get(pageKey));
+  const thumbnail = painted?.pageKey === pageKey ? painted : recent.get(pageKey);
   const [failed, setFailed] = useState(false);
-  const genRef = useRef(0);
 
   useImperativeHandle(ref, () => ({ retry: () => {
     if (failed) setRetry(value => value + 1);
@@ -104,34 +109,36 @@ export const SlideThumb = forwardRef<SlideThumbHandle, { slot: SlotRevision; ses
   }, [failed]);
 
   useEffect(() => {
-    const gen = ++genRef.current;
     setFailed(false);
 
-    const aliased = getRasterPng(aKey);
-    if (aliased) {
-      setPreviewSrc(aliased);
+    const cached = recent.get(pageKey);
+    if (cached?.revisionKey === aKey) {
+      setPainted(cached);
       return;
     }
-    setPreviewSrc(null);
 
     let cancelled = false;
     (async () => {
-      const saved = await loadRasterPng(aKey);
-      if (cancelled || gen !== genRef.current) return;
-      if (saved) { setPreviewSrc(saved); return; }
-      const text = await loadArtifactText(slot.artifact_value);
-      if (cancelled || gen !== genRef.current) return;
-      const html = extractHtmlFromArtifact(text) || extractHtmlFromArtifact(slot.artifact_value);
-      if (!html) throw new Error('Slide artifact does not contain HTML');
-
-      const contentKey = rasterCacheKey(sessionId, fingerprintText(html));
-      const png = await ensureRasterPng(contentKey, html);
-      // Index under alias so the next render hits before re-fetching HTML.
-      await setRasterPng(aKey, png, RASTER_EXPORT_PIXEL_RATIO);
-      if (cancelled || gen !== genRef.current) return;
-      setPreviewSrc(png);
+      let png = await loadRasterPng(aKey);
+      if (cancelled) return;
+      if (!png) {
+        const text = await loadArtifactText(slot.artifact_value);
+        if (cancelled) return;
+        const html = extractHtmlFromArtifact(text) || extractHtmlFromArtifact(slot.artifact_value);
+        if (!html) throw new Error('Slide artifact does not contain HTML');
+        png = await ensureRasterPng(rasterCacheKey(sessionId, fingerprintText(html)), html);
+        if (cancelled) return;
+        void setRasterPng(aKey, png, RASTER_EXPORT_PIXEL_RATIO);
+      }
+      const src = await filmstripImage(png);
+      if (cancelled) return;
+      const ready = { pageKey, revisionKey: aKey, src };
+      recent.delete(pageKey);
+      recent.set(pageKey, ready);
+      if (recent.size > 64) recent.delete(recent.keys().next().value!);
+      setPainted(ready);
     })().catch(error => {
-      if (cancelled || gen !== genRef.current) return;
+      if (cancelled) return;
       console.warn('[workflow] slide thumbnail failed', {
         sessionId, slot: slot.slot, listIndex: slot.list_index,
         message: error instanceof Error ? error.message : 'Slide capture failed',
@@ -142,12 +149,12 @@ export const SlideThumb = forwardRef<SlideThumbHandle, { slot: SlotRevision; ses
     return () => {
       cancelled = true;
     };
-  }, [aKey, retry, sessionId, slot.artifact_value, slot.slot, slot.list_index, slot.sort_order]);
+  }, [aKey, pageKey, retry, sessionId, slot.artifact_value, slot.slot, slot.list_index]);
 
-  if (previewSrc) {
+  if (thumbnail && !failed) {
     return (
       <div ref={elementRef} className='slide-thumb slide-thumb--shot'>
-        <img className='slide-thumb__img' src={previewSrc} alt='' draggable={false} />
+        <img className='slide-thumb__img' src={thumbnail.src} alt='' draggable={false} />
       </div>
     );
   }

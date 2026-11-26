@@ -107,15 +107,6 @@
   overflow: hidden;
 }
 
-.step-node-id {
-  font-size: 10px;
-  color: #8c8c8c;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
 .step-node-mode-tag {
   font-size: 10px;
   line-height: 1.2;
@@ -150,6 +141,8 @@
 }
 
 .step-node-label {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   color: #1f1f1f;
@@ -350,15 +343,17 @@
   }
 
   .step-node-label {
-    margin: 8px 0 12px;
     font-size: 18px;
+  }
+
+  .step-node-header {
+    margin-bottom: 12px;
   }
 
   .step-node-outputs {
     font-size: 12px;
   }
 
-  .step-node-id,
   .step-node-mode-tag {
     font-size: 11px;
   }

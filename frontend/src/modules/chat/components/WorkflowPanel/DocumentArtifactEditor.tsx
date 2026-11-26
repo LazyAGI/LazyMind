@@ -1,6 +1,6 @@
 import ExternalLink from '@/components/ExternalLink';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal } from 'antd';
+import { cloneElement, type ReactElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Image, Modal } from 'antd';
 import { ExclamationCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { DocumentProvider, DocumentNumberingResult, DocumentConvertResult } from '@/api/generated/core-client';
 import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
@@ -168,6 +168,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     // MDXEditor does not cancel older preview lookups when its handler changes.
     return latestMediaUrls.current === mediaUrls ? resolved : resolveMarkdownImageUrlFromMap(url, latestMediaUrls.current);
   }, [mediaUrls]);
+  const [previewImage, setPreviewImage] = useState<{ key: string; src: string; alt: string }>();
   const imageDownloads = useDocumentImageDownloads({ scopeKey: editingKey, resolveImage: resolveImageUrl,
     readSource: () => ({ artifactId: latest.current.id, revision: latest.current.revision, draft: latest.current.draft,
       document: getSnapshot?.(editingKey) ?? draftContent.current }),
@@ -442,10 +443,16 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const versionHistory = VersionHistory && sessionId ? <VersionHistory sessionId={sessionId} slotId={slot.slot_id}
     listIndex={slot.list_index ?? -1} revisionCount={revisionCount ?? version} currentRevision={version}
     currentVersionNumber={slot.version_number} currentValue={value} currentChangeSource={slot.change_source}
+    previewKind={writerSlot && !paperDocument ? 'writer' : undefined} resolveImageUrl={resolveImageUrl}
     readCurrentValue={() => getSnapshot?.(editingKey) ?? draftContent.current} contentType='text'
     readOnly={!writable} triggerLabel={String(i18n.t('chat.slots.versionHistory'))} onRollback={rollback} /> : undefined;
   return <SlotEditingContext.Provider value={editorContext}><div className={`workflow-slot workflow-slot--artifact${paperDocument ? ' workflow-slot--paper-document' : ''}`}>
-    <div className={`workflow-slot__artifact-body${representation === 'markdown' ? ' workflow-slot__artifact-body--markdown' : ''}`} onClick={imageDownloads.onImageClick}>
+    <div className={`workflow-slot__artifact-body${representation === 'markdown' ? ' workflow-slot__artifact-body--markdown' : ''}`} onClick={event => {
+      const image = event.target;
+      if (!(image instanceof HTMLImageElement) || !event.currentTarget.contains(image) || image.closest('button, a')) return;
+      const src = image.currentSrc || image.getAttribute('src');
+      if (src) setPreviewImage({ key: editingKey, src, alt: image.alt });
+    }}>
     {representation === 'markdown' && typeof value === 'string'
       ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
         numberingDocument={typeof currentNumbering?.document === 'string' ? currentNumbering.document : undefined}
@@ -467,6 +474,12 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           return { document: saved.value as WriterDocument, sourceRevision: saved.revision, draftVersion: saved.draft };
         }} /> : <div role='alert'>{String(i18n.t('chat.writerIR.saveFailed'))}</div>}
     </div>
+    {previewImage?.key === editingKey && <Image.PreviewGroup items={[previewImage.src]}
+      preview={{
+        visible: true,
+        imageRender: (image: ReactElement<{ alt?: string }>) => cloneElement(image, { alt: previewImage.alt }),
+        onVisibleChange: (visible: boolean) => { if (!visible) setPreviewImage(undefined); },
+      }} />}
     {imageDownloads.dialog}
     {error && <div className='workflow-document-notice' role='alert'>
       <span className='workflow-document-notice__icon' aria-hidden='true'><ExclamationCircleOutlined /></span>

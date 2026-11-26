@@ -21,7 +21,7 @@ test/
 !/frontend/src/test/
 node_modules/
 # Editable PPT export deps live outside the repo; never commit this runtime link.
-workflows/ppt-workflow/runtime/scripts/export_pptx/node_modules/
+workflows/ppt-workflow/runtime/scripts/export_pptx/node_modules
 dist/
 tmp/
 build

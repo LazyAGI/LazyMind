@@ -1986,6 +1986,37 @@ class MultiTargetLegacyAndRasterEditTests(unittest.TestCase):
         )
         self.assertIn('<text>算力</text><text>Y</text>', preview['candidate_html'])
 
+    def test_text_block_polish_checks_source_and_preserves_title_format(self):
+        html = ('<html><body><h1 data-el="title"><span>A &amp; B</span><br><b>Team</b></h1>'
+                '<p>Team</p></body></html>')
+        selection = {'type': 'ppt_html', 'page': 1, 'el': '__lazymind_text_block',
+                     'text_block': {'tag': 'h1', 'occurrence': 0, 'el': 'title',
+                                    'segments': ['A & B', 'Team']}}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            TOOLS, '_agent_llm_call', return_value='{"op":"replace_text_segments","values":["A & B","League"]}',
+        ) as llm:
+            def preview():
+                return TOOLS.ppt_preview_selection_edit(
+                    html, '润色', selection, artifact_store=tmp, slot='preview_html',
+                )
+            result = preview()
+            self.assertEqual(result['candidate_html'], html.replace('<b>Team</b>', '<b>League</b>'))
+            self.assertEqual(result['preview']['old_text'], 'A & B\nTeam')
+            applied = TOOLS.ppt_apply_selection_edit(result['commit']['token'], html, tmp, 'preview_html')
+            self.assertEqual(applied['artifact']['value'], result['candidate_html'])
+            selection['text_block']['segments'][1] = 'stale'
+            with self.assertRaisesRegex(ValueError, '重新选择'):
+                preview()
+            llm.assert_called_once()
+
+    def test_text_block_polish_of_second_legacy_cell_with_identical_text(self):
+        html = '<html><body><table><tr><td>X</td><td>X</td></tr></table></body></html>'
+        block = {'tag': 'td', 'occurrence': 1, 'el': '', 'segments': ['X']}
+        with mock.patch.object(TOOLS, '_agent_llm_call',
+                               return_value='{"op":"replace_text_segments","values":["Y"]}'):
+            edited, _, _ = TOOLS._polish_text_block(TOOLS._HtmlTree(html), block, '润色')
+        self.assertIn('<td>X</td><td>Y</td>', edited)
+
     def test_raster_proxy_edit_reveals_only_proxy_and_keeps_background(self):
         edited, applied, _notes, removed = TOOLS._apply_html_ops(
             RASTER_PROXY_HTML,
