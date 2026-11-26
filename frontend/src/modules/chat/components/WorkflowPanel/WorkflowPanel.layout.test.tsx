@@ -776,8 +776,12 @@ describe('shared workflow compact layout', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: /用户意图/ }));
     const dialog = screen.getByRole('dialog', { name: '用户意图' });
     expect(dialog).toHaveTextContent('保留原文和图片');
+    // The panel clips its contents even when no artifacts have given it height.
+    expect(trigger.closest('.workflow-panel')).not.toContainElement(dialog);
+    expect(trigger).not.toHaveAttribute('title');
     fireEvent.keyDown(within(dialog).getByRole('button', { name: '关闭' }), { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Ant Design waits for the exit motion (1s deadline without browser CSS events).
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '用户意图' })).not.toBeInTheDocument(), { timeout: 2000 });
     expect(trigger).toHaveFocus();
   });
 

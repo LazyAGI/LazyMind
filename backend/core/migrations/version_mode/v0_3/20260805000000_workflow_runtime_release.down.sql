@@ -437,6 +437,7 @@ ALTER TABLE plugins
     DROP COLUMN IF EXISTS source_skill_id;
 DROP INDEX IF EXISTS idx_plugin_sessions_origin;
 ALTER TABLE plugin_sessions
+    DROP COLUMN IF EXISTS approval_preferences,
     DROP COLUMN IF EXISTS approval_mode,
     DROP COLUMN IF EXISTS workflow_mode,
     DROP COLUMN IF EXISTS controller_host,

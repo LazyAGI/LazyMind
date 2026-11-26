@@ -1,5 +1,21 @@
 @use '../../../../styles/taskStatus' as status;
 
+.workflow-panel-tooltip .ant-tooltip-inner {
+  padding: 6px 12px;
+  border: 1px solid #303337;
+  border-radius: 999px;
+  background: #1c1e20;
+  color: #fff;
+  font-size: 12px;
+  line-height: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.workflow-panel-intent-overlay .ant-popover-inner {
+  padding: 0;
+  border-radius: 10px;
+}
+
 // Flow layouts scroll the entire artifact, regardless of whether a text slot
 // resolves to plain Markdown, a persisted document editor, or a PPT prompt.
 // Bounded document workspaces and nested composite frames keep their own scroller.
@@ -419,24 +435,44 @@
   }
 
   &__intent-popover {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    width: 280px;
-    max-width: calc(100cqw - 40px);
+    display: flex;
+    flex-direction: column;
+    width: 360px;
+    max-width: calc(100vw - 32px);
     max-height: min(60dvh, 480px);
-    overflow-y: auto;
+    overflow: hidden;
     box-sizing: border-box;
     background: #fff;
     border: 1px solid #e5e7eb;
     border-radius: 10px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  &__intent-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  &__intent-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: #aebbd0 #f7f9fc;
+    overflow-wrap: anywhere;
     padding: 14px 16px;
-    z-index: 200;
+
+    &::-webkit-scrollbar { width: 7px; }
+    &::-webkit-scrollbar-track { background: #f7f9fc; }
+    &::-webkit-scrollbar-thumb { background: #aebbd0; border-radius: 4px; }
   }
 
   &__intent-close {
-    float: right;
     width: 24px;
     height: 24px;
     border: 0;
@@ -451,7 +487,6 @@
     font-size: 14px;
     font-weight: 600;
     color: #1a1d23;
-    margin-bottom: 10px;
   }
 
   &__intent-section {
@@ -486,7 +521,7 @@
 
   &__intent-step-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     font-size: 12px;
     color: #374151;
@@ -508,9 +543,8 @@
 
   &__intent-step-text {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    white-space: pre-wrap;
   }
 
   &__intent-step-arrow {
@@ -522,6 +556,7 @@
     color: #2563eb;
     font-weight: 500;
     flex-shrink: 0;
+    max-width: 30%;
   }
 
   &__intent-step-note {

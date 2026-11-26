@@ -19,7 +19,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useAppVersion } from '@/runtime/useAppVersion';
-import { message as antdMessage, Popconfirm, Tooltip, Dropdown, Collapse, Alert } from 'antd';
+import { message as antdMessage, Popconfirm, Popover, Tooltip, Dropdown, Collapse, Alert } from 'antd';
 import {
   ApartmentOutlined,
   ArrowLeftOutlined,
@@ -121,6 +121,14 @@ function parseSelectedSlotText(session: WorkflowSession, slotKey: string, includ
   return String(raw);
 }
 
+const workflowToolbarTooltipProps = {
+  mouseEnterDelay: 0.1,
+  mouseLeaveDelay: 0,
+  arrow: false,
+  placement: 'top' as const,
+  rootClassName: 'workflow-panel-tooltip',
+};
+
 /** IntentPopover shows global intent + per-step intent inside a floating popover. */
 function IntentPopover({
   session,
@@ -158,33 +166,37 @@ function IntentPopover({
   return (
     <div className='workflow-panel__intent-popover' ref={wrapRef} role='dialog' aria-label={t('chat.workflowIntentBtn')}
       onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose(); } }}>
-      <button type='button' className='workflow-panel__intent-close' aria-label={t('common.close')} autoFocus onClick={onClose}>×</button>
-      <div className='workflow-panel__intent-popover-title'>{t('chat.workflowIntentBtn')}</div>
-      {globalText && (
-        <div className='workflow-panel__intent-section'>
-          <div className='workflow-panel__intent-section-title'>{t('chat.workflowIntentGlobalTitle')}</div>
-          <div className='workflow-panel__intent-section-text'>{globalText}</div>
-        </div>
-      )}
-      {stepIntents.length > 0 && (
-        <div className='workflow-panel__intent-section'>
-          <div className='workflow-panel__intent-section-title'>{t('chat.workflowIntentStepTitle')}</div>
-          <div className='workflow-panel__intent-step-list'>
-            {stepIntents.map((si) => (
-              <div key={si.stepId} className='workflow-panel__intent-step-row'>
-                <span className='workflow-panel__intent-step-badge'>{si.idx}</span>
-                <span className='workflow-panel__intent-step-text'>{si.text}</span>
-                <span className='workflow-panel__intent-step-arrow'>→</span>
-                <span className='workflow-panel__intent-step-tab'>{si.tabLabel}</span>
-              </div>
-            ))}
+      <div className='workflow-panel__intent-header'>
+        <div className='workflow-panel__intent-popover-title'>{t('chat.workflowIntentBtn')}</div>
+        <button type='button' className='workflow-panel__intent-close' aria-label={t('common.close')} autoFocus onClick={onClose}>×</button>
+      </div>
+      <div className='workflow-panel__intent-body'>
+        {globalText && (
+          <div className='workflow-panel__intent-section'>
+            <div className='workflow-panel__intent-section-title'>{t('chat.workflowIntentGlobalTitle')}</div>
+            <div className='workflow-panel__intent-section-text'>{globalText}</div>
           </div>
-          <div className='workflow-panel__intent-step-note'>{t('chat.workflowIntentStepMapNote')}</div>
-        </div>
-      )}
-      {!globalText && stepIntents.length === 0 && (
-        <div className='workflow-panel__intent-empty'>{t('chat.workflowIntentEmpty')}</div>
-      )}
+        )}
+        {stepIntents.length > 0 && (
+          <div className='workflow-panel__intent-section'>
+            <div className='workflow-panel__intent-section-title'>{t('chat.workflowIntentStepTitle')}</div>
+            <div className='workflow-panel__intent-step-list'>
+              {stepIntents.map((si) => (
+                <div key={si.stepId} className='workflow-panel__intent-step-row'>
+                  <span className='workflow-panel__intent-step-badge'>{si.idx}</span>
+                  <span className='workflow-panel__intent-step-text'>{si.text}</span>
+                  <span className='workflow-panel__intent-step-arrow'>→</span>
+                  <span className='workflow-panel__intent-step-tab'>{si.tabLabel}</span>
+                </div>
+              ))}
+            </div>
+            <div className='workflow-panel__intent-step-note'>{t('chat.workflowIntentStepMapNote')}</div>
+          </div>
+        )}
+        {!globalText && stepIntents.length === 0 && (
+          <div className='workflow-panel__intent-empty'>{t('chat.workflowIntentEmpty')}</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2428,7 +2440,7 @@ export function WorkflowPanel({
           </button>
           {!resultsOnly && <WorkflowApprovalSettings session={session} onRefresh={refresh} disabled={actionPending}
                 onSendMessage={onSendMessage} />}
-          {uiReady && <Tooltip title={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}>
+          {uiReady && <Tooltip {...workflowToolbarTooltipProps} title={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}>
             <button type='button' className='workflow-panel__tool workflow-panel__follow-button'
               aria-label={t(view.mode === 'following' ? 'chat.workflowFollowProgress' : 'chat.workflowFreeBrowse')}
               aria-pressed={view.mode === 'following'} disabled={resumingFollow}
@@ -2444,22 +2456,27 @@ export function WorkflowPanel({
           </div>
         </div>
         <div className='workflow-panel__window-actions'>
-          <div className='workflow-panel__intent-btn-wrap'>
-            <Dropdown trigger={['click']} menu={{
-              items: [
-                { key: 'intent', label: t('chat.workflowIntentBtn'), icon: <InfoCircleOutlined />, onClick: () => setIntentOpen(true) },
-              ],
-            }}>
-              <button ref={moreButtonRef} type='button' className='workflow-panel__more-btn'
-                aria-label={t('chat.workflowMoreActions')} title={t('chat.workflowMoreActions')}>
-                <MoreOutlined />
-              </button>
-            </Dropdown>
-            {intentOpen && <IntentPopover session={session} tabs={tabs} onClose={() => {
+          <Popover open={intentOpen} trigger={[]} placement='bottomRight' arrow={false} destroyOnHidden
+            getPopupContainer={() => document.body} rootClassName='workflow-panel-intent-overlay'
+            content={intentOpen && <IntentPopover session={session} tabs={tabs} onClose={() => {
               setIntentOpen(false);
               moreButtonRef.current?.focus();
-            }} />}
-          </div>
+            }} />}>
+            <div className='workflow-panel__intent-btn-wrap'>
+              <Dropdown trigger={['click']} menu={{
+                items: [
+                  { key: 'intent', label: t('chat.workflowIntentBtn'), icon: <InfoCircleOutlined />, onClick: () => setIntentOpen(true) },
+                ],
+              }}>
+                <Tooltip {...workflowToolbarTooltipProps} title={t('chat.workflowMoreActions')}>
+                  <button ref={moreButtonRef} type='button' className='workflow-panel__more-btn'
+                    aria-label={t('chat.workflowMoreActions')}>
+                    <MoreOutlined />
+                  </button>
+                </Tooltip>
+              </Dropdown>
+            </div>
+          </Popover>
           {(!embedded || externalPresentation?.onToggleExpand) && <button
             type='button'
             className='workflow-panel__expand-btn'

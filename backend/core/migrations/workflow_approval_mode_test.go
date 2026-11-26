@@ -44,6 +44,11 @@ func TestWorkflowApprovalModeMigration(t *testing.T) {
 					applySQL(t, db, migrationPath(t, "dev_mode/v0_3/*_workflow_approval_snapshot.down.sql"), dialect)
 				}
 				applySQL(t, db, strings.Replace(up, ".up.sql", ".down.sql", 1), dialect)
+				for _, column := range importTableColumns(t, db, "plugin_sessions", dialect) {
+					if strings.HasPrefix(column, "approval_mode:") || strings.HasPrefix(column, "approval_preferences:") {
+						t.Fatalf("rollback retained approval column (aggregate=%v): %s", aggregate, column)
+					}
+				}
 				if err := db.QueryRow("SELECT plugin_id FROM plugin_sessions WHERE id='existing'").Scan(&workflow); err != nil || workflow != "workflow" {
 					t.Fatalf("rollback lost data: %v", err)
 				}
