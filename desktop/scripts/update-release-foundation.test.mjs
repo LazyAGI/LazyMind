@@ -188,10 +188,17 @@ test("Windows packaging pins the signed runtime copies and preserves other manif
   const signing = { platformSpecificBuildOptions: config.win, shouldSignFile: WinPackager.prototype.shouldSignFile,
     sign: async file => fs.promises.appendFile(file, "|fixture signature") };
   // PlatformPackager copies extraResources with the Windows transformer before afterPack.
+  const trace = message => console.log(`${new Date().toISOString()} [win-packaging] ${message}`);
+  trace("before copyDir");
   await copyDir(stage, packed, { isUseHardLink: DO_NOT_USE_HARD_LINKS,
     transformer: WinPackager.prototype.createTransformerForExtraFiles.call(signing, context) });
+  trace("after copyDir");
+  trace("before afterPack");
   await config.afterPack(context);
+  trace("after afterPack");
+  trace("before afterSign");
   await config.afterSign?.(context);
+  trace("after afterSign");
 
   const expected = { ...manifest, checksums: { ...manifest.checksums } };
   for (const [name, bytes] of Object.entries(files)) {
@@ -204,6 +211,7 @@ test("Windows packaging pins the signed runtime copies and preserves other manif
     expected.checksums[name] = sha(copied);
   }
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(packed, "manifest.json"), "utf8")), expected);
+  trace("assertions complete");
 });
 
 test("release CI uses the shared tag decision without an additional prerelease filter", () => {

@@ -1,0 +1,40 @@
+name: Diagnose PR 913 Windows packaging test
+
+on:
+  push:
+    branches: [feat-v05-1019]
+    paths: ['.github/workflows/diagnose-pr913-windows.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  packaging-test:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          package-manager-cache: false
+      - name: Install Desktop test dependencies
+        working-directory: desktop/electron
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Run the Windows packaging test
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -uo pipefail
+          node --version
+          node --test --test-reporter=tap \
+            --test-name-pattern='^Windows packaging pins the signed runtime copies and preserves other manifest entries$' \
+            desktop/scripts/update-release-foundation.test.mjs
+          status=$?
+          echo "Node exited with status $status"
+          exit "$status"
