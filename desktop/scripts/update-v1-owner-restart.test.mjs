@@ -86,7 +86,7 @@ function session(dir, owner, { crashAt, inspectBarrier, discardBarrier } = {}) {
   });
   const updater = createDesktopUpdater({
     currentVersion: sourceVersion, installIntent: shell(dir), runtime,
-    clock: { setTimeout: (fn, ms) => ms <= 2000 ? setImmediate(fn) : { unref() {} }, clearTimeout: clearImmediate },
+    clock: { setTimeout: (fn, ms) => ms <= 2000 ? setImmediate(fn) : undefined, clearTimeout: clearImmediate },
     readLocalState: async () => ({ dataProfile: profile, dirty: false }),
     invokeHelper: async command => {
       events.push(command);
