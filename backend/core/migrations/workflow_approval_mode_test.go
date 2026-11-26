@@ -44,7 +44,7 @@ func TestWorkflowApprovalModeMigration(t *testing.T) {
 					applySQL(t, db, migrationPath(t, "dev_mode/v0_3/*_workflow_approval_snapshot.down.sql"), dialect)
 				}
 				applySQL(t, db, strings.Replace(up, ".up.sql", ".down.sql", 1), dialect)
-				for _, column := range importTableColumns(t, db, "plugin_sessions", dialect) {
+				for _, column := range importTableColumns(t, db, "plugin_sessions", dialect) { // workflow-naming: persistence
 					if strings.HasPrefix(column, "approval_mode:") || strings.HasPrefix(column, "approval_preferences:") {
 						t.Fatalf("rollback retained approval column (aggregate=%v): %s", aggregate, column)
 					}
