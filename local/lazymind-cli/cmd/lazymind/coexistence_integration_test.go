@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,13 @@ import (
 // The subprocess executes the real CLI/HTTP server, including detached launch,
 // environment routing and shutdown. No Docker or user runtime is required.
 func TestMain(m *testing.M) {
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == dshNativeInstallFixture {
+		if err := runDSHNativeInstallFixture(os.Args[1:]); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if os.Getenv("LAZYMIND_COEXISTENCE_TEST_HELPER") == "1" && len(os.Args) > 1 && os.Args[1] == "coexistence-owner" {
 		time.Sleep(time.Hour)
 		os.Exit(0)

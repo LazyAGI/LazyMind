@@ -1,5 +1,3 @@
-//go:build !windows
-
 package main
 
 import (
@@ -14,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,39 +28,82 @@ import (
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
+const dshNativeInstallFixture = "dsh-native-install-fixture"
+const dshFixturePackage = "@lazymind/dsh-workflow"
+
+func runDSHNativeInstallFixture(args []string) error {
+	want := []string{"plugin", "--profile", "web", "add", "--workspace-root", "@deepseek-ai/dsh-mcp-client@0.2.0"}
+	if len(args) != len(want)+1 || !slices.Equal(args[:len(want)], want) || !filepath.IsAbs(args[len(want)]) {
+		return fmt.Errorf("unexpected DSH installer arguments %q, want %q followed by an absolute archive path", args, want)
+	}
+	archive := args[len(want)]
+	home := os.Getenv("DSH_HOME")
+	if home == "" {
+		return errors.New("DSH installer did not receive DSH_HOME")
+	}
+	target := filepath.Join(home, "profiles", "web", "node_modules", filepath.FromSlash(dshFixturePackage))
+	if err := connectortest.UnpackDSHArchive(archive, target); err != nil {
+		return err
+	}
+	calls, err := os.OpenFile(filepath.Join(home, "native-installations"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(calls, archive)
+	return errors.Join(err, calls.Close())
+}
+
 func TestDSHStandaloneCLIReconnectsWithSelectedRelease(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skip("node is required to exercise both DSH entry points")
+		if os.Getenv("CI") == "true" {
+			t.Fatalf("CI requires Node to exercise both DSH entry points: %v", err)
+		}
+		t.Skipf("Node is required to exercise both DSH entry points: %v", err)
 	}
 	root := t.TempDir()
 	home, dshHome := filepath.Join(root, "LazyMind home"), filepath.Join(root, "DSH home")
 	profile := filepath.Join(dshHome, "profiles", "web")
-	bin := filepath.Join(root, "bin")
-	self, dsh := filepath.Join(bin, "lazymind"), filepath.Join(bin, "dsh")
-	const plugin = "@lazymind/dsh-workflow"
-	write := func(path, data string, mode os.FileMode) {
+	bin := filepath.Join(root, "CLI bin")
+	self := filepath.Join(bin, "lazymind")
+	fixture := filepath.Join(bin, dshNativeInstallFixture)
+	pnpm := filepath.Join(bin, "pnpm")
+	pnpmBody := "#!/bin/sh\nexit 1\n"
+	if runtime.GOOS == "windows" {
+		self += ".exe"
+		fixture += ".exe"
+		pnpm += ".cmd"
+		pnpmBody = "@exit /b 1\r\n"
+	}
+	write := func(path string, data []byte, mode os.FileMode) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(data), mode); err != nil {
+		if err := os.WriteFile(path, data, mode); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write(filepath.Join(profile, "package.json"), `{"dsh":{"profile":{"bundles":["@lazymind/dsh-workflow"]}},"dependencies":{"@lazymind/dsh-workflow":"file:old.tgz"}}`, 0600)
-	write(filepath.Join(profile, "node_modules", "@deepseek-ai", "dsh-session", "package.json"), `{"version":"0.2.0"}`, 0600)
-	write(dsh, `#!/bin/sh
-set -eu
-test "$1 $2 $3 $4 $5" = "plugin --profile web add --workspace-root"
-shift 6
-test "$#" -eq 1
-target="$DSH_HOME/profiles/web/node_modules/@lazymind/dsh-workflow"
-mkdir -p "$target"
-tar -xzf "$1" -C "$target" --strip-components 1
-printf '%s\n' "$1" >> "$DSH_HOME/native-installations"
-`, 0700)
-	write(filepath.Join(bin, "pnpm"), "#!/bin/sh\nexit 0\n", 0700)
+	write(filepath.Join(profile, "package.json"), []byte(`{"dsh":{"profile":{"bundles":["@lazymind/dsh-workflow"]}},"dependencies":{"@lazymind/dsh-workflow":"file:old.tgz"}}`), 0600)
+	write(filepath.Join(profile, "node_modules", "@deepseek-ai", "dsh-session", "package.json"), []byte(`{"version":"0.2.0"}`), 0600)
+	testExecutable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper, err := os.ReadFile(testExecutable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(fixture, helper, 0700)
+	dsh := fixture
+	if runtime.GOOS == "windows" {
+		// Exercise the same batch invocation path as the Windows DSH launcher.
+		dsh = filepath.Join(bin, "dsh.cmd")
+		write(dsh, []byte("@echo off\r\n\"%~dp0"+dshNativeInstallFixture+".exe\" %*\r\nexit /b %errorlevel%\r\n"), 0700)
+	}
+	// DSH's package manager is discovered by name. The fixture installs the
+	// archive itself, so an unexpected invocation of pnpm should fail.
+	write(pnpm, []byte(pnpmBody), 0700)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("LAZYMIND_HOME", home)
 	t.Setenv("LAZYMIND_HOST_HOME", root)
@@ -119,7 +162,7 @@ printf '%s\n' "$1" >> "$DSH_HOME/native-installations"
 			t.Fatalf("%v: %s %v", args, body, err)
 		}
 		if status.State != agentintegration.Enabled || status.Connection == nil {
-			t.Fatalf("%v: %s", args, body)
+			t.Fatalf("%v: %s\n%s", args, body, stderr.String())
 		}
 		if digest() != original {
 			t.Fatalf("CLI changed during %v", args)
@@ -144,7 +187,7 @@ new Function('window', source)({ __ModuleLoader__: { load: ({ factory }) => { br
 if (connectorBuild !== expected || browser?.connectorBuild !== expected) throw new Error('incorrect DSH entry point build')
 console.log(JSON.stringify({ build: connectorBuild, client_build: browser.connectorBuild, process_instance: randomUUID(), process_started_at: Math.round(Date.now() - process.uptime()*1000) }))
 `
-		loaded, err := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script, filepath.Join(profile, "node_modules", plugin), build).CombinedOutput()
+		loaded, err := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script, filepath.Join(profile, "node_modules", filepath.FromSlash(dshFixturePackage)), build).CombinedOutput()
 		if err != nil {
 			t.Fatalf("load Node and browser entries: %s %v", loaded, err)
 		}
@@ -185,8 +228,9 @@ console.log(JSON.stringify({ build: connectorBuild, client_build: browser.connec
 			t.Fatalf("%s: got %d native installations, want %d: %q", stage, len(invocations), len(releases), invocations)
 		}
 		for i, release := range releases {
-			if filepath.Base(filepath.Dir(invocations[i])) != release.Release || filepath.Base(invocations[i]) != release.Entry {
-				t.Fatalf("%s: native installation %d used %q, want %s/%s", stage, i+1, invocations[i], release.Release, release.Entry)
+			want := filepath.Join(home, "dsh-workflow", "connectors", release.Release, release.Entry)
+			if invocations[i] != want {
+				t.Fatalf("%s: native installation %d used %q, want %q", stage, i+1, invocations[i], want)
 			}
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -76,39 +77,46 @@ func WriteDSHPackage(t testing.TB, executable, build string) workflowconnector.M
 
 func UnpackDSHFixture(t testing.TB, archive, directory string) {
 	t.Helper()
+	if err := UnpackDSHArchive(archive, directory); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// UnpackDSHArchive extracts a test fixture in a native installer subprocess.
+func UnpackDSHArchive(archive, directory string) error {
 	file, err := os.Open(archive)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	defer file.Close()
 	unzip, err := gzip.NewReader(file)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	defer unzip.Close()
 	reader := tar.NewReader(unzip)
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
-			return
+			return nil
 		}
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		name, ok := strings.CutPrefix(header.Name, "package/")
-		if !ok || strings.Contains(name, "..") {
-			t.Fatalf("unexpected fixture archive member %q", header.Name)
+		if !ok || !fs.ValidPath(name) || strings.Contains(name, "\\") || !filepath.IsLocal(filepath.FromSlash(name)) || header.Typeflag != tar.TypeReg {
+			return fmt.Errorf("unexpected fixture archive member %q", header.Name)
 		}
 		body, err := io.ReadAll(reader)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		path := filepath.Join(directory, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			t.Fatal(err)
+			return err
 		}
 		if err := os.WriteFile(path, body, 0600); err != nil {
-			t.Fatal(err)
+			return err
 		}
 	}
 }

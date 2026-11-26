@@ -307,6 +307,10 @@ jobs:
             integrations/dsh-workflow/pnpm-lock.yaml
             integrations/codex-workflow/pnpm-lock.yaml
             integrations/workbuddy-workflow/connector/pnpm-lock.yaml
+      - uses: actions/setup-node@v4
+        if: runner.os != 'Linux'
+        with:
+          node-version: '24'
       - name: Test and verify the desktop Workflow Connector release packages
         if: runner.os == 'Linux'
         shell: bash
