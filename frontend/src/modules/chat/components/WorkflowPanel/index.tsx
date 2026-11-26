@@ -81,6 +81,7 @@ import { useArtifactPreview } from '../ArtifactPreview/context';
 import { useWorkflowViewState } from './useWorkflowViewState';
 import { resolveWorkflowActiveTabIndex, resolveWorkflowRealTabIndex } from './workflowFollowMode';
 import { PaperAnalysisCharts } from './PaperAnalysisCharts';
+import { WorkflowLogExportButton } from './WorkflowLogExportButton';
 import './WorkflowPanel.scss';
 
 const PageGroupContext = React.createContext<{ tabs: TabDef[]; pages: Record<string, number>; select: (group: string, page: number) => void }>({ tabs: [], pages: {}, select: () => {} });
@@ -2448,6 +2449,7 @@ export function WorkflowPanel({
           </button>
         </div>
         <div className='workflow-panel__header-right'>
+          <WorkflowLogExportButton key={session.session_id} runId={session.session_id} />
           <div className='workflow-panel__intent-btn-wrap'>
             <Dropdown trigger={['click']} menu={{
               items: [

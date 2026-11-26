@@ -11,7 +11,7 @@ function fixture() {
   window.HTMLElement.prototype.hidePopover = vi.fn()
   window.document.querySelector('.conversation-shell__main').getBoundingClientRect = () => ({ left: 100, top: 60, right: 1000, bottom: 750 })
   const listeners = new Set<() => void>()
-  const saveAs = vi.fn(async (_options: { defaultFileName: string, contentBase64: string }) => ({ success: true }))
+  const saveAs = vi.fn(async (_options: { defaultFileName: string, contentBase64: string }): Promise<{ success: boolean; error?: string }> => ({ success: true }))
   window.workbuddyDesktop = { appVersion: '5.8.3' }
   window.wb = { conversations: { currentId: 'native-1', onCurrentChange: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn) } }, fileTransfer: { saveAs } }
   const doc = window.document.querySelector('.cr-document')
@@ -112,12 +112,17 @@ it('saves Blob bytes through native saveAs; cancellation, replay and invalid fil
   expect(f.saveAs).toHaveBeenCalledWith({ defaultFileName: 'test.txt', contentBase64: 'aGVsbG8=' })
   f.message(request)
   expect(f.saveAs).toHaveBeenCalledTimes(1)
-  f.saveAs.mockResolvedValue({ success: false })
+  f.saveAs.mockResolvedValueOnce({ success: false, error: 'User cancelled' })
   const cancelled = { ...request, requestId: crypto.randomUUID() }
   f.message(cancelled)
-  await vi.waitFor(() => expect(f.reply).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: cancelled.requestId, ok: false }), expect.anything()))
+  await vi.waitFor(() => expect(f.reply).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: cancelled.requestId, ok: false, cancelled: true }), expect.anything()))
+  f.saveAs.mockResolvedValueOnce({ success: false, error: 'Permission denied' })
+  const failed = { ...request, requestId: crypto.randomUUID() }
+  f.message(failed)
+  await vi.waitFor(() => expect(f.reply).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: failed.requestId, ok: false, error: expect.any(String) }), expect.anything()))
+  expect(f.reply.mock.lastCall?.[0]).not.toHaveProperty('cancelled')
   f.message({ ...request, filename: '../escape.txt', requestId: crypto.randomUUID() })
-  expect(f.saveAs).toHaveBeenCalledTimes(2)
+  expect(f.saveAs).toHaveBeenCalledTimes(3)
   expect(f.reply).toHaveBeenLastCalledWith(expect.objectContaining({ ok: false }), expect.anything())
 })
 

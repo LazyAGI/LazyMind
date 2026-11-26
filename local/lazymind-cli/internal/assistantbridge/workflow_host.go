@@ -125,6 +125,11 @@ func (s *Server) handleWorkflowHostActions(w http.ResponseWriter, r *http.Reques
 		workflowHostError(w, err)
 		return
 	}
+	if r.URL.Query().Get("log_export") == "1" && r.URL.Query().Get("after") == "" {
+		if read := s.takeWorkflowLogRead(pair); read != nil {
+			result["log_read"] = read
+		}
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

@@ -306,6 +306,15 @@ func TestIsolatedDesktopAcceptsOnlyItsRegisteredOrigin(t *testing.T) {
 			t.Fatalf("origin %s: got HTTP %d, want %d", origin, response.Code, want)
 		}
 	}
+	const bridge = "http://127.0.0.1:19100"
+	request := httptest.NewRequest(http.MethodPost, bridge+"/v1/workflow-runs/run-1/host-logs", nil)
+	request.Header.Set("Origin", bridge)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response := httptest.NewRecorder()
+	s.routes().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_LOG_GRANT") {
+		t.Fatalf("embedded Workflow log request did not reach grant verification: HTTP %d", response.Code)
+	}
 }
 
 func TestBridgeIdentityRequiresProductProtocolPlatformAndEnvironment(t *testing.T) {

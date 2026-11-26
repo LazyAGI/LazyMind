@@ -17,7 +17,7 @@ it('embedded worker polls independently, excludes a second worker and exits on d
     res.setHeader('content-type', 'application/json')
     if (req.url === '/json/list') { res.end('[]'); return }
     if (req.headers.authorization !== `Bearer ${pairing.token}`) { res.statusCode = 403; res.end('{}'); return }
-    if (req.url === '/v1/workflow-host/actions') { polls++; res.end('{"actions":[]}'); return }
+    if (req.url?.split('?')[0] === '/v1/workflow-host/actions') { polls++; res.end('{"actions":[]}'); return }
     res.end('{"requests":[]}')
   })
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })

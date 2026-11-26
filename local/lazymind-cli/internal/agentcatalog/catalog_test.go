@@ -264,6 +264,7 @@ func TestWorkBuddySessionsImportOnlyRealLazyMindTranscriptTurns(t *testing.T) {
 	}
 	threadID := "workbuddy-session-1"
 	content := strings.Join([]string{
+		`{"type":"session-meta","sessionId":"` + threadID + `"}`,
 		`{"sessionId":"` + threadID + `","cwd":"/Users/example/LazyRAG"}`,
 		`{"type":"message","role":"user","id":"turn-1","timestamp":1787334456295,"content":[{"type":"input_text","text":"<user_query>检查真实链接</user_query>"}]}`,
 		`{"type":"function_call","name":"DeferExecuteTool","arguments":"{\"toolName\":\"mcp__lazymind__workflow.list\"}"}`,

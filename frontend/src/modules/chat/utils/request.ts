@@ -597,9 +597,27 @@ export interface ExecuteArtifactActionResult {
 
 type PublicationRequestOptions = RawAxiosRequestConfig & { silentError?: boolean };
 
+export interface LogRecord { time: string; event: string }
+
+export interface WorkflowRunLogExport {
+  run_id: string;
+  cutoff: string;
+  scheduling: LogRecord[];
+  agent: LogRecord[];
+  host_required: boolean;
+  host_provider?: string;
+  host_grant?: string;
+}
+
 // Workflow Session API.
 export function WorkflowSessionApi() {
   return {
+    getRunLogs(sessionId: string, cutoffMS: number, options?: PublicationRequestOptions) {
+      return axiosInstance.get<{ result: WorkflowRunLogExport }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/log-export`,
+        { ...options, silentError: true, params: { cutoff_ms: cutoffMS } } as PublicationRequestOptions,
+      );
+    },
     pauseSession(sessionId: string) {
       return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}:pause`);
     },

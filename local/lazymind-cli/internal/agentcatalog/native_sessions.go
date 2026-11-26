@@ -257,6 +257,13 @@ func Workspace(ctx context.Context, provider, threadID string) (string, bool, er
 	return meta.CWD, true, nil
 }
 
+func WorkBuddyTranscriptPath(ctx context.Context, threadID string) (string, error) {
+	if !validSessionID(threadID) {
+		return "", nil
+	}
+	return findNativeSessionPath(ctx, "workbuddy", threadID)
+}
+
 func findNativeSessionPath(ctx context.Context, provider, threadID string) (string, error) {
 	if provider == "codex" {
 		return CodexRolloutPath(threadID), ctx.Err()

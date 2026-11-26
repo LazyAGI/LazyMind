@@ -22,7 +22,8 @@ html,body{height:100%;margin:0;overflow:hidden;background:transparent}iframe{dis
 	if (!["http:", "https:"].includes(base.protocol) || base.username || base.password || base.search || base.hash) return;
 	const url = new URL(`${base.href.replace(/\/$/, "")}/workflow-runs/${run}/embed`);
 	url.searchParams.set("hostOrigin", location.origin);
-	if (document.querySelector("meta[name=\"lazymind-workflow-downloads\"]")?.content !== "browser") {
+	const hostDownloads = document.querySelector("meta[name=\"lazymind-workflow-downloads\"]")?.content !== "browser";
+	if (hostDownloads) {
 		url.searchParams.set("downloadHostOrigin", location.origin);
 		url.searchParams.set("downloadBridgeId", bridgeId);
 		url.searchParams.set("workbuddyBlobDownloads", "1");
@@ -95,6 +96,35 @@ html,body{height:100%;margin:0;overflow:hidden;background:transparent}iframe{dis
 		receive: receiveHost,
 		status: snapshot
 	};
+	async function readHostLogs(requestId, grant) {
+		let payload = { ok: false };
+		try {
+			const response = await fetch(`/v1/workflow-runs/${run}/host-logs`, {
+				method: "POST",
+				mode: "same-origin",
+				credentials: "omit",
+				redirect: "error",
+				cache: "no-store",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ grant }),
+				signal: AbortSignal.timeout(16e3)
+			});
+			const result = await response.json();
+			payload = response.ok ? {
+				ok: true,
+				result
+			} : {
+				ok: false,
+				code: result?.code
+			};
+		} catch {}
+		if (!closed) frame.contentWindow?.postMessage({
+			type: "lazymind.workflow.host-logs.result",
+			bridgeId,
+			requestId,
+			...payload
+		}, url.origin);
+	}
 	window.addEventListener("message", (event) => {
 		const data = event.data;
 		if (!data || typeof data !== "object") return;
@@ -104,6 +134,7 @@ html,body{height:100%;margin:0;overflow:hidden;background:transparent}iframe{dis
 				sessionId: run,
 				bridgeId
 			});
+			else if (hostDownloads && data.type === "lazymind.workflow.host-logs" && data.bridgeId === bridgeId && typeof data.requestId === "string" && /^[a-zA-Z0-9-]{20,80}$/.test(data.requestId) && typeof data.grant === "string" && data.grant.length > 0 && data.grant.length < 512) readHostLogs(data.requestId, data.grant);
 			else if (data.type === "lazymind.workflow.download" && data.bridgeId === bridgeId && typeof data.requestId === "string" && /^[a-zA-Z0-9-]{20,80}$/.test(data.requestId)) {
 				if (pending.has(data.requestId)) return;
 				pending.set(data.requestId, window.setTimeout(() => pending.delete(data.requestId), 31e4));

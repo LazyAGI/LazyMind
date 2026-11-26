@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { downloadWorkflowFile } from './workflowDownload';
+import { downloadWorkflowFile, readEmbeddedWorkflowHostLogs } from './workflowDownload';
 
 const hostOrigin = 'http://127.0.0.1:54321';
 const bridgeId = '01234567-89ab-cdef-0123-456789abcdef';
@@ -13,7 +13,7 @@ function embedded() {
 }
 function reply(request: Record<string, unknown>, overrides: Record<string, unknown> = {}, origin = hostOrigin, source: unknown = parent) {
   window.dispatchEvent(new MessageEvent('message', { origin, source: source as Window,
-    data: { type: 'lazymind.workflow.download.result', bridgeId, requestId: request.requestId, ok: true, ...overrides } }));
+    data: { type: `${request.type}.result`, bridgeId, requestId: request.requestId, ok: true, ...overrides } }));
 }
 afterEach(() => {
   Object.defineProperty(window, 'parent', { configurable: true, value: originalParent });
@@ -70,4 +70,17 @@ it('rejects an untrusted host URL before disclosing file contents', async () => 
   history.replaceState({}, '', `/workflow-runs/test/embed?downloadHostOrigin=https://evil.example&downloadBridgeId=${bridgeId}`);
   await expect(downloadWorkflowFile({ filename: 'draft.md', blob: new Blob(['draft']) })).rejects.toThrow('invalid');
   expect(parent.postMessage).not.toHaveBeenCalled();
+});
+
+it('reads host logs through the configured WorkBuddy frame and accepts only a matching reply', async () => {
+  embedded();
+  const result = { run_id: 'test', entries: [{ time: '2026-11-26T03:01:37.843Z', event: 'tool.result' }] };
+  parent.postMessage.mockImplementation(request => {
+    reply(request, { result: 'untrusted' }, 'https://untrusted.example');
+    reply(request, { result });
+  });
+  await expect(readEmbeddedWorkflowHostLogs('run-grant', new AbortController().signal)).resolves.toEqual(result);
+  expect(parent.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'lazymind.workflow.host-logs', bridgeId, grant: 'run-grant',
+  }), hostOrigin);
 });

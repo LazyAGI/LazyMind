@@ -1,3 +1,4 @@
+import { hostLogEntry, type HostLogEntry, type HostLogRead } from '../../workflow-agent-core/src/log-record'
 import { codexTargets, windowCdp } from './windows'
 import { workflowTurnEvidence } from './ownership'
 import { sessionExpression } from './presentation'
@@ -6,7 +7,7 @@ export interface NativeTurn { id: string; status: string; startedAt?: number; it
 export interface NativeThread { id: string; turns: NativeTurn[]; active: boolean; owner?: boolean; ready?: boolean; ownerScope?: 'host' | 'window' }
 
 /** Runs inside the existing desktop renderer, never in a new App Server. */
-export async function codexOperation(input: any, readEvidence = workflowTurnEvidence): Promise<any> {
+export async function codexOperation(input: any, readEvidence = workflowTurnEvidence, logEntry?: typeof hostLogEntry): Promise<any> {
   const host = globalThis as any
   // Discovery must not invoke arbitrary accessors or derived signal reads in
   // the application's renderer. Those reads can subscribe, compute and grow
@@ -139,18 +140,66 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
   if (rpc && input.kind === 'interrupt') return {
     rejected: 'This Codex version cannot safely interrupt a Workflow turn. Stop the current response in Codex.',
   }
-  const capture = (state: any, stream: any, streaming: boolean) => {
+  const capture = (state: any, stream?: any, streaming = false) => {
     if (!state || state.id !== input.threadId) return { missing: true as const }
-    const history = state?.turnHistory
-    const records = history?.kind === 'canonical'
-      ? history.history.islands.flatMap((island: any) => island.entries.map((entry: any) => history.history.entitiesByKey[entry.value])).filter(Boolean)
+    const history = state.turnHistory?.kind === 'canonical' ? state.turnHistory.history : state.turnHistory
+    const records = Array.isArray(history?.islands)
+      ? history.islands.flatMap((island: any) => island.entries.map((entry: any) => history.entitiesByKey[entry.value])).filter(Boolean)
       : state?.turns ?? []
     const turns = records.map((turn: any) => ({ id: turn.turnId ?? turn.id, status: turn.status,
-      startedAt: turn.turnStartedAtMs ?? turn.startedAtMs, items: turn.items ?? [] }))
-    const role = stream?.role
-    const ready = state.resumeState === 'resumed' && ['owner','follower'].includes(role) && streaming
-    return { id: state.id, turns, ready, owner: role === 'owner', ownerScope: rpc ? 'host' as const : 'window' as const,
-      active: state.threadRuntimeStatus?.type === 'active' || turns.some((turn: any) => turn.status === 'inProgress') }
+      startedAt: turn.turnStartedAtMs ?? turn.startedAtMs,
+      finishedAt: turn.turnCompletedAtMs ?? turn.completedAtMs ?? turn.finishedAtMs,
+      durationMs: turn.durationMs, itemTimings: turn.itemTimingsById, items: turn.items ?? [] }))
+    if (input.kind !== 'logs') {
+      const role = stream?.role
+      const ready = state.resumeState === 'resumed' && ['owner','follower'].includes(role) && streaming
+      return { id: state.id, turns, ready, owner: role === 'owner', ownerScope: rpc ? 'host' as const : 'window' as const,
+        active: state.threadRuntimeStatus?.type === 'active' || turns.some((turn: any) => turn.status === 'inProgress') }
+    }
+    const record = logEntry ?? hostLogEntry
+    // Completed histories can keep the call and omit its result body. Only a
+    // successful LazyMind call with the exact bound run ID can anchor export.
+    const start = turns.findIndex((turn: NativeTurn) => readEvidence(turn).runId === input.run_id
+      || turn.items.some(item => item?.type === 'mcpToolCall' && ['lazymind', 'lazymind-workflow'].includes(item.server)
+        && ['workflow.state', 'workflow.step.begin', 'workflow.step.claim', 'workflow.step.resume', 'workflow.step.complete'].includes(item.tool)
+        && item.status === 'completed' && !item.error && item.result?.isError !== true && item.arguments?.session_id === input.run_id))
+    const logs: HostLogEntry[] = []
+    const resultsCutoff = input.results_cutoff_ms ?? input.cutoff_ms
+    if (start >= 0) for (const turn of turns.slice(start)) {
+      const startTime = turn.startedAt ?? input.started_ms
+      const finished = turn.finishedAt ?? (turn.startedAt != null && typeof turn.durationMs === 'number'
+        ? turn.startedAt + turn.durationMs : undefined)
+      const turnLog = record('agent.turn', finished ?? startTime, input.cutoff_ms, turn.status, undefined, turn.durationMs)
+      if (turnLog) logs.push(turnLog)
+      for (const item of turn.items) {
+        const tool = item?.type === 'mcpToolCall' || item?.type === 'dynamicToolCall' ? item.tool
+          : ['commandExecution', 'fileChange', 'webSearch', 'collabAgentToolCall'].includes(item?.type) ? item.type : undefined
+        if (!tool) continue
+        const status = item.error || item.result?.isError === true || (typeof item.exitCode === 'number' && item.exitCode !== 0)
+          ? 'failed' : item.status
+        const timing = turn.itemTimings?.[item.id]
+        const began = item.startedAtMs ?? timing?.startedAtMs
+        const reportedDuration = typeof item.durationMs === 'number' && item.durationMs >= 0 ? item.durationMs : undefined
+        const resultTime = item.completedAtMs ?? timing?.completedAtMs ?? (began != null && reportedDuration != null
+          ? began + reportedDuration : undefined)
+        const started = began ?? (resultTime != null && reportedDuration != null ? resultTime - reportedDuration : undefined)
+        // Late receipts must have a known start before Workflow finished.
+        const callTime = started ?? startTime
+        if (callTime > input.cutoff_ms || (resultTime > input.cutoff_ms && started == null)) continue
+        const pending = status === 'inProgress' || status === 'in_progress' || resultTime > resultsCutoff
+        const elapsed = resultTime != null && started != null ? resultTime - started : undefined
+        const duration = resultTime > input.cutoff_ms ? elapsed : reportedDuration ?? elapsed
+        const row = record(pending ? 'tool.call' : 'tool.result', pending ? callTime : resultTime ?? callTime,
+          pending ? input.cutoff_ms : resultsCutoff, pending ? 'running' : status ?? 'completed', tool, pending ? undefined : duration)
+        if (row) logs.push(row)
+      }
+    }
+    return { id: state.id, turns: [], logs }
+  }
+  if (input.kind === 'logs') {
+    const state = await manager.getConversation(input.threadId)
+    try { return capture(state) }
+    finally { if (rpc) dispose(state) }
   }
   const localSnapshot = () => capture(manager.getConversation(input.threadId), manager.getStreamRole?.(input.threadId), manager.isConversationStreaming?.(input.threadId) === true)
   const snapshot = async () => {
@@ -203,7 +252,7 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
 }
 
 export function nativeExpression(input: object) {
-  return `(input => (${codexOperation.toString()})(input, ${workflowTurnEvidence.toString()}))(${JSON.stringify(input)})`
+  return `(input => (${codexOperation.toString()})(input, ${workflowTurnEvidence.toString()}, ${hostLogEntry.toString()}))(${JSON.stringify(input)})`
 }
 
 export class CodexNative {
@@ -222,10 +271,14 @@ export class CodexNative {
     const issue=ready?'':!windows.length?'control_window_unavailable':reachable?'capability_unavailable':'cdp_unavailable'
     return {ready,window_count:windows.length,issue}
   }
-  private async locate(threadId:string,signal:AbortSignal) {
+  private async locate(threadId:string,signal:AbortSignal, read?: HostLogRead) {
     const windows=await codexTargets(this.port,signal)
-    const results=await Promise.allSettled(windows.map(async window=>({id:window.id,state:await this.evaluate(window.id,{kind:'read',threadId},signal) as NativeThread&{missing?:boolean}})))
+    const results=await Promise.allSettled(windows.map(async window=>({id:window.id,state:await this.evaluate(window.id,{...read,kind:read?'logs':'read',threadId},signal) as NativeThread&{missing?:boolean; logs?:HostLogEntry[]}})))
     const matches=results.flatMap(result=>result.status==='fulfilled'&&!result.value.state?.missing&&result.value.state?.id===threadId?[result.value]:[])
+    if (read) {
+      const history = matches.find(match => match.state.logs?.length)
+      if (history) return history
+    }
     const owners=matches.filter(match=>match.state.owner)
     // RPC clients in main/detached windows observe the same local host manager.
     // Their repeated owner reports are not independent window owners. Preserve
@@ -236,6 +289,9 @@ export class CodexNative {
     return selected
   }
   async read(threadId:string,signal:AbortSignal):Promise<NativeThread> {return (await this.locate(threadId,signal)).state}
+  async readLogs(read: HostLogRead, signal: AbortSignal): Promise<HostLogEntry[]> {
+    return (await this.locate(read.driver_session_id, signal, read)).state.logs ?? []
+  }
   async visible(threadId:string,signal:AbortSignal):Promise<boolean> {
     const windows=await codexTargets(this.port,signal)
     const results=await Promise.allSettled(windows.map(window=>windowCdp(this.port,window.id).evaluate<{session_id?:string}>(sessionExpression(),signal)))

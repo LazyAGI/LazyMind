@@ -69,8 +69,14 @@ var HostBridge = class {
 	async state(runId, signal) {
 		return (await this.request(`/runs/${encodeURIComponent(runId)}/control`, signal)).control;
 	}
-	async actions(after, signal) {
-		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal, void 0, await this.actionHeaders?.(signal));
+	async actions(after, signal, readLogs = false) {
+		const query = new URLSearchParams();
+		if (after) query.set("after", after);
+		if (readLogs) query.set("log_export", "1");
+		return this.request(query.size ? `/actions?${query}` : "/actions", signal, void 0, await this.actionHeaders?.(signal));
+	}
+	async logResult(id, entries, signal) {
+		await this.request(`/logs/${encodeURIComponent(id)}`, signal, entries);
 	}
 	async action(id, signal) {
 		return this.request(`/actions/${encodeURIComponent(id)}`, signal);
@@ -139,14 +145,24 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 		}
 		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
+	async function readLogs(read) {
+		if (!runtime.readLogs || !bridge.logResult) return;
+		const readSignal = AbortSignal.any([signal, AbortSignal.timeout(1e4)]);
+		const entries = await runtime.readLogs(read, readSignal).catch(() => null);
+		await bridge.logResult(read.id, entries, signal);
+	}
 	async function poll() {
 		let failures = 0, lastWarning = "";
+		let logRead;
 		while (!signal.aborted) {
 			let retryMs = 1e3;
 			try {
 				let after = "";
 				do {
-					const page = await bridge.actions(after, signal);
+					const page = await (runtime.readLogs && bridge.logResult && !logRead ? bridge.actions(after, signal, true) : bridge.actions(after, signal));
+					if (page.log_read && !logRead) logRead = readLogs(page.log_read).catch(() => {}).finally(() => {
+						logRead = void 0;
+					});
 					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
@@ -173,6 +189,7 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 				break;
 			}
 		}
+		await logRead;
 	}
 	return {
 		deliver,
@@ -307,6 +324,9 @@ var CodexAdapter = class {
 		this.signal = signal;
 		this.recovery = recovery;
 	}
+	readLogs(read, signal) {
+		return this.native.readLogs?.(read, signal) ?? Promise.resolve([]);
+	}
 	id(thread) {
 		return thread;
 	}
@@ -436,6 +456,43 @@ var CodexAdapter = class {
 		});
 	}
 };
+
+//#endregion
+//#region ../workflow-agent-core/src/log-record.ts
+/** Also serialized into desktop renderers. Extract only fields safe for export. */
+function hostLogEntry(event, time, cutoff, status, tool, duration) {
+	const stamp = typeof time === "number" ? time : typeof time === "string" ? Date.parse(time) : NaN;
+	if (!Number.isFinite(stamp) || stamp <= 0 || stamp > cutoff) return;
+	const row = {
+		time: new Date(stamp).toISOString(),
+		event
+	};
+	if (typeof tool === "string" && /^[a-zA-Z0-9_][a-zA-Z0-9_.:-]{0,127}$/.test(tool)) row.tool = tool;
+	switch (status) {
+		case "in_progress":
+		case "inProgress":
+		case "working":
+		case "running":
+			row.status = "running";
+			break;
+		case "completed":
+		case "success":
+		case "succeeded":
+			row.status = "completed";
+			break;
+		case "failed":
+		case "error":
+			row.status = "failed";
+			break;
+		case "cancelled":
+		case "canceled":
+		case "interrupted":
+			row.status = "interrupted";
+			break;
+	}
+	if (typeof duration === "number" && Number.isFinite(duration) && duration >= 0) row.duration_ms = Math.round(duration);
+	return row;
+}
 
 //#endregion
 //#region ../workflow-agent-core/node/cdp.ts
@@ -1470,7 +1527,7 @@ async function presentationLoop(port, request, bridgeURL, signal, report) {
 //#endregion
 //#region src/native.ts
 /** Runs inside the existing desktop renderer, never in a new App Server. */
-async function codexOperation(input, readEvidence = workflowTurnEvidence) {
+async function codexOperation(input, readEvidence = workflowTurnEvidence, logEntry) {
 	const host = globalThis;
 	const data = (value, key) => {
 		for (let depth = 0; value && depth < 6; depth++, value = Object.getPrototypeOf(value)) {
@@ -1595,26 +1652,81 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 	}
 	if (input.kind === "probe") return { ready: true };
 	if (rpc && input.kind === "interrupt") return { rejected: "This Codex version cannot safely interrupt a Workflow turn. Stop the current response in Codex." };
-	const capture = (state, stream, streaming) => {
+	const capture = (state, stream, streaming = false) => {
 		if (!state || state.id !== input.threadId) return { missing: true };
-		const history = state?.turnHistory;
-		const turns = (history?.kind === "canonical" ? history.history.islands.flatMap((island) => island.entries.map((entry) => history.history.entitiesByKey[entry.value])).filter(Boolean) : state?.turns ?? []).map((turn) => ({
+		const history = state.turnHistory?.kind === "canonical" ? state.turnHistory.history : state.turnHistory;
+		const turns = (Array.isArray(history?.islands) ? history.islands.flatMap((island) => island.entries.map((entry) => history.entitiesByKey[entry.value])).filter(Boolean) : state?.turns ?? []).map((turn) => ({
 			id: turn.turnId ?? turn.id,
 			status: turn.status,
 			startedAt: turn.turnStartedAtMs ?? turn.startedAtMs,
+			finishedAt: turn.turnCompletedAtMs ?? turn.completedAtMs ?? turn.finishedAtMs,
+			durationMs: turn.durationMs,
+			itemTimings: turn.itemTimingsById,
 			items: turn.items ?? []
 		}));
-		const role = stream?.role;
-		const ready = state.resumeState === "resumed" && ["owner", "follower"].includes(role) && streaming;
+		if (input.kind !== "logs") {
+			const role = stream?.role;
+			const ready = state.resumeState === "resumed" && ["owner", "follower"].includes(role) && streaming;
+			return {
+				id: state.id,
+				turns,
+				ready,
+				owner: role === "owner",
+				ownerScope: rpc ? "host" : "window",
+				active: state.threadRuntimeStatus?.type === "active" || turns.some((turn) => turn.status === "inProgress")
+			};
+		}
+		const record = logEntry ?? hostLogEntry;
+		const start = turns.findIndex((turn) => readEvidence(turn).runId === input.run_id || turn.items.some((item) => item?.type === "mcpToolCall" && ["lazymind", "lazymind-workflow"].includes(item.server) && [
+			"workflow.state",
+			"workflow.step.begin",
+			"workflow.step.claim",
+			"workflow.step.resume",
+			"workflow.step.complete"
+		].includes(item.tool) && item.status === "completed" && !item.error && item.result?.isError !== true && item.arguments?.session_id === input.run_id));
+		const logs = [];
+		const resultsCutoff = input.results_cutoff_ms ?? input.cutoff_ms;
+		if (start >= 0) for (const turn of turns.slice(start)) {
+			const startTime = turn.startedAt ?? input.started_ms;
+			const turnLog = record("agent.turn", turn.finishedAt ?? (turn.startedAt != null && typeof turn.durationMs === "number" ? turn.startedAt + turn.durationMs : void 0) ?? startTime, input.cutoff_ms, turn.status, void 0, turn.durationMs);
+			if (turnLog) logs.push(turnLog);
+			for (const item of turn.items) {
+				const tool = item?.type === "mcpToolCall" || item?.type === "dynamicToolCall" ? item.tool : [
+					"commandExecution",
+					"fileChange",
+					"webSearch",
+					"collabAgentToolCall"
+				].includes(item?.type) ? item.type : void 0;
+				if (!tool) continue;
+				const status = item.error || item.result?.isError === true || typeof item.exitCode === "number" && item.exitCode !== 0 ? "failed" : item.status;
+				const timing = turn.itemTimings?.[item.id];
+				const began = item.startedAtMs ?? timing?.startedAtMs;
+				const reportedDuration = typeof item.durationMs === "number" && item.durationMs >= 0 ? item.durationMs : void 0;
+				const resultTime = item.completedAtMs ?? timing?.completedAtMs ?? (began != null && reportedDuration != null ? began + reportedDuration : void 0);
+				const started = began ?? (resultTime != null && reportedDuration != null ? resultTime - reportedDuration : void 0);
+				const callTime = started ?? startTime;
+				if (callTime > input.cutoff_ms || resultTime > input.cutoff_ms && started == null) continue;
+				const pending = status === "inProgress" || status === "in_progress" || resultTime > resultsCutoff;
+				const elapsed = resultTime != null && started != null ? resultTime - started : void 0;
+				const duration = resultTime > input.cutoff_ms ? elapsed : reportedDuration ?? elapsed;
+				const row = record(pending ? "tool.call" : "tool.result", pending ? callTime : resultTime ?? callTime, pending ? input.cutoff_ms : resultsCutoff, pending ? "running" : status ?? "completed", tool, pending ? void 0 : duration);
+				if (row) logs.push(row);
+			}
+		}
 		return {
 			id: state.id,
-			turns,
-			ready,
-			owner: role === "owner",
-			ownerScope: rpc ? "host" : "window",
-			active: state.threadRuntimeStatus?.type === "active" || turns.some((turn) => turn.status === "inProgress")
+			turns: [],
+			logs
 		};
 	};
+	if (input.kind === "logs") {
+		const state = await manager.getConversation(input.threadId);
+		try {
+			return capture(state);
+		} finally {
+			if (rpc) dispose(state);
+		}
+	}
 	const localSnapshot = () => capture(manager.getConversation(input.threadId), manager.getStreamRole?.(input.threadId), manager.isConversationStreaming?.(input.threadId) === true);
 	const snapshot = async () => {
 		if (!rpc) return localSnapshot();
@@ -1683,7 +1795,7 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 	throw new Error("Unknown Codex operation");
 }
 function nativeExpression(input) {
-	return `(input => (${codexOperation.toString()})(input, ${workflowTurnEvidence.toString()}))(${JSON.stringify(input)})`;
+	return `(input => (${codexOperation.toString()})(input, ${workflowTurnEvidence.toString()}, ${hostLogEntry.toString()}))(${JSON.stringify(input)})`;
 }
 var CodexNative = class {
 	constructor(port) {
@@ -1704,15 +1816,20 @@ var CodexNative = class {
 			issue
 		};
 	}
-	async locate(threadId, signal) {
+	async locate(threadId, signal, read) {
 		const windows = await codexTargets(this.port, signal);
 		const matches = (await Promise.allSettled(windows.map(async (window$1) => ({
 			id: window$1.id,
 			state: await this.evaluate(window$1.id, {
-				kind: "read",
+				...read,
+				kind: read ? "logs" : "read",
 				threadId
 			}, signal)
 		})))).flatMap((result) => result.status === "fulfilled" && !result.value.state?.missing && result.value.state?.id === threadId ? [result.value] : []);
+		if (read) {
+			const history = matches.find((match) => match.state.logs?.length);
+			if (history) return history;
+		}
 		const owners = matches.filter((match) => match.state.owner);
 		if (owners.length > 1 && !owners.every((match) => match.state.ownerScope === "host")) throw Error("Codex reports conflicting owners for this chat");
 		const selected = (owners.length ? owners : matches).sort((a, b) => a.id.localeCompare(b.id))[0];
@@ -1721,6 +1838,9 @@ var CodexNative = class {
 	}
 	async read(threadId, signal) {
 		return (await this.locate(threadId, signal)).state;
+	}
+	async readLogs(read, signal) {
+		return (await this.locate(read.driver_session_id, signal, read)).state.logs ?? [];
 	}
 	async visible(threadId, signal) {
 		const windows = await codexTargets(this.port, signal);

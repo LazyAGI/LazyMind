@@ -68,8 +68,14 @@ var HostBridge = class {
 	async state(runId, signal) {
 		return (await this.request(`/runs/${encodeURIComponent(runId)}/control`, signal)).control;
 	}
-	async actions(after, signal) {
-		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal, void 0, await this.actionHeaders?.(signal));
+	async actions(after, signal, readLogs = false) {
+		const query = new URLSearchParams();
+		if (after) query.set("after", after);
+		if (readLogs) query.set("log_export", "1");
+		return this.request(query.size ? `/actions?${query}` : "/actions", signal, void 0, await this.actionHeaders?.(signal));
+	}
+	async logResult(id, entries, signal) {
+		await this.request(`/logs/${encodeURIComponent(id)}`, signal, entries);
 	}
 	async action(id, signal) {
 		return this.request(`/actions/${encodeURIComponent(id)}`, signal);
@@ -138,14 +144,24 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 		}
 		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
+	async function readLogs(read) {
+		if (!runtime.readLogs || !bridge.logResult) return;
+		const readSignal = AbortSignal.any([signal, AbortSignal.timeout(1e4)]);
+		const entries = await runtime.readLogs(read, readSignal).catch(() => null);
+		await bridge.logResult(read.id, entries, signal);
+	}
 	async function poll() {
 		let failures = 0, lastWarning = "";
+		let logRead;
 		while (!signal.aborted) {
 			let retryMs = 1e3;
 			try {
 				let after = "";
 				do {
-					const page = await bridge.actions(after, signal);
+					const page = await (runtime.readLogs && bridge.logResult && !logRead ? bridge.actions(after, signal, true) : bridge.actions(after, signal));
+					if (page.log_read && !logRead) logRead = readLogs(page.log_read).catch(() => {}).finally(() => {
+						logRead = void 0;
+					});
 					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
@@ -172,6 +188,7 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 				break;
 			}
 		}
+		await logRead;
 	}
 	return {
 		deliver,
@@ -843,7 +860,7 @@ function readPresentationSession() {
 const cleanupPresentation = "window.__lazymindWorkflowTail?.dispose(); window.__lazymindWorkflowPresentationSession?.dispose()";
 function mountPresentation(target, followTail = installTailFollow, fitTail = installTailExtent, versionIssue = workbuddyVersionIssue) {
 	const host = window;
-	const version = "tail-v4";
+	const version = "tail-v5";
 	const key = "__lazymindWorkflowTail";
 	const previous = host[key];
 	const wb = host.wb;
@@ -1095,14 +1112,16 @@ function mountPresentation(target, followTail = installTailFollow, fitTail = ins
 			return;
 		}
 		if (data.type !== "lazymind.workflow.download" || typeof data.requestId !== "string" || !/^[a-zA-Z0-9-]{20,80}$/.test(data.requestId) || seen.has(data.requestId)) return;
-		const respond = (ok, error) => reply({
+		const respond = (result) => reply({
 			type: "lazymind.workflow.download.result",
 			requestId: data.requestId,
-			ok,
-			error
+			...result
 		});
 		if (seen.size >= 1e3) {
-			respond(false, "请重新打开面板后下载。");
+			respond({
+				ok: false,
+				error: "请重新打开面板后下载。"
+			});
 			return;
 		}
 		seen.add(data.requestId);
@@ -1110,7 +1129,7 @@ function mountPresentation(target, followTail = installTailFollow, fitTail = ins
 		try {
 			if (typeof wb.fileTransfer?.saveAs !== "function") throw Error("WorkBuddy 文件保存不可用。");
 			if (data.action === "capabilities") {
-				respond(true);
+				respond({ ok: true });
 				return;
 			}
 			if (data.action !== "save" || !(data.blob instanceof Blob) || typeof data.filename !== "string" || !data.filename.trim() || data.filename.length > 240 || /[\/\\\u0000-\u001f]/.test(data.filename)) throw Error("无效的下载文件。");
@@ -1123,13 +1142,24 @@ function mountPresentation(target, followTail = installTailFollow, fitTail = ins
 				reader.readAsDataURL(data.blob);
 			});
 			if (disposed || wb.conversations.currentId !== target.session_id) return;
-			if ((await wb.fileTransfer.saveAs({
+			const result = await wb.fileTransfer.saveAs({
 				defaultFileName: data.filename,
 				contentBase64: base64
-			}))?.success !== true) throw Error("保存失败或已取消。");
-			respond(true);
+			});
+			if (result?.success === true) respond({ ok: true });
+			else if (result?.error === "User cancelled") respond({
+				ok: false,
+				cancelled: true
+			});
+			else respond({
+				ok: false,
+				error: "文件保存失败。"
+			});
 		} catch (error) {
-			respond(false, error instanceof Error ? error.message : "文件保存失败。");
+			respond({
+				ok: false,
+				error: error instanceof Error ? error.message : "文件保存失败。"
+			});
 		} finally {
 			if (ownsSave) saving = false;
 		}

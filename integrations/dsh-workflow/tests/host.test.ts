@@ -314,3 +314,37 @@ it('does not repair binding based only on a completion receipt', async () => {
   await f.turn()
   expect(f.bridge.bind).not.toHaveBeenCalled()
 })
+
+it('reads DSH tool metadata for the bound run through the export cutoff', async () => {
+  const { dshRuntime } = await import('../src/host-adapter')
+  const ctx = new Context()
+  const time = Date.parse('2026-11-26T00:00:00Z')
+  const events = [
+    { type: 'tool/result', seq: 1, time, data: { meta: { lazymind_workflow: { runId: 'run-1', operation: 'start' } } } },
+    { type: 'tool/call', seq: 2, time: time + 10, data: { callId: 'call-1', name: 'search', arguments: 'PRIVATE_ARGUMENT' } },
+    { type: 'tool/result', seq: 3, time: time + 25, data: { error: { reason: 'PRIVATE_ERROR' }, message: { toolCallId: 'call-1' } } },
+    { type: 'tool/call', seq: 4, time: time + 45, data: { callId: 'terminal', name: 'complete' } },
+    { type: 'tool/call', seq: 5, time: time + 46, data: { callId: 'outstanding', name: 'outstanding' } },
+    { type: 'tool/call', seq: 6, time: time + 51, data: { callId: 'late', name: 'late-tool' } },
+    { type: 'tool/result', seq: 7, time: time + 52, data: { message: { toolCallId: 'terminal' } } },
+    { type: 'tool/result', seq: 8, time: time + 53, data: { name: 'late-tool', message: { toolCallId: 'late' } } },
+    { type: 'tool/result', seq: 9, time: time + 101, data: { message: { toolCallId: 'outstanding' } } },
+  ]
+  ctx.provide('sessionController', {
+    async *follow() {
+      yield { type: 'snapshot', header: { id: 'native-root' }, hasMore: false,
+        records: events.map(event => ({ type: 'event', event })) }
+    },
+  })
+  const runtime = dshRuntime(ctx, 'lazymind', 'http://localhost:8090')
+  const rows = await runtime.readLogs?.(
+    { id: 'read', run_id: 'run-1', driver_session_id: 'native-root', started_ms: time, cutoff_ms: time + 50, results_cutoff_ms: time + 100 },
+    new AbortController().signal,
+  )
+  expect(rows).toContainEqual({
+    time: new Date(time + 25).toISOString(), event: 'tool.result', tool: 'search', status: 'failed', duration_ms: 15,
+  })
+  expect(rows).toContainEqual({ time: new Date(time + 52).toISOString(), event: 'tool.result', tool: 'complete', status: 'completed', duration_ms: 7 })
+  expect(rows?.filter(row => row.tool === 'outstanding').map(row => row.event)).toEqual(['tool.call'])
+  expect(JSON.stringify(rows)).not.toMatch(/PRIVATE_|late-tool/)
+})

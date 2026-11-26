@@ -49,6 +49,20 @@ it.each([
     expect(childMessages).toHaveLength(2)
     message(saved, parent, 'null')
     expect(childMessages).toHaveLength(2)
+    const hostLog = { type: 'lazymind.workflow.host-logs', bridgeId: mount, requestId, grant: 'run-grant' }
+    const result = { run_id: 'run-1', entries: [] }
+    const fetch = (window as any).fetch
+    fetch.mockResolvedValueOnce({ ok: true, json: async () => result })
+    message(hostLog, frame.contentWindow, 'https://untrusted.example')
+    message({ ...hostLog, bridgeId: 'wrong' }, frame.contentWindow, url.origin)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    message(hostLog, frame.contentWindow, url.origin)
+    await vi.waitFor(() => expect(childMessages.at(-1)).toEqual([{
+      type: 'lazymind.workflow.host-logs.result', bridgeId: mount, requestId, ok: true, result,
+    }, url.origin]))
+    expect(fetch).toHaveBeenLastCalledWith('/v1/workflow-runs/run-1/host-logs', expect.objectContaining({
+      method: 'POST', mode: 'same-origin', body: JSON.stringify({ grant: 'run-grant' }),
+    }))
   } finally { dom.window.close() }
 })
 

@@ -119,8 +119,14 @@ var HostBridge = class {
 	async state(runId, signal) {
 		return (await this.request(`/runs/${encodeURIComponent(runId)}/control`, signal)).control;
 	}
-	async actions(after, signal) {
-		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal, void 0, await this.actionHeaders?.(signal));
+	async actions(after, signal, readLogs = false) {
+		const query = new URLSearchParams();
+		if (after) query.set("after", after);
+		if (readLogs) query.set("log_export", "1");
+		return this.request(query.size ? `/actions?${query}` : "/actions", signal, void 0, await this.actionHeaders?.(signal));
+	}
+	async logResult(id, entries, signal) {
+		await this.request(`/logs/${encodeURIComponent(id)}`, signal, entries);
 	}
 	async action(id, signal) {
 		return this.request(`/actions/${encodeURIComponent(id)}`, signal);
@@ -552,14 +558,24 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 		}
 		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
+	async function readLogs(read) {
+		if (!runtime.readLogs || !bridge.logResult) return;
+		const readSignal = AbortSignal.any([signal, AbortSignal.timeout(1e4)]);
+		const entries = await runtime.readLogs(read, readSignal).catch(() => null);
+		await bridge.logResult(read.id, entries, signal);
+	}
 	async function poll() {
 		let failures = 0, lastWarning = "";
+		let logRead;
 		while (!signal.aborted) {
 			let retryMs = 1e3;
 			try {
 				let after = "";
 				do {
-					const page = await bridge.actions(after, signal);
+					const page = await (runtime.readLogs && bridge.logResult && !logRead ? bridge.actions(after, signal, true) : bridge.actions(after, signal));
+					if (page.log_read && !logRead) logRead = readLogs(page.log_read).catch(() => {}).finally(() => {
+						logRead = void 0;
+					});
 					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
@@ -586,6 +602,7 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 				break;
 			}
 		}
+		await logRead;
 	}
 	return {
 		deliver,
@@ -704,6 +721,43 @@ function eventRun(event, serverName, webUrl) {
 }
 
 //#endregion
+//#region ../workflow-agent-core/src/log-record.ts
+/** Also serialized into desktop renderers. Extract only fields safe for export. */
+function hostLogEntry(event, time, cutoff, status, tool, duration) {
+	const stamp = typeof time === "number" ? time : typeof time === "string" ? Date.parse(time) : NaN;
+	if (!Number.isFinite(stamp) || stamp <= 0 || stamp > cutoff) return;
+	const row = {
+		time: new Date(stamp).toISOString(),
+		event
+	};
+	if (typeof tool === "string" && /^[a-zA-Z0-9_][a-zA-Z0-9_.:-]{0,127}$/.test(tool)) row.tool = tool;
+	switch (status) {
+		case "in_progress":
+		case "inProgress":
+		case "working":
+		case "running":
+			row.status = "running";
+			break;
+		case "completed":
+		case "success":
+		case "succeeded":
+			row.status = "completed";
+			break;
+		case "failed":
+		case "error":
+			row.status = "failed";
+			break;
+		case "cancelled":
+		case "canceled":
+		case "interrupted":
+			row.status = "interrupted";
+			break;
+	}
+	if (typeof duration === "number" && Number.isFinite(duration) && duration >= 0) row.duration_ms = Math.round(duration);
+	return row;
+}
+
+//#endregion
 //#region src/host-adapter.ts
 /** DSH SDK translation only. Core owns execution admission; the shared coordinator gates automatic turns. */
 function dshRuntime(ctx, serverName, webUrl) {
@@ -764,6 +818,66 @@ function dshRuntime(ctx, serverName, webUrl) {
 			controller.abort();
 		}
 	}
+	async function readLogs(read, signal) {
+		const address = {
+			kind: "session",
+			sessionId: read.driver_session_id
+		};
+		for await (const frame of ctx.sessionController.follow({
+			address,
+			maxMessages: 100
+		}, signal)) {
+			if (frame.type !== "snapshot") continue;
+			if (frame.header.id !== address.sessionId) return [];
+			const matchesRun = (event) => eventRun(event, serverName, webUrl)?.runId === read.run_id;
+			let records = [...frame.records];
+			let hasMore = frame.hasMore;
+			while (hasMore && records.length && records[0].event.time >= read.started_ms - 1e3) {
+				signal.throwIfAborted();
+				const beforeSeq = records[0].event.seq;
+				const page = await ctx.sessionController.page({
+					address,
+					throughSeq: frame.cursor,
+					beforeSeq,
+					maxMessages: 100
+				}, signal);
+				if (!page.records.length || page.records[0].event.seq >= beforeSeq) break;
+				records = [...page.records, ...records];
+				hasMore = page.hasMore;
+			}
+			const events = records.flatMap((record) => record.type === "event" ? [record.event] : []);
+			if (!events.some(matchesRun)) return [];
+			const logs = [];
+			const calls = /* @__PURE__ */ new Map();
+			const resultsCutoff = read.results_cutoff_ms ?? read.cutoff_ms;
+			for (const event of events) {
+				if (event.time < read.started_ms || event.time > resultsCutoff) continue;
+				const data = object(event.data);
+				if (event.type === "tool/call" || event.type === "tool/ptc-dispatch-start") {
+					if (event.time > read.cutoff_ms) continue;
+					const id = data?.callId ?? data?.subCallId;
+					if (id != null) calls.set(id, {
+						time: event.time,
+						name: data?.name
+					});
+					const row = hostLogEntry("tool.call", event.time, read.cutoff_ms, "running", data?.name);
+					if (row) logs.push(row);
+				} else if (event.type === "tool/result" || event.type === "tool/ptc-dispatch") {
+					const message = object(data?.message);
+					const blocks = Array.isArray(message?.content) ? message.content.map(object) : [message];
+					for (const block of blocks) {
+						const call = calls.get(data?.subCallId ?? block?.toolCallId ?? block?.callId ?? message?.toolCallId);
+						if (event.time > read.cutoff_ms && !call) continue;
+						const failed = data?.error != null || data?.isError === true || block?.isError === true;
+						const row = hostLogEntry("tool.result", event.time, resultsCutoff, failed ? "failed" : "completed", call?.name ?? data?.name ?? block?.toolName ?? message?.toolName, call && event.time - call.time);
+						if (row) logs.push(row);
+					}
+				}
+			}
+			return logs;
+		}
+		return [];
+	}
 	function parent(agent) {
 		const agents = ctx.agents;
 		if (typeof agents.isOwnedBy === "function") return agents.list().find((candidate) => candidate !== agent && agents.isOwnedBy(agent.session.id, candidate));
@@ -774,6 +888,7 @@ function dshRuntime(ctx, serverName, webUrl) {
 	}
 	return {
 		cancellation: "session",
+		readLogs,
 		id: (agent) => agent.session.id,
 		parent,
 		isLive: (agent) => ctx.agents.get(agent.session.id) === agent,
