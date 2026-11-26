@@ -753,6 +753,7 @@ def test_batch_deadline_prevents_next_request(monkeypatch, tmp_path, tools):
 
 
 def test_consecutive_failures_trip_circuit_and_do_not_retry(monkeypatch, tmp_path, tools):
+    monkeypatch.setenv('LAZYMIND_PPT_MAX_CONSECUTIVE_FAILURES', '3')
     def respond(*_args):
         raise transport_failure()
 
@@ -910,3 +911,53 @@ def test_existing_notes_do_not_need_source_equality(monkeypatch, tmp_path, tools
     store.selected['preview_notes', 0]['value']['text'] = 'A user-edited script with no separate source.'
     monkeypatch.setattr(tools, '_load_saved_notes', lambda: pytest.fail('no notes source check at delivery'))
     assert tools.ppt_list_pages(str(deck))['fully_published'] is True
+
+
+def test_slow_active_pages_have_no_default_wall_clock_deadline(monkeypatch, tmp_path, tools):
+    clock = [0.0]
+    for key in ('LAZYMIND_PPT_PAGE_TIMEOUT', 'LAZYMIND_PPT_BATCH_TIMEOUT',
+                'LAZYMIND_PPT_LLM_TIMEOUT'):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(tools.time, 'monotonic', lambda: clock[0])
+
+    def respond(_prompt, control):
+        # Simulate a stream whose total duration exceeds both former caps.
+        for _ in range(200):
+            clock[0] += 10
+            control.check()
+        return HTML
+
+    deck, model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 2, respond)
+    result = tools._batch_page_html_publish_progressive(deck)
+    assert result['status'] == 'ok'
+    assert result['published_count'] == 2
+    assert result['budget']['stop_reason'] is None
+    assert [call['timeout'] for call in model.calls] == [120, 120]
+
+
+def test_default_page_failures_do_not_skip_remaining_pages(monkeypatch, tmp_path, tools):
+    monkeypatch.delenv('LAZYMIND_PPT_MAX_CONSECUTIVE_FAILURES', raising=False)
+
+    def respond(prompt, _control):
+        if int(prompt) <= 3:
+            raise transport_failure()
+        return HTML
+
+    deck, model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 5, respond)
+    result = tools._batch_page_html_publish_progressive(deck)
+    assert len(model.calls) == 5
+    assert [row['page'] for row in result['published']] == [4, 5]
+    assert result['budget']['stop_reason'] is None
+
+
+@pytest.mark.parametrize('caller_timeout,configured,expected', [
+    (None, None, 120), (300, None, 120), (10, None, 10), (300, '45', 45),
+])
+def test_ppt_stream_inactivity_timeout(monkeypatch, tools, caller_timeout, configured, expected):
+    monkeypatch.delenv('LAZYMIND_PPT_LLM_TIMEOUT', raising=False)
+    if configured is not None:
+        monkeypatch.setenv('LAZYMIND_PPT_LLM_TIMEOUT', configured)
+    model = AdapterModel(lambda *_: HTML)
+    monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_: model)
+    tools._agent_llm_call('system', 'page', timeout=caller_timeout)
+    assert model.calls[0]['timeout'] == expected
