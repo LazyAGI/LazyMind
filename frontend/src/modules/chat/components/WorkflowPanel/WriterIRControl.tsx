@@ -1,3 +1,4 @@
+import { useWriterCheckpoint } from './useWriterCheckpoint';
 import { WriterDocumentOptions } from './WriterDocumentOptions';
 import { useWriterPageWidth } from './useWriterPageWidth';
 import { selectedIRParagraphs } from './writerIRRewriteSelection';
@@ -83,7 +84,8 @@ export interface WriterIRControlProps {
    * When true (draft_document), local Save / flush never create a version.
    * Versions are created only by successful Feishu write-back.
    */
-  feishuVersionOnly?: boolean;
+  writerCheckpoints?: boolean;
+  initialWorkingDraft?: boolean;
   onSave?: (
     sourceDocument: WriterDocument,
     revisedDocument: WriterDocument,
@@ -310,7 +312,8 @@ export function WriterIRControl({
   sourceRevision,
   readOnly = false,
   editingKey,
-  feishuVersionOnly = false,
+  writerCheckpoints = false,
+  initialWorkingDraft = false,
   onSave,
   onEditingChange,
   onDocumentChange,
@@ -359,6 +362,7 @@ export function WriterIRControl({
   const lastSavedDocumentRef = useRef<WriterDocument | undefined>(undefined);
   /** Content last captured as a versioned revision (Save button / conversation flush). */
   const lastCheckpointDocumentRef = useRef<WriterDocument>(document);
+  const workingDraft = useRef(initialWorkingDraft);
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
   /** Highest pending save mode; checkpoint wins over draft until consumed. */
@@ -667,7 +671,7 @@ export function WriterIRControl({
     );
     // Draft only when dirty. Checkpoint (Save / conversation flush) may still
     // run after draft autosave when content is not yet versioned.
-    if (!numberingUpdate && (sameAsCheckpoint || (sameAsBase && saveMode !== 'checkpoint'))) {
+    if (!numberingUpdate && (saveMode === 'checkpoint' ? sameAsCheckpoint && !workingDraft.current : sameAsBase)) {
       pendingSaveModeRef.current = 'draft';
       return 'noop';
     }
@@ -695,7 +699,7 @@ export function WriterIRControl({
         saveMode,
         numberingUpdate,
       );
-      if (!mountedRef.current) return 'saved';
+      workingDraft.current = writerCheckpoints && saveMode === 'draft';
       saved = true;
       // If the user edited while this request was pending, keep their draft
       // and only advance the persisted base / revision.
@@ -705,18 +709,20 @@ export function WriterIRControl({
       lastSavedDocumentRef.current = savedDocument;
       baseSourceRevisionRef.current = savedSourceRevision;
       pendingExternalDocumentRef.current = null;
-      setBaseSourceRevision(savedSourceRevision);
-      // Versioned save becomes the checkpoint baseline. For Feishu-only
-      // versioning, every successful local persist is the flush baseline.
+      // A Writer working draft can advance the storage revision before its edit group closes.
       if (
-        feishuVersionOnly
-        || saveMode === 'checkpoint'
-        || savedSourceRevision !== previousRevision
+        saveMode === 'checkpoint' || (!writerCheckpoints && savedSourceRevision !== previousRevision)
       ) {
         lastCheckpointDocumentRef.current = sameWriterDocumentForSync(snapshot, savedDocument)
           ? snapshot
           : savedDocument;
       }
+      if (!mountedRef.current) {
+        baseDocumentRef.current = savedDocument;
+        if (!hasNewerDraft) draftRef.current = lastCheckpointDocumentRef.current === snapshot ? snapshot : savedDocument;
+        return 'saved';
+      }
+      setBaseSourceRevision(savedSourceRevision);
       if (hasNewerDraft) {
         // Keep the live draft; only advance the persisted base/revision.
         baseDocumentRef.current = savedDocument;
@@ -753,7 +759,7 @@ export function WriterIRControl({
         scheduleFollowupSave();
       }
     }
-  }, [clearAutoSaveTimers, documentReadOnly, feishuVersionOnly, scheduleFollowupSave, t, savePaused]);
+  }, [clearAutoSaveTimers, documentReadOnly, writerCheckpoints, scheduleFollowupSave, t, savePaused]);
 
   saveRunnerRef.current = runSave;
 
@@ -766,15 +772,15 @@ export function WriterIRControl({
 
   /** Explicit Save button: create a versioned checkpoint. */
   const requestCheckpointSave = useCallback(() => {
-    escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
+    escalateSaveMode('checkpoint');
     clearAutoSaveTimers();
     void saveRunnerRef.current();
-  }, [clearAutoSaveTimers, escalateSaveMode, feishuVersionOnly]);
+  }, [clearAutoSaveTimers, escalateSaveMode]);
 
   /** Flush before conversation actions (continue/retry → chat): version the draft. */
   const flushPendingSave = useCallback(async (): Promise<boolean> => {
     if (documentReadOnly || !onSaveRef.current) return true;
-    escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
+    escalateSaveMode('checkpoint');
     clearAutoSaveTimers();
     if (saveFollowupTimerRef.current !== undefined) {
       window.clearTimeout(saveFollowupTimerRef.current);
@@ -792,18 +798,19 @@ export function WriterIRControl({
         saveFollowupTimerRef.current = undefined;
       }
       // Skip only when this content is already a versioned checkpoint.
-      if (sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current)) {
+      if (!workingDraft.current && sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current)) {
         return true;
       }
 
-      escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
+      escalateSaveMode('checkpoint');
       const result = await runSave();
       if (result === 'error') return false;
       if (result === 'noop') return true;
     }
     return sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current);
-  }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, feishuVersionOnly, runSave]);
+  }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, runSave]);
 
+  useWriterCheckpoint(writerCheckpoints && !documentReadOnly, draft, dirty || initialWorkingDraft && workingDraft.current, rootRef, flushPendingSave);
   useEffect(() => {
     if (!editingKey) return undefined;
     return registerFlush(editingKey, flushPendingSave);

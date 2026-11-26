@@ -68,6 +68,27 @@ async function applyFirstVersion() {
   fireEvent.click(within(dialog).getByRole('button', { name: /应用.*1/ }));
 }
 
+it('shows every published platform only on its version and links its receipts in the detail', async () => {
+  const published_at = '2026-11-26T02:17:49Z';
+  const publications = {
+    notion: { target_url: 'https://www.notion.so/fixture', published_at },
+    feishu: { target_url: 'https://example.feishu.cn/docx/fixture', published_at },
+  };
+  api.getSlotItemVersions.mockResolvedValueOnce({ data: { data: { versions: [1, 2].map(revision => ({
+    revision, version: revision, selected: revision === 2, change_source: 'ai', created_at: published_at,
+    content_snapshot: { text: `Version ${revision}` }, publications: revision === 1 ? publications : undefined,
+  })) } } });
+  show(slotFor('markdown', 2));
+  const dialog = within(await openHistory());
+  const first = await dialog.findByRole('option', { name: /v1/ });
+  expect(within(first).getByText('已发布到 Notion、飞书')).toBeVisible();
+  expect(dialog.getByRole('option', { name: /v2/ })).not.toHaveTextContent('已发布到');
+  fireEvent.click(first);
+  for (const { target_url } of Object.values(publications)) {
+    expect(dialog.getAllByRole('link', { name: '打开云文档' }).map(link => link.getAttribute('href'))).toContain(target_url);
+  }
+});
+
 it('resolves the illustration referenced by each historical Markdown snapshot', async () => {
   const mediaUrls = {
     '/Application Support/v1/image.png': '/preview/first.png',
@@ -141,7 +162,7 @@ it('preserves the draft and does not roll back when saving fails', async () => {
   api.saveDocumentArtifact.mockRejectedValue(new Error('fixture save failure'));
   show(slotFor('markdown'));
   fireEvent.change(await screen.findByLabelText('Document draft'), { target: { value: 'Keep this draft' } });
-  await applyFirstVersion();
+  fireEvent.click(await screen.findByRole('button', { name: '版本历史' }));
   expect(await screen.findByRole('alert')).toBeInTheDocument();
   expect(api.rollbackSlotItem).not.toHaveBeenCalled();
   expect(screen.getByLabelText('Document draft')).toHaveValue('Keep this draft');

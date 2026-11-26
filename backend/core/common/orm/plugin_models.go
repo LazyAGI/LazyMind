@@ -166,7 +166,8 @@ type WorkflowSlotRevision struct {
 	ProducerAttemptID string    `gorm:"column:producer_attempt_id;type:varchar(36);not null;default:''"`
 	CreatedAt         time.Time `gorm:"column:created_at;not null"`
 	// PPTNotesRevisionID pairs a slide history entry with its speaker notes.
-	PPTNotesRevisionID *string `gorm:"column:ppt_notes_revision_id;type:varchar(36)"`
+	PPTNotesRevisionID   *string `gorm:"column:ppt_notes_revision_id;type:varchar(36)"`
+	RestoredFromRevision *int    `gorm:"column:restored_from_revision"`
 }
 
 func (WorkflowSlotRevision) TableName() string { return "plugin_slot_revisions" }

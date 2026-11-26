@@ -4666,6 +4666,8 @@ const enUS = {
       wechatDraftLinkUnavailable: "Saved to WeChat drafts. The draft preview link is temporarily unavailable.",
       refreshWechatDraftLink: "Refresh draft link",
       localVersion: "Local v{{version}}",
+      restoredFrom: "Restored from v{{version}}",
+      publishedTo: "Published to {{provider}}",
       localHistory: "Local history",
       syncedToVersion: "Cloud document aligned to v{{version}}",
       writeBackBlocked: "Cannot write to cloud document (no valid target)",

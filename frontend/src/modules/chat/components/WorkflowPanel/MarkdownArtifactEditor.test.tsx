@@ -1256,6 +1256,29 @@ describe('MarkdownArtifactEditor autosave', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it('groups Writer edits across working-draft autosaves until five seconds after the last edit', async () => {
+    vi.useFakeTimers();
+    const save = vi.fn(async (_text: string, base: number, _mode?: string) => base + 1);
+    const view = render(<MarkdownArtifactEditor markdown='Initial' sourceRevision={1} writerCheckpoints onSave={save} />);
+    try {
+      const field = screen.getByTestId('markdown-editable');
+      const type = (text: string) => { field.textContent = text; fireEvent.input(field); };
+      const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      type('First edit');
+      await advance(1500);
+      type('Last edit');
+      await advance(4999);
+      expect(save.mock.calls.map(call => call[2])).toEqual(['draft', 'draft']);
+      await advance(1);
+      expect(save).toHaveBeenLastCalledWith('Last edit', 3, 'checkpoint', undefined);
+      await advance(6000);
+      expect(save).toHaveBeenCalledTimes(3);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it('uses a checkpoint when pending edits are flushed at a version boundary', async () => {
     const onSave = vi.fn(async () => 8);
     let flush: (() => Promise<boolean>) | undefined;

@@ -398,7 +398,11 @@ func slotRevisionVersionKey(slotID string, listIndex *int) string {
 }
 
 func isWriterWorkingDraftRevision(slotID, changeSource string) bool {
-	return (slotID == "draft_document" || slotID == "flat_draft_document") && changeSource == "human"
+	return isWriterFinalSlot(slotID) && changeSource == "human"
+}
+
+func isWriterFinalSlot(slotID string) bool {
+	return slotID == "draft_document" || slotID == "flat_draft_document"
 }
 
 // ListConversationSessions handles GET /conversations/{conversation_id}/workflow-sessions.

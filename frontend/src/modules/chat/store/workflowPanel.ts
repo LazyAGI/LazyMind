@@ -257,7 +257,7 @@ export interface SlotRevision {
   /** Human-readable description for image/file artifacts. */
   caption?: string;
   /** change_source: ai / human / provider_sync (cloud-provider-confirmed). */
-  change_source?: "ai" | "human" | "provider_sync";
+  change_source?: "ai" | "human" | "provider_sync" | "writer_edit" | "writer_restore";
   /** Whether this draft has a server-owned cloud-provider baseline. */
   write_back_ready?: boolean;
   /** Whether the selected draft differs from that cloud-provider baseline. */
@@ -728,16 +728,24 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
   };
 }
 
+export interface VersionPublication {
+  target_url: string;
+  published_at: string;
+}
+
 export interface SlotVersionEntry {
   revision: number;
   draft_version?: number;
   /** User-visible version number. Writer working drafts are excluded from this sequence. */
   version?: number;
-  change_source: "ai" | "human" | "provider_sync";
+  change_source: "ai" | "human" | "provider_sync" | "writer_edit" | "writer_restore";
   created_at: string;
   selected: boolean;
   /** Whether this historical Writer revision was provider-confirmed. */
   provider_synced?: boolean;
+  restored_from_version?: number;
+  publications?: Record<string, VersionPublication>;
+  feishu_publication?: VersionPublication;
   content_snapshot?: any;
 }
 
@@ -791,7 +799,7 @@ interface WorkflowStore {
   ) => Promise<number | undefined>;
   reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number, linkedOrders?: { slot_id: string; order: number[]; version: number }[]) => Promise<void>;
   getSlotVersions: (sessionId: string, slotId: string, listIndex: number) => Promise<SlotVersionEntry[]>;
-  rollbackSlotItem: (sessionId: string, slotId: string, listIndex: number, revision: number) => Promise<void>;
+  rollbackSlotItem: (sessionId: string, slotId: string, listIndex: number, revision: number) => Promise<number | void>;
   createSlotItem: (sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, contentType?: string) => Promise<void>;
   patchSlotCaption: (sessionId: string, slotId: string, listIndex: number, caption: string) => Promise<void>;
   // Track focused tab and sort_order for the AI. Held in sibling maps so the
@@ -1152,7 +1160,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   },
 
   rollbackSlotItem: async (sessionId, slotId, listIndex, revision) => {
-    await WorkflowSessionApi().rollbackSlotItem(sessionId, slotId, listIndex, revision);
+    const response = await WorkflowSessionApi().rollbackSlotItem(sessionId, slotId, listIndex, revision);
+    return response?.data?.data?.revision;
   },
 
   createSlotItem: async (sessionId, slotId, value, caption, insertBefore, contentType) => {

@@ -4588,6 +4588,8 @@ const zhCN = {
       wechatDraftLinkUnavailable: "已写回微信草稿箱，暂时无法获取该草稿的预览链接",
       refreshWechatDraftLink: "刷新草稿链接",
       localVersion: "本地 v{{version}}",
+      restoredFrom: "恢复自 v{{version}}",
+      publishedTo: "已发布到 {{provider}}",
       localHistory: "本地历史",
       syncedToVersion: "云文档已对齐到 v{{version}}",
       writeBackBlocked: "无法写入云文档（无合法目标）",

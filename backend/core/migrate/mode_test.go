@@ -102,13 +102,16 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 154 {
-		t.Fatalf("v0_3 dev migration count=%d, want 154", len(v03.Dev))
+	if len(v03.Dev) != 155 {
+		t.Fatalf("v0_3 dev migration count=%d, want 155", len(v03.Dev))
 	}
 	for _, version := range []uint64{20261124092328, 20261125061444} {
 		if !containsMigrationFileVersion(v03.Dev, version) {
 			t.Fatalf("v0_3 dev migrations are missing workflow approval migration %d", version)
 		}
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20261125090000) {
+		t.Fatal("v0_3 dev migrations are missing the writer restore source")
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20261123022951) {
 		t.Fatal("v0_3 dev migrations are missing the PPT page revision association")

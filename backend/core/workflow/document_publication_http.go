@@ -638,11 +638,15 @@ func publicationSavedResult(ctx context.Context, db *gorm.DB, op *DocumentPublic
 		}
 		draft = human.DraftVersion
 	}
+	if revision.ID == op.SourceRevisionID && !receipt.NoLocalChange {
+		// The provider may have normalized its copy; the local editor keeps its submitted snapshot.
+		value.Data = op.SourceValue
+	}
 	status := "synced"
 	if receipt.NoLocalChange {
 		status = "no_change"
 	}
-	return &DocumentPublishResult{OperationID: op.ID, ArtifactID: revision.ID, Revision: revision.Revision, DraftVersion: draft, Provider: op.Provider, ProviderSynced: true, ArtifactSaved: !receipt.NoLocalChange, Status: status, Representation: representation, Document: value.Data, PatchResult: map[string]any{"success": true}, TargetDocument: receipt.TargetDocument, Warnings: receipt.Warnings}, nil
+	return &DocumentPublishResult{OperationID: op.ID, ArtifactID: revision.ID, Revision: revision.Revision, DraftVersion: draft, Provider: op.Provider, ProviderSynced: true, ArtifactSaved: revision.ID != op.SourceRevisionID, Status: status, Representation: representation, Document: value.Data, PatchResult: map[string]any{"success": true}, TargetDocument: receipt.TargetDocument, Warnings: receipt.Warnings}, nil
 }
 func replyPublicationResult(w http.ResponseWriter, result *DocumentPublishResult, op *DocumentPublicationOperation, err error) {
 	if err == nil {

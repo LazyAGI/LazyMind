@@ -1383,8 +1383,8 @@ func TestSaveWriterDocumentDraftUpdatesInPlaceAndCheckpointCreatesRevision(t *te
 			"spans": []any{map[string]any{"text": "", "style": []any{}}},
 		}},
 	}
-	if revision, draftVersion := save("draft", legacyIR, 4, 1); revision != 4 || draftVersion != 2 {
-		t.Fatalf("IR draft baseline = revision %d draft %d, want 4 and 2", revision, draftVersion)
+	if revision, draftVersion := save("draft", legacyIR, 4, 1); revision != 5 || draftVersion != 1 {
+		t.Fatalf("IR draft baseline = revision %d draft %d, want 5 and 1", revision, draftVersion)
 	}
 	if !receivedNormalizedIR {
 		t.Fatal("save forwarded legacy IR style array without normalization")

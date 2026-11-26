@@ -150,6 +150,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const availability = useWriterProviderAvailability(providers.map(provider => provider.id));
   const previewSource = useRef<Baseline>();
 
+  const writerCheckpoints = !paperDocument && ['draft_document', 'flat_draft_document'].includes(slot.slot_id);
   const writerSlot = (['source_document', 'outline_document', 'flat_draft_document', 'draft_document'] as const).find(id => id === slot.slot_id);
   const mediaRevision = useWorkflowStore(state => {
     const session = Object.values(state.sessionByConversation).find(item => item?.session_id === sessionId);
@@ -285,7 +286,8 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       JSON.stringify([latest.current.id, latest.current.revision, latest.current.draft])];
     setRestoring(true);
     try {
-      await useWorkflowStore.getState().rollbackSlotItem(sessionId, slot.slot_id, slot.list_index ?? -1, revision);
+      const restored = await useWorkflowStore.getState().rollbackSlotItem(sessionId, slot.slot_id, slot.list_index ?? -1, revision);
+      revision = typeof restored === 'number' ? restored : revision;
     } catch (error) {
       setRestoring(false);
       throw error;
@@ -304,8 +306,9 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       numbering_update: numbering, content_type: ir ? 'json' : 'text/markdown', value: artifact, command_id: key(),
     }, { silentError: true } as never);
     const result = response.data.result;
-    if (!response.data.ok || !result?.artifact_id || typeof result.revision !== 'number' || typeof result.draft_version !== 'number') throw new Error('invalid save response');
-    accept(result.artifact_id, result.revision, result.draft_version, unwrap(result.value ?? artifact), content);
+    if (!response.data.ok || !result?.artifact_id || typeof result.revision !== 'number' || (result.draft_version === undefined && result.revision > base)) throw new Error('invalid save response');
+    const savedContent = await readDocumentValue(result.value ?? artifact, ir ? 'ir' : 'markdown');
+    accept(result.artifact_id, result.revision, result.draft_version, savedContent, content);
     onRefresh?.();
     return latest.current;
   }, [accept, onRefresh]);
@@ -442,6 +445,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     listIndex={slot.list_index ?? -1} revisionCount={revisionCount ?? version} currentRevision={version}
     currentVersionNumber={slot.version_number} currentValue={value} currentChangeSource={slot.change_source}
     previewKind={writerSlot && !paperDocument ? 'writer' : undefined} resolveImageUrl={resolveImageUrl}
+    beforeOpen={writerCheckpoints ? () => flushEditor.current?.() ?? Promise.resolve(true) : undefined}
     readCurrentValue={() => getSnapshot?.(editingKey) ?? draftContent.current} contentType='text'
     readOnly={!writable} triggerLabel={String(i18n.t('chat.slots.versionHistory'))} onRollback={rollback} /> : undefined;
   return <SlotEditingContext.Provider value={editorContext}><div className={`workflow-slot workflow-slot--artifact${paperDocument ? ' workflow-slot--paper-document' : ''}`}>
@@ -452,7 +456,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       if (src) setPreviewImage({ key: editingKey, src, alt: image.alt });
     }}>
     {representation === 'markdown' && typeof value === 'string'
-      ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
+      ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} writerCheckpoints={writerCheckpoints} initialWorkingDraft={slot.change_source === 'human' && writerCheckpoints} allowMultipleParagraphs
         disableImageSettingsButton={Boolean(writerSlot) && !paperDocument}
         numberingDocument={typeof currentNumbering?.document === 'string' ? currentNumbering.document : undefined}
         resolveImageUrl={resolveImageUrl} onDownloadImage={imageDownloads.downloadImage} onContentChange={edit} numbering={numbering} toolbarActions={versionHistory}
@@ -462,7 +466,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           sessionId, slotId: slot.slot_id, listIndex: slot.list_index ?? -1, preview: preview.value, applyPreview } : null}
         onRewritePreviewApplied={() => setPreview(null)} onRewritePreviewRejected={() => setPreview(null)}
         onSave={async (text, revision, mode, numbering) => { const saved = await save(text, revision, mode, numbering); return { markdown: String(saved.value), revision: saved.revision }; }} />
-      : isWriterDocument(value) ? <WriterIRControl document={value as WriterDocument} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
+      : isWriterDocument(value) ? <WriterIRControl document={value as WriterDocument} sourceRevision={version} editingKey={editingKey} readOnly={!writable} writerCheckpoints={writerCheckpoints} initialWorkingDraft={slot.change_source === 'human' && writerCheckpoints} allowMultipleParagraphs
         onDocumentChange={edit} numbering={numbering} toolbarActions={versionHistory}
         onRewriteSelection={canRewrite ? (picked) => setSelection({ type: 'ir', node_id: picked.nodeId, nodeSelections: picked.nodeSelections, selectedText: picked.selectedText, anchor: picked.anchor }) : undefined}
         rewriteDialogOpen={selection !== null}
@@ -517,7 +521,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           if (!keepVertical) return undefined;
           const current = draftContent.current;
           if (typeof current !== 'string' && !isWriterDocument(current)) throw new Error(String(i18n.t('chat.writerIR.saveFailed')));
-          await save(keepVerticalImageGroups(current, pending), latest.current.revision, 'draft');
+          await save(keepVerticalImageGroups(current, pending), latest.current.revision, writerCheckpoints ? 'checkpoint' : 'draft');
           pending.forEach(group => imageGroupReminders.current.add(imageGroupKey(group.images)));
         }
         return { ...latest.current };
