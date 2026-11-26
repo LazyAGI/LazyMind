@@ -6,7 +6,7 @@ import vm from "node:vm";
 import dev from "../electron/src/desktop-dev.js";
 
 test("an in-place test build uses its own startup binaries and the configured data root", () => {
-  const main = fs.readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
+  const main = fs.readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = main.indexOf("const clientInstanceId =");
   const end = main.indexOf("try {\n  guardDesktopStartup", start);
   assert.ok(start >= 0 && end > start);

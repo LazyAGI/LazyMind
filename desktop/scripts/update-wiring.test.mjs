@@ -7,12 +7,33 @@ import vm from "node:vm";
 const require = createRequire(import.meta.url);
 const { createDesktopUpdater, sendUpdateState } = require("../electron/src/update-controller.js");
 
-test("the actual Electron entrypoint starts the updater and binds current window/origin authority", () => {
+test("the actual Electron entrypoint starts the updater and binds current window/origin authority", t => {
   const source = readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
   assert.match(source, /require\(["']\.\/update-controller(?:\.js)?["']\)/);
   assert.match(source, /require\(["']\.\/update-helper-client(?:\.js)?["']\)/);
   assert.match(source, /const desktopUpdater = createDesktopUpdater\(/);
-  assert.match(source, /registerUpdateIPC\(\{[\s\S]*?updater: desktopUpdater[\s\S]*?authorize: \(event\) => isTrustedNotificationSender\(event, mainWindow, notificationFrontendOrigin\(\)\)/);
+  let registration;
+  const install = t.mock.fn(releaseId => releaseId);
+  const mainWindow = {}, trustedEvent = {}, origin = "http://localhost:3131";
+  const context = {
+    registerUpdateIPC: options => { registration = options; },
+    ipcMain: {}, desktopUpdater: { install }, componentRefreshLease: null, mainWindow,
+    notificationFrontendOrigin: () => origin,
+    isTrustedNotificationSender: (event, window, url) => event === trustedEvent && window === mainWindow && url === origin,
+  };
+  const start = source.indexOf("registerUpdateIPC({");
+  const end = source.indexOf("desktopUpdater.subscribe(", start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInNewContext(source.slice(start, end), context);
+  assert.equal(registration.ipcMain, context.ipcMain);
+  assert.equal(registration.authorize(trustedEvent), true);
+  assert.equal(registration.authorize({}), false);
+  context.componentRefreshLease = {};
+  assert.throws(() => registration.updater.install("r2"), { code: "tasks_active" });
+  assert.equal(install.mock.callCount(), 0);
+  context.componentRefreshLease = null;
+  assert.equal(registration.updater.install("r2"), "r2");
+  assert.equal(install.mock.callCount(), 1);
   assert.match(source, /desktopUpdater\.start\(\)/);
   assert.match(source, /desktopUpdater\.subscribe\(\(state\) => sendUpdateState\(mainWindow, notificationFrontendOrigin\(\), state\)\)/);
   assert.match(source, /app\.on\(["']will-quit["'],[\s\S]*?desktopUpdater\.dispose\(\)/);

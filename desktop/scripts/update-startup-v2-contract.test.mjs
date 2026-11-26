@@ -159,7 +159,7 @@ test("startup compares the exact component plan supplied by the runtime", async 
   }
 });
 
-test("cold target import can exceed fifteen seconds without starting business", async t => {
+test("macOS cold target import can exceed fifteen seconds without starting business", async t => {
   let release;
   const delayed = new Promise(resolve => { release = resolve; });
   const f = fixture({ intercept: async action => {
@@ -168,6 +168,7 @@ test("cold target import can exceed fifteen seconds without starting business", 
       return { status: "activated", transactionId: tx, owner };
     }
   } });
+  f.parameters.platform = "darwin";
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let settled = false;
   const attempt = prepare(f).finally(() => { settled = true; });

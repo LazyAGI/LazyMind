@@ -6,7 +6,7 @@ import test from "node:test";
 import vm from "node:vm";
 import startup from "../electron/src/update-startup.js";
 
-const main = fs.readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8");
+const main = fs.readFileSync(new URL("../electron/src/main.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const entry = main.slice(main.indexOf("app.whenReady().then"), main.indexOf('  app.on("window-all-closed"'));
 
 test("an interrupted activated target explains which version can resume, without offering invalid adoption", async t => {

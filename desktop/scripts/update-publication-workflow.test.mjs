@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-const read = name => fs.readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), "utf8");
+const read = name => fs.readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 function assertConjunctiveGate(job, expectedTerms) {
   const gate = job.match(/^    if: (.+)$/m)?.[1].trim().replace(/^\$\{\{\s*|\s*\}\}$/g, "");
