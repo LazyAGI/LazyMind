@@ -2399,6 +2399,7 @@ export function WorkflowPanel({
       <div className="workflow-panel__topbar">
       {/* Header */}
       <div className='workflow-panel__header'>
+        <div className='workflow-panel__header-main'>
         <div className='workflow-panel__header-left'>
           <ApartmentOutlined className='workflow-panel__logo' aria-hidden />
           <div className='workflow-panel__heading'>
@@ -2416,7 +2417,7 @@ export function WorkflowPanel({
             {t(displayStatusKey)}
           </span>
         </div>
-        <div className='workflow-panel__header-right'>
+          <div className='workflow-panel__header-tools'>
           <button type='button' className='workflow-panel__tool' aria-pressed={graphVisible}
             onClick={() => { setGraphVisible(!graphVisible); if (collapsed) setCollapsed(false); }}>
             <WorkflowToolbarIcon name='graph' />{t('chat.workflowExecutionGraph')}
@@ -2436,6 +2437,9 @@ export function WorkflowPanel({
               <WorkflowToolbarIcon name={view.mode === 'following' ? 'following' : 'browse'} />
             </button>
           </Tooltip>}
+          </div>
+        </div>
+        <div className='workflow-panel__window-actions'>
           <div className='workflow-panel__intent-btn-wrap'>
             <Dropdown trigger={['click']} menu={{
               items: [
