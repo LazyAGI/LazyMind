@@ -27,6 +27,7 @@ import (
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 	"lazymind/agentconnector/internal/workflowmcp"
 )
@@ -76,6 +77,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "workflow-connectors" {
+		return runWorkflowConnectors(ctx, args[1:], stdout)
+	}
 	if len(args) > 0 && args[0] == "codex-recovery" {
 		return runCodexRecovery(ctx, args[1:], stdout)
 	}
@@ -459,6 +463,13 @@ func serveAssistant(ctx context.Context, address string, stderr io.Writer) error
 	store, err := credentials.NewStore(home, "")
 	if err != nil {
 		return err
+	}
+	// A staged Bridge can serve a new browser-scoped environment before its
+	// first connection. Existing installations keep their selected release.
+	if self, selfErr := os.Executable(); selfErr == nil {
+		if err := workflowconnector.Provision(ctx, store.Directory(), self, false); err != nil {
+			_, _ = fmt.Fprintln(stderr, "Workflow Connector package:", err)
+		}
 	}
 	bridge, err := mcpbridge.New(store)
 	if err != nil {

@@ -95,20 +95,25 @@ export const INPUT_SAVED_NOTICE = 'chat.workflowInputSaved';
 export type OverlayInfoBanner = { key: string; tone: 'info' | 'warning' };
 
 /** Only delivery problems need a banner; routine delivery stays silent. */
-export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
-  if (!delivery || delivery.consumed_at) return undefined;
-  if (delivery.status === 'unknown') return { key: 'chat.workflowControlDeliveryUnknown', tone: 'warning' };
-  if (delivery.status === 'failed' && delivery.kind === 'cancel' && binding?.provider === 'codex') {
+export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding'], continuation?: WorkflowControlView['continuation']): OverlayInfoBanner | undefined {
+  const current = delivery?.consumed_at ? undefined : delivery;
+  if (current?.status === 'unknown') return { key: 'chat.workflowControlDeliveryUnknown', tone: 'warning' };
+  if (binding?.bound && binding.provider === 'workbuddy' && continuation === 'stopped'
+    && (current?.kind !== 'cancel' || !['accepted', 'dispatching'].includes(current.status))) {
+    return { key: 'chat.workflowControlWorkBuddyStopped', tone: 'info' };
+  }
+  if (!current) return undefined;
+  if (current.status === 'failed' && current.kind === 'cancel' && binding?.provider === 'codex') {
     return { key: 'chat.workflowControlCodexStopped', tone: 'info' };
   }
-  if (delivery.status === 'failed') return { key: 'chat.workflowControlDeliveryFailed', tone: 'warning' };
+  if (current.status === 'failed') return { key: 'chat.workflowControlDeliveryFailed', tone: 'warning' };
   return undefined;
 }
 
 /** At most one info/warning strip so the panel workspace is not squeezed by stacked Alerts. */
-export function overlayInfoBanner(noticeKey: string, delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
+export function overlayInfoBanner(noticeKey: string, delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding'], continuation?: WorkflowControlView['continuation']): OverlayInfoBanner | undefined {
   if ([REVIEW_CHANGED_NOTICE, INPUT_CHANGED_NOTICE, INPUT_SAVED_EXTERNAL_NOTICE, INPUT_SAVED_PAUSED_NOTICE, INPUT_SAVED_NOTICE].includes(noticeKey)) return { key: noticeKey, tone: 'info' };
-  return deliveryBanner(delivery, binding);
+  return deliveryBanner(delivery, binding, continuation);
 }
 
 /** One user operation retains its exact command after uncertain delivery. */

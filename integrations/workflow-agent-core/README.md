@@ -67,7 +67,7 @@ DSH provides the SDK-hook adapter. Codex has a separate native-session adapter i
 `../codex-workflow` that reuses the shared dispatcher; availability of its native
 control channel must be checked on the installed host. Sharing this library alone
 does not prove that panel-to-host wake or cancellation works on a particular machine.
-The SDK-free adapter in `../dsh-workflow/tests/shared-runtime.test.ts` exercises the
+The SDK-free adapter in `tests/shared-runtime.test.ts` exercises the
 same coordination and delivery rules without depending on either host SDK.
 Run `pnpm typecheck`, `pnpm test`, and `pnpm bundle` in `../dsh-workflow` to validate
 both the shared library and DSH. See that package's README for deterministic CLI

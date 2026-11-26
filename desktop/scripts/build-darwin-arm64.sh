@@ -276,8 +276,10 @@ mkdir -p \
 install_feishu_cli
 install_github_cli
 
-echo "==> Building WorkBuddy Workflow resources"
+echo "==> Building Workflow Connector packages"
+(cd "${ROOT}/integrations/codex-workflow" && "${PNPM_BIN}" install --frozen-lockfile && "${PNPM_BIN}" run build)
 (cd "${ROOT}/integrations/workbuddy-workflow/connector" && "${PNPM_BIN}" install --frozen-lockfile && "${PNPM_BIN}" run build)
+(cd "${ROOT}/integrations/dsh-workflow" && "${PNPM_BIN}" install --frozen-lockfile && "${PNPM_BIN}" run bundle && "${PNPM_BIN}" run stage-connectors "${RUNTIME_ROOT}/bin")
 
 echo "==> Building Go desktop runtime binaries"
 (cd "${ROOT}/backend/feishu-credential-helper" && "${GO_BIN}" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -mod=readonly -o "${RUNTIME_ROOT}/bin/feishu-credential-helper" .)

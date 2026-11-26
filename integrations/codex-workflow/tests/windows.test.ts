@@ -1,6 +1,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest'
 import {CodexNative} from '../src/native'
-import {presentationLoop} from '../src/presentation'
+import type {LookupBinding} from '../../workflow-agent-core/src/adapter'
+import {presentationLoop,type PresentationStatus,type PresentationTarget} from '../src/presentation'
 import {isCodexChatTarget,selectCodexTarget} from '../src/windows'
 const model=vi.hoisted(()=>({targets:[] as any[],calls:[] as any[],aborted:[] as string[],reads:new Map<string,any>(),failStart:false}))
 vi.mock('node:timers/promises',()=>({setTimeout:(ms:number,_value:any,options?:{signal?:AbortSignal})=>new Promise((resolve,reject)=>{
@@ -27,16 +28,18 @@ vi.mock('../../workflow-agent-core/node/cdp',()=>({CdpClient:class {
    return {accepted:true,turnId:'new-turn'}
   }
   if(expression.includes('mountPresentation')){
-   const expected='"run_id":"run-'+target.id+'"'
-   if(!expression.includes(expected))throw Error('wrong window/run')
-   model.calls.push({target:target.id,kind:'mount'});return{status:'mounted',page_status:'ready'}
+   const payloadStart=expression.indexOf('({"session_id":')+1
+   const payloadEnd=expression.indexOf(',()=>',payloadStart)
+   const {session_id,run_id}:PresentationTarget=JSON.parse(expression.slice(payloadStart,payloadEnd))
+   model.calls.push({target:target.id,kind:run_id?'mount':'unmount',session_id,run_id})
+   return run_id?{status:'mounted',page_status:target.id==='b'?'frontend-unavailable':'ready'}:{status:'unbound'}
   }
-  return{session_id:'thread-'+target.id,epoch:'epoch-'+target.id}
+  return{session_id:target.sessionId,epoch:'epoch-'+target.id}
  }
 }}))
 beforeEach(()=>{
  vi.useFakeTimers();model.calls=[];model.aborted=[];model.reads.clear();model.failStart=false
- model.targets=[{id:'a',type:'page',url:'app://-/index.html'},{id:'b',type:'page',url:'app://-/detached-window.html?initialRoute=%2Fdetached-window'},{id:'avatar',type:'page',url:'app://-/index.html?initialRoute=%2Favatar-overlay'}]
+ model.targets=[{id:'a',sessionId:'thread-design',type:'page',url:'app://-/index.html'},{id:'b',sessionId:'thread-review',type:'page',url:'app://-/detached-window.html?initialRoute=%2Fdetached-window'},{id:'avatar',sessionId:'thread-overlay',type:'page',url:'app://-/index.html?initialRoute=%2Favatar-overlay'}]
  vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>model.targets})))
 })
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals()})
@@ -46,20 +49,41 @@ it('recognizes main and detached chat windows while excluding auxiliary windows'
  expect(selectCodexTarget(model.targets,'b').id).toBe('b')
  expect(()=>selectCodexTarget(model.targets)).toThrow()
 })
-it('mounts every window and discovers new/closed windows without duplicating the shared delivery worker',async()=>{
- const stop=new AbortController(),reports:any[]=[]
- const lookup=vi.fn(async(session:string)=>({session_id:session,run_id:'run-'+session.replace('thread-','')}))
+it('mounts workflows by chat session across reopened windows and keeps an unbound window unmounted',async()=>{
+ const stop=new AbortController(),reports:PresentationStatus[]=[]
+ const bindings=new Map([['thread-design','run-spec'],['thread-review','run-approval']])
+ const lookup=vi.fn<LookupBinding>(async session=>{
+  const runId=bindings.get(session)
+  return runId?{status:'bound',runId}:{status:'unbound'}
+ })
+ const mounts=()=>model.calls.filter(call=>call.kind==='mount').sort((first,second)=>first.target.localeCompare(second.target))
+ const initialMounts=[
+  {target:'a',kind:'mount',session_id:'thread-design',run_id:'run-spec'},
+  {target:'b',kind:'mount',session_id:'thread-review',run_id:'run-approval'},
+ ]
  const running=presentationLoop(9334,lookup,'http://127.0.0.1:19091',stop.signal,status=>reports.push(status))
  try{
-  await vi.waitFor(()=>expect(model.calls.filter(x=>x.kind==='mount').map(x=>x.target).sort()).toEqual(['a','b']))
-  model.targets=model.targets.filter(x=>x.id!=='a');model.targets.push({id:'c',type:'page',url:'app://-/index.html?initialRoute=%2Flocal%2F01a16196-3096-7dd3-8c20-33cd9250503c'})
+  await vi.waitFor(()=>expect(mounts()).toEqual(initialMounts))
+  expect(reports.at(-1)).toMatchObject({status:'mounted',page_status:'frontend-unavailable',window_count:2})
+  model.targets=model.targets.filter(target=>target.id!=='a')
+  model.targets.push(
+   {id:'c',sessionId:'thread-design',type:'page',url:'app://-/index.html?initialRoute=%2Flocal%2F01a16196-3096-7dd3-8c20-33cd9250503c'},
+   {id:'d',sessionId:'thread-draft',type:'page',url:'app://-/detached-window.html?initialRoute=%2Fdetached-window'},
+  )
   await vi.advanceTimersByTimeAsync(1100)
-  expect(model.calls.some(x=>x.kind==='mount'&&x.target==='c')).toBe(true)
+  expect(mounts()).toEqual([...initialMounts,{target:'c',kind:'mount',session_id:'thread-design',run_id:'run-spec'}])
+  expect(model.calls.filter(call=>call.target==='d')).toEqual([
+   {target:'d',kind:'unmount',session_id:'thread-draft',run_id:''},
+  ])
   expect(model.aborted).toContain('a')
-  expect(lookup.mock.calls.some(([session])=>session==='thread-avatar')).toBe(false)
-  expect(reports.some(x=>x.window_count===2&&x.windows?.every((w:any)=>w.target_id!=='a')&&x.windows?.some((w:any)=>w.target_id==='c'))).toBe(true)
+  expect(lookup.mock.calls.map(([session])=>session).sort()).toEqual(['thread-design','thread-design','thread-draft','thread-review'])
+  expect(reports.at(-1)).toMatchObject({window_count:3,windows:[
+   {target_id:'b',status:'mounted'},
+   {target_id:'c',status:'mounted',native_session_id:'thread-design',run_id:'run-spec'},
+   {target_id:'d',status:'unbound',native_session_id:'thread-draft'},
+  ]})
  }finally{stop.abort();await running}
- expect(model.calls.filter(x=>x.kind==='cleanup').map(x=>x.target).sort()).toEqual(['b','c'])
+ expect(model.calls.filter(x=>x.kind==='cleanup').map(x=>x.target).sort()).toEqual(['b','c','d'])
 })
 it('routes native control by the bound thread owner and never retries a failed mutation elsewhere',async()=>{
  const thread='01a1770e-5cca-7100-81da-d9f69e3b02ab',signal=new AbortController().signal

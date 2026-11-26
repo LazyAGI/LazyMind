@@ -1,6 +1,10 @@
 import type { WorkflowControl } from './protocol'
+import type { LookupBinding } from './adapter'
+import { RequestRetry } from './request-retry'
+import { BridgeError, isHostAuthorizationError } from './transport-errors'
+export { BridgeError, isHostAuthorizationError } from './transport-errors'
 
-export interface Pairing { connector_id: string; token: string }
+export interface Pairing { connector_id: string; token: string; runtime_revision?: string }
 export interface HostAction {
   id: string
   session_id: string
@@ -17,18 +21,6 @@ export interface HostAction {
 export interface ActionClaim { action: HostAction; dispatch_token?: string; control: WorkflowControl }
 export type HostTransport = Pick<HostBridge, 'bind' | 'state' | 'actions' | 'action' | 'claim' | 'settle'>
 
-export class BridgeError extends Error {
-  constructor(readonly code: string, message: string, readonly status: number) { super(message) }
-}
-
-export function isHostAuthorizationError(error: unknown): error is BridgeError {
-  // Core can reject an individual action or receipt with 403 (including HOST_AUTH_REQUIRED).
-  // The Bridge reports a missing LazyMind session with 401 and pairing failures with explicit codes.
-  return error instanceof BridgeError && (error.status === 401
-    || ['HOST_PAIRING_MISSING', 'HOST_PAIRING_DISABLED', 'HOST_ACCOUNT_MISMATCH',
-      'HOST_CREDENTIAL_MISMATCH', 'HOST_PAIRING_INVALID', 'HOST_PAIRING_UNREADABLE'].includes(error.code))
-}
-
 export class HostBridge {
   private readonly base: string
   constructor(url: string, private readonly pairing: Pairing,
@@ -40,8 +32,12 @@ export class HostBridge {
   }
 
   private async request<T>(path: string, signal: AbortSignal, body?: unknown, headers?: Record<string, string>): Promise<T> {
-    const response = await fetch(this.base + path, {
-      method: body === undefined ? 'GET' : 'POST', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    return this.requestURL<T>(this.base + path, signal, body, headers)
+  }
+
+  private async requestURL<T>(url: string | URL, signal: AbortSignal, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    const response = await fetch(url, {
+      method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
       headers: { ...headers, Authorization: `Bearer ${this.pairing.token}`, 'X-LazyMind-Connector-Id': this.pairing.connector_id,
         ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -55,6 +51,10 @@ export class HostBridge {
     const value = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {}
     if (!response.ok) throw new BridgeError(typeof value.code === 'string' ? value.code : 'BRIDGE_ERROR', typeof value.error === 'string' ? value.error : 'Workflow Bridge request failed', response.status)
     return value as T
+  }
+
+  async reportHeartbeat(headers: Record<string, string>, signal: AbortSignal): Promise<void> {
+    await this.request('/heartbeat', signal, {}, headers)
   }
 
   async bind(runId: string, driver: string, signal: AbortSignal): Promise<WorkflowControl> {
@@ -78,5 +78,34 @@ export class HostBridge {
     await this.request(`/actions/${encodeURIComponent(id)}/settle`, signal, {
       instance_id: instanceId, dispatch_token: token, status, native_event_seq: seq, error,
     })
+  }
+
+  lookupBinding(provider: 'codex' | 'workbuddy' | 'deepseek-harness'): LookupBinding {
+    // Presentation supplies a new signal for each view, including when returning
+    // to the same chat. Old requests cannot touch the new view's retry state.
+    const retries = new WeakMap<AbortSignal, RequestRetry>()
+    return async (chatId, signal) => {
+      signal.throwIfAborted()
+      let retry = retries.get(signal)
+      if (!retry) { retry = new RequestRetry(); retries.set(signal, retry) }
+      try {
+        const url = new URL(`/v1/${provider}/presentation`, this.base)
+        url.searchParams.set('session_id', chatId)
+        const response = await this.requestURL<{ session_id: unknown; run_id: unknown }>(url, signal)
+        signal.throwIfAborted()
+        if (response.session_id !== chatId || typeof response.run_id !== 'string'
+          || response.run_id !== '' && !/^[a-zA-Z0-9_-]{1,256}$/.test(response.run_id)) throw new Error('Invalid presentation response')
+        retry.succeeded()
+        return response.run_id ? { status: 'bound', runId: response.run_id } : { status: 'unbound' }
+      } catch (error) {
+        signal.throwIfAborted()
+        if (error instanceof BridgeError && error.status === 403 && !isHostAuthorizationError(error)) {
+          retry.succeeded()
+          return { status: 'access-denied' }
+        }
+        const { authorization } = retry.failed(error)
+        return { status: authorization ? 'access-denied' : 'unavailable', retryAt: retry.retryAt }
+      }
+    }
   }
 }

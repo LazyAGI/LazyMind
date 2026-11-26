@@ -71,9 +71,9 @@ LEGACY_DOMAIN = re.compile(
     r"plugin[-_][A-Za-z0-9_-]+|/api/plugins(?:/|\b))"  # noqa: Q000
 )
 
-# DeepSeek Harness uses these names in its UI and in the connector status contract.
+# DeepSeek Harness uses these names in its UI.
 # Require an explicit marker on each reference to keep the exemption local.
-DSH_EXTERNAL_NAMES = {'Plugin', 'Plugins', 'plugin_update_required'}
+DSH_EXTERNAL_NAMES = {'Plugin', 'Plugins'}
 DSH_EXTERNAL_MARKER = '// workflow-naming: dsh-external'
 
 GO_PERSISTENCE = re.compile(

@@ -2,15 +2,21 @@ package assistantbridge
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -56,7 +62,7 @@ func TestWorkflowBindUsesPairedProviderNotRequestBody(t *testing.T) {
 				t.Fatal("binding did not use trusted pairing identity")
 			}
 			wantCancellation := "none"
-			if provider == workflowhost.DSHProvider || provider == "workbuddy" {
+			if provider == workflowhost.DSHProvider {
 				wantCancellation = "session"
 			}
 			if received["cancellation"] != wantCancellation {
@@ -188,4 +194,189 @@ func TestDSHRuntimeRequiresAuthenticatedPollAndExplicitMCPReadiness(t *testing.T
 			}
 		})
 	}
+}
+
+func TestDSHHeartbeatKeepsLocalReadinessDuringCoreAuthorizationBackoff(t *testing.T) {
+	var calls atomic.Int64
+	var coreReady atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if !coreReady.Load() {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":"UNAUTHORIZED","error":"session expired"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"actions":[]}`))
+	}))
+	defer upstream.Close()
+	home := t.TempDir()
+	server := newTestServer(t, home)
+	if err := server.store.Save(credentials.Credentials{ServerURL: upstream.URL, AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 3600}); err != nil {
+		t.Fatal(err)
+	}
+	account, err := server.store.AccountScope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := workflowhost.Ensure(home, t.TempDir(), account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairPath := filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json")
+	configPath, err := connectorconfig.Save(connectorconfig.Config{
+		Home: home, HostID: "host", Provider: pair.Provider, Profile: pair.Profile, PairingFile: pairPath, Controlled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := connectorconfig.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := workflowhost.DSHRuntimeIdentity{
+		Dispatcher: "00000000-0000-0000-0000-000000000001", Process: "00000000-0000-0000-0000-000000000002",
+		ConfigRevision: config.Revision(), PairingRevision: pair.RuntimeRevision,
+	}
+	lockPath := pairPath + ".runtime.lock"
+	setLock := func(identity workflowhost.DSHRuntimeIdentity) {
+		t.Helper()
+		body := fmt.Sprintf(`{"pid":%d,"instanceId":%q,"processInstance":%q}`, os.Getpid(), identity.Dispatcher, identity.Process)
+		if err := os.WriteFile(lockPath, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setLock(identity)
+	routes := server.routes()
+	started := strconv.FormatInt(time.Now().Add(-time.Minute).UnixMilli(), 10)
+	request := func(method, path string, identity workflowhost.DSHRuntimeIdentity) int {
+		r := httptest.NewRequest(method, "/v1/workflow-host/"+path, nil)
+		r.Header.Set("Authorization", "Bearer "+pair.Token)
+		r.Header.Set("X-LazyMind-Connector-Id", pair.ConnectorID)
+		r.Header.Set("X-LazyMind-DSH-Dispatcher", identity.Dispatcher)
+		r.Header.Set("X-LazyMind-DSH-Process", identity.Process)
+		r.Header.Set("X-LazyMind-DSH-Config-Revision", identity.ConfigRevision)
+		r.Header.Set("X-LazyMind-DSH-Pairing-Revision", identity.PairingRevision)
+		r.Header.Set("X-LazyMind-DSH-Process-Started-At", started)
+		r.Header.Set("X-LazyMind-DSH-Build", "0.1.6+0000000000000001")
+		r.Header.Set("X-LazyMind-DSH-Client-Build", "0.1.6+0000000000000002")
+		r.Header.Set("X-LazyMind-DSH-Panel", "bound")
+		if method == http.MethodPost {
+			r.Header.Set("X-LazyMind-MCP-Ready", "1")
+		}
+		w := httptest.NewRecorder()
+		routes.ServeHTTP(w, r)
+		return w.Code
+	}
+	expect := func(method, path string, identity workflowhost.DSHRuntimeIdentity, want int) {
+		t.Helper()
+		if status := request(method, path, identity); status != want {
+			t.Fatalf("%s %s returned %d, want %d", method, path, status, want)
+		}
+	}
+	read := func(issue string) workflowhost.RuntimeStatus {
+		t.Helper()
+		status, err := workflowhost.ReadRuntimeStatus(home, pair)
+		if err != nil || !status.MCPReady || status.Build != "0.1.6+0000000000000001" ||
+			status.ClientBuild != "0.1.6+0000000000000002" || status.Panel != "bound" || status.ConnectionIssue(pair) != issue {
+			t.Fatalf("want local readiness and Core issue %q, got %+v %v", issue, status, err)
+		}
+		return status
+	}
+
+	// Core may hold this lock during token refresh. The local heartbeat can
+	// still check the atomically published account snapshot.
+	unlock, err := localfile.Lock(filepath.Join(home, "credentials.json.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	first := make(chan int, 1)
+	go func() { first <- request(http.MethodPost, "heartbeat", identity) }()
+	select {
+	case status := <-first:
+		if status != http.StatusOK || calls.Load() != 0 {
+			t.Fatalf("first heartbeat returned %d and contacted Core %d times", status, calls.Load())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("local heartbeat waited for the credentials lock")
+	}
+	unlock()
+	unlock = nil
+	read(workflowconnector.ConnectionPending)
+	expect(http.MethodGet, "actions", identity, http.StatusUnauthorized)
+	observed := read("lazymind_auth_required")
+	upstreamCount := calls.Load()
+
+	// Advance both persisted clocks to a point past liveness expiry, while
+	// the dispatcher would still be in its 30-second authorization backoff.
+	observed.CheckedAt -= 18_000
+	observed.ConnectionCheckedAt -= 18_000
+	body, err := json.Marshal(observed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pairPath+".runtime-status.json", body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflowhost.ReadRuntimeStatus(home, pair); err == nil {
+		t.Fatal("stale heartbeat still appeared live")
+	}
+	expect(http.MethodPost, "heartbeat", identity, http.StatusOK)
+	during := read("lazymind_auth_required")
+	if during.CheckedAt <= observed.CheckedAt || during.ConnectionCheckedAt != observed.ConnectionCheckedAt || calls.Load() != upstreamCount {
+		t.Fatal("local heartbeat changed the Core observation or contacted Core")
+	}
+
+	coreReady.Store(true)
+	expect(http.MethodGet, "actions", identity, http.StatusOK)
+	recovered := read("")
+	if recovered.ConnectionCheckedAt <= during.ConnectionCheckedAt || recovered.CheckedAt != during.CheckedAt {
+		t.Fatal("Core recovery refreshed the local heartbeat")
+	}
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflowhost.ReadRuntimeStatus(home, pair); err == nil {
+		t.Fatal("stopped dispatcher retained readiness")
+	}
+	expect(http.MethodPost, "heartbeat", identity, http.StatusForbidden)
+
+	newIdentity := identity
+	newIdentity.Dispatcher = "00000000-0000-0000-0000-000000000003"
+	newIdentity.Process = "00000000-0000-0000-0000-000000000004"
+	setLock(newIdentity)
+	expect(http.MethodPost, "heartbeat", newIdentity, http.StatusOK)
+	expect(http.MethodGet, "actions", identity, http.StatusForbidden)
+	read(workflowconnector.ConnectionPending)
+
+	config.Overrides = map[string]string{"LAZYMIND_WEB_URL": "http://localhost:8090"}
+	body, err = json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflowhost.ReadRuntimeStatus(home, pair); err == nil {
+		t.Fatal("superseded configuration retained readiness")
+	}
+	expect(http.MethodPost, "heartbeat", newIdentity, http.StatusForbidden)
+	newIdentity.ConfigRevision = config.Revision()
+	expect(http.MethodPost, "heartbeat", newIdentity, http.StatusOK)
+	if err := workflowhost.Disable(home, pair.ConnectorID); err != nil {
+		t.Fatal(err)
+	}
+	expect(http.MethodPost, "heartbeat", newIdentity, http.StatusForbidden)
+	if _, err := workflowhost.ReadRuntimeStatus(home, pair); err == nil {
+		t.Fatal("revoked pairing retained readiness")
+	}
+	if _, err := workflowhost.Ensure(home, pair.Profile, account); err != nil {
+		t.Fatal(err)
+	}
+	expect(http.MethodPost, "heartbeat", newIdentity, http.StatusForbidden)
 }

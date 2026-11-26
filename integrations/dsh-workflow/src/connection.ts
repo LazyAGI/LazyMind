@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 
 export interface ConnectionConfig { connectorConfig: string; command: string }
-export interface Connection { provider: string; webUrl: string; bridgeUrl: string; pairingFile: string; serverName: string; revision: string }
+export interface Connection { provider: string; webUrl: string; bridgeUrl: string; pairingFile: string; serverName: string; revision: string; configRevision?: string }
 
 /** Resolve through the connector so both runtimes share one configuration policy. */
 export function resolveConnection(config: ConnectionConfig, signal: AbortSignal): Promise<Connection> {

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { HostEvent, RuntimeAdapter, ToolCall } from '../../workflow-agent-core/src/adapter'
-import { createCoordinator } from '../../workflow-agent-core/src/coordinator'
-import { createDispatcher } from '../../workflow-agent-core/src/dispatcher'
-import { BridgeError, type HostAction, type HostTransport } from '../../workflow-agent-core/src/transport'
-import type { WorkflowControl } from '../../workflow-agent-core/src/protocol'
+import type { HostEvent, RuntimeAdapter, ToolCall } from '../src/adapter'
+import { createCoordinator } from '../src/coordinator'
+import { createDispatcher } from '../src/dispatcher'
+import { BridgeError, type HostAction, type HostTransport } from '../src/transport'
+import type { WorkflowControl } from '../src/protocol'
 
 // Deliberately contains no DSH SDK, event names, goal format or tool-name encoding.
 interface Agent { id: string; parent?: Agent; events: HostEvent[] }
@@ -92,12 +92,14 @@ describe('shared delivery contract with an SDK-free host', () => {
     expect(f.bridge.settle).toHaveBeenLastCalledWith('action-1', 'instance-2', '', 'accepted', 18, '', f.lifetime.signal)
   })
 
-  it('does not retry unknown delivery when history contains no evidence', async () => {
+  it.each(['unknown', 'dispatching'] as const)('does not resend %s delivery without receipt evidence', async status => {
     const f = fixture()
-    f.updateAction({ status: 'unknown' })
+    f.updateAction({ status })
     await f.dispatcher.deliver(f.action())
     expect(f.runtime.prompt).not.toHaveBeenCalled()
     expect(f.bridge.settle).not.toHaveBeenCalled()
+    expect(f.bridge.claim).toHaveBeenCalledOnce()
+    expect(f.bridge.claim).toHaveBeenCalledWith('action-1', 'instance-1', f.lifetime.signal)
     expect(f.action().status).toBe('unknown')
   })
 
@@ -108,14 +110,6 @@ describe('shared delivery contract with an SDK-free host', () => {
     await f.dispatcher.deliver(f.action())
     expect(f.runtime.reconcile).not.toHaveBeenCalled()
     expect(f.bridge.claim).not.toHaveBeenCalled()
-  })
-
-  it('does not resend after a dispatch lease expires without receipt evidence', async () => {
-    const f = fixture()
-    f.updateAction({ status: 'dispatching' })
-    await f.dispatcher.deliver(f.action())
-    expect(f.action().status).toBe('unknown')
-    expect(f.runtime.prompt).not.toHaveBeenCalled()
   })
 
   it.each(['awaiting_user', 'awaiting_executor', 'stopped', 'completed'])('delivers a wake without interpreting %s execution state', async continuation => {
@@ -182,6 +176,57 @@ describe('shared delivery contract with an SDK-free host', () => {
     expect(f.action().status).toBe('accepted')
   })
 
+  it('does not reuse previous ownership when a newly observed user input is still being checked', async () => {
+    const f = fixture()
+    f.runtime.suspendGoal = vi.fn()
+    await f.start()
+    let finishLookup!: () => void
+    vi.mocked(f.bridge.action).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      finishLookup = () => reject(new BridgeError('NOT_FOUND', 'manual input', 404))
+    }))
+    const checked = f.coordinator.beforeTurn({ agent: f.root, turn: 2,
+      messages: [{ user: true, requestId: 'unverified-input' }], signal: f.lifetime.signal })
+    f.updateAction({ kind: 'cancel' })
+    f.updateControl({ continuation: 'stopped' })
+    await f.dispatcher.deliver(f.action())
+    expect(f.runtime.cancel).not.toHaveBeenCalled()
+    expect(f.runtime.suspendGoal).not.toHaveBeenCalled()
+    finishLookup()
+    expect(await checked).toBe(true)
+  })
+
+  it.each([false, true])('requires exclusive native input ownership before interrupting (mixed=%s)', async mixed => {
+    const f = fixture()
+    f.runtime.suspendGoal = vi.fn()
+    await f.start()
+    f.runtime.activeTurn = () => ({ turn: 2, startSeq: 1 })
+    f.updateControl({ binding: { ...f.control().binding!, connector_id: 'connector' } })
+    f.updateAction({ connector_id: 'connector' })
+    const messages = [{ user: true, requestId: f.action().id }, ...(mixed ? [{ user: true }] : [])]
+    expect(await f.coordinator.beforeTurn({ agent: f.root, turn: 2, messages, signal: f.lifetime.signal })).toBe(true)
+    // A subsequent step with no user input still belongs to the same native turn.
+    expect(await f.coordinator.beforeTurn({ agent: f.root, turn: 2, messages: [], signal: f.lifetime.signal })).toBe(true)
+    f.updateAction({ kind: 'cancel', id: 'stop' })
+    f.updateControl({ continuation: 'stopped' })
+    await f.dispatcher.deliver(f.action())
+    expect(f.runtime.cancel).toHaveBeenCalledTimes(mixed ? 0 : 1)
+    expect(f.runtime.suspendGoal).toHaveBeenCalledTimes(mixed ? 0 : 1)
+  })
+
+  it.each(['next-turn', 'replaced-agent'] as const)('requires the current native turn and Agent (%s)', async changed => {
+    const f = fixture()
+    let turn = 1
+    f.runtime.activeTurn = () => ({ turn, startSeq: 1 })
+    await f.start()
+    await f.turn()
+    if (changed === 'next-turn') turn++
+    else f.runtime.isLive = () => false
+    f.updateAction({ kind: 'cancel' })
+    f.updateControl({ continuation: 'stopped' })
+    await f.dispatcher.deliver(f.action())
+    expect(f.runtime.cancel).not.toHaveBeenCalled()
+  })
+
   it('cancels the current Workflow-owned host turn', async () => {
     const f = fixture()
     await f.start()
@@ -221,15 +266,20 @@ describe('shared delivery contract with an SDK-free host', () => {
     expect(f.bridge.settle).not.toHaveBeenCalled()
   })
 
-  it('does not repeat cancellation when only the Core receipt failed', async () => {
+  it.each(['cancel', 'continue'] as const)('never resends %s when only the Core receipt failed', async kind => {
     const f = fixture()
-    await f.start()
-    f.updateAction({ kind: 'cancel' })
-    f.updateControl({ continuation: 'stopped' })
+    if (kind === 'cancel') {
+      await f.start()
+      f.updateAction({ kind })
+      f.updateControl({ continuation: 'stopped' })
+    }
+    vi.mocked(f.runtime.reconcile).mockResolvedValue(0)
     vi.mocked(f.bridge.settle).mockRejectedValueOnce(new Error('receipt lost'))
     await expect(f.dispatcher.deliver(f.action())).rejects.toThrow('receipt lost')
     await f.dispatcher.deliver(f.action())
-    expect(f.runtime.cancel).toHaveBeenCalledOnce()
+    expect(f.runtime.cancel).toHaveBeenCalledTimes(kind === 'cancel' ? 1 : 0)
+    expect(f.runtime.prompt).toHaveBeenCalledTimes(kind === 'continue' ? 1 : 0)
+    expect(f.bridge.settle).toHaveBeenCalledOnce()
     expect(f.action().status).toBe('unknown')
   })
 

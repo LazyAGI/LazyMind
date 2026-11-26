@@ -547,7 +547,7 @@ func TestBrowserHealthReportsBridgeIdentityAcrossPlatforms(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["version"] != "v11" || payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
+	if payload["version"] != bridgeProtocol || payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
 		t.Fatalf("payload=%#v", payload)
 	}
 }

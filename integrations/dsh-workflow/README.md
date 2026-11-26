@@ -1,8 +1,8 @@
 # LazyMind Workflow for DeepSeek Harness
 
-LazyMind distributes this precompiled bundle with its connector. Connect DeepSeek Harness from LazyMind to install it into the selected DSH profile, configure MCP and create a private pairing file. Users do not build the bundle or modify DSH source.
+LazyMind distributes this precompiled bundle with its connector. Connect DeepSeek Harness from LazyMind to install the selected release, configure MCP and create a private pairing file. A fresh installation with no selected or retained release selects the bundled release on first connection. LazyMind Desktop connects the Desktop and Web profiles through DSH's installer.
 
-The supported SDK baseline is DSH 0.1.6-alpha.1. The Node Host adapter uses public scoped tools, lifecycle gates and SessionController; the browser adapter projects standard tool events into a session-scoped Workbench window. It never appends a custom `lazymind-workflow/open` event and never reads DSH's signing credentials.
+The supported SDK baseline is DSH 0.1.6-alpha.1. The Node Host adapter uses public scoped tools, lifecycle gates and SessionController; the browser adapter opens the default panel for the current chat’s Core binding and projects standard tool events into historical cards. It never appends a custom `lazymind-workflow/open` event and never reads DSH's signing credentials.
 
 DSH 0.2.2-rc.2 removed `agents.isOwnedBy`. The adapter uses
 `subagents.rootOf` on that host and retains the registry ownership API for older
@@ -35,13 +35,19 @@ imposed on other external Agent applications.
 
 ## Build and validate
 
-From this directory, run `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm test` and `pnpm run bundle`. Then run `go run ./cmd/package-workflow-bundle` from `local/lazymind-cli` to refresh its embedded deterministic tarball. Commit source, compiled JS, lockfile and embedded archive together. CI verifies they match.
+From this directory, run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test` and `pnpm bundle`. Run the shared runtime tests with `pnpm exec vitest run --root ../workflow-agent-core`. Commit the source and compiled JavaScript together. CI verifies both entry points from the staged archive.
+
+The desktop and local build scripts stage the DSH archive and manifest in `workflow-connectors/dsh` beside the LazyMind executable. For a standalone Go CLI, build the plugin as above and stage only the DSH sidecar by running `pnpm stage-connectors /absolute/path/to/cli/directory --dsh-only` from this directory.
+
+Deploying a new LazyMind Desktop release selects the Connector version bundled with that deployment. Fully quit DeepSeek Harness and use Reconnect in the installation guide to apply the selected release, then restart DeepSeek Harness and check the connection. Reconnecting keeps the selected release, profile settings and pairing.
 
 ## Configuration
 
-The connector writes only `connectorConfig` (an absolute connection record path) and `command` (the installed LazyMind CLI) into the user-layer override. MCP receives the same record through `LAZYMIND_CONNECTOR_CONFIG`. The record references the LazyMind home, DSH profile and pairing; it does not copy credentials, service addresses or program bindings.
+The connector writes `connectorConfig` (an absolute connection record path) and `command` (the installed LazyMind CLI) into the user-layer override. MCP receives the same record through `LAZYMIND_CONNECTOR_CONFIG`. The record references the LazyMind home, DSH profile and pairing.
 
-The Node host runs `internal connection resolve` to read current credentials and validate the account and pairing. It checks for changes every three seconds, releases the previous controller before replacement, and stops control when configuration is invalid or pairing is revoked. Missing login credentials leave the plugin active and waiting, so signing in again can restore the connection without restarting DSH. Browser clients poll the same-origin `/lazymind-workflow/config` route for public panel configuration and rebuild historical panel entries when it returns. The Electron file carrier receives configuration at boot and may require reloading after login or an address change. The pairing secret remains in the Node host and is never injected into browser code.
+The Node host runs `internal connection resolve` to read current credentials and validate the account and pairing. It checks for changes every three seconds, releases the previous controller before replacement, and stops control when configuration is invalid or pairing is revoked. Missing login credentials leave the plugin active and waiting, so signing in again can restore the connection without restarting DSH. Both clients use DSH’s authorized Connection RPC to look up the current native chat. The Node plugin checks that the chat exists in its profile, then reads Core through the scoped Bridge pairing. A chat change clears the old default panel. Temporary lookup failures retain the verified panel for the current chat, while a confirmed unbind or authorization rejection clears it. Historical cards can still be opened manually. The RPC returns public panel configuration together with the binding status. The pairing credential stays in the Node plugin.
+
+The DSH plugin reports local liveness, MCP readiness and loaded builds through the paired Bridge heartbeat. Core authorization follows the independent actions poll and can recover while the same DSH process stays running. Earlier installations continue to report runtime status through the actions poll.
 
 `DSH_HOME` selects the installation root and `LAZYMIND_DSH_PROFILE` selects a profile (default `web`). Desktop-managed integrations ignore inherited endpoint and executable overrides. Deliberate deployment overrides belong in the connection record's `overrides` object, for example `LAZYMIND_WEB_URL`; invalid values report a configuration error. A standalone CLI without a connection record retains explicit environment overrides. Reconnecting preserves explicit record overrides and backs up the managed client configuration. A disconnected pairing is disabled while retained for explicit reconnection to existing runs.
 

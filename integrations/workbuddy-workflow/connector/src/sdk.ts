@@ -72,7 +72,7 @@ export async function sdkOperation(input: any, versionIssue = workbuddyVersionIs
   }
   if (input.kind === 'cancel') {
     if (typeof conversation.cancel !== 'function') return { rejected: 'cancel unavailable' }
-    // Deliberately session-scoped: Stop interrupts the currently running turn.
+    // The opt-in diagnostic stops whichever request the session is running.
     const result = await conversation.cancel()
     if (result?.errorCode) return { rejected: String(result.errorCode) }
     return { accepted: true }

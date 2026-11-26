@@ -34,6 +34,7 @@ describe('CDP Workflow admission and interruption', () => {
  it('sends one notification to the bound chat and saves its actual turn receipt', async () => {
   const {adapter,native,receipts}=await fixture();adapter.host.cacheClaim(claim())
   await expect(adapter.prompt(thread,{actionId:'action-1',message:'continue'},new AbortController().signal)).resolves.toBe(0)
+  expect(native.start).toHaveBeenCalledOnce()
   expect(native.start).toHaveBeenCalledWith(thread,expect.any(String),'[LazyMind action_id=action-1]\ncontinue',expect.any(AbortSignal))
   expect(await receipts.read('action-1')).toMatchObject({status:'accepted',turnId:'turn-new',threadId:thread})
  })

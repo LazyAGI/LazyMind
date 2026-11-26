@@ -41,6 +41,8 @@ func workBuddyIssueMessage(code string) string {
 		return "Sign in to WorkBuddy to continue the connection."
 	case "workbuddy_auth_unreadable":
 		return "WorkBuddy sign-in status could not be read. Check its account status and authentication file permissions, then retry."
+	case "lazymind_pending":
+		return "Waiting for the current connector to verify communication with LazyMind."
 	case "lazymind_unavailable":
 		return "LazyMind MCP is unavailable. Wait for LazyMind's local services to be ready, then retry."
 	case "configuration_failed":
@@ -76,7 +78,7 @@ func workBuddyFailure(status agentintegration.Status, err error) agentintegratio
 		return agentintegration.RequireQuit(status, "connect")
 	}
 	if code == "" {
-		code = workBuddyPairingIssue(err)
+		code = workflowhost.PairingIssue(err)
 	}
 	var api *coreapi.Error
 	if code == "" && (credentials.IsAuthenticationRequired(err) ||
@@ -97,15 +99,7 @@ func workBuddyFailure(status agentintegration.Status, err error) agentintegratio
 }
 
 func workBuddyPairingIssue(err error) string {
-	var pairing *workflowhost.PairingError
-	if !errors.As(err, &pairing) {
-		return ""
-	}
-	return map[string]string{
-		"HOST_PAIRING_MISSING": "pairing_required", "HOST_PAIRING_DISABLED": "pairing_disabled",
-		"HOST_ACCOUNT_MISMATCH": "pairing_account_mismatch", "HOST_CREDENTIAL_MISMATCH": "pairing_credential_mismatch",
-		"HOST_PAIRING_INVALID": "pairing_invalid", "HOST_PAIRING_UNREADABLE": "pairing_unreadable",
-	}[pairing.Code]
+	return workflowhost.PairingIssue(err)
 }
 
 func sanitizeWorkBuddyFailure(status *agentintegration.Status) {

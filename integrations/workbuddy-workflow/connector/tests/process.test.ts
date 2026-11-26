@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 
-it('embedded worker polls independently, excludes a second worker and exits on disconnect', async () => {
+it('packaged worker polls independently, excludes a second worker and exits on disconnect', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'wb-connector-'))
   const pairingFile = join(directory, 'pair.json')
   const pairing = { provider: 'workbuddy', enabled: true, connector_id: 'host-' + 'a'.repeat(32), token: 'b'.repeat(64) }
@@ -22,20 +22,26 @@ it('embedded worker polls independently, excludes a second worker and exits on d
   })
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   const port = (server.address() as { port: number }).port
-  const entry = fileURLToPath(new URL('../../../../local/lazymind-cli/internal/workbuddyhost/assets/connector.mjs', import.meta.url))
+  const entry = fileURLToPath(new URL('../dist/connector/main.mjs', import.meta.url))
   const args = [entry, '--pairing-file', pairingFile, '--bridge-url', `http://127.0.0.1:${port}`, '--cdp-port', String(port)]
   const first = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
   const firstExit = new Promise<number | null>(resolve => first.once('exit', resolve))
   let second: ReturnType<typeof spawn> | undefined
   try {
     const deadline = Date.now() + 5000
-    while (polls < 2 && Date.now() < deadline) await delay(50)
+    let state
+    while (Date.now() < deadline) {
+      state = await readFile(pairingFile + '.workbuddy-status.json', 'utf8').then(body => JSON.parse(body), () => undefined)
+      if (polls >= 2 && state?.connection) break
+      await delay(50)
+    }
     expect(polls).toBeGreaterThanOrEqual(2)
     second = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     const secondExit = new Promise<number | null>(resolve => second!.once('exit', resolve))
     expect(await Promise.race([secondExit, delay(3000).then(() => 'timeout')])).toBe(1)
-    const state = JSON.parse(await readFile(pairingFile + '.workbuddy-status.json', 'utf8'))
     expect(state.ready).toBe(false) // Missing CDP does not kill the independent worker.
+    expect(state.cancellation).toBe('none')
+    expect(state.connection).toMatchObject({ issue: '', checked_at: expect.any(Number) })
     expect(first.exitCode).toBe(null)
     await writeFile(pairingFile, JSON.stringify({ ...pairing, enabled: false }))
     expect(await Promise.race([firstExit, delay(4000).then(() => 'timeout')])).toBe(0)

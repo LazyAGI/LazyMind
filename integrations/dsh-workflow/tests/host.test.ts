@@ -281,6 +281,34 @@ it('delivers a queued wake through the DSH session API without cancelling the cu
   expect(cancel).not.toHaveBeenCalled()
 })
 
+it.each([false, true])('checks the open DSH session turn at native Stop (replaced=%s)', async replaced => {
+  const f = await fixture()
+  f.root.session.append('turn/start', { turn: 2 })
+  await f.turn()
+  await f.execute('mcp__lazymind__workflow_start')
+  if (replaced) {
+    f.root.session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+    f.root.session.append('turn/start', { turn: 3 })
+  }
+  const before = await f.bridge.state('run-1', new AbortController().signal)
+  const control: WorkflowControl = { ...before, state_version: before.state_version + 1, continuation: 'stopped' }
+  const cancel = vi.fn()
+  f.ctx.provide('sessionController', { resolveAgent: async () => ({ agent: f.root }), cancel })
+  const action = { id: 'panel-stop', session_id: 'run-1', kind: 'cancel' as const,
+    native_session_id: f.root.session.id, status: 'pending' }
+  const claim = { action: { ...action, status: 'dispatching' }, dispatch_token: 'dispatch', control }
+  vi.mocked(f.bridge.claim).mockResolvedValue(claim)
+  vi.mocked(f.bridge.action).mockResolvedValue(claim)
+  vi.mocked(f.bridge.settle).mockResolvedValue(undefined)
+  vi.mocked(f.bridge.actions).mockResolvedValueOnce({ actions: [action] })
+  await vi.waitFor(() => expect(f.bridge.settle).toHaveBeenCalledOnce(), { timeout: 2500 })
+  if (replaced) expect(cancel).not.toHaveBeenCalled()
+  else {
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledWith({ sessionId: f.root.session.id })
+  }
+})
+
 it('preserves publication success and Core rejection without concluding the turn', async () => {
   const f = await fixture()
   await f.execute('mcp__lazymind__workflow_start')

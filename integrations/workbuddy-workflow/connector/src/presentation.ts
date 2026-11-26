@@ -1,18 +1,25 @@
 import { workbuddyVersionIssue } from './compatibility'
+import type { LookupBinding, UIAdapter, WatchView } from '../../../workflow-agent-core/src/adapter'
+import { runPresentation, type PresentationStatus } from '../../../workflow-agent-core/src/presentation'
 import type { Cdp } from './cdp'
 import { setTimeout as delay } from 'node:timers/promises'
 import { installTailFollow } from './tail-follow'
 import { installTailExtent } from './tail-extent'
 
-export interface PresentationTarget { session_id: string; run_id: string; frame_url: string; mount_id: string; epoch?: string }
+export type { PresentationStatus } from '../../../workflow-agent-core/src/presentation'
+export interface PresentationTarget { session_id: string | null; run_id: string; frame_url: string; mount_id: string; epoch?: string }
 
 // Detect A -> B -> A as well as renderer recreation while a lookup is pending.
 // This token guards presentation freshness only; it is never a binding source.
 export function readPresentationSession(): { session_id: string | null; epoch: string } | null {
   const host = window as any, sdk = host.wb?.conversations
-  if (!sdk || typeof sdk.onCurrentChange !== 'function') return null
   const key = '__lazymindWorkflowPresentationSession'
-  if (host[key] && !host[key].wait) host[key].dispose()
+  const usable = sdk && typeof sdk.onCurrentChange === 'function'
+  if (host[key] && (!usable || host[key].sdk !== sdk)) {
+    host.__lazymindWorkflowTail?.dispose()
+    host[key].dispose()
+  }
+  if (!usable) return null
   if (!host[key]) {
     let session = sdk.currentId || null, epoch = crypto.randomUUID()
     const waiters = new Set<() => void>()
@@ -22,6 +29,7 @@ export function readPresentationSession(): { session_id: string | null; epoch: s
     }
     const unsubscribe = sdk.onCurrentChange(changed)
     const gate = {
+      sdk,
       read: () => { if (session !== (sdk.currentId || null)) changed(); return { session_id: session, epoch } },
       wait: (expected: string) => {
         if (gate.read().epoch !== expected) return Promise.resolve()
@@ -42,7 +50,7 @@ export function readPresentationSession(): { session_id: string | null; epoch: s
   return host[key].read()
 }
 
-const cleanupPresentation = 'window.__lazymindWorkflowTail?.dispose(); window.__lazymindWorkflowPresentationSession?.dispose()'
+export const cleanupPresentation = 'window.__lazymindWorkflowTail?.dispose(); window.__lazymindWorkflowPresentationSession?.dispose()'
 
 // Serialized into the renderer: keep this function independent of module scope.
 export function mountPresentation(target: PresentationTarget, followTail = installTailFollow, fitTail = installTailExtent, versionIssue = workbuddyVersionIssue) {
@@ -51,27 +59,30 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
   const key = '__lazymindWorkflowTail'
   const previous = host[key]
   const wb = host.wb
-  if (target.epoch && host.__lazymindWorkflowPresentationSession?.read().epoch !== target.epoch) return { status: 'stale' }
-  if (!wb?.conversations) return { status: 'page-not-ready' }
+  const conversations = wb?.conversations
+  const gate = host.__lazymindWorkflowPresentationSession
+  if (target.epoch && (gate?.sdk !== conversations || gate?.read().epoch !== target.epoch)) return { status: 'stale' }
+  if (!conversations) return { status: 'page-not-ready' }
+  if ((conversations.currentId || null) !== target.session_id) return { status: 'stale' }
+  if (!target.run_id) { previous?.dispose(); return { status: 'unbound' } }
   const issue = versionIssue(host.workbuddyDesktop?.appVersion)
   if (issue) { previous?.dispose(); return { status: issue } }
-  if (typeof wb.conversations.onCurrentChange !== 'function') { previous?.dispose(); return { status: 'capability_unavailable' } }
-  if (wb?.conversations?.currentId !== target.session_id) return { status: 'stale' }
-  if (!target.run_id) { previous?.dispose(); return { status: 'unbound' } }
+  if (typeof conversations.onCurrentChange !== 'function') { previous?.dispose(); return { status: 'capability_unavailable' } }
   const url = new URL(target.frame_url)
   if (url.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(url.hostname)
     || url.username || url.password || url.pathname !== '/v1/workbuddy/frame' || url.search || url.hash
     || !/^[a-zA-Z0-9_-]{1,256}$/.test(target.run_id) || !/^[a-zA-Z0-9-]{20,80}$/.test(target.mount_id)) throw Error('Invalid presentation target')
   if (previous?.version === version && previous.session === target.session_id && previous.run === target.run_id
-    && previous.origin === url.origin) {
+    && previous.origin === url.origin && previous.epoch === target.epoch) {
     previous.sync()
-    return previous.status()
+    const state = previous.status()
+    return state.status === 'mounted' ? { ...state, status: 'reused' } : state
   }
   previous?.dispose()
   host.__lazymindTailPanelDemo?.dispose()
   let cachedDoc: HTMLElement | undefined
   const locate = () => {
-    if (wb.conversations.currentId !== target.session_id) return null
+    if (!current()) return null
     const doc = cachedDoc?.isConnected && cachedDoc.dataset.rootId === target.session_id && cachedDoc.getBoundingClientRect().width > 0
       ? cachedDoc : Array.from(document.querySelectorAll<HTMLElement>('.cr-document[data-root-id]'))
         .find(e => e.dataset.rootId === target.session_id && e.getBoundingClientRect().width > 0)
@@ -84,7 +95,7 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
   const initial = locate()
   if (!initial) return { status: 'layout-unavailable' }
   const panel = document.createElement('section')
-  panel.dataset.lazymindWorkflowTail = target.session_id
+  panel.dataset.lazymindWorkflowTail = initial.doc.dataset.rootId!
   panel.setAttribute('aria-label', 'LazyMind Workflow')
   panel.style.cssText = 'box-sizing:border-box;position:relative;margin:16px auto 24px;width:100%;overflow:hidden;border-radius:12px;'
   // Keep the iframe in the same DOM subtree. A manual popover enters the top
@@ -108,6 +119,10 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
   let tailExtent: ReturnType<typeof installTailExtent> | undefined, fittedDoc: HTMLElement | undefined
   let syncQueued = false
   const seen = new Set<string>()
+  function current() {
+    return host.wb?.conversations === conversations && conversations.currentId === target.session_id
+      && (!target.epoch || host.__lazymindWorkflowPresentationSession === gate && gate.read().epoch === target.epoch)
+  }
   function size() {
     frame.style.height = expanded ? '100%' : collapsed ? '64px' : 'clamp(360px, 60vh, 640px)'
   }
@@ -144,7 +159,7 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
   }
   function sync() {
     if (disposed) return
-    if (wb.conversations.currentId !== target.session_id) { dispose(); return }
+    if (!current()) { dispose(); return }
     const destination = locate()
     if (!destination) {
       layoutReady = false; panel.hidden = true
@@ -198,11 +213,11 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
     }
   }
   function reply(data: object) {
-    if (!disposed) frame.contentWindow?.postMessage({ ...data, sessionId: target.run_id, bridgeId: target.mount_id }, url.origin)
+    if (!disposed && current()) frame.contentWindow?.postMessage({ ...data, sessionId: target.run_id, bridgeId: target.mount_id }, url.origin)
   }
   async function receive(event: MessageEvent) {
     const data = event.data
-    if (disposed || wb.conversations.currentId !== target.session_id || event.source !== frame.contentWindow
+    if (disposed || !current() || event.source !== frame.contentWindow
       || event.origin !== url.origin || data?.bridgeId !== target.mount_id || data.sessionId !== target.run_id) return
     if (data.type === 'lazymind.workflow.frame-status' && ['loading', 'ready', 'frontend-unavailable', 'load-timeout'].includes(data.status)) {
       pageStatus = data.status
@@ -238,7 +253,7 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
         reader.onerror = () => reject(Error('无法读取下载文件。'))
         reader.readAsDataURL(data.blob)
       })
-      if (disposed || wb.conversations.currentId !== target.session_id) return
+      if (disposed || !current()) return
       const result = await wb.fileTransfer.saveAs({ defaultFileName: data.filename, contentBase64: base64 })
       if (result?.success !== true) throw Error('保存失败或已取消。')
       respond(true)
@@ -256,7 +271,7 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
     syncQueued = true
     queueMicrotask(() => { syncQueued = false; if (!disposed) sync() })
   })
-  const unsubscribe = wb.conversations.onCurrentChange(() => { if (wb.conversations.currentId !== target.session_id) dispose() })
+  const unsubscribe = conversations.onCurrentChange(() => { if (!current()) dispose() })
   function dispose() {
     if (disposed) return
     disposed = true
@@ -270,7 +285,7 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
     panel.remove()
     if (host[key]?.dispose === dispose) delete host[key]
   }
-  host[key] = { version, session: target.session_id, run: target.run_id, origin: url.origin, sync, dispose, status, tailFollow }
+  host[key] = { version, session: target.session_id, run: target.run_id, origin: url.origin, epoch: target.epoch, sync, dispose, status, tailFollow }
   window.addEventListener('message', receive)
   window.addEventListener('resize', sync)
   size(); sync()
@@ -281,63 +296,49 @@ export function presentationExpression(target: PresentationTarget) {
   return `(${mountPresentation.toString()})(${JSON.stringify(target)}, ${installTailFollow.toString()}, ${installTailExtent.toString()}, ${workbuddyVersionIssue.toString()})`
 }
 
-export interface PresentationStatus { status: string; page_status?: string; checked_at: number; native_session_id?: string; run_id?: string }
-
-export async function presentationLoop(cdp: Cdp, request: (route: string) => Promise<any>, bridgeURL: string, signal: AbortSignal,
-  report: (status: PresentationStatus) => void = () => {}) {
-  let native_session_id: string | undefined, run_id: string | undefined
-  function publish(status: string, page_status?: string) {
-    report({ status, page_status, checked_at: Date.now(), native_session_id, run_id })
-  }
-  while (!signal.aborted) {
-    native_session_id = undefined; run_id = undefined
-    let stage = 'host'
-    let epoch: string | undefined, retryLayout = false
-    try {
-      const current = await cdp.evaluate<ReturnType<typeof readPresentationSession>>(`(${readPresentationSession.toString()})()`, signal)
-      epoch = current?.epoch
-      const session = current?.session_id
-      native_session_id = session ?? undefined
-      if (session) {
-        stage = 'binding'
-        const target = await request(`presentation?session_id=${encodeURIComponent(session)}`)
-        signal.throwIfAborted()
-        if (target.session_id !== session || typeof target.run_id !== 'string') throw Error('Invalid presentation response')
-        run_id = target.run_id || undefined
-        stage = 'renderer'
-        const result = await cdp.evaluate<{status: string; page_status?: string}>(presentationExpression({
-          ...target, epoch: current!.epoch, frame_url: new URL('/v1/workbuddy/frame', bridgeURL).href, mount_id: crypto.randomUUID(),
-        }), signal)
-        publish(result.status, result.page_status)
-        retryLayout = result.status === 'layout-unavailable' || result.status === 'stale' || result.status === 'page-not-ready'
-      } else {
-        await cdp.evaluate('window.__lazymindWorkflowTail?.dispose()', signal)
-        publish(current ? 'waiting-session' : 'page-not-ready')
+function watchView(cdp: Pick<Cdp, 'evaluate'>, reportIssue: (status: string) => void): WatchView {
+  return async (report, signal) => {
+    let epoch: string | undefined
+    while (!signal.aborted) {
+      try {
+        if (epoch) await cdp.evaluate(`window.__lazymindWorkflowPresentationSession?.wait(${JSON.stringify(epoch)})`, signal)
+        const view = await cdp.evaluate<ReturnType<typeof readPresentationSession>>(`(${readPresentationSession.toString()})()`, signal)
+        if (view?.epoch) {
+          epoch = view.epoch
+          report({ chatId: view.session_id, epoch })
+          continue
+        }
+        if (!signal.aborted) reportIssue('page-not-ready')
+      } catch {
+        if (!signal.aborted) reportIssue('host-offline')
       }
-    } catch (error) {
-      // A transient read failure does not revoke an existing binding. Keep the
-      // live iframe (and editor state); explicit account/pairing rejection must
-      // still remove it. Native session changes dispose synchronously in WB.
-      const status = (error as { status?: number } | null)?.status
-      if (status === 401 || status === 403) {
-        await cdp.evaluate('window.__lazymindWorkflowTail?.dispose()', signal).catch(() => {})
-      }
-      if (!signal.aborted) publish(status === 401 || status === 403 ? 'access-denied'
-        : stage === 'binding' ? 'binding-unavailable' : stage === 'host' ? 'host-offline' : 'renderer-unavailable')
       epoch = undefined
-    }
-    if (signal.aborted) break
-    // Subscribe after every lookup with its observed epoch: a switch during the
-    // request also wakes immediately. The timeout only rechecks bindings/layout.
-    try {
-      if (epoch && !retryLayout) {
-        await cdp.evaluate(`window.__lazymindWorkflowPresentationSession?.wait(${JSON.stringify(epoch)})`, signal)
-      } else await delay(retryLayout ? 100 : 1000, undefined, { signal })
-    } catch {
-      if (signal.aborted) break
       try { await delay(1000, undefined, { signal }) } catch { break }
     }
   }
-  await cdp.evaluate(cleanupPresentation, AbortSignal.timeout(2000)).catch(() => {})
-  publish('disabled')
+}
+
+export async function presentationLoop(cdp: Pick<Cdp, 'evaluate'>, lookupBinding: LookupBinding, bridgeURL: string, signal: AbortSignal,
+  report: (status: PresentationStatus) => void = () => {}) {
+  const frameUrl = new URL('/v1/workbuddy/frame', bridgeURL).href
+  const ui: UIAdapter = {
+    async syncPanel(view, target, active) {
+      const result = await cdp.evaluate<{ status: string; page_status?: string }>(presentationExpression({
+        session_id: view.chatId, epoch: view.epoch, run_id: target?.runId ?? '', frame_url: target?.frameUrl ?? '', mount_id: crypto.randomUUID(),
+      }), active)
+      if (result.status === 'unbound') return { status: 'unmounted' }
+      if (['unsupported_version', 'version_unreadable', 'capability_unavailable', 'page-not-ready'].includes(result.status)) {
+        return { status: 'layout-unavailable', issue: result.status }
+      }
+      const status = result.status
+      return { status: status === 'mounted' || status === 'reused' || status === 'stale' ? status : 'layout-unavailable',
+        pageStatus: result.page_status }
+    },
+  }
+  try {
+    await runPresentation({ watchView: watchView(cdp, status => report({ status, checked_at: Date.now() })), lookupBinding, ui, frameUrl, signal, report })
+  } finally {
+    await cdp.evaluate(cleanupPresentation, AbortSignal.timeout(2000)).catch(() => {})
+    report({ status: 'disabled', checked_at: Date.now() })
+  }
 }

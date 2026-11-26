@@ -159,9 +159,9 @@ export default function AgentIntegrationPage() {
   const [manualBindingPath, setManualBindingPath] = useState("");
   const [workBuddyGuideOpen, setWorkBuddyGuideOpen] = useState(false);
   const [codexGuideOpen, setCodexGuideOpen] = useState(false);
-  const [dshGuideOpen, setDSHGuideOpen] = useState(false);
-  const openInstallationGuide = (agent: DesktopAgent) => {
-    if (agent === "deepseek-harness") setDSHGuideOpen(true);
+  const [dshGuide, setDSHGuide] = useState<"check" | "connect" | null>(null);
+  const openInstallationGuide = (agent: DesktopAgent, reconnect = false) => {
+    if (agent === "deepseek-harness") setDSHGuide(reconnect ? "connect" : "check");
     else if (agent === "codex") setCodexGuideOpen(true);
     else if (agent === "workbuddy") setWorkBuddyGuideOpen(true);
   };
@@ -353,7 +353,7 @@ export default function AgentIntegrationPage() {
 
   const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction, restartConfirmed = false) => {
     if (["workbuddy", "codex", "deepseek-harness"].includes(agent) && nextAction === "connect" && !restartConfirmed) {
-      openInstallationGuide(agent);
+      openInstallationGuide(agent, true);
       return;
     }
     if (pendingAgentActions.current.has(agent)) return;
@@ -521,7 +521,7 @@ export default function AgentIntegrationPage() {
                       return next;
                     })}
                     onMCPAction={async (agent, operation) => { await runAction(agent, operation); }}
-                    onOpenInstallationGuide={() => openInstallationGuide(agent.id)}
+                    onOpenInstallationGuide={(reconnect) => openInstallationGuide(agent.id, reconnect)}
                     onExecutorAction={runExecutorAction}
                     onBindingAction={runBindingAction}
                     onExternalConfigurationStarted={(target) => {
@@ -538,11 +538,12 @@ export default function AgentIntegrationPage() {
         </section>
       </Spin>
       <ExternalCapabilityAccess />
-      {dshGuideOpen && <DSHInstallationGuide
+      {dshGuide && <DSHInstallationGuide
         status={statuses["deepseek-harness"]}
+        startWithConnect={dshGuide === "connect"}
         onConnect={() => runAction("deepseek-harness", "connect", true)}
         onStatus={(status) => setStatuses(current => ({ ...current, "deepseek-harness": status }))}
-        onClose={() => setDSHGuideOpen(false)}
+        onClose={() => setDSHGuide(null)}
       />}
       {codexGuideOpen && <WorkBuddyInstallationGuide
         agent="codex"
@@ -653,7 +654,7 @@ function AgentCard({
   bindings: BindingMap;
   onToggle: () => void;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
-  onOpenInstallationGuide: () => void;
+  onOpenInstallationGuide: (reconnect?: boolean) => void;
   onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
   onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   onExternalConfigurationStarted: (agent: DesktopAgent) => void;
@@ -960,7 +961,7 @@ function AgentConfigurationFlow({
   busyAction: string;
   bindings: BindingMap;
   onMCPAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
-  onOpenInstallationGuide: () => void;
+  onOpenInstallationGuide: (reconnect?: boolean) => void;
   onExecutorAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
   onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   onExternalConfigurationStarted: (agent: DesktopAgent) => void;
@@ -1041,8 +1042,9 @@ function AgentConfigurationFlow({
   const mcpActions = (
     <Space wrap size={8}>
       {["workbuddy", "codex", "deepseek-harness"].includes(agent.id) && !retryDisconnect && !waitingForAction
-        && (mcpStatus?.issue || mcpStatus?.connection?.runtime_state === "connection_required") && mcpStatus?.can_connect && (
-        <Button size="small" disabled={busyAction !== ""} onClick={onOpenInstallationGuide}>
+        && (mcpStatus?.issue || mcpStatus?.connection?.runtime_state === "connection_required" || (agent.id === "deepseek-harness" && mcpChecked))
+        && mcpStatus?.can_connect && (
+        <Button size="small" disabled={busyAction !== ""} onClick={() => onOpenInstallationGuide(true)}>
           {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.reconnect`)}
         </Button>
       )}
@@ -1242,7 +1244,7 @@ function AgentConfigurationFlow({
                 size="small"
                 className="agent-integration-installation-help"
                 icon={<QuestionCircleOutlined />}
-                onClick={onOpenInstallationGuide}
+                onClick={() => onOpenInstallationGuide()}
               >
                 {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.entry`)}
               </Button>

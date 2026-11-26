@@ -104,7 +104,6 @@ class WorkflowNamingCheckTest(unittest.TestCase):
         violations = self._scan(
             'frontend/src/modules/agentIntegration/dshConnection.ts',
             'const menu = "Plugins"; // workflow-naming: dsh-external\n'
-            'const code = "plugin_update_required"; // workflow-naming: dsh-external\n'
             'const route = "/api/plugins"; // workflow-naming: dsh-external\n'
             'const unmarked = "Plugin";\n',
         )

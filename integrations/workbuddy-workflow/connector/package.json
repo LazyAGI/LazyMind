@@ -7,9 +7,9 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "tsdown src/main.ts --format esm --platform node --out-dir dist --no-dts && tsdown src/verify.ts src/presentation.ts src/presentation-frame.ts --format esm --platform node --out-dir dist/diagnostics --no-dts && node scripts/embed.mjs",
+    "build": "tsdown src/main.ts --format esm --platform node --out-dir dist/connector --no-dts --unbundle && tsdown src/verify.ts src/presentation.ts src/presentation-frame.ts --format esm --platform node --out-dir dist/diagnostics --no-dts && node scripts/embed-frame.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "pnpm build && vitest run"
   },
   "devDependencies": {
     "@types/jsdom": "21.1.7",

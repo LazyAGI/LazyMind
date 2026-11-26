@@ -8,8 +8,11 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { createPortal } from 'react-dom'
 import { eventRun, type RunLink } from '../protocol'
 import { runKey, windowStore } from './window-store'
-import { observePresentationConfig, type PresentationConfig } from '../presentation-config'
+import { observePresentationConfig, parsePresentationConfig, type PresentationConfig } from '../presentation-config'
+import { runPresentation } from '../../../workflow-agent-core/src/presentation'
+import { clientBindingLookup, reportClientBuild } from '../binding-rpc'
 import { presentationLink } from '../events'
+export { connectorBuild } from '../connector-build'
 
 declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap { 'lazymind-workflow': RunLink }
@@ -18,10 +21,12 @@ declare module '@deepseek-ai/dsh-client-ui-chat/client' {
 // Electron drag regions intercept native mouse clicks even above lower z-index content.
 const interactiveRegion = { WebkitAppRegion: 'no-drag' } as CSSProperties
 
-export const inject = ['uiConversation', 'slots']
+export const inject = ['uiConversation', 'slots', 'connection']
 
 export function apply(ctx: ClientContext): void {
   let config: PresentationConfig | undefined
+  let unregister: (() => void) | undefined
+  let viewEpoch = 0
   const configListeners = new Set<() => void>()
   const subscribeConfig = (listener: () => void) => { configListeners.add(listener); return () => { configListeners.delete(listener) } }
   const configSnapshot = () => config
@@ -49,7 +54,7 @@ export function apply(ctx: ClientContext): void {
   }
 
   function Entry({ node, sessionId }: { node: ChatNode<'lazymind-workflow'>; sessionId?: string }) {
-    const run = node.data.hostSessionId ? node.data : { ...node.data, hostSessionId: sessionId }
+    const run = { ...node.data, hostSessionId: sessionId ?? node.data.hostSessionId }
     const snapshot = useSyncExternalStore(windows.subscribe, windows.snapshot, windows.snapshot)
     useEffect(() => { windows.observe(run, node.anchorSeq) }, [node.data, node.anchorSeq, sessionId])
     const first = snapshot.firstCards[runKey(run)]
@@ -57,14 +62,28 @@ export function apply(ctx: ClientContext): void {
       || snapshot.entries[run.hostSessionId ?? '']?.run.runId === run.runId) return null
     return <section style={{ margin: '8px 0', border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}>
       <strong>LazyMind Workflow</strong>
-      <button style={{ marginLeft: 12 }} onClick={() => windows.open(run, node.anchorSeq)}>Open workflow</button>
+      <button style={{ marginLeft: 12 }} onClick={() => windows.open(run)}>Open workflow</button>
     </section>
   }
+
+  function publishConfig(next: PresentationConfig | undefined) {
+    if (JSON.stringify(next) === JSON.stringify(config)) return
+    if (config && config.webUrl !== next?.webUrl) windows.clear()
+    config = next
+    unregister?.()
+    unregister = config ? ctx.uiConversation.events.register(definition) : undefined
+    for (const listener of configListeners) listener()
+  }
+
+  const lookupBinding = clientBindingLookup(ctx, value => {
+    if (value === null) { publishConfig(undefined); return }
+    try { publishConfig(parsePresentationConfig(value)) } catch { /* Ignore malformed configuration. */ }
+  })
 
   function WorkflowDock({ session }: { session: { sessionId: string } }) {
     const connection = useSyncExternalStore(subscribeConfig, configSnapshot, configSnapshot)
     const state = useSyncExternalStore(windows.subscribe, windows.snapshot, windows.snapshot)
-    const current = state.entries[session.sessionId]
+    const current = Object.hasOwn(state.entries, session.sessionId) ? state.entries[session.sessionId] : undefined
     const frame = useRef<HTMLIFrameElement>(null)
     const anchor = useRef<HTMLSpanElement>(null)
     const [tail, setTail] = useState<HTMLDivElement | null>(null)
@@ -74,6 +93,30 @@ export function apply(ctx: ClientContext): void {
     const runId = current?.run.runId
     const link = current && connection ? presentationLink(current.run.runId, connection.webUrl) : null
     const origin = link ? new URL(link.url).origin : undefined
+    useLayoutEffect(() => {
+      const lifetime = new AbortController()
+      const chatId = session.sessionId
+      const view = { chatId, epoch: String(++viewEpoch) }
+      void runPresentation({
+        signal: lifetime.signal, frameUrl: config?.webUrl ?? '', lookupBinding,
+        watchView: (report, signal) => {
+          report(view)
+          return new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+        },
+        ui: {
+          async syncPanel(next, target, signal) {
+            if (signal.aborted || next.epoch !== view.epoch) return { status: 'stale' }
+            const run = config && target ? presentationLink(target.runId, config.webUrl) : null
+            windows.binding(chatId, run && { ...run, hostSessionId: chatId })
+            return { status: run ? 'mounted' : 'unmounted' }
+          },
+        },
+        report: state => {
+          if (state.status === 'access-denied') windows.close(chatId)
+        },
+      })
+      return () => { lifetime.abort(); windows.close(chatId) }
+    }, [session.sessionId])
     useLayoutEffect(() => {
       // DSH rc.2 exposes the composer seat inside the shared conversation scroller.
       // Keep our own portal host before that seat: messages grow before the panel,
@@ -148,17 +191,11 @@ export function apply(ctx: ClientContext): void {
     ) : panel}</>
   }
   ctx.effect(() => {
-    let unregister: (() => void) | undefined
-    const stop = observePresentationConfig(globalThis, next => {
-      if (JSON.stringify(next) === JSON.stringify(config)) return
-      config = next
-      // Registry changes make DSH rebuild existing history, including receipts
-      // read before login/config recovery. No workflow event is fabricated.
-      unregister?.()
-      unregister = config ? ctx.uiConversation.events.register(definition) : undefined
-      for (const listener of configListeners) listener()
-    })
-    return () => { stop(); unregister?.() }
+    // Registry changes let DSH rebuild historical receipts after login.
+    const stop = observePresentationConfig(globalThis, publishConfig)
+    const lifetime = new AbortController()
+    reportClientBuild(ctx, lifetime.signal)
+    return () => { lifetime.abort(); stop(); unregister?.() }
   })
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({ name: 'conversation.chat.node', key: 'lazymind-workflow' }, Entry))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'lazymind-workflow', order: -10 }, WorkflowDock))

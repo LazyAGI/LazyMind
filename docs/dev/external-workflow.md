@@ -11,7 +11,7 @@
 | 根 Controller | 读取状态、领取授权，代理工具调用，发布产物、完成步骤，响应停止 |
 | LazyMind Core | 固定 revision，存储输入/产物/状态，检查归属、租约、类型、幂等与版本 |
 | LazyMind Chat 工具服务 | 提供明确开放的确定性工具或用户已配置的媒体能力 |
-| Host Connector | 将继续、取消等通知送到原绑定的宿主会话 |
+| Host Connector | 将继续、取消等通知送到原绑定的宿主会话，为 Codex 和 WorkBuddy 的当前窗口同步工作流面板 |
 
 “零模型配置”指外部执行不依赖 LazyMind 的文本/视觉模型。图片、视频等能力优先由宿主完成；宿主没有能力时可以调用已声明的 LazyMind 工具。两边都不可用时，说明需要在 LazyMind 配置的功能并等待用户重试，不能假装完成或改成交付别的格式。
 
@@ -211,7 +211,7 @@ PPT HTML 导出只接受自包含内容，禁止网络资源、脚本和任意�
 
 ## Codex 安装与外部宿主适配
 
-LazyMind 的 Codex 连接入口安装内置 `lazymind-workflow` 插件与 workflow Skill。源码位于 `local/lazymind-cli/internal/codexplugin/assets/lazymind-workflow/skills/workflow/SKILL.md`。Connector 位于 `integrations/codex-workflow`，继续复用现有会话绑定、通知投递、恢复与面板能力。
+LazyMind 的 Codex 连接入口安装内置 `lazymind-workflow` 插件与 workflow Skill。Skill 源码位于 `local/lazymind-cli/internal/codexplugin/assets/lazymind-workflow/skills/workflow/SKILL.md`，Codex Connector 源码位于 `integrations/codex-workflow`。
 
 本地开发中，已有连接更新 CLI 后使用不重启宿主的刷新入口：
 

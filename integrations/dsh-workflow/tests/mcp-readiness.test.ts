@@ -1,6 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { HostBridge } from '../src/bridge'
+import { HostBridge, reportRuntime } from '../src/bridge'
+import { createDispatcher } from '../../workflow-agent-core/src/dispatcher'
+import type { RuntimeAdapter } from '../../workflow-agent-core/src/adapter'
 import { mcpReadiness } from '../src/mcp-readiness'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -32,7 +34,6 @@ describe('DSH live MCP readiness', () => {
     f.names.clear()
     expect(await f.ready(new AbortController().signal)).toBe(false)
   })
-
   it('does not claim readiness without the optional native connection service', async () => {
     const f = fixture(false)
     expect(await f.ready(new AbortController().signal)).toBe(false)
@@ -60,23 +61,59 @@ describe('DSH live MCP readiness', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('sends fresh MCP evidence with each authenticated action poll', async () => {
-    const f = fixture()
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ actions: [] }), { status: 200 }))
-    // Use a fresh response body for every call.
-    fetch.mockImplementation(async () => new Response(JSON.stringify({ actions: [] }), { status: 200 }))
-    vi.stubGlobal('fetch', fetch)
-    const bridge = new HostBridge('http://127.0.0.1:18086', { connector_id: 'profile-desktop', token: 'token' }, async signal => ({
-      'X-LazyMind-MCP-Ready': await f.ready(signal) ? '1' : '0',
-    }))
-    const signal = new AbortController().signal
-    await bridge.actions('', signal)
-    expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'X-LazyMind-MCP-Ready': '1',
-      'X-LazyMind-Connector-Id': 'profile-desktop', Authorization: 'Bearer token' })
-    f.request.mockRejectedValue(new Error('MCP connection closed'))
-    await bridge.actions('', signal)
-    expect(fetch.mock.calls[1][1].headers['X-LazyMind-MCP-Ready']).toBe('0')
-    // A missing MCP connection does not prevent control actions from being polled.
-    expect(fetch).toHaveBeenCalledTimes(2)
+})
+
+it('continues local heartbeats throughout the shared dispatcher authorization backoff', async () => {
+  vi.useFakeTimers()
+  const lifetime = new AbortController()
+  const mcp = fixture()
+  let actionCalls = 0
+  const heartbeats: Array<{ time: number; headers: Record<string, string> }> = []
+  const fetch = vi.fn(async (url: string, request: { headers: Record<string, string> }) => {
+    if (url.endsWith('/heartbeat')) {
+      heartbeats.push({ time: Date.now(), headers: request.headers })
+      return Response.json({ ok: true })
+    }
+    if (++actionCalls === 1) return Response.json({ code: 'HOST_AUTH_REQUIRED' }, { status: 401 })
+    return Response.json({ actions: [] })
   })
+  vi.stubGlobal('fetch', fetch)
+  const identity = { 'X-LazyMind-DSH-Dispatcher': 'dispatcher', 'X-LazyMind-DSH-Process': 'process' }
+  const headers = async (signal: AbortSignal) => ({
+    ...identity,
+    'X-LazyMind-MCP-Ready': await mcp.ready(signal) ? '1' : '0',
+    'X-LazyMind-DSH-Build': '0.1.6+0000000000000001',
+    'X-LazyMind-DSH-Client-Build': '0.1.6+0000000000000002',
+    'X-LazyMind-DSH-Panel': 'bound',
+  })
+  const bridge = new HostBridge('http://127.0.0.1:19091', { connector_id: 'profile-desktop', token: 'token' }, async () => identity)
+  const native = { cancellation: 'none', warn: vi.fn() } as unknown as RuntimeAdapter<string>
+  const dispatcher = createDispatcher(native, undefined, bridge, 'dispatcher', lifetime.signal)
+  const reporting = reportRuntime(bridge, headers, lifetime.signal)
+  const polling = dispatcher.poll()
+  try {
+    await vi.advanceTimersByTimeAsync(0)
+    const authObservation = dispatcher.connection
+    expect(authObservation?.issue).toBe('lazymind_auth_required')
+    mcp.request.mockRejectedValue(new Error('MCP connection closed'))
+    await vi.advanceTimersByTimeAsync(18_000)
+    expect(actionCalls).toBe(1)
+    expect(dispatcher.connection).toBe(authObservation)
+    expect(heartbeats.at(-1)!.time - authObservation!.checked_at).toBeGreaterThan(12_000)
+    expect(heartbeats.at(-1)!.headers).toMatchObject({
+      ...identity, Authorization: 'Bearer token', 'X-LazyMind-MCP-Ready': '0',
+      'X-LazyMind-DSH-Build': '0.1.6+0000000000000001',
+      'X-LazyMind-DSH-Client-Build': '0.1.6+0000000000000002', 'X-LazyMind-DSH-Panel': 'bound',
+    })
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(actionCalls).toBe(2)
+    expect(dispatcher.connection).toEqual({ checked_at: Date.now(), issue: '' })
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/actions')).at(-1)?.[1].headers).not.toHaveProperty('X-LazyMind-MCP-Ready')
+  } finally {
+    lifetime.abort()
+    await Promise.all([reporting, polling])
+  }
+  const stopped = heartbeats.length
+  await vi.advanceTimersByTimeAsync(12_000)
+  expect(heartbeats).toHaveLength(stopped)
 })

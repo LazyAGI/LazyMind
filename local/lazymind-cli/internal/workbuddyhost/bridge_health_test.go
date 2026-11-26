@@ -27,8 +27,9 @@ func TestWaitReadyNeverAcceptsBridgeFailureWithHealthyDesktop(t *testing.T) {
 				if err = writeAtomic(ConfigPath(home), body); err != nil {
 					t.Fatal(err)
 				}
-				// Even an inconsistent old writer setting ready=true must not mask issue.
-				status := Status{ConnectorID: pair.ConnectorID, Version: "5.9.3", Ready: true, Cancellation: "session", Issue: code, CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+				// The native readiness probe can succeed while Core rejects authorization.
+				status := Status{ConnectorID: pair.ConnectorID, Version: "5.9.3", Ready: true, Cancellation: "session", CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+				status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, code)
 				body, _ = json.Marshal(status)
 				if err = writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
 					t.Fatal(err)

@@ -58,6 +58,30 @@ it('shows results for the explicitly linked run without subscribing to execution
   expect(screen.queryByRole('button', { name: /刷\s*新/ })).not.toBeInTheDocument();
 });
 
+it('reports a successful WorkBuddy Stop with a manual interruption hint', async () => {
+  const baseline = await fixture.load();
+  baseline.session.status = 'active';
+  baseline.control.continuation = 'continue';
+  baseline.control.binding = { provider: 'workbuddy', bound: true };
+  baseline.control.reviews = [];
+  baseline.control.available_actions = ['stop'];
+  fixture.load.mockResolvedValue(baseline);
+  fixture.control.mockImplementation(async (_id, command) => {
+    fixture.load.mockResolvedValue({
+      session: { ...baseline.session, status: 'stopped' },
+      control: { ...baseline.control, state_version: 2, continuation: 'stopped',
+        delivery: { id: 'cancel', kind: 'cancel', status: 'failed' } },
+    });
+    return { data: { data: { receipt: { command_id: command.command_id } } } };
+  });
+  render(<WorkflowRunPage />);
+  await screen.findByRole('button', { name: '确认测试审核' });
+  const adapter: WorkflowPanelControlAdapter = fixture.panel.mock.lastCall?.[0].controlAdapter;
+  await act(async () => { await adapter.execute({ kind: 'stop' }); });
+  expect(fixture.control).toHaveBeenCalledWith('acceptance-test', expect.objectContaining({ kind: 'stop' }), expect.anything());
+  expect(await screen.findByText('工作流已停止，当前回复可在 WorkBuddy 手动停止。')).toBeVisible();
+});
+
 it('shows and copies the complete original request as a native user bubble', async () => {
   const baseline = await fixture.load();
   const text = '根据附件生成四页 PPT，并覆盖论文方法、证据和局限。'.repeat(8);

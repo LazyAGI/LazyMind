@@ -2,10 +2,7 @@ package mcpclient
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +10,7 @@ import (
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -23,7 +21,7 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 		return
 	}
 	status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true,
-		RuntimeState: "unavailable", PresentationStatus: "host-offline"}
+		RuntimeState: "unavailable", LazyMindState: "pending", PresentationStatus: "host-offline"}
 	target := a
 	desktop := a.desktopDSHMode()
 	if desktop {
@@ -46,19 +44,12 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 		}
 	}
 	if desktop {
-		body, readErr := os.ReadFile(filepath.Join(filepath.Dir(target.dshConfigPath()), "package.json"))
-		var manifest struct {
-			DSH struct {
-				Profile struct {
-					Bundles []string `json:"bundles"`
-				} `json:"profile"`
-			} `json:"dsh"`
-		}
-		if readErr != nil || json.Unmarshal(body, &manifest) != nil {
+		enabled, err := dshBundleEnabled(filepath.Dir(target.dshConfigPath()))
+		if err != nil {
 			dshConnectionIssue(status, "configuration_unreadable")
 			return
 		}
-		status.Connection.MCPEnabled = status.Connection.MCPEnabled && slices.Contains(manifest.DSH.Profile.Bundles, dshWorkflowPackage)
+		status.Connection.MCPEnabled = status.Connection.MCPEnabled && enabled
 	}
 	if !status.Connection.MCPEnabled {
 		dshConnectionIssue(status, "mcp_enable_required")
@@ -74,7 +65,7 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 		dshConnectionIssue(status, "lazymind_unavailable")
 		return
 	}
-	account, err := store.AccountScope()
+	account, err := store.AccountScopeSnapshot()
 	if err != nil {
 		code := "lazymind_unavailable"
 		if credentials.IsAuthenticationRequired(err) {
@@ -100,21 +91,50 @@ func (a *Adapter) inspectDSHConnection(ctx context.Context, status *agentintegra
 	// DSH has no separate trust dialog. This field records the valid scoped
 	// pairing, so consumers still require both native enablement and live control.
 	status.Connection.MCPTrusted = true
+	build, err := target.readDSHBuild()
+	if err != nil {
+		dshConnectionIssue(status, "configuration_unreadable")
+		return
+	}
 	if live, err := workflowhost.ReadRuntimeStatus(a.home, pair); err == nil {
-		if live.Issue != "" {
-			dshConnectionIssue(status, live.Issue)
+		if build.Build != "" && !build.matchesLoad(live) {
+			status.Connection.RuntimeState = "waiting"
+			status.Message = "Fully quit and restart the selected DeepSeek Harness profile to load the installed LazyMind plugin."
 			return
 		}
 		status.Connection.ControlReady = true
+		status.Connection.MCPReady = &live.MCPReady
+		status.Connection.RuntimeState = "connected"
+		switch {
+		case live.Panel == "unavailable", build.Build != "" && live.ClientBuild != "" && live.ClientBuild != build.Build:
+			status.Connection.PresentationStatus = "binding-unavailable"
+		case live.Panel == "access-denied", live.Panel == "unbound", live.Panel == "waiting-session":
+			status.Connection.PresentationStatus = live.Panel
+		default:
+			status.Connection.PresentationStatus = "available"
+		}
+		issue := live.ConnectionIssue(pair)
+		agentintegration.SetLazyMindIssue(status, issue)
 		if !live.MCPReady {
-			dshConnectionIssue(status, "mcp_unavailable")
-			status.Connection.ControlReady = true
+			status.Connection.RuntimeState = "unavailable"
+			if status.Issue == nil {
+				status.Issue = dshIssue("mcp_unavailable", "")
+			}
+			status.Message = "DeepSeek Harness has not loaded the LazyMind MCP tools."
+		} else if issue == "" {
+			status.Message = "DeepSeek Harness is connected to LazyMind."
+		} else {
+			status.Message = "DeepSeek Harness session control is available. Check the LazyMind connection."
+		}
+		return
+	}
+	if build.Build != "" {
+		observed, err := workflowhost.ReadLastRuntimeStatus(a.home, pair)
+		if err != nil || !build.matchesLoad(observed) {
+			status.Connection.RuntimeState = "waiting"
+			status.Message = "Fully quit and restart the selected DeepSeek Harness profile to load the installed LazyMind plugin."
 			return
 		}
-		status.Connection.RuntimeState = "connected"
-		status.Connection.PresentationStatus = "available"
-		status.Message = "DeepSeek Harness is connected to LazyMind."
-		return
 	}
 	if desktop {
 		cli, err := agentexec.FindDSHDesktopCLI()
@@ -149,6 +169,9 @@ func (a *Adapter) isDSHDesktopRunning(ctx context.Context, cli string) (bool, er
 func dshConnectionIssue(status *agentintegration.Status, code string) {
 	status.Connection.RuntimeState = "unavailable"
 	status.Connection.ControlReady = false
+	if code == "lazymind_auth_required" || code == "lazymind_unavailable" || code == workflowconnector.ConnectionPending {
+		agentintegration.SetLazyMindIssue(status, code)
+	}
 	status.Issue = &agentintegration.Issue{Code: code}
 	status.Message = "The DeepSeek Harness connection is unavailable. Check the installation guide and retry."
 }

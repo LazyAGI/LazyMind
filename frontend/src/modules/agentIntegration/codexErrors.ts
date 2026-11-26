@@ -7,7 +7,7 @@ const connectionIssueCodes = new Set([
   "startup_unavailable", "runtime_unavailable", "configuration_failed", "pairing_required",
   "pairing_disabled", "pairing_account_mismatch", "pairing_credential_mismatch", "pairing_invalid",
   "pairing_unreadable", "operation_cancelled", "operation_busy", "installation_unavailable",
-  "lazymind_auth_required", "lazymind_unavailable",
+  "lazymind_pending", "lazymind_auth_required", "lazymind_unavailable",
 ]);
 
 export function codexErrorMessage(status: DesktopAgentIntegrationStatus | undefined, t: TFunction,

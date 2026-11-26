@@ -1,6 +1,6 @@
 //go:build windows
 
-package mcpclient
+package workflowhost
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func dshProcessExited(pid int) bool {
+func DSHProcessExited(pid int) bool {
 	handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
 		// Invalid PID proves absence; access denied does not prove termination.

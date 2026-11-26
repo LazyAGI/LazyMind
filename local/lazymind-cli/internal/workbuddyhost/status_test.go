@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"lazymind/agentconnector/internal/workflowhost"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"lazymind/agentconnector/internal/workflowconnector"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 func TestStatusRejectsStaleOtherConnectorAndRemoteEndpoint(t *testing.T) {
@@ -40,7 +43,7 @@ func TestStatusRejectsStaleOtherConnectorAndRemoteEndpoint(t *testing.T) {
 	}
 }
 
-func TestWaitReadyRequiresAHeartbeatAfterInstallationWithCancellation(t *testing.T) {
+func TestWaitReadyRequiresCurrentNativeAndConnectionEvidence(t *testing.T) {
 	home := t.TempDir()
 	pair, err := workflowhost.EnsureForProvider(home, "workbuddy", filepath.Join(home, "profile"), "account")
 	if err != nil {
@@ -57,19 +60,32 @@ func TestWaitReadyRequiresAHeartbeatAfterInstallationWithCancellation(t *testing
 		cancellation string
 		version      string
 		checked      time.Time
+		managed      bool
 		ok           bool
 	}{
-		{"fresh", "session", "5.8.3", time.Now(), true},
-		{"newer", "session", "6.0.0", time.Now(), true},
-		{"numeric ordering", "session", "5.8.10", time.Now(), true},
-		{"prerelease below minimum", "session", "5.8.3-rc.1", time.Now(), false},
-		{"unknown version", "session", "", time.Now(), false},
-		{"before restart", "session", "5.8.3", since.Add(-time.Second), false},
-		{"old worker", "none", "5.8.3", time.Now(), false},
-		{"unsupported layout", "session", "5.7.7", time.Now(), false},
+		{"legacy", "session", "5.8.3", time.Now(), false, true},
+		{"current managed", "none", "5.8.3", time.Now(), true, true},
+		{"newer", "session", "6.0.0", time.Now(), false, true},
+		{"numeric ordering", "session", "5.8.10", time.Now(), false, true},
+		{"prerelease below minimum", "session", "5.8.3-rc.1", time.Now(), false, false},
+		{"unknown version", "session", "", time.Now(), false, false},
+		{"before restart", "none", "5.8.3", since.Add(-time.Second), true, false},
+		{"expired heartbeat", "none", "5.8.3", time.Now().Add(-15 * time.Second), true, false},
+		{"different pairing", "none", "5.8.3", time.Now(), true, false},
+		{"old worker without build identity", "none", "5.8.3", time.Now(), false, false},
+		{"unsupported layout", "session", "5.7.7", time.Now(), false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body, _ := json.Marshal(Status{ConnectorID: pair.ConnectorID, Version: tc.version, Ready: true, Cancellation: tc.cancellation, CheckedAt: tc.checked.UnixMilli(), BridgeURL: "http://127.0.0.1:19091"})
+			status := Status{ConnectorID: pair.ConnectorID, Version: tc.version, Ready: true, Cancellation: tc.cancellation, CheckedAt: tc.checked.UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+			status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, "")
+			if tc.managed {
+				status.Runtime = workflowconnector.Runtime{ConnectorEntry: filepath.Join(home, "main.mjs"),
+					ConnectorVersion: "0.1.0", ConnectorRevision: strings.Repeat("a", 64)}
+			}
+			if tc.name == "different pairing" {
+				status.PairingRevision = "previous"
+			}
+			body, _ := json.Marshal(status)
 			if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
 				t.Fatal(err)
 			}
@@ -98,6 +114,11 @@ func waitReadyFixture(t *testing.T) (string, Config, workflowhost.Pairing) {
 	return home, config, pair
 }
 
+func readinessEvidence(pair workflowhost.Pairing, at int64, issue string) workflowconnector.ConnectionEvidence {
+	return workflowconnector.ConnectionEvidence{PairingRevision: pair.RuntimeRevision,
+		Connection: &workflowconnector.ConnectionObservation{CheckedAt: at, Issue: issue}}
+}
+
 func TestWaitReadyAllowsTransientStartupStatusToRecover(t *testing.T) {
 	for _, issue := range []string{"capability_unavailable", "pairing_disabled"} {
 		t.Run(issue, func(t *testing.T) {
@@ -105,6 +126,11 @@ func TestWaitReadyAllowsTransientStartupStatusToRecover(t *testing.T) {
 			since := time.Now().Add(-time.Second)
 			status := Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: issue,
 				CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+			switch issue {
+			case "lazymind_unavailable", "lazymind_auth_required", "pairing_disabled", "pairing_account_mismatch":
+				status.Issue, status.Ready, status.Cancellation = "", true, "session"
+				status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, issue)
+			}
 			body, _ := json.Marshal(status)
 			if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
 				t.Fatal(err)
@@ -114,6 +140,7 @@ func TestWaitReadyAllowsTransientStartupStatusToRecover(t *testing.T) {
 				time.Sleep(30 * time.Millisecond)
 				status.Issue, status.Ready, status.Cancellation = "", true, "session"
 				status.CheckedAt = time.Now().UnixMilli()
+				status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, "")
 				body, _ := json.Marshal(status)
 				updated <- writeAtomic(config.PairingFile+".workbuddy-status.json", body)
 			}()
@@ -147,8 +174,14 @@ func TestWaitReadyDistinguishesStartupFromTerminalFailures(t *testing.T) {
 	} {
 		t.Run(sample.issue, func(t *testing.T) {
 			home, config, pair := waitReadyFixture(t)
-			body, _ := json.Marshal(Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: sample.issue,
-				CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"})
+			status := Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: sample.issue,
+				CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+			switch sample.issue {
+			case "lazymind_unavailable", "lazymind_auth_required", "pairing_disabled", "pairing_account_mismatch":
+				status.Issue, status.Ready, status.Cancellation = "", true, "session"
+				status.ConnectionEvidence = readinessEvidence(pair, status.CheckedAt, sample.issue)
+			}
+			body, _ := json.Marshal(status)
 			if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
 				t.Fatal(err)
 			}

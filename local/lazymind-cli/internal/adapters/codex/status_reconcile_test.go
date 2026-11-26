@@ -14,6 +14,7 @@ import (
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/connectorlauncher"
 	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 func TestStatusKeepsInstalledConfigurationWhenPathRepairFails(t *testing.T) {
@@ -78,5 +79,65 @@ func TestStatusKeepsInstalledConfigurationWhenPathRepairFails(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestStatusReportsControlAndCoreEvidenceSeparately(t *testing.T) {
+	adapter, store, _ := newPluginReconnectTestAdapter(t)
+	record, err := codexplugin.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := store.AccountScope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, pair, err := codexhost.Load(adapter.home, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		probe, issue, state string
+		mcpDisabled         bool
+	}{
+		{"legacy", workflowconnector.ConnectionPending, "pending", false},
+		{"lazymind_auth_required", "lazymind_auth_required", "authorization_required", false},
+		{"lazymind_unavailable", "lazymind_unavailable", "unavailable", false},
+		{"", "", "connected", false},
+		{"", "mcp_enable_required", "connected", true},
+	} {
+		t.Run(tc.state+"/"+tc.issue, func(t *testing.T) {
+			if tc.mcpDisabled {
+				path := filepath.Join(record.Profile, "config.toml")
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(body), "enabled = true", "enabled = false")), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			at := time.Now().UnixMilli()
+			heartbeat := codexhost.Status{Connector: pair.ConnectorID, CheckedAt: at, Ready: true}
+			heartbeat.Presentation.Status = "binding-unavailable"
+			if tc.probe != "legacy" {
+				heartbeat.ConnectionEvidence = workflowconnector.ConnectionEvidence{PairingRevision: pair.RuntimeRevision,
+					Connection: &workflowconnector.ConnectionObservation{CheckedAt: at, Issue: tc.probe}}
+			}
+			data, _ := json.Marshal(heartbeat)
+			if err := os.WriteFile(record.PairingFile+".codex-status.json", data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			status := adapter.Status(context.Background())
+			conn := status.Connection
+			got := ""
+			if status.Issue != nil {
+				got = status.Issue.Code
+			}
+			if conn == nil || !conn.ControlReady || conn.MCPEnabled == tc.mcpDisabled || conn.LazyMindState != tc.state ||
+				conn.PresentationStatus != "binding-unavailable" || got != tc.issue {
+				t.Fatalf("unexpected status: %+v, connection: %+v", status, conn)
+			}
+		})
 	}
 }

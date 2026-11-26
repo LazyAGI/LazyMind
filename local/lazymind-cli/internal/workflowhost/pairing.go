@@ -41,6 +41,18 @@ func (e *PairingError) Error() string {
 	}
 }
 
+func PairingIssue(err error) string {
+	var pairing *PairingError
+	if !errors.As(err, &pairing) {
+		return ""
+	}
+	return map[string]string{
+		"HOST_PAIRING_MISSING": "pairing_required", "HOST_PAIRING_DISABLED": "pairing_disabled",
+		"HOST_ACCOUNT_MISMATCH": "pairing_account_mismatch", "HOST_CREDENTIAL_MISMATCH": "pairing_credential_mismatch",
+		"HOST_PAIRING_INVALID": "pairing_invalid", "HOST_PAIRING_UNREADABLE": "pairing_unreadable",
+	}[pairing.Code]
+}
+
 type Pairing struct {
 	Provider        string    `json:"provider"`
 	ConnectorID     string    `json:"connector_id"`
@@ -119,7 +131,7 @@ func EnsureForProvider(home, provider, profile, accountScope string) (Pairing, e
 	}
 	// Re-enabling preserves the business credential but invalidates runtime
 	// evidence, including a poll that authenticated before the disconnection.
-	if provider == DSHProvider && (!pair.Enabled || pair.RuntimeRevision == "") {
+	if (provider == DSHProvider || provider == "codex" || provider == "workbuddy") && (!pair.Enabled || pair.RuntimeRevision == "") {
 		generation := make([]byte, 16)
 		if _, err := rand.Read(generation); err != nil {
 			return Pairing{}, err

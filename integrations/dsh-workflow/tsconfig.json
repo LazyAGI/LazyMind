@@ -6,6 +6,7 @@
     "jsx": "react-jsx",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "strict": true,
+    "allowJs": true,
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"]

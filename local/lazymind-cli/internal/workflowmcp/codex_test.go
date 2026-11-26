@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,9 +46,10 @@ func TestCodexDriverIdentity(t *testing.T) {
 func TestControlledStartBindsBeforeReturningStateAndRetainsRetryIdentity(t *testing.T) {
 	for _, provider := range []string{"codex", "workbuddy"} {
 		for _, failBind := range []bool{false, true} {
-			t.Run(map[bool]string{false: "bound", true: "retryable binding failure"}[failBind], func(t *testing.T) {
+			t.Run(provider+"/"+map[bool]string{false: "bound", true: "retryable binding failure"}[failBind], func(t *testing.T) {
 				bound := false
 				requests := 0
+				consumeID := ""
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests++
 					switch r.URL.Path {
@@ -56,17 +58,25 @@ func TestControlledStartBindsBeforeReturningStateAndRetainsRetryIdentity(t *test
 					case "/api/core/workflow-preparations":
 						var body map[string]any
 						_ = json.NewDecoder(r.Body).Decode(&body)
-						if body["host_binding_required"] != true || body["host_provider"] != provider || body["origin_ref"] != provider+":"+threadUUID {
+						if body["host_binding_required"] != true || body["host_provider"] != provider || body["origin_ref"] != provider+":"+threadUUID || body["idempotency_key"] != "retry-1" {
 							t.Errorf("wrong preparation: %v", body)
 						}
 						_, _ = w.Write([]byte(`{"preparation_id":"prep-1"}`))
 					case "/api/core/workflow-preparations/prep-1:consume":
+						var body struct {
+							SessionID string `json:"session_id"`
+						}
+						_ = json.NewDecoder(r.Body).Decode(&body)
+						if consumeID != "" && consumeID != body.SessionID {
+							t.Errorf("retry changed session identity: %q != %q", consumeID, body.SessionID)
+						}
+						consumeID = body.SessionID
 						_, _ = w.Write([]byte(`{"session_id":"run-1","workflow_id":"wf-1"}`))
 					case "/api/core/workflow-sessions/run-1/projection":
 						if !bound {
 							t.Error("projection read before binding")
 						}
-						_, _ = w.Write([]byte(`{"session_id":"run-1","control":{"continuation":"awaiting_user"}}`))
+						_, _ = fmt.Fprintf(w, `{"session_id":"run-1","control":{"continuation":"awaiting_user","binding":{"bound":true,"driver_session_id":%q}}}`, threadUUID)
 					default:
 						t.Errorf("unexpected request: %s", r.URL.Path)
 					}
@@ -78,7 +88,7 @@ func TestControlledStartBindsBeforeReturningStateAndRetainsRetryIdentity(t *test
 				}
 				api, _ := coreapi.New(store)
 				client := &Client{api: api, HostProvider: provider, RequireHostBinding: true, BindController: func(_ context.Context, run, driver string) error {
-					if run != "run-1" || driver != threadUUID || requests != 3 {
+					if run != "run-1" || driver != threadUUID || requests%3 != 0 {
 						t.Fatalf("wrong binding: %s %s requests=%d", run, driver, requests)
 					}
 					if failBind {
@@ -91,12 +101,17 @@ func TestControlledStartBindsBeforeReturningStateAndRetainsRetryIdentity(t *test
 				if err == nil || requests != 0 {
 					t.Fatal("missing identity created a run")
 				}
-				result, err := client.Start(context.Background(), StartInput{WorkflowID: "wf-1", IdempotencyKey: "retry-1", DriverSessionID: threadUUID})
+				input := StartInput{WorkflowID: "wf-1", SessionID: "run-1", IdempotencyKey: "retry-1", DriverSessionID: threadUUID}
+				result, err := client.Start(context.Background(), input)
 				if failBind {
-					if err == nil || !strings.Contains(err.Error(), "idempotency_key=retry-1 and session_id=run-1") || requests != 3 {
-						t.Fatalf("lost retry identity: %v", err)
+					if err != nil || result.BindingStatus != "pending" || result.IdempotencyKey != "retry-1" || result.SessionID != "run-1" || requests != 3 {
+						t.Fatalf("lost retry identity: %+v %v", result, err)
 					}
-				} else if err != nil || result.SessionID != "run-1" || !strings.Contains(result.State.AgentInstruction, "END this turn") {
+					failBind = false
+					input.SessionID, input.IdempotencyKey = result.SessionID, result.IdempotencyKey
+					result, err = client.Start(context.Background(), input)
+				}
+				if err != nil || result.SessionID != "run-1" || result.BindingStatus != "confirmed" || result.State == nil || !strings.Contains(result.State.AgentInstruction, "END this turn") {
 					t.Fatalf("unexpected result: %+v %v", result, err)
 				}
 			})

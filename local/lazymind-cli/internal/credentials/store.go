@@ -108,28 +108,42 @@ func (s *Store) AccountScope() (string, error) {
 	}
 	var scope string
 	err := s.withLock(func() error {
-		value, err := s.loadUnlocked()
-		if err != nil {
-			return err
-		}
-		subject := ""
-		if parts := strings.Split(value.AccessToken, "."); len(parts) == 3 {
-			if body, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
-				var claims map[string]json.RawMessage
-				if json.Unmarshal(body, &claims) == nil {
-					subject = string(claims["sub"])
-				}
-			}
-		}
-		serverIdentity := value.ServerURL
-		if value.LocalRuntimeID != "" && isLoopbackOrigin(value.ServerURL) {
-			serverIdentity = "desktop:" + value.LocalRuntimeID
-		}
-		sum := sha256.Sum256([]byte(serverIdentity + "\x00" + value.Username + "\x00" + value.TenantID + "\x00" + subject))
-		scope = hex.EncodeToString(sum[:])
-		return nil
+		var err error
+		scope, err = s.accountScopeSnapshot()
+		return err
 	})
 	return scope, err
+}
+
+// AccountScopeSnapshot reads the atomically published session without waiting
+// for a Core token refresh that may hold the credentials lock.
+func (s *Store) AccountScopeSnapshot() (string, error) {
+	if err := s.validateConnection(); err != nil {
+		return "", err
+	}
+	return s.accountScopeSnapshot()
+}
+
+func (s *Store) accountScopeSnapshot() (string, error) {
+	value, err := s.loadUnlocked()
+	if err != nil {
+		return "", err
+	}
+	subject := ""
+	if parts := strings.Split(value.AccessToken, "."); len(parts) == 3 {
+		if body, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+			var claims map[string]json.RawMessage
+			if json.Unmarshal(body, &claims) == nil {
+				subject = string(claims["sub"])
+			}
+		}
+	}
+	serverIdentity := value.ServerURL
+	if value.LocalRuntimeID != "" && isLoopbackOrigin(value.ServerURL) {
+		serverIdentity = "desktop:" + value.LocalRuntimeID
+	}
+	sum := sha256.Sum256([]byte(serverIdentity + "\x00" + value.Username + "\x00" + value.TenantID + "\x00" + subject))
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func (s *Store) path() string { return filepath.Join(s.home, credentialFile) }

@@ -29,7 +29,7 @@ func resolveConnection(ctx context.Context, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	scope, err := store.AccountScope()
+	scope, err := store.AccountScopeSnapshot()
 	if err != nil {
 		return err
 	}
@@ -56,5 +56,8 @@ func resolveConnection(ctx context.Context, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return printJSON(stdout, map[string]string{"provider": c.Provider, "webUrl": web, "bridgeUrl": bridge, "pairingFile": c.PairingFile, "serverName": "lazymind", "revision": fmt.Sprintf("%x", sha256.Sum256(body))})
+	return printJSON(stdout, map[string]string{
+		"provider": c.Provider, "webUrl": web, "bridgeUrl": bridge, "pairingFile": c.PairingFile, "serverName": "lazymind",
+		"revision": fmt.Sprintf("%x", sha256.Sum256(body)), "configRevision": c.Revision(),
+	})
 }

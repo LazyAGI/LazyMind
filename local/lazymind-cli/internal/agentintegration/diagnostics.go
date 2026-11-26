@@ -15,6 +15,7 @@ import (
 
 	"lazymind/agentconnector/internal/desktopsetup"
 	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 // Inspection contains only the connection fields needed to diagnose setup.
@@ -52,13 +53,45 @@ func (o *Operation) Finish(status *Status) {
 		code = status.Issue.Code
 	}
 	status.DiagnosticID, status.DiagnosticLog = o.id, diagnosticPath(o.home)
-	status.DiagnosticContext = diagnosticContext(o.home, o.action, o.Stage, o.CLI, o.After)
+	status.DiagnosticContext = diagnosticContext(o.home, o.action, o.Stage, o.CLI, o.After, status)
 	o.record(string(status.State), code, status.Enabled)
 }
 
-func diagnosticContext(home, action, stage, cli string, inspections []Inspection) *DiagnosticContext {
+func diagnosticContext(home, action, stage, cli string, inspections []Inspection, status *Status) *DiagnosticContext {
 	return &DiagnosticContext{Action: action, Stage: stage, CurrentCLI: safePath(cli),
-		AppVersion: os.Getenv("LAZYMIND_DESKTOP_APP_VERSION"), Environment: diagnosticEnvironment(home), Configuration: safeInspections(inspections)}
+		AppVersion: os.Getenv("LAZYMIND_DESKTOP_APP_VERSION"), Environment: diagnosticEnvironment(home), Configuration: safeInspections(inspections), Connector: connectorDiagnostic(home, status)}
+}
+
+func connectorDiagnostic(home string, status *Status) *ConnectorDiagnostic {
+	host := status.Agent
+	if host != "codex" && host != "workbuddy" {
+		return nil
+	}
+	path := workflowconnector.RecordPath(home, host)
+	result := &ConnectorDiagnostic{State: "installed", RecordPath: safePath(path)}
+	installed, err := workflowconnector.Resolve(home, host)
+	if err != nil {
+		var packagePath *workflowconnector.PathError
+		if errors.As(err, &packagePath) {
+			result.FailurePath = safePath(packagePath.Path)
+		}
+		result.State = "invalid"
+		if errors.Is(err, os.ErrNotExist) {
+			result.State = "missing"
+		}
+	}
+	if installed.Entry != "" {
+		result.Version = installed.Version
+		result.EntryPath = safePath(installed.EntryPath())
+		result.PresentationModulePath = safePath(installed.PresentationPath())
+		result.ControlModulePath = safePath(installed.ControlPath())
+		result.Loaded = err == nil && installed.Matches(status.ConnectorRuntime) &&
+			status.ConnectorRuntime.ConnectorReload == workflowconnector.ReloadRequest(home, host)
+		if result.Loaded {
+			result.LoadedRevision = status.ConnectorRuntime.ConnectorRevision
+		}
+	}
+	return result
 }
 
 // Only bootstrap paths and profiles are copied. Empty values must also be
@@ -125,7 +158,7 @@ func appendDiagnostic(home string, row any) {
 // RecordInspection reuses the diagnostic ID while a polled configuration stays unchanged.
 // The small cache is diagnostic metadata, never an input to installation or authorization.
 func RecordInspection(home, cli string, inspections []Inspection, status *Status) {
-	status.DiagnosticContext = diagnosticContext(home, "inspect", "inspect", cli, inspections)
+	status.DiagnosticContext = diagnosticContext(home, "inspect", "inspect", cli, inspections, status)
 	if os.MkdirAll(filepath.Join(home, "logs"), 0700) != nil {
 		return
 	}
@@ -150,7 +183,9 @@ func RecordInspection(home, cli string, inspections []Inspection, status *Status
 		Connection  *ConnectionStatus
 		AppVersion  string
 		Environment map[string]string
-	}{cli, inspections, status.Enabled, status.State, code, status.Connection, status.DiagnosticContext.AppVersion, status.DiagnosticContext.Environment})
+		Connector   *ConnectorDiagnostic
+		HostVersion string
+	}{cli, inspections, status.Enabled, status.State, code, status.Connection, status.DiagnosticContext.AppVersion, status.DiagnosticContext.Environment, status.DiagnosticContext.Connector, status.Version})
 	hash := sha256.Sum256(body)
 	fingerprint := hex.EncodeToString(hash[:])
 	var previous struct {

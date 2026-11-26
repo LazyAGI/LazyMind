@@ -294,3 +294,69 @@ func TestCodexPresentationReadsOnlyItsExistingBinding(t *testing.T) {
 		}
 	}
 }
+
+func TestDSHPresentationReadsOnlyTheCurrentProfileBinding(t *testing.T) {
+	var desktop, web workflowhost.Pairing
+	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("presentation attempted a mutation: %s", r.Method)
+		}
+		switch r.URL.Path {
+		case "/api/core/workflow-sessions":
+			_, _ = w.Write([]byte(`{"sessions":[{"session_id":"desktop-run","created_at":"2026-11-15T00:00:00Z"},{"session_id":"web-run","created_at":"2026-11-20T00:00:00Z"}]}`))
+		case "/api/core/workflow-sessions/desktop-run/control", "/api/core/workflow-sessions/web-run/control":
+			pair := desktop
+			if strings.Contains(r.URL.Path, "web-run") {
+				pair = web
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"control": map[string]any{"binding": map[string]any{
+				"bound": true, "provider": workflowhost.DSHProvider, "connector_id": pair.ConnectorID, "driver_session_id": "shared-id",
+			}}})
+		default:
+			t.Errorf("unexpected Core route %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer core.Close()
+	home := t.TempDir()
+	s := newTestServer(t, home)
+	if err := s.store.Save(credentials.Credentials{ServerURL: core.URL, AccessToken: "access", RefreshToken: "refresh"}); err != nil {
+		t.Fatal(err)
+	}
+	account, err := s.store.AccountScope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	desktop, err = workflowhost.Ensure(home, filepath.Join(home, "desktop"), account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, err = workflowhost.Ensure(home, filepath.Join(home, "web"), account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(pair workflowhost.Pairing, chatID string, code int, run string) {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/v1/deepseek-harness/presentation?session_id="+chatID, nil)
+		r.Header.Set("Authorization", "Bearer "+pair.Token)
+		r.Header.Set("X-LazyMind-Connector-Id", pair.ConnectorID)
+		w := httptest.NewRecorder()
+		s.routes().ServeHTTP(w, r)
+		if w.Code != code {
+			t.Fatalf("status %d: %s", w.Code, w.Body)
+		}
+		if code == http.StatusOK {
+			var got map[string]string
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got["run_id"] != run || got["session_id"] != chatID {
+				t.Fatalf("read wrong session binding %v: %v", got, err)
+			}
+		}
+	}
+	read(desktop, "shared-id", http.StatusOK, "desktop-run")
+	read(web, "shared-id", http.StatusOK, "web-run")
+	read(web, "no-binding", http.StatusOK, "")
+	if err := workflowhost.Disable(home, web.ConnectorID); err != nil {
+		t.Fatal(err)
+	}
+	read(web, "shared-id", http.StatusForbidden, "")
+}

@@ -9,8 +9,9 @@ import RepairRequestCopy from "./RepairRequestCopy";
 type Stage = "prepare" | "installing" | "quitRequired" | "installFailed" | "enable" | "checking" | "notReady" | "success" | "disconnectRequired";
 const imageURL = "/installation-guides/deepseek-harness/enable.png";
 
-export default function DSHInstallationGuide({ status, onConnect, onStatus, onClose }: {
+export default function DSHInstallationGuide({ status, startWithConnect, onConnect, onStatus, onClose }: {
   status?: DesktopAgentIntegrationStatus;
+  startWithConnect?: boolean;
   onConnect: () => Promise<DesktopAgentIntegrationStatus | undefined>;
   onStatus: (status: DesktopAgentIntegrationStatus) => void;
   onClose: () => void;
@@ -18,10 +19,11 @@ export default function DSHInstallationGuide({ status, onConnect, onStatus, onCl
   const { t } = useTranslation();
   const text = (key: string) => t(`agentIntegration.dshInstallGuide.${key}`);
   const [stage, setStage] = useState<Stage>(status?.retry_action === "disconnect" ? "disconnectRequired" : requiresAgentQuit(status) ? "quitRequired"
+    : startWithConnect ? "prepare"
     : status?.issue?.code === "pairing_account_mismatch" ? "notReady"
     : status?.state === "enabled" && (status.connection?.mcp_configured ?? true) ? "enable" : "prepare");
   const [zoomed, setZoomed] = useState(false);
-  const [error, setError] = useState(status?.issue?.code === "pairing_account_mismatch" ? dshErrorMessage(status, t) : "");
+  const [error, setError] = useState(!startWithConnect && status?.issue?.code === "pairing_account_mismatch" ? dshErrorMessage(status, t) : "");
   const [diagnostics, setDiagnostics] = useState(status);
   const diagnostic = diagnostics?.diagnostic_id || diagnostics?.issue?.operation_id;
   const mounted = useRef(true);

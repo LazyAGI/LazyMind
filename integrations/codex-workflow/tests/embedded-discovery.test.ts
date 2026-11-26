@@ -3,9 +3,9 @@ import { runInNewContext } from 'node:vm'
 import { expect, it } from 'vitest'
 
 it('the shipped renderer probe does not evaluate a self-expanding signal family', async () => {
-  // Exercise the asset embedded in the Go executable, not just the TS source:
-  // a stale dispatcher can reintroduce the freeze even when source tests pass.
-  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  // Exercise the editable module from the Connector build, not just the TS source:
+  // a stale package can reintroduce the freeze even when source tests pass.
+  const bundle = readFileSync(new URL('../dist/connector/native.mjs', import.meta.url), 'utf8')
   const start = bundle.indexOf('async function codexOperation(')
   const end = bundle.indexOf('\nfunction nativeExpression(', start)
   expect(start).toBeGreaterThanOrEqual(0)
@@ -32,7 +32,7 @@ it('the shipped renderer probe does not evaluate a self-expanding signal family'
 })
 
 it('the shipped panel discovers indirectly loaded browser modules', async () => {
-  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const bundle = readFileSync(new URL('../dist/connector/presentation-surface.mjs', import.meta.url), 'utf8')
   const start = bundle.indexOf('async function prepareCodexBrowser(')
   const end = bundle.indexOf('\nfunction createCodexSurface(', start)
   expect(start).toBeGreaterThanOrEqual(0)
@@ -55,7 +55,7 @@ it('the shipped panel discovers indirectly loaded browser modules', async () => 
 })
 
 it('the shipped panel discovers the browser through the numbered Rspack entry cache', async () => {
-  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const bundle = readFileSync(new URL('../dist/connector/presentation-surface.mjs', import.meta.url), 'utf8')
   const start = bundle.indexOf('async function prepareCodexBrowser(')
   const end = bundle.indexOf('\nfunction createCodexSurface(', start)
   expect(start).toBeGreaterThanOrEqual(0)
@@ -82,7 +82,7 @@ it('the shipped panel discovers the browser through the numbered Rspack entry ca
 })
 
 it('the shipped RPC reports host ownership and refuses an unfenced interruption', async () => {
-  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const bundle = readFileSync(new URL('../dist/connector/native.mjs', import.meta.url), 'utf8')
   const start = bundle.indexOf('async function codexOperation(')
   const end = bundle.indexOf('\nfunction nativeExpression(', start)
   expect(start).toBeGreaterThanOrEqual(0)
@@ -113,7 +113,7 @@ it('the shipped RPC reports host ownership and refuses an unfenced interruption'
 })
 
 it('the shipped panel discovers the cached browser in numeric Rspack entries', async () => {
-  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const bundle = readFileSync(new URL('../dist/connector/presentation-surface.mjs', import.meta.url), 'utf8')
   const start = bundle.indexOf('async function prepareCodexBrowser(')
   const end = bundle.indexOf('\nfunction createCodexSurface(', start)
   expect(start).toBeGreaterThanOrEqual(0)

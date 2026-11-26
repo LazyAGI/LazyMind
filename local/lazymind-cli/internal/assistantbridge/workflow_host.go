@@ -1,12 +1,15 @@
 package assistantbridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
@@ -40,16 +43,28 @@ func relayWorkflowHost(w http.ResponseWriter, r *http.Request, api *coreapi.Clie
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) workflowHost(w http.ResponseWriter, r *http.Request) (workflowhost.Pairing, *coreapi.Client, bool) {
-	scope, err := s.store.AccountScope()
+func (s *Server) workflowPairing(w http.ResponseWriter, r *http.Request, localSnapshot bool) (workflowhost.Pairing, bool) {
+	accountScope := s.store.AccountScope
+	if localSnapshot {
+		accountScope = s.store.AccountScopeSnapshot
+	}
+	scope, err := accountScope()
 	if err != nil {
 		workflowHostError(w, err)
-		return workflowhost.Pairing{}, nil, false
+		return workflowhost.Pairing{}, false
 	}
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	pair, err := workflowhost.Verify(s.store.Directory(), r.Header.Get("X-LazyMind-Connector-Id"), token, scope)
 	if err != nil {
 		workflowHostError(w, err)
+		return pair, false
+	}
+	return pair, true
+}
+
+func (s *Server) workflowHost(w http.ResponseWriter, r *http.Request) (workflowhost.Pairing, *coreapi.Client, bool) {
+	pair, ok := s.workflowPairing(w, r, false)
+	if !ok {
 		return pair, nil, false
 	}
 	api, err := coreapi.New(s.store)
@@ -74,7 +89,7 @@ func (s *Server) handleWorkflowHostBind(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	cancellation := "none"
-	if pair.Provider == workflowhost.DSHProvider || pair.Provider == "workbuddy" {
+	if pair.Provider == workflowhost.DSHProvider {
 		cancellation = "session"
 	}
 	relayWorkflowHost(w, r, api, http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.RunID)+"/host-binding", map[string]any{
@@ -91,9 +106,44 @@ func (s *Server) handleWorkflowHostState(w http.ResponseWriter, r *http.Request)
 	relayWorkflowHost(w, r, api, http.MethodGet, "/workflow-sessions/"+url.PathEscape(r.PathValue("session"))+"/control?view=control", nil, nil)
 }
 
+func dshRuntimeIdentity(r *http.Request) workflowhost.DSHRuntimeIdentity {
+	return workflowhost.DSHRuntimeIdentity{
+		Dispatcher: r.Header.Get("X-LazyMind-DSH-Dispatcher"), Process: r.Header.Get("X-LazyMind-DSH-Process"),
+		ConfigRevision: r.Header.Get("X-LazyMind-DSH-Config-Revision"), PairingRevision: r.Header.Get("X-LazyMind-DSH-Pairing-Revision"),
+	}
+}
+
+func dshRuntimeLoad(r *http.Request) (bool, workflowhost.DSHLoad) {
+	startedAt, _ := strconv.ParseInt(r.Header.Get("X-LazyMind-DSH-Process-Started-At"), 10, 64)
+	return r.Header.Get("X-LazyMind-MCP-Ready") == "1", workflowhost.DSHLoad{
+		Build: r.Header.Get("X-LazyMind-DSH-Build"), Instance: r.Header.Get("X-LazyMind-DSH-Process"), StartedAt: startedAt,
+		Panel: r.Header.Get("X-LazyMind-DSH-Panel"), ClientBuild: r.Header.Get("X-LazyMind-DSH-Client-Build"),
+	}
+}
+
+func (s *Server) handleDSHRuntimeHeartbeat(w http.ResponseWriter, r *http.Request) {
+	pair, ok := s.workflowPairing(w, r, true)
+	if !ok {
+		return
+	}
+	mcpReady, load := dshRuntimeLoad(r)
+	if err := workflowhost.RecordRuntimeHeartbeat(r.Context(), s.store.Directory(), pair, dshRuntimeIdentity(r), mcpReady, load); err != nil {
+		workflowHostError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) handleWorkflowHostActions(w http.ResponseWriter, r *http.Request) {
 	pair, api, ok := s.workflowHost(w, r)
 	if !ok {
+		return
+	}
+	home := s.store.Directory()
+	identity := dshRuntimeIdentity(r)
+	split := pair.Provider == workflowhost.DSHProvider && identity.Dispatcher != ""
+	if split && !identity.Current(home, pair) {
+		workflowHostError(w, &workflowhost.PairingError{Code: "HOST_PAIRING_INVALID"})
 		return
 	}
 	query := url.Values{"connector_id": {pair.ConnectorID}}
@@ -114,11 +164,18 @@ func (s *Server) handleWorkflowHostActions(w http.ResponseWriter, r *http.Reques
 	if _, valid := result["actions"].([]any); err == nil && !valid {
 		issue = "lazymind_unavailable"
 	}
-	// A dispatcher may run before its MCP client has registered any tools.
-	// Only the current plugin's explicit runtime observation establishes MCP
-	// readiness; older plugins without the header remain visibly unavailable.
-	mcpReady := r.Header.Get("X-LazyMind-MCP-Ready") == "1"
-	if recordErr := workflowhost.RecordRuntimeStatus(s.store.Directory(), pair, issue, mcpReady); recordErr != nil {
+	var recordErr error
+	if split {
+		// A request timeout is still a Core observation when this
+		// dispatcher remains current.
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), time.Second)
+		defer cancel()
+		recordErr = workflowhost.RecordRuntimeConnection(recordCtx, home, pair, identity, issue)
+	} else {
+		mcpReady, loaded := dshRuntimeLoad(r)
+		recordErr = workflowhost.RecordRuntimeStatus(home, pair, issue, mcpReady, loaded)
+	}
+	if recordErr != nil {
 		log.Printf("DSH dispatcher status could not be recorded")
 	}
 	if err != nil {

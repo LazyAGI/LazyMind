@@ -11,3 +11,6 @@ workflows/** text=auto eol=lf
 # Published showcase ZIPs are identified by exact source bytes on every OS.
 # Disable checkout line-ending conversion for both text and binary assets.
 skills/featured/**/assets/** -text
+
+# Keep published DSH Connector archive inputs stable across checkouts.
+integrations/dsh-workflow/** text=auto eol=lf

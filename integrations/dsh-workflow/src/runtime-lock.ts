@@ -1,12 +1,12 @@
 import { open, readFile, unlink } from 'node:fs/promises'
 
 /** One cooperating dispatcher per pairing/profile, including across DSH processes. */
-export async function dispatcherLock(pairingFile: string, instanceId: string): Promise<() => Promise<void>> {
+export async function dispatcherLock(pairingFile: string, instanceId: string, processInstance: string): Promise<() => Promise<void>> {
   const path = `${pairingFile}.runtime.lock`
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const file = await open(path, 'wx', 0o600)
-      try { await file.writeFile(JSON.stringify({ pid: process.pid, instanceId })) } finally { await file.close() }
+      try { await file.writeFile(JSON.stringify({ pid: process.pid, instanceId, processInstance })) } finally { await file.close() }
       return async () => {
         try {
           const current = JSON.parse(await readFile(path, 'utf8'))

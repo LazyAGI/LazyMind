@@ -16,13 +16,8 @@ func codexConnectionFailure(status agentintegration.Status, err error) agentinte
 	if code == "quit_required" {
 		return agentintegration.RequireQuit(status, "connect")
 	}
-	var pairing *workflowhost.PairingError
-	if errors.As(err, &pairing) {
-		code = map[string]string{
-			"HOST_PAIRING_MISSING": "pairing_required", "HOST_PAIRING_DISABLED": "pairing_disabled",
-			"HOST_ACCOUNT_MISMATCH": "pairing_account_mismatch", "HOST_CREDENTIAL_MISMATCH": "pairing_credential_mismatch",
-			"HOST_PAIRING_INVALID": "pairing_invalid", "HOST_PAIRING_UNREADABLE": "pairing_unreadable",
-		}[pairing.Code]
+	if issue := workflowhost.PairingIssue(err); issue != "" {
+		code = issue
 	}
 	if credentials.IsAuthenticationRequired(err) {
 		code = "lazymind_auth_required"

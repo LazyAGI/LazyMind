@@ -59,7 +59,7 @@ function readControl(value) {
 }
 
 //#endregion
-//#region ../workflow-agent-core/src/transport.ts
+//#region ../workflow-agent-core/src/transport-errors.ts
 var BridgeError = class extends Error {
 	constructor(code, message, status) {
 		super(message);
@@ -77,6 +77,76 @@ function isHostAuthorizationError(error) {
 		"HOST_PAIRING_UNREADABLE"
 	].includes(error.code));
 }
+
+//#endregion
+//#region ../workflow-agent-core/src/request-retry.ts
+const pairingIssues = {
+	HOST_PAIRING_MISSING: "pairing_required",
+	HOST_PAIRING_DISABLED: "pairing_disabled",
+	HOST_ACCOUNT_MISMATCH: "pairing_account_mismatch",
+	HOST_CREDENTIAL_MISMATCH: "pairing_credential_mismatch",
+	HOST_PAIRING_INVALID: "pairing_invalid",
+	HOST_PAIRING_UNREADABLE: "pairing_unreadable"
+};
+var RequestRetry = class {
+	failures = 0;
+	retryAt = 0;
+	observation;
+	resetBackoff() {
+		this.failures = 0;
+		this.retryAt = 0;
+	}
+	succeeded() {
+		this.resetBackoff();
+		this.observeSuccess();
+	}
+	observeSuccess() {
+		this.observation = {
+			checked_at: Date.now(),
+			issue: ""
+		};
+	}
+	failed(error) {
+		const now = Date.now();
+		const authorization = isHostAuthorizationError(error);
+		const previous = this.observation?.issue;
+		const issue = authorization ? Object.hasOwn(pairingIssues, error.code) ? pairingIssues[error.code] : "lazymind_auth_required" : previous || "lazymind_unavailable";
+		const delay = authorization ? 3e4 : Math.min(3e4, 1e3 * 2 ** Math.min(this.failures, 5));
+		this.failures++;
+		this.retryAt = now + delay;
+		this.observation = {
+			checked_at: now,
+			issue
+		};
+		return {
+			authorization,
+			issue
+		};
+	}
+};
+function requestErrorCode(error) {
+	return error instanceof BridgeError && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : "BRIDGE_UNAVAILABLE";
+}
+function waitUntil(at, signal) {
+	return new Promise((resolve, reject) => {
+		if (signal.aborted) {
+			reject(signal.reason);
+			return;
+		}
+		const abort = () => {
+			clearTimeout(timer);
+			reject(signal.reason);
+		};
+		const timer = setTimeout(() => {
+			signal.removeEventListener("abort", abort);
+			resolve();
+		}, Math.max(0, at - Date.now()));
+		signal.addEventListener("abort", abort, { once: true });
+	});
+}
+
+//#endregion
+//#region ../workflow-agent-core/src/transport.ts
 var HostBridge = class {
 	base;
 	constructor(url, pairing, actionHeaders) {
@@ -91,8 +161,12 @@ var HostBridge = class {
 		this.base = parsed.href.replace(/\/$/, "") + "/v1/workflow-host";
 	}
 	async request(path, signal, body, headers) {
-		const response = await fetch(this.base + path, {
+		return this.requestURL(this.base + path, signal, body, headers);
+	}
+	async requestURL(url, signal, body, headers) {
+		const response = await fetch(url, {
 			method: body === void 0 ? "GET" : "POST",
+			redirect: "error",
 			signal: AbortSignal.any([signal, AbortSignal.timeout(15e3)]),
 			headers: {
 				...headers,
@@ -109,6 +183,9 @@ var HostBridge = class {
 		const value = decoded && typeof decoded === "object" && !Array.isArray(decoded) ? decoded : {};
 		if (!response.ok) throw new BridgeError(typeof value.code === "string" ? value.code : "BRIDGE_ERROR", typeof value.error === "string" ? value.error : "Workflow Bridge request failed", response.status);
 		return value;
+	}
+	async reportHeartbeat(headers, signal) {
+		await this.request("/heartbeat", signal, {}, headers);
 	}
 	async bind(runId, driver, signal) {
 		return (await this.request("/bind", signal, {
@@ -137,6 +214,40 @@ var HostBridge = class {
 			error
 		});
 	}
+	lookupBinding(provider) {
+		const retries = /* @__PURE__ */ new WeakMap();
+		return async (chatId, signal) => {
+			signal.throwIfAborted();
+			let retry = retries.get(signal);
+			if (!retry) {
+				retry = new RequestRetry();
+				retries.set(signal, retry);
+			}
+			try {
+				const url = new URL(`/v1/${provider}/presentation`, this.base);
+				url.searchParams.set("session_id", chatId);
+				const response = await this.requestURL(url, signal);
+				signal.throwIfAborted();
+				if (response.session_id !== chatId || typeof response.run_id !== "string" || response.run_id !== "" && !/^[a-zA-Z0-9_-]{1,256}$/.test(response.run_id)) throw new Error("Invalid presentation response");
+				retry.succeeded();
+				return response.run_id ? {
+					status: "bound",
+					runId: response.run_id
+				} : { status: "unbound" };
+			} catch (error) {
+				signal.throwIfAborted();
+				if (error instanceof BridgeError && error.status === 403 && !isHostAuthorizationError(error)) {
+					retry.succeeded();
+					return { status: "access-denied" };
+				}
+				const { authorization } = retry.failed(error);
+				return {
+					status: authorization ? "access-denied" : "unavailable",
+					retryAt: retry.retryAt
+				};
+			}
+		};
+	}
 };
 
 //#endregion
@@ -150,8 +261,25 @@ async function loadPairing(path) {
 	if (!value || typeof value.connector_id !== "string" || typeof value.token !== "string" || value.token.length !== 64 || value.enabled !== true) throw new Error("Workflow pairing is unavailable; reconnect DeepSeek Harness from LazyMind");
 	return {
 		connector_id: value.connector_id,
-		token: value.token
+		token: value.token,
+		...typeof value.runtime_revision === "string" ? { runtime_revision: value.runtime_revision } : {}
 	};
+}
+/** Report local runtime evidence independently of the dispatcher's Core backoff. */
+async function reportRuntime(host, headers, signal) {
+	while (!signal.aborted) {
+		try {
+			const bounded = AbortSignal.any([signal, AbortSignal.timeout(2500)]);
+			const current = await headers(bounded);
+			bounded.throwIfAborted();
+			await host.reportHeartbeat(current, bounded);
+		} catch {}
+		try {
+			await waitUntil(Date.now() + 3e3, signal);
+		} catch {
+			return;
+		}
+	}
 }
 
 //#endregion
@@ -218,7 +346,7 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 		}
 	}
 	function suspendGoal(scope) {
-		if (!scope.runId || !scope.automatic || driver(scope.agent) !== scope.agent || !scope.control || !PAUSED.has(scope.control.continuation) || hasModelWork(scope)) return;
+		if (!scope.runId || !scope.automatic || scope.stopInput?.blocked || driver(scope.agent) !== scope.agent || !scope.control || !PAUSED.has(scope.control.continuation) || hasModelWork(scope)) return;
 		runtime.suspendGoal?.(scope.agent, {
 			runId: scope.runId,
 			goalId: scope.goalId,
@@ -268,6 +396,8 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 		const goal = runtime.goal?.(root);
 		if (goal && ownedAt && goal.createdAt <= ownedAt) scope.goalId = goal.id;
 		else if (goal && ownedAt && goal.createdAt > ownedAt) scope.automatic = false;
+		const currentTurn = runtime.activeTurn?.(scope.agent);
+		if (scope.automatic && currentTurn && currentTurn.startSeq < ownedSeq) scope.turn = currentTurn.turn;
 	}
 	function ensure(agent) {
 		const existing = scopes.get(agent);
@@ -341,13 +471,20 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 			scope.activeOwned = scope.automatic = true;
 			scope.manual = false;
 		}
+		const driverId = runtime.id(root);
 		if (operation === "start") {
 			scope.activeOwned = scope.automatic = rootScope.activeOwned = rootScope.automatic = true;
 			scope.manual = rootScope.manual = false;
+			if (exec.nested && run) ptcLinks.set(exec.callId, {
+				...run,
+				hostSessionId: driverId,
+				operation
+			});
 		}
 		try {
-			const fresh = operation === "start" ? await bridge.bind(runId, runtime.id(root), signal(exec.signal)) : returned ?? await bridge.state(runId, signal(exec.signal));
-			if (fresh.binding?.driver_session_id !== runtime.id(root)) return null;
+			const fresh = operation === "start" ? await bridge.bind(runId, driverId, signal(exec.signal)) : returned ?? await bridge.state(runId, signal(exec.signal));
+			if (fresh.binding?.driver_session_id !== driverId) return null;
+			if (operation === "start" && (!fresh.binding.bound || fresh.session_id !== runId)) throw new Error("Workflow binding confirmation is pending");
 			if (rootScope.runId && rootScope.runId !== runId && operation !== "start") {
 				if (scope !== rootScope) {
 					scope.runId = runId;
@@ -422,6 +559,10 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 			scope.manual = false;
 			scope.activeOwned = scope.automatic;
 		}
+		scope.turnSignal = payload.signal;
+		const userInputs = payload.messages.filter((message) => message.user);
+		const stopInput = userInputs.length ? { blocked: true } : void 0;
+		if (stopInput) scope.stopInput = stopInput;
 		try {
 			const action = await lookupInput(payload.agent, payload.messages, payload.signal);
 			if (action) {
@@ -430,11 +571,15 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 				scope.activeOwned = scope.automatic = true;
 				scope.manual = false;
 				publish(scope.runId, action.control);
-			} else if (payload.messages.some((message) => message.user)) {
+			} else if (userInputs.length) {
 				scope.manual = true;
 				scope.activeOwned = scope.automatic = false;
 			}
 			if ((!scope.manual || scope.activeOwned) && !completion(scope)) await refresh(scope, payload.signal);
+			if (stopInput && scope.stopInput === stopInput) {
+				const binding = scope.control?.binding;
+				stopInput.blocked = !!action && !(action.action.kind !== "cancel" && scope.runId === action.action.session_id && binding?.bound && binding.driver_session_id === runtime.id(payload.agent) && binding.connector_id && binding.connector_id === action.action.connector_id && userInputs.every((message) => message.requestId === action.action.id));
+			}
 			if (action?.action.kind === "model_generate" && action.action.execution_id) {
 				const binding = scope.control?.binding;
 				scope.modelJobs.delete(action.action.execution_id);
@@ -465,12 +610,16 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 		beforeTurn,
 		async cancelSession(agent, claim) {
 			const { action, control } = claim;
-			if (action.consumed_at || control.continuation !== "stopped") throw new AdmissionRejected("Cancellation no longer applies to this Workflow.");
+			if (action.kind !== "cancel" || action.status !== "dispatching" || action.consumed_at || control.continuation !== "stopped") throw new AdmissionRejected("Cancellation no longer applies to this Workflow.");
 			const scope = ensure(agent);
-			if (scope.runId !== action.session_id) return;
+			if (scope.runId !== action.session_id || lifetime.aborted || runtime.id(agent) !== action.native_session_id || driver(agent) !== agent || runtime.isLive?.(agent) !== true) return;
 			publish(action.session_id, control);
-			if (scope.activeOwned && scope.automatic && !scope.manual && runtime.isRunning?.(agent) !== false) await runtime.cancel(agent);
+			if (scope.control?.continuation !== "stopped") throw new AdmissionRejected("Cancellation no longer applies to this Workflow.");
+			const running = runtime.isRunning?.(agent) === true;
+			if (running && (scope.turnSignal?.aborted || runtime.activeTurn && (scope.turn === void 0 || runtime.activeTurn(agent)?.turn !== scope.turn))) return;
+			const cancellation = running && scope.activeOwned && scope.automatic && !scope.manual && !scope.stopInput?.blocked ? runtime.cancel(agent) : void 0;
 			suspendGoal(scope);
+			await cancellation;
 		},
 		cacheClaim(claim) {
 			actionCache.set(claim.action.id, claim);
@@ -489,6 +638,8 @@ function createCoordinator(runtime, bridge, webUrl, lifetime) {
 			if (scope) {
 				scope.activeOwned = false;
 				scope.manual = false;
+				scope.turn = void 0;
+				scope.turnSignal = void 0;
 			}
 		},
 		forget(agent) {
@@ -552,14 +703,17 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 		}
 		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
+	const retry = new RequestRetry();
 	async function poll() {
-		let failures = 0, lastWarning = "";
+		let lastWarning = "";
 		while (!signal.aborted) {
-			let retryMs = 1e3;
 			try {
 				let after = "";
 				do {
 					const page = await bridge.actions(after, signal);
+					if (signal.aborted) return;
+					if (!Array.isArray(page.actions)) throw new Error("Invalid Workflow actions response");
+					retry.observeSuccess();
 					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
@@ -568,20 +722,19 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 					}
 					after = page.next_page_token ?? "";
 				} while (after && !signal.aborted);
-				failures = 0;
+				if (signal.aborted) return;
+				retry.resetBackoff();
 				lastWarning = "";
 			} catch (error) {
 				if (signal.aborted) break;
-				const needsAuthorization = isHostAuthorizationError(error);
-				retryMs = needsAuthorization ? 3e4 : Math.min(3e4, 1e3 * 2 ** Math.min(failures, 5));
-				failures++;
-				const code = error instanceof BridgeError && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : "BRIDGE_UNAVAILABLE";
-				const warning = needsAuthorization ? `lazymind-workflow: authorization required (${code}); sign in or repair the connection in LazyMind` : `lazymind-workflow: reconnecting Bridge (${code})`;
+				const { authorization } = retry.failed(error);
+				const code = requestErrorCode(error);
+				const warning = authorization ? `lazymind-workflow: authorization required (${code}); sign in or repair the connection in LazyMind` : `lazymind-workflow: reconnecting Bridge (${code})`;
 				if (warning !== lastWarning) runtime.warn(warning);
 				lastWarning = warning;
 			}
 			try {
-				await delay(retryMs, signal);
+				await waitUntil(retry.retryAt || Date.now() + 1e3, signal);
 			} catch {
 				break;
 			}
@@ -589,25 +742,11 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 	}
 	return {
 		deliver,
-		poll
-	};
-}
-function delay(ms, signal) {
-	return new Promise((resolve, reject) => {
-		if (signal.aborted) {
-			reject(signal.reason);
-			return;
+		poll,
+		get connection() {
+			return retry.observation;
 		}
-		const abort = () => {
-			clearTimeout(timer);
-			reject(signal.reason);
-		};
-		const timer = setTimeout(() => {
-			signal.removeEventListener("abort", abort);
-			resolve();
-		}, ms);
-		signal.addEventListener("abort", abort, { once: true });
-	});
+	};
 }
 function continuationMessage(action, control) {
 	if (action.kind === "model_generate") return `LazyMind model request: session_id=${action.session_id}, job_id=${action.execution_id}. Call workflow.generation.claim with a stable command_id. Only with status=running, execute the exact generation_request as a model worker. LazyMind has reserved one of at most two workers for this Workflow session. Claim ready_job_ids too and run up to two native model workers concurrently when available. Keep worker_token in the controller. Use the supplied messages, tool definitions and response format. Generate an OpenAI assistant message with content or tool_calls. Treat each job as a fresh model call. Read every message in its original order, including earlier data, schemas and guidance; the final message may contain only task parameters or a repair error. Generate the response from this request, including each repair request. LazyMind runs the tools, business logic, validation and publication. After the worker ends, return its message with workflow.generation.respond and unchanged worker_token and request_hash. For cancel_requested, acknowledge cancelled=true without generating. For already_claimed or terminal status, END this turn. Do not begin or complete Workflow steps, publish artifacts, approve reviews, or call a LazyMind model. Wait for the next notification.`;
@@ -778,6 +917,17 @@ function dshRuntime(ctx, serverName, webUrl) {
 		parent,
 		isLive: (agent) => ctx.agents.get(agent.session.id) === agent,
 		isRunning: (agent) => agent.status === "running",
+		activeTurn(agent) {
+			const events = agent.session.ownEvents();
+			for (let index = events.length - 1; index >= 0; index--) {
+				const event = events[index];
+				if (event.type === "turn/end") return void 0;
+				if (event.type === "turn/start") return {
+					turn: event.data.turn,
+					startSeq: event.seq
+				};
+			}
+		},
 		history: (agent) => [...agent.session.ownEvents()].map((event) => ({
 			seq: event.seq,
 			time: event.time,
@@ -875,23 +1025,43 @@ function workflowTool(original, hooks) {
 			}
 		},
 		async execute(args, exec) {
+			const start = hooks.operation === "start";
+			const startArgs = start ? object(args) : void 0;
+			if (startArgs && hooks.hostSessionId) {
+				const key = typeof startArgs.idempotency_key === "string" && startArgs.idempotency_key ? startArgs.idempotency_key : "dsh-" + createHash("sha256").update(hooks.hostSessionId + "\0" + exec.callId).digest("hex");
+				args = {
+					...startArgs,
+					driver_session_id: hooks.hostSessionId,
+					idempotency_key: key
+				};
+			}
 			const value = await original.execute(args, exec);
 			const control = hooks.afterResult ? await hooks.afterResult(value, exec) : readControl(value);
 			if (hooks.shouldConclude ? hooks.shouldConclude(control, exec) : control?.continuation === "awaiting_user") exec.concludeTurn();
 			const record = object(value);
 			const fields = object(record?.structuredContent);
 			const earlier = readControl(value);
-			if (control && fields && record && (earlier?.state_version !== control.state_version || earlier?.continuation !== control.continuation)) return {
-				...record,
-				structuredContent: {
-					...fields,
-					control
-				},
-				...Array.isArray(record.content) ? { content: [...record.content, {
-					type: "text",
-					text: JSON.stringify({ control })
-				}] } : {}
-			};
+			const confirmed = start && control?.binding?.bound === true && control.binding.driver_session_id === hooks.hostSessionId;
+			if (control && fields && record && (confirmed || earlier?.state_version !== control.state_version || earlier?.continuation !== control.continuation)) {
+				const update = {
+					control,
+					...confirmed ? {
+						binding_status: "confirmed",
+						agent_instruction: ""
+					} : {}
+				};
+				return {
+					...record,
+					structuredContent: {
+						...fields,
+						...update
+					},
+					...Array.isArray(record.content) ? { content: [...record.content, {
+						type: "text",
+						text: JSON.stringify(update)
+					}] } : {}
+				};
+			}
 			return value;
 		}
 	};
@@ -967,9 +1137,7 @@ function installHost(ctx, bridge, config, instanceId) {
 	}
 	const removeHook0 = ctx.on("agent/pre-step", (payload, next) => own((async () => {
 		const registration = ensure(payload.agent);
-		await registration.ready;
-		wrap(payload.agent, registration);
-		const allowed = await coordinator.beforeTurn({
+		const decision = coordinator.beforeTurn({
 			...payload,
 			messages: payload.messages.map((message) => {
 				const source = object(object(message)?.source);
@@ -979,6 +1147,8 @@ function installHost(ctx, bridge, config, instanceId) {
 				};
 			})
 		});
+		const [allowed] = await Promise.all([decision, registration.ready]);
+		wrap(payload.agent, registration);
 		if (allowed === "skip") {
 			registration.resumeInbox = true;
 			return {
@@ -1038,14 +1208,15 @@ function installHost(ctx, bridge, config, instanceId) {
 //#endregion
 //#region src/runtime-lock.ts
 /** One cooperating dispatcher per pairing/profile, including across DSH processes. */
-async function dispatcherLock(pairingFile, instanceId) {
+async function dispatcherLock(pairingFile, instanceId, processInstance$1) {
 	const path = `${pairingFile}.runtime.lock`;
 	for (let attempt = 0; attempt < 2; attempt++) try {
 		const file = await open(path, "wx", 384);
 		try {
 			await file.writeFile(JSON.stringify({
 				pid: process.pid,
-				instanceId
+				instanceId,
+				processInstance: processInstance$1
 			}));
 		} finally {
 			await file.close();
@@ -1261,7 +1432,67 @@ function mcpReadiness(ctx, serverName) {
 }
 
 //#endregion
+//#region src/connector-build.ts
+const connectorBuild = "0.1.6+19df2cf115a48218";
+
+//#endregion
+//#region src/binding-rpc.ts
+const channel = "/api";
+const endpoint = "lazymind/workflow-binding";
+const identifier = /^[A-Za-z0-9_-]{1,256}$/;
+const buildIdentifier = /^[0-9][A-Za-z0-9.-]{0,63}\+[a-f0-9]{16}$/;
+function installBindingRPC(ctx, source, report) {
+	ctx.inject(["connection", "sessionController"], (scope) => {
+		scope.get("connection")?.fetch?.register({
+			path: channel + "/lazymind/workflow-binding",
+			methods: ["POST"],
+			requestBody: "buffered",
+			async fetch(request) {
+				const body = object(await request.json().catch(() => void 0));
+				const payload = object(body?.payload);
+				const sessionId = payload?.sessionId;
+				const clientBuild = typeof payload?.clientBuild === "string" && buildIdentifier.test(payload.clientBuild) ? payload.clientBuild : void 0;
+				if (body?.type !== "client-request" || body.method !== endpoint || typeof body.rpcId !== "string" || !identifier.test(body.rpcId) || sessionId !== null && (typeof sessionId !== "string" || !identifier.test(sessionId))) return new Response(null, { status: 400 });
+				const response = (binding, config) => {
+					if (!request.signal.aborted) report(sessionId === null ? "waiting-session" : binding.status, clientBuild);
+					return Response.json({
+						type: "server-response",
+						rpcId: body.rpcId,
+						result: {
+							ok: true,
+							value: {
+								sessionId,
+								binding,
+								config: config && {
+									serverName: config.serverName,
+									webUrl: config.webUrl
+								}
+							}
+						}
+					}, { headers: { "Cache-Control": "no-store" } });
+				};
+				const active = source();
+				if (!active) return response({ status: "access-denied" }, null);
+				if (sessionId === null) return response({ status: "unbound" }, active.config);
+				if (clientBuild && clientBuild !== connectorBuild) return response({ status: "unavailable" }, active.config);
+				try {
+					const { items } = await scope.sessionController.list({}, request.signal);
+					if (!items.some((item) => item.sessionId === sessionId)) return response({ status: "unavailable" }, active.config);
+					const binding = await active.lookup(sessionId, request.signal);
+					if (active !== source()) return response({ status: "access-denied" }, null);
+					return response(binding, active.config);
+				} catch {
+					return active === source() ? response({ status: "unavailable" }, active.config) : response({ status: "access-denied" }, null);
+				}
+			}
+		});
+	});
+}
+
+//#endregion
 //#region src/index.ts
+const processStartedAt = Math.round(Date.now() - process.uptime() * 1e3);
+const processInstance = randomUUID();
 const inject = [
 	"tools",
 	"agents",
@@ -1270,25 +1501,61 @@ const inject = [
 /** Pairing and live addresses are resolved together; inherited endpoint env is ignored. */
 async function apply(ctx, config) {
 	let presentation;
+	let binding;
+	let panel;
+	let clientBuild;
 	let lastError = "";
 	const readiness = /* @__PURE__ */ new Map();
 	installPresentationConfig(ctx, () => presentation);
+	installBindingRPC(ctx, () => binding, (status, build) => {
+		if (status !== "waiting-session") panel = {
+			status,
+			at: Date.now()
+		};
+		if (build) clientBuild = build;
+	});
 	const stop = watchConnection((signal) => resolveConnection(config, signal), async (current) => {
 		const pairing = await loadPairing(current.pairingFile);
 		const instance = randomUUID();
-		const release = await dispatcherLock(current.pairingFile, instance);
+		const release = await dispatcherLock(current.pairingFile, instance, processInstance);
 		try {
 			let mcpReady = readiness.get(current.serverName);
 			if (!mcpReady) {
 				mcpReady = mcpReadiness(ctx, current.serverName);
 				readiness.set(current.serverName, mcpReady);
 			}
-			const dispose = installHost(ctx, new HostBridge(current.bridgeUrl, pairing, async (signal) => ({ "X-LazyMind-MCP-Ready": await mcpReady(signal) ? "1" : "0" })), current, instance);
-			presentation = current;
+			const identity = current.configRevision && pairing.runtime_revision ? {
+				"X-LazyMind-DSH-Dispatcher": instance,
+				"X-LazyMind-DSH-Process": processInstance,
+				"X-LazyMind-DSH-Config-Revision": current.configRevision,
+				"X-LazyMind-DSH-Pairing-Revision": pairing.runtime_revision
+			} : {};
+			const runtimeHeaders = async (signal) => ({
+				...identity,
+				"X-LazyMind-MCP-Ready": await mcpReady(signal) ? "1" : "0",
+				"X-LazyMind-DSH-Build": connectorBuild,
+				"X-LazyMind-DSH-Process": processInstance,
+				"X-LazyMind-DSH-Process-Started-At": String(processStartedAt),
+				"X-LazyMind-DSH-Panel": panel && Date.now() - panel.at < 2e4 ? panel.status : "waiting-session",
+				...clientBuild ? { "X-LazyMind-DSH-Client-Build": clientBuild } : {}
+			});
+			const host = new HostBridge(current.bridgeUrl, pairing, async () => identity);
+			const dispose = installHost(ctx, host, current, instance);
+			const runtimeLifetime = new AbortController();
+			const heartbeat = current.configRevision && pairing.runtime_revision ? reportRuntime(host, runtimeHeaders, runtimeLifetime.signal) : Promise.resolve();
+			presentation = {
+				serverName: current.serverName,
+				webUrl: current.webUrl
+			};
+			binding = {
+				lookup: host.lookupBinding("deepseek-harness"),
+				config: presentation
+			};
 			lastError = "";
 			return async () => {
+				runtimeLifetime.abort();
 				try {
-					await dispose();
+					await Promise.all([heartbeat, dispose()]);
 				} finally {
 					await release();
 				}
@@ -1299,6 +1566,9 @@ async function apply(ctx, config) {
 		}
 	}, (error) => {
 		presentation = void 0;
+		binding = void 0;
+		panel = void 0;
+		clientBuild = void 0;
 		const message = error instanceof Error ? error.message : "";
 		if (message && message !== lastError) console.warn("LazyMind Workflow:", message);
 		if (message) lastError = message;
@@ -1308,4 +1578,4 @@ async function apply(ctx, config) {
 }
 
 //#endregion
-export { apply, inject };
+export { apply, connectorBuild, inject };

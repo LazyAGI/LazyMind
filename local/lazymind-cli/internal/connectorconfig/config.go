@@ -54,6 +54,13 @@ func Path(home, provider, profile string) string {
 	return filepath.Join(home, "connections", provider+"-"+hex.EncodeToString(hash[:8])+".json")
 }
 
+// Revision identifies the exact settings a runtime resolved.
+func (c Config) Revision() string {
+	body, _ := json.Marshal(c)
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
 func Load(path string) (Config, error) {
 	var c Config
 	if !filepath.IsAbs(path) {

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -26,10 +27,11 @@ import (
 
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 // Older brokers still route some requests by their saved Desktop session.
-const bridgeProtocol = "v11"
+const bridgeProtocol = "v12"
 const bridgeProduct = "lazymind-assistant-bridge"
 const managementHeader = "X-LazyMind-Bridge-Control"
 const foregroundLauncherJobEnv = "LAZYMIND_CONNECTOR_LAUNCHER_JOB"
@@ -129,7 +131,15 @@ func stageBridgeExecutable(root string) (string, error) {
 	if _, err := io.Copy(hash, source); err != nil {
 		return "", err
 	}
+	sidecars, err := workflowconnector.ReadPackage(self)
+	if err != nil {
+		log.Printf("Workflow Connector source package: %v", err)
+	}
+	hash.Write([]byte(sidecars.Identity()))
 	path := filepath.Join(root, "bridge", "bin", hex.EncodeToString(hash.Sum(nil)), filepath.Base(self))
+	if err := sidecars.Stage(path); err != nil {
+		log.Printf("Workflow Connector staged package: %v", err)
+	}
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -189,7 +199,7 @@ func compatibleBridge(status map[string]any, home string, isolated bool) bool {
 func releasableBridge(status map[string]any, home string) bool {
 	// Older scoped brokers still support authenticated deployment release.
 	version := status["version"]
-	return (version == bridgeProtocol || version == "v10" || version == "v9") && bridgeMatchesScope(status, home, false)
+	return (version == bridgeProtocol || version == "v11" || version == "v10" || version == "v9") && bridgeMatchesScope(status, home, false)
 }
 
 func launchBridge(ctx context.Context, executable, home, address string, isolated bool) (map[string]any, error) {
@@ -288,6 +298,14 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 				return nil, errors.New("an incompatible Assistant Bridge is using this environment; it was preserved. Stop its owning deployment before upgrading the shared bridge, then retry")
 			}
 			continue
+		}
+		// Provision the current distribution before the deployment uses it.
+		self, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		if err := workflowconnector.Provision(ctx, client.Home, self, true); err != nil {
+			log.Printf("Workflow Connector package: %v", err)
 		}
 		if healthErr != nil {
 			listener, err := net.Listen("tcp", candidate)

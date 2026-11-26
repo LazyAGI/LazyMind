@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,10 +13,10 @@ import (
 	"strconv"
 	"time"
 
-	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 var recoveryThread = regexp.MustCompile(`(?i)^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
@@ -162,13 +160,8 @@ func deliverRecovery(ctx context.Context, home, request string, intent RecoveryI
 	if err != nil {
 		return err
 	}
-	bundle, err := codexplugin.DispatcherBundle()
+	installed, err := workflowconnector.Resolve(home, "codex")
 	if err != nil {
-		return err
-	}
-	sum := sha256.Sum256(bundle)
-	script := filepath.Join(home, "codex-workflow", "recover-"+hex.EncodeToString(sum[:8])+".mjs")
-	if err := localfile.Write(script, bundle, 0600); err != nil {
 		return err
 	}
 	body, err := json.Marshal(map[string]any{"request_id": request, "intent": intent})
@@ -179,7 +172,7 @@ func deliverRecovery(ctx context.Context, home, request string, intent RecoveryI
 	if err != nil {
 		return err
 	}
-	command := backgroundCommand(ctx, c.Node, script, "--recover-intent", "--pairing-file", c.PairingFile, "--cdp-port", strconv.Itoa(c.Port), "--bridge-url", "http://"+address)
+	command := backgroundCommand(ctx, c.Node, installed.EntryPath(), "--recover-intent", "--pairing-file", c.PairingFile, "--cdp-port", strconv.Itoa(c.Port), "--bridge-url", "http://"+address)
 	command.Stdin = bytes.NewReader(body)
 	command.WaitDelay = time.Second
 	var stderr bytes.Buffer

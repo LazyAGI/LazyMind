@@ -1,4 +1,7 @@
 import { defineConfig } from 'tsdown'
+import { dshBuildVersion } from './release-version.mjs'
+
+const define = { __LAZYMIND_DSH_BUILD__: JSON.stringify(dshBuildVersion) }
 
 /**
  * Build a regular DSH Host plugin plus the browser module-table artifact.
@@ -11,6 +14,7 @@ export default defineConfig([
   {
     entry: { index: 'src/index.ts' },
     outDir: 'lib',
+    define,
     format: 'esm',
     platform: 'node',
     external: [/^@deepseek-ai\//],
@@ -22,6 +26,7 @@ export default defineConfig([
   {
     entry: { client: 'src/client/index.tsx' },
     outDir: 'lib',
+    define,
     format: 'cjs',
     platform: 'browser',
     target: 'es2024',

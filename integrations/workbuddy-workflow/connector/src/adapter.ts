@@ -1,5 +1,4 @@
 import { AdmissionRejected, type RuntimeAdapter } from '../../../workflow-agent-core/src/adapter'
-import type { ActionClaim } from '../../../workflow-agent-core/src/transport'
 import { Cdp } from './cdp'
 import { sdkOperation } from './sdk'
 import { workbuddyVersionIssue } from './compatibility'
@@ -7,7 +6,7 @@ import type { Diagnostic, DiagnosticFields } from './diagnostics'
 
 const sessionPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
 export class WorkBuddyAdapter implements RuntimeAdapter<string> {
-  readonly cancellation = 'session' as const
+  readonly cancellation = 'none' as const
   constructor(private cdp: Pick<Cdp, 'evaluate'>, private log: Diagnostic = () => {}) {}
   id(id: string) { return id }
   warn(message: string) {
@@ -52,21 +51,6 @@ export class WorkBuddyAdapter implements RuntimeAdapter<string> {
   async cancel(sessionId: string, fields: DiagnosticFields = {}) {
     if (!sessionPattern.test(sessionId)) throw new AdmissionRejected('Native WorkBuddy session UUID required')
     await this.admission('cancel', sessionId, {}, AbortSignal.timeout(10000), fields)
-  }
-  // Core's authenticated binding determines the target. WorkBuddy supports
-  // session Stop, not an expected-request fence or per-turn ownership hooks.
-  control(signal: AbortSignal) {
-    return {
-      cacheClaim(_claim: ActionClaim) {},
-      cancelSession: async (sessionId: string, { action, control }: ActionClaim) => {
-        if (action.kind !== 'cancel' || action.native_session_id !== sessionId || action.consumed_at
-          || action.status !== 'dispatching' || control.session_id !== action.session_id || control.continuation !== 'stopped') {
-          throw new AdmissionRejected('Cancellation no longer applies to this bound Workflow session')
-        }
-        signal.throwIfAborted()
-        await this.cancel(sessionId, { action_id: action.id, run_id: action.session_id, execution_id: action.execution_id })
-      },
-    }
   }
   async identify(args: unknown, signal: AbortSignal) {
     const result = await this.call({ kind: 'identity', arguments: args }, signal)

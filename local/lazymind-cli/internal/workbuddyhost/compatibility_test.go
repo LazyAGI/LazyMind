@@ -3,6 +3,7 @@ package workbuddyhost
 import (
 	"encoding/binary"
 	"encoding/json"
+	"lazymind/agentconnector/internal/agentexec"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,7 +49,7 @@ func TestDesktopManifestOnMacAndWindowsLayouts(t *testing.T) {
 			if err := os.WriteFile(path, archive, 0600); err != nil {
 				t.Fatal(err)
 			}
-			version, err := desktopVersion(application)
+			version, err := agentexec.ElectronVersion(application)
 			if err != nil || version != "6.0.0" {
 				t.Fatalf("%s %v", version, err)
 			}
@@ -57,7 +58,7 @@ func TestDesktopManifestOnMacAndWindowsLayouts(t *testing.T) {
 			if err := os.WriteFile(path, archive, 0600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = desktopVersion(application); err == nil {
+			if _, err = agentexec.ElectronVersion(application); err == nil {
 				t.Fatal("accepted corrupt header")
 			}
 		})

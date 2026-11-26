@@ -1,27 +1,36 @@
 import { expect, it, vi } from 'vitest'
 import { presentationLoop } from '../src/presentation'
 import type { Cdp } from '../src/cdp'
+import type { BindingResult } from '../../../workflow-agent-core/src/adapter'
 
-it.each([503, 403])('retains the iframe on temporary failure but removes it on auth rejection (%s)', async status => {
+it('unmounts the current session panel when binding access is denied', async () => {
   const lifetime = new AbortController()
-  const evaluate = vi.fn(async (expression: string) => expression.includes('function readPresentationSession') ? { session_id: 'native-1', epoch: 'epoch-1' } : undefined)
-  let reject!: (error: Error) => void
-  const request = vi.fn(() => new Promise((_, fail) => { reject = fail }))
+  const evaluate = vi.fn(async (expression: string) => {
+    if (expression.includes('function readPresentationSession')) return { session_id: 'native-1', epoch: 'epoch-1' }
+    if (expression.includes('?.wait(')) await new Promise(resolve => lifetime.signal.addEventListener('abort', resolve, { once: true }))
+    return { status: 'unbound' }
+  })
+  let finish!: (result: BindingResult) => void
+  const request = vi.fn(() => new Promise<BindingResult>(resolve => { finish = resolve }))
   const loop = presentationLoop({ evaluate } as unknown as Cdp, request, 'http://127.0.0.1:19091', lifetime.signal)
   try {
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce())
-    reject(Object.assign(new Error('unavailable'), { status }))
-    // Finish the rejection microtasks before asserting, without retrying polls.
+    finish({ status: 'access-denied' })
     await new Promise(resolve => setImmediate(resolve))
-    const disposals = evaluate.mock.calls.filter(([expression]) => expression.startsWith('window.__lazymindWorkflowTail?.dispose()'))
-    expect(disposals).toHaveLength(status === 403 ? 1 : 0)
+    const disposals = evaluate.mock.calls.filter(([expression]) => expression.includes('"run_id":""'))
+    expect(disposals).toHaveLength(1)
+    expect(disposals[0][0]).toContain('"session_id":"native-1"')
+    expect(disposals[0][0]).toContain('"epoch":"epoch-1"')
   } finally { lifetime.abort(); await loop }
 })
 
 it('reports the home page as waiting for a session and cleans up on shutdown', async () => {
   const lifetime = new AbortController()
-  const evaluate = vi.fn(async (expression: string) => expression.includes('function readPresentationSession')
-    ? { session_id: null, epoch: 'home' } : undefined)
+  const evaluate = vi.fn(async (expression: string) => {
+    if (expression.includes('function readPresentationSession')) return { session_id: null, epoch: 'home' }
+    if (expression.includes('?.wait(')) await new Promise(resolve => lifetime.signal.addEventListener('abort', resolve, { once: true }))
+    return { status: 'unbound' }
+  })
   const states: string[] = []
   await presentationLoop({ evaluate } as unknown as Cdp, vi.fn(), 'http://127.0.0.1:19091', lifetime.signal, value => {
     states.push(value.status)

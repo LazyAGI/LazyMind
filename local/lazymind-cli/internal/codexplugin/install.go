@@ -29,7 +29,7 @@ import (
 
 const Name = "lazymind-workflow"
 
-//go:embed all:assets/lazymind-workflow assets/dispatcher.mjs
+//go:embed all:assets/lazymind-workflow
 var assets embed.FS
 
 var marketplaceName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)

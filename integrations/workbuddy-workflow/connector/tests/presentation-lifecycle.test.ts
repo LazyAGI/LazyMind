@@ -13,10 +13,11 @@ it('recovers discovery/reconnection without blocking the display loop and dispos
       if (++attempts === 1) throw Error('CDP offline')
       return { session_id: 'native-1', epoch: 'epoch-1' }
     }
+    if (expression.includes('?.wait(')) await new Promise(resolve => lifetime.signal.addEventListener('abort', resolve, { once: true }))
     if (expression.startsWith('window.__lazymindWorkflowTail?.dispose()')) return undefined
     return { status: 'mounted', page_status: 'ready' }
   })
-  const request = vi.fn(async () => ({ session_id: 'native-1', run_id: 'run-1' }))
+  const request = vi.fn(async () => ({ status: 'bound' as const, runId: 'run-1' }))
   await presentationLoop({ evaluate } as unknown as Cdp, request, 'http://127.0.0.1:19091', lifetime.signal, value => {
     statuses.push(value)
     if (value.status === 'mounted') lifetime.abort()
@@ -31,7 +32,7 @@ it('does not inject a late lookup after disable', async () => {
   const evaluate = vi.fn(async (expression: string) => expression.includes('function readPresentationSession') ? { session_id: 'native-1', epoch: 'epoch-1' } : undefined)
   const request = vi.fn(async () => {
     lifetime.abort()
-    return { session_id: 'native-1', run_id: 'run-1' }
+    return { status: 'bound' as const, runId: 'run-1' }
   })
   await presentationLoop({ evaluate } as unknown as Cdp, request, 'http://127.0.0.1:19091', lifetime.signal)
   expect(evaluate).toHaveBeenCalledTimes(2) // discovery + final cleanup, no mount
