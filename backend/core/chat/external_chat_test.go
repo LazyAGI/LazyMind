@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -490,6 +491,39 @@ func TestDSHHistoryOnlyImportsThreadsObservedByMCP(t *testing.T) {
 		if _, err := externalcontext.New(db).SyncSessionCatalog(t.Context(), identity[0], provider, identity[1], []externalcontext.NativeSession{session}, false); !errors.Is(err, externalcontext.ErrInvalidSource) {
 			t.Fatalf("unobserved identity %v: %v", identity, err)
 		}
+	}
+}
+
+func TestConversationSourcesScopesExternalBindings(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	const owner = "user-1"
+	bindings := []orm.ExternalAgentBinding{
+		{ConversationID: "native-dsh", Provider: ChatExecutorDSH, CreatedByUserID: owner},
+		{ConversationID: "managed-dsh", Provider: ChatExecutorDSH, CreatedByUserID: owner, ManagedByLazyMind: true},
+		{ConversationID: "managed-codex", Provider: ChatExecutorCodex, CreatedByUserID: owner, ManagedByLazyMind: true},
+		{ConversationID: "another-owner", Provider: ChatExecutorDSH, CreatedByUserID: "user-2"},
+		{ConversationID: "not-requested", Provider: ChatExecutorDSH, CreatedByUserID: owner},
+	}
+	for i := range bindings {
+		bindings[i].ID = "binding-" + bindings[i].ConversationID
+		bindings[i].HostID = "host"
+		bindings[i].ProviderThreadID = "thread-" + bindings[i].ConversationID
+	}
+	if err := db.Create(&bindings).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, err := conversationSources(t.Context(), db, owner, []string{"native-dsh", "managed-dsh", "managed-codex", "another-owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]conversationSource{
+		"native-dsh":    {Assistant: ChatExecutorDSH},
+		"managed-dsh":   {Assistant: ChatExecutorLazyMind},
+		"managed-codex": {Assistant: ChatExecutorCodex},
+		"another-owner": {Assistant: ChatExecutorLazyMind},
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("conversation sources = %v, want %v", got, want)
 	}
 }
 

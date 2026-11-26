@@ -24,15 +24,15 @@ func ConversationSourceIDs(db *gorm.DB, userID, assistants string) (*gorm.DB, er
 	q := db.Model(&orm.Conversation{}).Select("conversations.id").Where("create_user_id = ?", userID)
 	external := db.Model(&orm.ExternalAgentBinding{}).Select("1").
 		Where("external_agent_bindings.conversation_id = conversations.id AND external_agent_bindings.created_by_user_id = ?", userID).
-		Where("external_agent_bindings.provider <> ? OR external_agent_bindings.managed_by_lazymind = ?", "deepseek-harness", false)
+		Where("(external_agent_bindings.provider <> ? OR external_agent_bindings.managed_by_lazymind = ?)", "deepseek-harness", false)
 	visible := db.Table("external_agent_bindings AS visible_bindings").Select("1").
 		Joins("LEFT JOIN external_agent_sessions AS visible_sessions ON visible_sessions.owner_user_id = visible_bindings.created_by_user_id AND visible_sessions.provider = visible_bindings.provider AND visible_sessions.host_id = visible_bindings.host_id AND visible_sessions.provider_thread_id = visible_bindings.provider_thread_id").
 		Where("visible_bindings.conversation_id = conversations.id AND visible_bindings.created_by_user_id = ?", userID).
-		Where("visible_bindings.provider <> ? OR visible_bindings.managed_by_lazymind = ?", "deepseek-harness", false).
-		Where("visible_bindings.managed_by_lazymind = ? OR visible_sessions.active = ?", true, true)
+		Where("(visible_bindings.provider <> ? OR visible_bindings.managed_by_lazymind = ?)", "deepseek-harness", false).
+		Where("(visible_bindings.managed_by_lazymind = ? OR visible_sessions.active = ?)", true, true)
 	assistants = strings.ToLower(strings.TrimSpace(assistants))
 	if assistants == "" {
-		return q.Where("NOT EXISTS (?) OR EXISTS (?)", external, visible), nil
+		return q.Where("(NOT EXISTS (?) OR EXISTS (?))", external, visible), nil
 	}
 	providers := []string{}
 	includeLazyMind := false
@@ -48,7 +48,7 @@ func ConversationSourceIDs(db *gorm.DB, userID, assistants string) (*gorm.DB, er
 		}
 	}
 	if includeLazyMind && len(providers) > 0 {
-		return q.Where("NOT EXISTS (?) OR EXISTS (?)", external, visible.Where("visible_bindings.provider IN ?", providers)), nil
+		return q.Where("(NOT EXISTS (?) OR EXISTS (?))", external, visible.Where("visible_bindings.provider IN ?", providers)), nil
 	}
 	if includeLazyMind {
 		return q.Where("NOT EXISTS (?)", external), nil
