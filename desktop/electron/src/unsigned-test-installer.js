@@ -8,6 +8,9 @@ const { assertTestPaths } = require("./unsigned-test-profile");
 const failure = (code, handoffStarted = false) => Object.assign(new Error(code), { code, handoffStarted });
 const run = promisify(execFile);
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
+// Both commands run bounded native work. In particular, install may copy
+// and validate the entire application before acknowledging the handoff.
+const helperTimeoutMs = 10 * 60_000;
 
 function createUnsignedTestInstaller({ profile, currentVersion, resourcesPath, setQuitting, quit }) {
   const source = path.join(resourcesPath, "runtime", "bin", "unsigned-update-helper");
@@ -41,7 +44,7 @@ function createUnsignedTestInstaller({ profile, currentVersion, resourcesPath, s
       if (hash(fs.readFileSync(helper)) !== sha) throw failure("native_package_changed");
       let prepared;
       try {
-        const result = await run(helper, ["prepare"], { timeout: 10 * 60_000, maxBuffer: 4096 });
+        const result = await run(helper, ["prepare"], { timeout: helperTimeoutMs, maxBuffer: 4096 });
         prepared = JSON.parse(result.stdout);
       } catch { throw failure("native_prepare_failed"); }
       if (disposed || prepared.status !== "prepared" || !/^[a-f0-9]{32}$/.test(prepared.id) || prepared.releaseId !== release.releaseId) {
@@ -56,7 +59,7 @@ function createUnsignedTestInstaller({ profile, currentVersion, resourcesPath, s
           const timer = setTimeout(() => {
             child.kill();
             fail("native_handoff_unknown");
-          }, 30_000);
+          }, helperTimeoutMs + 5_000);
           function fail(code) {
             if (settled) return;
             settled = true;

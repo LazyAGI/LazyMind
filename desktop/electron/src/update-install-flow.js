@@ -162,7 +162,7 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
         const status = await runtime.status();
         if (!alive(op)) return;
         if (status.active !== 0) { await delay(op, 2000); if (!alive(op)) return; continue; }
-        op.epoch = ++epoch;
+        op.epoch = runtime.nextEpoch ? runtime.nextEpoch() : ++epoch;
         const locked = await runtime.pause(op.epoch);
         if (!alive(op)) return;
         if (!locked.paused || locked.epoch !== op.epoch) throw failure("task_state_unknown");

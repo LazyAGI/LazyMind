@@ -33,8 +33,8 @@ func verifyInstalledIdentity(ctx context.Context, encoded string) error {
 	if runtime.GOOS == "darwin" {
 		app := filepath.Clean(filepath.Join(resources, "..", ".."))
 		if update.UnsignedTestBuild {
-			paths, err := update.UnsignedPaths()
-			if err != nil || app != paths.Application || update.VerifyUnsignedMacBundle(bounded, app, c) != nil {
+			paths, systemApps, err := update.UnsignedApplicationLocations()
+			if err != nil || !update.IsUnsignedApplication(app, paths, systemApps) || update.VerifyUnsignedMacBundle(bounded, app, c) != nil {
 				return errors.New("build_identity_mismatch")
 			}
 			return nil

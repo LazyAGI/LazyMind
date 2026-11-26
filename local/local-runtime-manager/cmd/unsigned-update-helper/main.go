@@ -5,9 +5,11 @@ package main
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -32,7 +34,7 @@ func main() {
 
 func run(ctx context.Context, args []string, out io.Writer) error {
 	invalid := errors.New("unsigned_test_identity")
-	p, err := update.UnsignedPaths()
+	p, systemApplications, err := update.UnsignedApplicationLocations()
 	if err != nil {
 		return err
 	}
@@ -41,28 +43,80 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil || json.Unmarshal(raw, &cfg) != nil || update.ValidateConfig(cfg) != nil {
 		return invalid
 	}
+	if len(args) == 2 && (args[0] == "recover" || args[0] == "recover-on-exit") {
+		if args[0] == "recover-on-exit" {
+			var one [1]byte
+			n, e := os.Stdin.Read(one[:])
+			if e == nil && n == 1 && one[0] == 1 {
+				return nil
+			}
+			if e != io.EOF || n != 0 {
+				return invalid
+			}
+		}
+		return update.RecoverInterruptedUnsignedInstall(ctx, cfg, p, systemApplications, args[1], func(undo, backup, expectedSeal string) error {
+			proof := p
+			proof.Application = undo
+			if err := checkCachedHelper(ctx, proof); err != nil {
+				return err
+			}
+			source, err := sourceSeal(ctx, undo, cfg)
+			if err != nil {
+				return err
+			}
+			saved, err := sourceSeal(ctx, backup, cfg)
+			if err != nil {
+				return err
+			}
+			if source != saved || source != expectedSeal {
+				return invalid
+			}
+			return nil
+		})
+	}
 	parent, err := update.IdentifyProcess(os.Getppid())
 	if err != nil {
 		return err
 	}
-	if len(args) == 1 && args[0] == "prepare" {
-		r, err := update.UnsignedHandoffRecord(cfg, p, parent, "pending")
-		if err != nil {
-			return err
-		}
-		if err := prepare(ctx, p, cfg, r); err != nil {
+	p.Application, err = unsignedSourceApplication(p, systemApplications, parent)
+	if err != nil {
+		return err
+	}
+	if err := checkCachedHelper(ctx, p); err != nil {
+		return err
+	}
+	phase := "pending"
+	if len(args) == 2 && args[0] == "install" {
+		phase = "installing"
+	} else if len(args) != 1 || args[0] != "prepare" {
+		return invalid
+	}
+	r, err := update.AcceptedUnsignedHandoff(ctx, cfg, p, parent, phase)
+	if err != nil {
+		return err
+	}
+	p.Runtime = r.RuntimeRoot
+	if phase == "pending" {
+		if err := update.WithAcceptedUnsignedPreparation(ctx, cfg, p, parent, r, func() error { return prepare(ctx, p, cfg, r) }); err != nil {
 			return err
 		}
 		return json.NewEncoder(out).Encode(map[string]string{"status": "prepared", "id": r.TransactionID, "releaseId": r.TargetReleaseID})
 	}
-	if len(args) != 2 || args[0] != "install" {
+	if r.TransactionID != args[1] {
 		return invalid
 	}
-	if err := update.WithUnsignedV2Handoff(ctx, cfg, p, parent, func(r *update.NativeRecord) error {
-		if r.TransactionID != args[1] {
-			return invalid
+	var replacement *localReplacement
+	defer func() {
+		if replacement != nil {
+			replacement.close()
 		}
-		return install(ctx, p, cfg, r, parent, out)
+	}()
+	if err := update.WithAcceptedUnsignedV2Handoff(ctx, cfg, p, parent, r, func(locked *update.NativeRecord) error {
+		var e error
+		replacement, e = prepareInstall(ctx, p, cfg, locked)
+		return e
+	}, func(locked *update.NativeRecord) error {
+		return replacement.dispatch(ctx, p, cfg, locked, parent, out, func() error { return update.CheckUnsignedHandoffOffer(ctx, cfg, p.Updater, locked) })
 	}); err != nil {
 		return err
 	}
@@ -74,6 +128,34 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
+// The Electron copy in the OS-account updater cache and the helper in the
+// selected source bundle must still be the same content-addressed binary.
+func checkCachedHelper(ctx context.Context, p update.UnsignedTestPaths) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	source := filepath.Join(p.Application, "Contents", "Resources", "runtime", "bin", "unsigned-update-helper")
+	if update.NoUnsignedPathAliases(source) != nil || update.NoUnsignedPathAliases(exe) != nil {
+		return errors.New("unsigned_test_identity")
+	}
+	file, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	digest := sha256.New()
+	size, err := io.Copy(digest, file)
+	if err != nil {
+		return err
+	}
+	hash := fmt.Sprintf("%x", digest.Sum(nil))
+	if exe != filepath.Join(p.Updater, "helpers", hash, "unsigned-update-helper") {
+		return errors.New("unsigned_test_identity")
+	}
+	return update.VerifyArtifact(ctx, exe, update.Artifact{Size: size, SHA256: hash})
+}
+
 func stagePath(p update.UnsignedTestPaths, r *update.NativeRecord) string {
 	return filepath.Join(p.Updater, "installs", r.TransactionID)
 }
@@ -83,7 +165,20 @@ func packageArtifact(r *update.NativeRecord) update.Artifact {
 }
 
 func prepare(ctx context.Context, p update.UnsignedTestPaths, cfg update.Config, r *update.NativeRecord) error {
-	if err := update.VerifyUnsignedMacBundle(ctx, p.Application, cfg); err != nil {
+	workspace, _, err := localInstallDirectory(p, r.TransactionID)
+	if err != nil {
+		return err
+	}
+	defer workspace.Close()
+	seal, err := sourceSeal(ctx, p.Application, cfg)
+	if err != nil {
+		return err
+	}
+	source, err := os.Stat(p.Application)
+	if err != nil {
+		return err
+	}
+	if err := workspace.BindSource(seal, source); err != nil {
 		return err
 	}
 	dir := stagePath(p, r)
@@ -100,11 +195,18 @@ func prepare(ctx context.Context, p update.UnsignedTestPaths, cfg update.Config,
 	if err := copyVerifiedPackage(ctx, r.PackagePath, bundle, packageArtifact(r)); err != nil {
 		return err
 	}
-	_, err := candidate(ctx, p, cfg, r)
+	_, err = candidate(ctx, p, cfg, r, filepath.Join(workspace.Directory, "target"))
 	return err
 }
 
 func copyVerifiedPackage(ctx context.Context, from, to string, artifact update.Artifact) error {
+	info, err := os.Lstat(from)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() != artifact.Size {
+		return errors.New("unsigned_test_package")
+	}
 	in, err := os.Open(from)
 	if err != nil {
 		return err
@@ -131,7 +233,7 @@ func copyVerifiedPackage(ctx context.Context, from, to string, artifact update.A
 
 // Re-extract the verified ZIP after the source exits. The staged copy is not a
 // separate authority over the bundle that will replace the source.
-func candidate(ctx context.Context, p update.UnsignedTestPaths, cfg update.Config, r *update.NativeRecord) (string, error) {
+func candidate(ctx context.Context, p update.UnsignedTestPaths, cfg update.Config, r *update.NativeRecord, destination string) (string, error) {
 	dir := stagePath(p, r)
 	archive := filepath.Join(dir, "package.zip")
 	if err := update.NoUnsignedPathAliases(archive); err != nil {
@@ -140,7 +242,6 @@ func candidate(ctx context.Context, p update.UnsignedTestPaths, cfg update.Confi
 	if err := update.VerifyArtifact(ctx, archive, packageArtifact(r)); err != nil {
 		return "", err
 	}
-	destination := filepath.Join(dir, "target")
 	if err := update.NoUnsignedPathAliases(destination); err != nil {
 		return "", err
 	}
@@ -156,6 +257,13 @@ func candidate(ctx context.Context, p update.UnsignedTestPaths, cfg update.Confi
 	app := filepath.Join(destination, update.TestAppName+".app")
 	cfg.ReleaseID, cfg.Version = r.TargetReleaseID, r.TargetVersion
 	if err := update.VerifyUnsignedMacBundle(ctx, app, cfg); err != nil {
+		return "", err
+	}
+	catalog := filepath.Join(app, "Contents", "Resources", "runtime", "config", "python-components.json")
+	if err := update.NoUnsignedPathAliases(catalog); err != nil {
+		return "", err
+	}
+	if err := update.VerifyArtifact(ctx, catalog, update.Artifact{SHA256: r.ComponentsSHA256, Size: r.ComponentsSize}); err != nil {
 		return "", err
 	}
 	// The ad-hoc seal confirms bundle integrity, while the verified package
@@ -175,44 +283,6 @@ func candidate(ctx context.Context, p update.UnsignedTestPaths, cfg update.Confi
 		return "", errors.New("unsigned_test_target_config")
 	}
 	return app, nil
-}
-
-func install(ctx context.Context, p update.UnsignedTestPaths, cfg update.Config, r *update.NativeRecord, parent update.ProcessIdentity, out io.Writer) error {
-	if err := json.NewEncoder(out).Encode(map[string]string{"status": "accepted"}); err != nil {
-		return err
-	}
-	for {
-		alive, err := update.SameProcess(parent)
-		if err != nil {
-			return err
-		}
-		if !alive {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	if err := update.VerifyUnsignedMacBundle(ctx, p.Application, cfg); err != nil {
-		return err
-	}
-	app, err := candidate(ctx, p, cfg, r)
-	if err != nil {
-		return err
-	}
-	backup := filepath.Join(stagePath(p, r), "previous.app")
-	if _, err := os.Lstat(backup); !os.IsNotExist(err) {
-		return errors.New("unsigned_test_backup_exists")
-	}
-	if err := os.Rename(p.Application, backup); err != nil {
-		return err
-	}
-	if err := os.Rename(app, p.Application); err != nil {
-		return errors.Join(err, os.Rename(backup, p.Application))
-	}
-	return nil
 }
 
 // Validate AppleDouble and runtime link layout before letting ditto preserve

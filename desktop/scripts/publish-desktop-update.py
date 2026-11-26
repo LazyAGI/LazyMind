@@ -66,28 +66,30 @@ def digest(stream, expected):
 
 
 def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, validate=None, validator=None,
-            expected_policy_sha256=None):
+            expected_policy_sha256=None, verified_source_records=None):
     log.info('Validating publication inputs')
     directory = Path(directory).resolve()
     config = json.loads(Path(config_path).read_text())
     envelope = Path(policy_path).read_bytes()
     if len(envelope) > MAX_POLICY_BYTES:
         raise ValueError('Policy too large')
+    def check(raw, historical=False, rotation_key=None):
+        with tempfile.TemporaryDirectory(prefix='lm-policy-check-') as temp:
+            filename = Path(temp) / 'policy.json'
+            filename.write_bytes(raw)
+            command = [str(validator), 'verify', '--config', str(config_path), '--envelope', str(filename)]
+            if historical:
+                command.append('--historical')
+            if rotation_key:
+                command.extend(['--check-shared-key', rotation_key, '--verified-source-records', str(verified_source_records)])
+            result = subprocess.run(command,
+                                    capture_output=True, text=True, timeout=30)
+            if result.returncode:
+                raise ValueError('Policy signature or contract verification failed')
+            return json.loads(result.stdout)
     if validate is None:
         if not validator:
             raise ValueError('Offline policy validator is required')
-        def check(raw, historical=False):
-            with tempfile.TemporaryDirectory(prefix='lm-policy-check-') as temp:
-                filename = Path(temp) / 'policy.json'
-                filename.write_bytes(raw)
-                command = [str(validator), 'verify', '--config', str(config_path), '--envelope', str(filename)]
-                if historical:
-                    command.append('--historical')
-                result = subprocess.run(command,
-                                        capture_output=True, text=True, timeout=30)
-                if result.returncode:
-                    raise ValueError('Policy signature or contract verification failed')
-                return json.loads(result.stdout)
         validate = check
         validate_history = lambda raw: check(raw, historical=True)
     else:
@@ -118,6 +120,13 @@ def publish(directory, policy_path, config_path, repo, *, api=None, fetch=None, 
             raise ValueError('Remote policy does not match the publication plan')
     if old is not None:
         previous = validate_history(old)
+        platforms = {r.get('platform') for p in (previous, policy) for r in p['releases']}
+        if len(platforms) > 1:
+            next_key = json.loads(envelope)['keyId']
+            if next_key != json.loads(old)['keyId']:
+                if not validator or not verified_source_records:
+                    raise ValueError('Shared policy key rotation requires verified native source records')
+                check(old, historical=True, rotation_key=next_key)
         if envelope != old and policy['policySequence'] <= previous['policySequence']:
             raise ValueError('Policy sequence regression or conflict')
     # Validate every local file and destination before the first remote mutation.
@@ -189,13 +198,14 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--repo', required=True)
     parser.add_argument('--validator', type=Path, required=True)
+    parser.add_argument('--verified-source-records', type=Path, help='Current native verification records for shared key rotation')
     parser.add_argument('--expected-policy-sha256', help="Required prior policy SHA-256, or 'absent' for the first release")
     args = parser.parse_args()
     log.setLevel(logging.INFO)
     log.addHandler(logging.StreamHandler())
     try:
         publish(args.directory, args.policy, args.config, args.repo, validator=args.validator.resolve(),
-                expected_policy_sha256=args.expected_policy_sha256)
+                expected_policy_sha256=args.expected_policy_sha256, verified_source_records=args.verified_source_records)
     except Exception:
         # SDK/network errors may contain temporary signed URLs or credentials.
         raise SystemExit('Desktop update publication failed; policy must not be assumed published. Reconcile remote state before retrying.') from None

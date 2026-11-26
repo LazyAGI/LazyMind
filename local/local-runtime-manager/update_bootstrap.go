@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -185,7 +186,7 @@ func bindStartup(ctx context.Context, cfg *RuntimeConfig, paths *RuntimePaths, t
 	if err := compareNativeStorage(*cfg, record); err != nil {
 		return err
 	}
-	profile, dirty, err := inspectStoredUpdateFormat(ctx, nativeStorageSnapshot(record), !record.SourceHadRAG)
+	profile, dirty, err := inspectRecordedUpdateFormat(ctx, record)
 	if err != nil {
 		return err
 	}
@@ -243,8 +244,12 @@ func localUpdateSystemVersion(ctx context.Context) (string, error) {
 	}
 	return version, nil
 }
-func sourceUpdateState(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (desktopupdate.LocalState, error) {
-	state, err := measureDesktopUpdateState(ctx, cfg, paths)
+func sourceUpdateState(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, identity desktopupdate.Config) (desktopupdate.LocalState, error) {
+	var verifiedRelease string
+	if identity.UpdaterProtocol == 2 {
+		verifiedRelease = identity.ReleaseID
+	}
+	state, err := measureDesktopUpdateStateForRelease(ctx, cfg, paths, verifiedRelease)
 	if err != nil {
 		return state, err
 	}
@@ -274,9 +279,6 @@ func readTargetCatalog(ctx context.Context, filename string, artifact desktopupd
 	if json.Unmarshal(raw, &catalog) != nil || catalog.SchemaVersion != 1 || catalog.Platform != runtime.GOOS || catalog.Arch != runtime.GOARCH {
 		return nil, nil, updateStateFailure("component_update_incompatible")
 	}
-	if _, ok := catalog.Components["rag"]; !ok {
-		return nil, nil, updateStateFailure("component_update_incompatible")
-	}
 	for id, entry := range catalog.Components {
 		if !desktopupdate.IsUpdateComponent(id) || entry.ID != id || entry.Platform != catalog.Platform || entry.Arch != catalog.Arch ||
 			!componentDigestPattern.MatchString(entry.Revision) || !componentDigestPattern.MatchString(entry.SHA256) ||
@@ -296,6 +298,13 @@ func fullSourceDescriptors(paths RuntimePaths, local desktopupdate.LocalState) (
 	if err != nil || catalog == nil {
 		return nil, updateStateFailure("component_state_unknown")
 	}
+	var bundled struct {
+		Components map[string]desktopupdate.ComponentDescriptor
+	}
+	pins, e := os.ReadFile(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"))
+	if e != nil || json.Unmarshal(pins, &bundled) != nil {
+		return nil, updateStateFailure("component_state_unknown")
+	}
 	components := make(map[string]desktopupdate.ComponentDescriptor, len(local.Components))
 	for id, revision := range local.Components {
 		entry := catalog.Components[id]
@@ -304,7 +313,12 @@ func fullSourceDescriptors(paths RuntimePaths, local desktopupdate.LocalState) (
 		}
 		raw, err := os.ReadFile(filepath.Join(paths.RuntimeRoot, "deps", "python-components", id, "catalog-"+entry.Tag+".json"))
 		var descriptor desktopupdate.ComponentDescriptor
-		if err != nil || json.Unmarshal(raw, &descriptor) != nil || descriptor.ID != id || descriptor.Revision != revision ||
+		if os.IsNotExist(err) && bundled.Components[id].Revision == revision && installedPythonComponentPath(paths, entry) != "" {
+			descriptor = bundled.Components[id]
+		} else if err != nil || json.Unmarshal(raw, &descriptor) != nil {
+			return nil, updateStateFailure("component_state_unknown")
+		}
+		if descriptor.ID != id || descriptor.Revision != revision ||
 			descriptor.SHA256 != entry.SHA256 || descriptor.Tag != entry.Tag || descriptor.CatalogURL != entry.CatalogURL ||
 			descriptor.PythonABI != entry.PythonABI || descriptor.BaseFingerprint != entry.BaseFingerprint ||
 			descriptor.Platform != entry.Platform || descriptor.Arch != entry.Arch || !maps.Equal(descriptor.Packages, entry.Packages) {
@@ -315,19 +329,48 @@ func fullSourceDescriptors(paths RuntimePaths, local desktopupdate.LocalState) (
 	return components, nil
 }
 
+func descriptorIDs(components map[string]desktopupdate.ComponentDescriptor) []string {
+	ids := make([]string, 0, len(components))
+	for id := range components {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 func selectTargetComponents(source, catalog map[string]desktopupdate.ComponentDescriptor) (map[string]desktopupdate.ComponentDescriptor, error) {
-	if len(source) == 0 {
-		return nil, nil
-	}
-	selected := make(map[string]desktopupdate.ComponentDescriptor, len(source))
-	for id, entry := range source {
-		target, ok := catalog[id]
-		if !ok || entry.PythonABI != target.PythonABI {
-			return nil, updateStateFailure("component_update_incompatible")
+	return targetsForWanted(descriptorIDs(source), catalog), nil
+}
+
+func targetsForWanted(ids []string, catalog map[string]desktopupdate.ComponentDescriptor) map[string]desktopupdate.ComponentDescriptor {
+	targets := map[string]desktopupdate.ComponentDescriptor{}
+	for _, id := range ids {
+		if d, ok := catalog[id]; ok {
+			targets[id] = d
 		}
-		selected[id] = target
 	}
-	return selected, nil
+	return targets
+}
+
+// A prior target may still be waiting for its optional packages when it
+// becomes the source of a new signed update. Only that source's own immutable
+// catalog may contribute its saved user selection.
+func wantedForSource(paths RuntimePaths, sourceID string, installed map[string]desktopupdate.ComponentDescriptor) ([]string, error) {
+	ids := descriptorIDs(installed)
+	prior, err := desktopupdate.ReadSelectedComponents(paths.RuntimeRoot)
+	if err != nil {
+		return nil, err
+	}
+	if prior != nil && prior.ReleaseID == sourceID {
+		raw, e := os.ReadFile(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"))
+		h := sha256.Sum256(raw)
+		if e != nil || hex.EncodeToString(h[:]) != prior.ComponentsSHA256 {
+			return nil, updateStateFailure("component_state_unknown")
+		}
+		ids = append(ids, prior.Wanted...)
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids), nil
 }
 
 func equalComponentDescriptors(a, b map[string]desktopupdate.ComponentDescriptor) bool {
@@ -387,7 +430,7 @@ func invokeCoreMaintenance(ctx context.Context, paths RuntimePaths, action, tx s
 	if response.Status == "blocked" {
 		return nil, updateStateFailure(response.Reason)
 	}
-	if response.TransactionID != tx || (action == "stage" && response.Status != "prepared") || (action == "activate" && response.Status != "activated") {
+	if response.TransactionID != tx || (action == "stage" && response.Status != "prepared") || (action == "activate" && response.Status != "activated") || (action == "defer" && response.Status != "deferred") {
 		return nil, updateStateFailure("component_maintenance_failed")
 	}
 	return &response.NativeComponentStage, nil
@@ -412,6 +455,20 @@ func (w *boundedUpdateOutput) Bytes() []byte { return w.data }
 func activateVerifiedTarget(ctx context.Context, manager *RuntimeManager, cfg RuntimeConfig, paths RuntimePaths, root string, record *desktopupdate.NativeRecord) error {
 	effective, _, profile, _ := record.EffectiveTarget()
 	components := record.EffectiveComponents()
+	if len(record.WantedComponents) != 0 {
+		if _, err := invokeCoreMaintenance(ctx, paths, "defer", record.TransactionID); err != nil {
+			return err
+		}
+		proof, err := desktopupdate.NativeComponentProof(record)
+		if err != nil {
+			return err
+		}
+		actor, err := desktopupdate.IdentifyProcess(os.Getppid())
+		if err != nil {
+			return err
+		}
+		return nativeCommand(ctx, root, "activated", map[string]any{"transactionId": record.TransactionID, "releaseId": effective, "dataProfile": profile, "componentMode": record.ComponentMode, "components": proof.Components, "pendingComponents": proof.PendingComponents, "unavailableComponents": proof.UnavailableComponents, "owner": cfg.OwnerToken, "actor": actor})
+	}
 	if len(components) != 0 {
 		// A Windows simple install leaves Python archived. Activation runs
 		// before Up, so prepare the target interpreter before Core probes it.
@@ -442,7 +499,10 @@ func activateVerifiedTarget(ctx context.Context, manager *RuntimeManager, cfg Ru
 
 func nativeCommand(ctx context.Context, root, action string, value any) error {
 	raw, _ := json.Marshal(value)
-	output, err := desktopupdate.NativeUpdateStateCommand(ctx, root, action, raw)
+	return nativeCommandError(desktopupdate.NativeUpdateStateCommand(ctx, root, action, raw))
+}
+
+func nativeCommandError(output []byte, err error) error {
 	if err != nil {
 		return err
 	}
@@ -458,6 +518,18 @@ func nativeCommand(ctx context.Context, root, action string, value any) error {
 func nativeSummary(record *desktopupdate.NativeRecord, owner string) map[string]any {
 	target, version, profile, rag := record.EffectiveTarget()
 	view := map[string]any{"runtimeRoot": record.RuntimeRoot, "version": 2, "phase": record.Phase, "transactionId": record.TransactionID, "owner": owner, "sourceVersion": record.SourceVersion, "releaseId": target, "nextVersion": version, "targetReleaseId": target, "targetVersion": version, "dataProfile": profile, "packagePath": record.PackagePath, "sourceHadRAG": record.SourceHadRAG, "componentMode": record.ComponentMode, "expectedPeers": record.ExpectedPeers, "componentsPrepared": record.ComponentStage != nil}
+	if len(record.WantedComponents) != 0 {
+		var unavailable []string
+		known := record.EffectiveComponents()
+		for _, id := range record.WantedComponents {
+			if _, ok := known[id]; !ok {
+				unavailable = append(unavailable, id)
+			}
+		}
+		if len(unavailable) != 0 {
+			view["unavailableComponents"] = unavailable
+		}
+	}
 	if components := record.EffectiveComponents(); len(components) != 0 {
 		view["targetComponents"] = components
 	}
@@ -479,6 +551,9 @@ func (c *CLI) prepareNativeComponents(ctx context.Context, cfg RuntimeConfig, pa
 		}
 		effective, _, _, _ := record.EffectiveTarget()
 		if record.Phase == "repair" && record.RepairTarget != nil && identity.ReleaseID == effective {
+			if len(record.WantedComponents) != 0 {
+				return record, nil
+			}
 			stage, err := invokeCoreMaintenance(ctx, paths, "stage", record.TransactionID)
 			if err != nil {
 				return nil, err
@@ -508,7 +583,7 @@ func (c *CLI) prepareNativeComponents(ctx context.Context, cfg RuntimeConfig, pa
 			componentsPath = record.ComponentsPath
 		}
 	}
-	local, err := sourceUpdateState(ctx, cfg, paths)
+	local, err := sourceUpdateState(ctx, cfg, paths, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -541,10 +616,14 @@ func (c *CLI) prepareNativeComponents(ctx context.Context, cfg RuntimeConfig, pa
 	if err != nil {
 		return nil, err
 	}
-	targetComponents, err := selectTargetComponents(source, catalog)
+	wanted, err := wantedForSource(paths, identity.ReleaseID, source)
 	if err != nil {
 		return nil, err
 	}
+	if record != nil && len(record.WantedComponents) == 0 {
+		wanted = descriptorIDs(source)
+	}
+	targetComponents := targetsForWanted(wanted, catalog)
 	if record == nil {
 		tx, err := randomHexToken()
 		if err != nil {
@@ -565,29 +644,56 @@ func (c *CLI) prepareNativeComponents(ctx context.Context, cfg RuntimeConfig, pa
 		if buildRuntimeProcessPlan(cfg).includes(scanControlPlaneProcessName) {
 			peers = append(peers, "scan")
 		}
-		rag, hasRAG := source["rag"]
+		hasRAG := slices.Contains(wanted, "rag")
 		record = &desktopupdate.NativeRecord{Version: 2, TransactionID: tx, Phase: "pending", SourceReleaseID: identity.ReleaseID, SourceVersion: identity.Version, TargetReleaseID: target.ID, TargetVersion: target.Version, TrustDomain: identity.TrustDomain, Audience: identity.Audience, Channel: identity.Channel, SigningIdentity: identity.SigningIdentity, Platform: identity.Platform, Arch: identity.Arch, RuntimeRoot: paths.RuntimeRoot, InstallationRoot: paths.ResourcesRoot, Scope: scope, SourceDataProfile: local.DataProfile, TargetDataProfile: decision.Edge.TargetDataProfile, SourceStorage: desktopupdate.NativeStorage{Version: 2, Databases: cloneUpdateStorage(cfg.UpdateStorage).Databases, SegmentStore: cfg.UpdateStorage.SegmentStore, VectorEngine: cfg.ModeProfile.VectorStore.Engine, VectorPath: cfg.ModeProfile.VectorStore.DBPath, LayoutSource: "resolved-runtime", OptionalAbsent: []string{}}, SourceHadRAG: hasRAG, ComponentMode: "absent", ExpectedPeers: peers, PackagePath: packagePath, PackageSHA256: target.Package.SHA256, PackageSize: target.Package.Size, PackageUnpackedBytes: target.Package.UnpackedBytes, ComponentsPath: componentsPath, ComponentsSHA256: target.Components.SHA256, ComponentsSize: target.Components.Size, PolicyDigest: decision.PolicyDigest, PolicySequence: decision.PolicySequence, SourceOwnerDigest: digestOwner(cfg.OwnerToken), SourceActor: &actor}
 		if hasRAG {
 			record.ComponentMode = "sync-target"
 		}
-		if hasRAG && len(catalog) == 1 {
-			// A RAG-only target from the existing v2 releases can read the original wire shape.
-			targetRAG := targetComponents["rag"]
-			record.SourceComponent, record.TargetComponent = &rag, &targetRAG
-		} else if len(source) != 0 {
-			record.ComponentUpdates = make(map[string]desktopupdate.NativeComponentUpdate, len(source))
-			for id, component := range source {
-				record.ComponentUpdates[id] = desktopupdate.NativeComponentUpdate{Source: component, Target: targetComponents[id]}
+		if len(wanted) != 0 {
+			record.WantedComponents = wanted
+			if _, activeRAG := source["rag"]; !activeRAG && cfg.Algorithm.RAGDisabled {
+				for _, family := range []string{"scan", "scan-state"} {
+					if _, e := os.Lstat(record.SourceStorage.Databases[family]); os.IsNotExist(e) {
+						record.SourceStorage.OptionalAbsent = append(record.SourceStorage.OptionalAbsent, family)
+					} else if e != nil {
+						return nil, updateStateFailure("data_unknown")
+					}
+				}
+			}
+			record.ComponentUpdates = make(map[string]desktopupdate.NativeComponentUpdate, len(wanted))
+			for _, id := range wanted {
+				record.ComponentUpdates[id] = desktopupdate.NativeComponentUpdate{Source: source[id], Target: targetComponents[id]}
 			}
 		}
-		if err := nativeCommand(ctx, root, "create", record); err != nil {
+		recheck := func() error {
+			installed, err := measureInstalledComponents(ctx, paths, cfg.Algorithm.RAGDisabled, identity.ReleaseID)
+			if err != nil {
+				return err
+			}
+			now, err := fullSourceDescriptors(paths, desktopupdate.LocalState{Components: installed})
+			if err != nil {
+				return err
+			}
+			wantedNow, err := wantedForSource(paths, identity.ReleaseID, now)
+			if err != nil {
+				return err
+			}
+			if !equalComponentDescriptors(source, now) || !slices.Equal(wanted, wantedNow) {
+				return updateStateFailure("offer_changed")
+			}
+			return nil
+		}
+		if err := nativeCommandError(desktopupdate.CreateNativeRecord(ctx, root, record, recheck)); err != nil {
 			return nil, err
 		}
 	} else {
 		if record.SourceDataProfile != local.DataProfile || record.PackageSHA256 != target.Package.SHA256 || record.ComponentsSHA256 != target.Components.SHA256 ||
-			!equalComponentDescriptors(record.SourceComponents(), source) || !equalComponentDescriptors(record.EffectiveComponents(), targetComponents) {
+			!equalComponentDescriptors(record.SourceComponents(), source) || !equalComponentDescriptors(record.EffectiveComponents(), targetComponents) || (len(record.WantedComponents) != 0 && !slices.Equal(record.WantedComponents, wanted)) {
 			return nil, updateStateFailure("offer_changed")
 		}
+	}
+	if len(record.WantedComponents) != 0 || len(targetComponents) == 0 {
+		return desktopupdate.ReadNativeRecord(root)
 	}
 	stage, err := invokeCoreMaintenance(ctx, paths, "stage", record.TransactionID)
 	if err != nil {
@@ -701,7 +807,7 @@ func (c *CLI) updateBootstrapCommand(ctx context.Context, manager *RuntimeManage
 		if record.Phase != "pending" || identity.ReleaseID != record.SourceReleaseID {
 			return blocked(updateStateFailure("update_incomplete"))
 		}
-		local, err := sourceUpdateState(ctx, cfg, paths)
+		local, err := sourceUpdateState(ctx, cfg, paths, identity)
 		if err != nil {
 			return blocked(err)
 		}
@@ -730,10 +836,17 @@ func (c *CLI) updateBootstrapCommand(ctx context.Context, manager *RuntimeManage
 		if err != nil {
 			return blocked(err)
 		}
-		components, err := selectTargetComponents(source, catalog)
-		if err != nil {
-			return blocked(err)
+		wanted := descriptorIDs(source)
+		if len(record.WantedComponents) != 0 {
+			wanted, err = wantedForSource(paths, identity.ReleaseID, source)
+			if err != nil {
+				return blocked(err)
+			}
+			if !slices.Equal(wanted, record.WantedComponents) {
+				return blocked(updateStateFailure("offer_changed"))
+			}
 		}
+		components := targetsForWanted(wanted, catalog)
 		if !equalComponentDescriptors(components, record.EffectiveComponents()) {
 			return blocked(updateStateFailure("offer_changed"))
 		}
@@ -774,7 +887,7 @@ func (c *CLI) updateBootstrapCommand(ctx context.Context, manager *RuntimeManage
 		if err := compareNativeStorage(cfg, record); err != nil {
 			return blocked(err)
 		}
-		actual, dirty, err := inspectStoredUpdateFormat(ctx, nativeStorageSnapshot(record), !record.SourceHadRAG)
+		actual, dirty, err := inspectRecordedUpdateFormat(ctx, record)
 		if err != nil {
 			return blocked(err)
 		}
@@ -796,10 +909,11 @@ func (c *CLI) updateBootstrapCommand(ctx context.Context, manager *RuntimeManage
 		if err != nil {
 			return blocked(err)
 		}
-		components, err := selectTargetComponents(record.SourceComponents(), catalog)
-		if err != nil {
-			return blocked(err)
+		wanted := record.WantedComponents
+		if wanted == nil {
+			wanted = descriptorIDs(record.SourceComponents())
 		}
+		components := targetsForWanted(wanted, catalog)
 		if !equalComponentDescriptors(components, record.EffectiveComponents()) {
 			return blocked(updateStateFailure("component_update_incompatible"))
 		}
@@ -960,18 +1074,36 @@ func verifyNativeStartup(ctx context.Context, cfg RuntimeConfig, paths RuntimePa
 	if err := compareNativeStorage(running, record); err != nil {
 		return nil, err
 	}
-	profile, dirty, err := inspectStoredUpdateFormat(ctx, nativeStorageSnapshot(record), !record.SourceHadRAG)
+	profile, dirty, err := inspectRecordedUpdateFormat(ctx, record)
 	if err != nil {
 		return nil, err
 	}
 	if dirty || profile != want {
 		return nil, updateStateFailure("update_startup_failed")
 	}
-	components, err := measuredUpdateComponents(paths, running.Algorithm.RAGDisabled)
+	proof, err := desktopupdate.NativeComponentProof(record)
 	if err != nil {
 		return nil, err
 	}
-	if !maps.Equal(components, componentRevisions(record.EffectiveComponents())) {
+	var components map[string]string
+	if len(record.WantedComponents) == 0 {
+		components, err = measureInstalledComponents(ctx, paths, running.Algorithm.RAGDisabled, identity.ReleaseID)
+	} else {
+		var catalog *pythonComponentCatalog
+		catalog, err = loadPythonComponentCatalog(paths)
+		components = map[string]string{}
+		if err == nil && catalog != nil {
+			for id, d := range catalog.Components {
+				if (id != "rag" || !running.Algorithm.RAGDisabled) && installedPythonComponentPath(paths, d) != "" {
+					components[id] = d.Revision
+				}
+			}
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !maps.Equal(components, proof.Components) {
 		return nil, updateStateFailure("component_state_unknown")
 	}
 	expected := []string{"core"}
@@ -989,7 +1121,7 @@ func verifyNativeStartup(ctx context.Context, cfg RuntimeConfig, paths RuntimePa
 		}
 		peers[name] = proof
 	}
-	return map[string]any{"status": "ready", "transactionId": record.TransactionID, "owner": cfg.OwnerToken, "releaseId": target, "version": version, "dataProfile": profile, "dirty": false, "components": components, "peers": peers}, nil
+	return map[string]any{"status": "ready", "transactionId": record.TransactionID, "owner": cfg.OwnerToken, "releaseId": target, "version": version, "dataProfile": profile, "dirty": false, "components": components, "pendingComponents": proof.PendingComponents, "unavailableComponents": proof.UnavailableComponents, "peers": peers}, nil
 }
 func releaseNativePeers(ctx context.Context, cfg RuntimeConfig, tx, owner string) error {
 	expected := []string{"core"}
@@ -1056,7 +1188,7 @@ func adoptNativeRepair(ctx context.Context, cfg RuntimeConfig, paths RuntimePath
 	if err := compareNativeStorage(cfg, record); err != nil {
 		return nil, err
 	}
-	profile, dirty, err := inspectStoredUpdateFormat(ctx, nativeStorageSnapshot(record), !record.SourceHadRAG)
+	profile, dirty, err := inspectRecordedUpdateFormat(ctx, record)
 	if err != nil {
 		return nil, err
 	}
@@ -1078,7 +1210,8 @@ func adoptNativeRepair(ctx context.Context, cfg RuntimeConfig, paths RuntimePath
 	if err != nil {
 		return nil, err
 	}
-	request, _ := json.Marshal(map[string]any{"sourceReleaseId": record.SourceReleaseID, "failedTargetReleaseId": record.TargetReleaseID, "currentReleaseId": identity.ReleaseID, "dataProfile": profile, "sourceHadRAG": record.SourceHadRAG, "components": components, "componentMetadata": metadata})
+	_, sourceRAG := metadata["rag"]
+	request, _ := json.Marshal(map[string]any{"sourceReleaseId": record.SourceReleaseID, "failedTargetReleaseId": record.TargetReleaseID, "currentReleaseId": identity.ReleaseID, "dataProfile": profile, "sourceHadRAG": sourceRAG, "components": components, "componentMetadata": metadata})
 	accepted, err := desktopupdate.CheckRepairAcceptance(ctx, envelope, identity, request, root, time.Now().UTC())
 	if err != nil {
 		return nil, err
@@ -1095,6 +1228,9 @@ func adoptNativeRepair(ctx context.Context, cfg RuntimeConfig, paths RuntimePath
 	targetComponents, err := selectTargetComponents(metadata, catalog)
 	if err != nil {
 		return nil, err
+	}
+	if len(record.WantedComponents) != 0 {
+		targetComponents = targetsForWanted(record.WantedComponents, catalog)
 	}
 	repair := &desktopupdate.NativeRepairTarget{ReleaseID: target.ID, Version: target.Version, PackageSHA256: target.Package.SHA256, ComponentsSHA256: target.Components.SHA256, ComponentsSize: target.Components.Size, ComponentsPath: filename, DataProfile: profile}
 	if len(record.ComponentUpdates) != 0 {

@@ -49,19 +49,20 @@ type pythonCatalog struct {
 }
 
 type PythonComponentStatus struct {
-	ID               string `json:"id"`
-	Installed        bool   `json:"installed"`
-	Active           bool   `json:"active"`
-	RestartRequired  bool   `json:"restartRequired"`
-	InstallSupported bool   `json:"installSupported"`
-	Installing       bool   `json:"installing"`
-	Filename         string `json:"filename,omitempty"`
-	URL              string `json:"url,omitempty"`
-	FallbackURL      string `json:"fallbackUrl,omitempty"`
-	SizeBytes        int64  `json:"sizeBytes,omitempty"`
-	UnpackedBytes    int64  `json:"unpackedBytes,omitempty"`
-	Message          string `json:"message,omitempty"`
-	InstallMethod    string `json:"installMethod,omitempty"`
+	InstalledRevision string `json:"installedRevision,omitempty"`
+	ID                string `json:"id"`
+	Installed         bool   `json:"installed"`
+	Active            bool   `json:"active"`
+	RestartRequired   bool   `json:"restartRequired"`
+	InstallSupported  bool   `json:"installSupported"`
+	Installing        bool   `json:"installing"`
+	Filename          string `json:"filename,omitempty"`
+	URL               string `json:"url,omitempty"`
+	FallbackURL       string `json:"fallbackUrl,omitempty"`
+	SizeBytes         int64  `json:"sizeBytes,omitempty"`
+	UnpackedBytes     int64  `json:"unpackedBytes,omitempty"`
+	Message           string `json:"message,omitempty"`
+	InstallMethod     string `json:"installMethod,omitempty"`
 }
 
 type pythonComponentRule struct {
@@ -193,6 +194,9 @@ func pythonComponentStatus(root string, catalog *pythonCatalog, id string) Pytho
 	status.SizeBytes, status.UnpackedBytes = entry.SizeBytes, entry.UnpackedBytes
 	status.InstallSupported = IsLocalRuntime() && os.Getenv("LAZYMIND_ALGORITHM_PYTHON") != ""
 	status.Installed = pythonComponentInstalled(root, entry)
+	if status.Installed {
+		status.InstalledRevision = entry.Revision
+	}
 	status.Active = status.Installed && PythonComponentActive(id)
 	status.RestartRequired = status.Installed && !status.Active
 	if lock := &pythonComponentRuleFor(id).install; lock.TryLock() {
@@ -530,7 +534,8 @@ func InstallPythonComponent(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Minute)
 	defer cancel()
-	if err := installPythonComponent(ctx, root, entry, entry.URL); err != nil {
+	env := PythonComponentMaintenanceContext{RuntimeRoot: root, ResourcesRoot: os.Getenv("LAZYMIND_RUNTIME_RESOURCES_ROOT"), UpdaterRoot: updater, Python: os.Getenv("LAZYMIND_ALGORITHM_PYTHON"), AlgorithmSource: os.Getenv("LAZYMIND_ALGORITHM_SOURCE")}
+	if err := installRequestedPythonComponent(ctx, env, entry); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}

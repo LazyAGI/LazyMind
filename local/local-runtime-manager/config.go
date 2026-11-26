@@ -866,12 +866,14 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 	buildRoot := cleanOptionalPath(firstNonEmpty(opts.BuildRoot, os.Getenv(localBuildRootEnvVar), defaultBuildRoot))
 	pathLayout := defaultRuntimePathLayout()
 	if desktopupdate.UnsignedTestBuild {
-		testPaths, err := desktopupdate.UnsignedPaths()
+		testPaths, systemApps, err := unsignedRuntimeLocations()
 		if err != nil {
 			return RuntimeConfig{}, RuntimePaths{}, err
 		}
-		testResources := filepath.Join(testPaths.Application, "Contents", "Resources", "runtime")
-		if profile != "desktop" || resourcesRoot != testResources || buildRoot != testResources || root != filepath.Join(testResources, "app") {
+		app := filepath.Clean(filepath.Join(resourcesRoot, "..", "..", ".."))
+		if profile != "desktop" || !desktopupdate.IsUnsignedApplication(app, testPaths, systemApps) ||
+			resourcesRoot != filepath.Join(app, "Contents", "Resources", "runtime") || buildRoot != resourcesRoot || root != filepath.Join(resourcesRoot, "app") ||
+			desktopupdate.NoUnsignedPathAliases(root) != nil {
 			return RuntimeConfig{}, RuntimePaths{}, updateStateFailure("unsigned_test_runtime_scope")
 		}
 		pathLayout = RuntimePathLayout{DataRoot: testPaths.Runtime, CacheRoot: testPaths.Cache, LogsRoot: testPaths.Logs, LocalImportRoot: testPaths.Documents}
@@ -1072,6 +1074,8 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 	ragDisabled := !envBool(ragEnabledEnvVar, true)
 	if componentCatalog != nil {
 		ragDisabled = installedPythonComponentPath(p, componentCatalog.Components["rag"]) == ""
+	} else if desktopupdate.UnsignedTestBuild {
+		ragDisabled = true
 	} else if sourceRAGInstalled(p) {
 		ragDisabled = false
 	}
@@ -1151,19 +1155,80 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 }
 
 func validateUnsignedTestStorage(cfg RuntimeConfig, paths RuntimePaths, layout RuntimePathLayout) error {
-	if cfg.NetworkProfile != "localhost" || paths.RuntimeRoot != layout.DataRoot ||
-		cfg.UpdateStorage == nil || cfg.AuthService.DatabaseURL != sqliteURL(paths.AuthServiceDBPath) {
-		return updateStateFailure("unsigned_test_storage_scope")
+	invalid := updateStateFailure("unsigned_test_storage_scope")
+	valid := func(path string) bool {
+		return filepath.IsAbs(path) && filepath.Dir(path) != path && desktopupdate.NoUnsignedPathAliases(path) == nil
 	}
-	scope, err := runtimeUpdateScope(cfg, paths)
-	if err != nil {
-		return err
+	if cfg.NetworkProfile != "localhost" || cfg.UpdateStorage == nil || !valid(paths.StateFile) ||
+		!valid(paths.RuntimeRoot) || !sameRuntimePath(cfg.UpdateStorage.Databases["auth"], updateAuthSQLitePath(cfg.AuthService.DatabaseURL)) ||
+		pathIsUnderRoot(paths.RuntimeRoot, paths.ResourcesRoot) || pathIsUnderRoot(paths.ResourcesRoot, paths.RuntimeRoot) {
+		return invalid
 	}
-	roots := append(scope.DataRoots, cfg.FileWatcher.AllowedRoots...)
-	for _, file := range roots {
-		if (!pathIsUnderRoot(file, layout.DataRoot) && !pathIsUnderRoot(file, layout.LocalImportRoot)) ||
-			desktopupdate.NoUnsignedPathAliases(file) != nil {
-			return updateStateFailure("unsigned_test_storage_scope")
+	saved, err := readRuntimeState(paths.StateFile)
+	bound := err == nil && saved.Profile == "desktop" && sameRuntimePath(saved.RuntimeRoot, paths.RuntimeRoot) && sameRuntimePath(saved.ResourcesRoot, paths.ResourcesRoot)
+	if !sameRuntimePath(paths.RuntimeRoot, layout.DataRoot) && !bound {
+		return invalid
+	}
+	for _, dir := range []string{paths.DataDir, paths.UploadRoot, paths.LazyLLMHome, paths.FileWatcherBaseRoot, paths.SubagentDataDir, paths.EvoDataDir} {
+		if dir != "" && (!valid(dir) || !pathIsUnderRoot(dir, paths.RuntimeRoot)) {
+			return invalid
+		}
+	}
+	var databases map[string]string
+	var vector string
+	var watcherRoots []string
+	if bound {
+		watcherRoots = append([]string{saved.Config.FileWatcher.WatchHostDir}, saved.Config.FileWatcher.AllowedRoots...)
+		if snapshot := saved.Config.UpdateStorage; snapshot != nil {
+			databases = snapshot.Databases
+			vector = snapshot.VectorPath
+		} else if saved.Config.NativeCommittedTx == "" && saved.Config.NativeCommittedReleaseID == "" {
+			// Early 0.5 saved auth and vector independently. Only a saved auth path
+			// at the normal SQLite layout also identifies that layout's sibling DBs.
+			auth := updateAuthSQLitePath(saved.Config.AuthService.DatabaseURL)
+			databases = map[string]string{"auth": auth}
+			vector = saved.Config.ModeProfile.VectorStore.DBPath
+			if auth != "" && sameRuntimePath(auth, paths.AuthServiceDBPath) {
+				sqlite := filepath.Dir(filepath.Dir(auth))
+				for family, path := range map[string]string{"core": paths.CoreDBPath, "lazyllm": paths.LazyLLMDBPath, "channel": paths.ChannelGatewayDBPath, "scan": paths.ScanDBPath, "segments": localSegmentStorePath(paths)} {
+					if pathIsUnderRoot(path, sqlite) {
+						databases[family] = path
+					}
+				}
+			}
+		}
+	}
+	// A WAL or SHM is protected with its own database. It is never a grant
+	// to use it as another database, vector directory, or watched location.
+	for family, path := range cfg.UpdateStorage.Databases {
+		if family == "segments" && !strings.EqualFold(cfg.UpdateStorage.SegmentStore, "SQLiteStore") {
+			continue
+		}
+		if !valid(path) || (!pathIsUnderRoot(path, paths.RuntimeRoot) && !sameRuntimePath(path, databases[family])) ||
+			!valid(path+"-wal") || !valid(path+"-shm") {
+			return invalid
+		}
+	}
+	path := cfg.ModeProfile.VectorStore.DBPath
+	if !valid(path) || (!pathIsUnderRoot(path, paths.RuntimeRoot) && !sameRuntimePath(path, vector)) {
+		return invalid
+	}
+	for _, watch := range cfg.FileWatcher.AllowedRoots {
+		if !valid(watch) {
+			return invalid
+		}
+		if pathIsUnderRoot(watch, paths.RuntimeRoot) || pathIsUnderRoot(watch, layout.LocalImportRoot) {
+			continue
+		}
+		matched := false
+		for _, stored := range watcherRoots {
+			if stored != "" && sameRuntimePath(watch, stored) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return invalid
 		}
 	}
 	return nil
@@ -1268,6 +1333,10 @@ func normalizeRuntimeProfile(profile string) (string, error) {
 		return "", fmt.Errorf("%s must be local or desktop", runtimeProfileEnvVar)
 	}
 }
+
+// Resolve OS account locations once per consumer; the system Applications root
+// is supplied by the platform, never by an installer argument or environment.
+var unsignedRuntimeLocations = desktopupdate.UnsignedApplicationLocations
 
 func defaultRuntimePathLayout() RuntimePathLayout {
 	return runtimePathLayoutForGOOS(runtime.GOOS, hostHomeDir(), os.Getenv("LOCALAPPDATA"), os.Getenv("XDG_DATA_HOME"), os.Getenv("XDG_CACHE_HOME"), os.Getenv("XDG_STATE_HOME"))

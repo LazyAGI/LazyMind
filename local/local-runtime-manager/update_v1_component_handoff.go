@@ -251,6 +251,12 @@ func consumeV1ComponentHandoff(ctx context.Context, paths RuntimePaths, version 
 	if err != nil || record == nil {
 		return false, err
 	}
+	// The in-place test build only creates v2 transactions. A v1 receipt in
+	// this now-shared StateDir belongs to another client, including legacy
+	// records without a phase. Do not consume or undo its version markers.
+	if update.UnsignedTestBuild {
+		return false, updateStateFailure("update_transaction_conflict")
+	}
 	lock, err := update.NativeComponentLock(paths.RuntimeRoot)
 	if err != nil {
 		return false, err

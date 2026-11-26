@@ -26,22 +26,39 @@ jobs:
 
   windows:
     name: Build and test Windows installer
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/windows-installer.yml
     with:
       git_ref: ${{ github.ref }}
       enable_updates: ${{ vars.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true' }}
     secrets: inherit
 
-  publish_update:
-    name: Publish signed desktop update
+  publish_macos_update:
+    name: Publish signed macOS update
     if: vars.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true' && vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'
-    needs: [macos, windows]
+    needs: macos
     permissions:
       actions: read
       contents: read
     uses: ./.github/workflows/desktop-update-publish.yml
     with:
       use_current_run: true
+      platform: macos
+      source_build_run_id: ${{ vars.LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID }}
+
+  publish_windows_update:
+    name: Publish signed Windows update
+    if: vars.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true' && vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'
+    needs: windows
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/desktop-update-publish.yml
+    with:
+      use_current_run: true
+      platform: windows
       source_build_run_id: ${{ vars.LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID }}
 
   release:

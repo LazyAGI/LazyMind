@@ -149,9 +149,11 @@ func readUpdateStateBytes(path string) ([]byte, error) {
 }
 
 func measureDesktopUpdateState(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (desktopupdate.LocalState, error) {
+	return measureDesktopUpdateStateForRelease(ctx, cfg, paths, "")
+}
+
+func measureDesktopUpdateStateForRelease(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, verifiedRelease string) (desktopupdate.LocalState, error) {
 	empty := desktopupdate.LocalState{}
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
-	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return empty, err
 	}
@@ -177,10 +179,14 @@ func measureDesktopUpdateState(ctx context.Context, cfg RuntimeConfig, paths Run
 	if authPath == "" || !sameRuntimePath(authPath, storage.Databases["auth"]) {
 		return empty, updateStateFailure("unsupported_storage")
 	}
+	// All nine SQLite checks share one budget. Any subsequent package
+	// identity check uses the caller's context and its own native timeout.
+	dbCtx, cancelDB := context.WithTimeout(ctx, 25*time.Second)
+	defer cancelDB()
 	shapes := map[string]updateDatabaseShape{}
 	seen := map[string]bool{}
 	for _, family := range []string{"core", "auth", "lazyllm", "segments", "channel", "scan", "core-state", "auth-state", "scan-state"} {
-		shape, dirty, err := inspectBoundUpdateDatabase(ctx, storage.Databases[family], family, persisted.Config.Algorithm.RAGDisabled, seen)
+		shape, dirty, err := inspectBoundUpdateDatabase(dbCtx, storage.Databases[family], family, persisted.Config.Algorithm.RAGDisabled, seen)
 		if err != nil {
 			return empty, err
 		}
@@ -189,7 +195,10 @@ func measureDesktopUpdateState(ctx context.Context, cfg RuntimeConfig, paths Run
 		}
 		shapes[family] = shape
 	}
-	components, err := measuredUpdateComponents(paths, persisted.Config.Algorithm.RAGDisabled)
+	if err := dbCtx.Err(); err != nil {
+		return empty, err
+	}
+	components, err := measureInstalledComponents(ctx, paths, persisted.Config.Algorithm.RAGDisabled, verifiedRelease)
 	if err != nil {
 		return empty, err
 	}
@@ -335,9 +344,37 @@ func inspectUpdateSQLite(ctx context.Context, file string, core bool) (updateDat
 }
 
 func measuredUpdateComponents(paths RuntimePaths, ragDisabled bool) (map[string]string, error) {
+	return measureInstalledComponents(context.Background(), paths, ragDisabled, "")
+}
+
+func measureInstalledComponents(ctx context.Context, paths RuntimePaths, ragDisabled bool, verifiedRelease string) (map[string]string, error) {
 	catalog, err := loadPythonComponentCatalogForUpdate(paths)
 	if err != nil {
 		return nil, updateStateFailure("component_state_unknown")
+	}
+	if catalog != nil && catalog.pendingRelease != "" {
+		for id, entry := range catalog.Components {
+			if !entry.awaitingProbe {
+				continue
+			}
+			// The source may still contain A's valid payload at exactly B's
+			// revision. Without a successful target probe it is not active.
+			entry.selectionInvalid = false
+			if installedPythonComponentPath(paths, entry) == "" {
+				continue // Existing damaged evidence follows the strict measurement.
+			}
+			if verifiedRelease == "" {
+				identity, e := readNativeConfiguration(ctx, paths)
+				if e != nil || identity.UpdaterProtocol != 2 {
+					return nil, updateStateFailure("component_state_unknown")
+				}
+				verifiedRelease = identity.ReleaseID
+			}
+			if catalog.pendingRelease != verifiedRelease {
+				return nil, updateStateFailure("component_state_unknown")
+			}
+			delete(catalog.Components, id)
+		}
 	}
 	return measuredComponentsFromCatalog(paths, ragDisabled, catalog)
 }

@@ -43,7 +43,7 @@ func modelCredentialKey() (string, error) {
 func deviceCredentialKey(purpose string) (string, error) {
 	filename := credentialDeviceIdentityPath()
 	if desktopupdate.UnsignedTestBuild {
-		testPaths, err := desktopupdate.UnsignedPaths()
+		testPaths, _, err := unsignedRuntimeLocations()
 		if err != nil {
 			return "", err
 		}

@@ -154,49 +154,51 @@ func assemble(p plan, records map[string]record) (update.Policy, update.Config, 
 	return policy, config, nil
 }
 
-func readPublication(name string, config update.Config, now time.Time, historical bool) (update.Policy, error) {
+func readPublication(name string, config update.Config, now time.Time, historical bool) (update.Policy, string, error) {
 	var empty update.Policy
 	info, err := os.Stat(name)
 	if err != nil || !info.Mode().IsRegular() || info.Size() > update.MaxEnvelopeBytes {
-		return empty, errors.New("invalid envelope file")
+		return empty, "", errors.New("invalid envelope file")
 	}
 	file, err := os.Open(name)
 	if err != nil {
-		return empty, errors.New("cannot open signed envelope")
+		return empty, "", errors.New("cannot open signed envelope")
 	}
 	defer file.Close()
 	opened, err := file.Stat()
 	if err != nil || !os.SameFile(info, opened) {
-		return empty, errors.New("invalid envelope file")
+		return empty, "", errors.New("invalid envelope file")
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, update.MaxEnvelopeBytes+1))
 	if err != nil || len(raw) > update.MaxEnvelopeBytes {
-		return empty, errors.New("invalid envelope file")
+		return empty, "", errors.New("invalid envelope file")
+	}
+	var envelope struct {
+		KeyID   string `json:"keyId"`
+		Payload string `json:"payload"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil {
+		return empty, "", errors.New("invalid signed envelope")
 	}
 	if historical {
-		var envelope struct {
-			Payload string `json:"payload"`
-		}
-		if json.Unmarshal(raw, &envelope) != nil {
-			return empty, errors.New("invalid historical envelope")
-		}
 		payload, err := base64.StdEncoding.DecodeString(envelope.Payload)
 		if err != nil {
-			return empty, errors.New("invalid historical payload")
+			return empty, "", errors.New("invalid historical payload")
 		}
 		var value struct {
 			IssuedAt string `json:"issuedAt"`
 		}
 		if json.Unmarshal(payload, &value) != nil {
-			return empty, errors.New("invalid historical payload")
+			return empty, "", errors.New("invalid historical payload")
 		}
 		now, err = time.Parse(time.RFC3339, value.IssuedAt)
 		if err != nil {
-			return empty, err
+			return empty, "", err
 		}
 		// This time is trusted only after the original policy signature passes validation.
 	}
-	return update.ValidatePublication(raw, config, now)
+	policy, err := update.ValidatePublication(raw, config, now)
+	return policy, envelope.KeyID, err
 }
 
 func selectPublishedSource(policy update.Policy, target update.Config) (update.Release, error) {
@@ -231,6 +233,45 @@ func selectPublishedSource(policy update.Policy, target update.Config) (update.R
 	return best, nil
 }
 
+// Native verification produced these records by opening each signed source package
+// on its own platform. A target's keyring cannot speak for another installed app.
+func proveSharedKey(previous update.Policy, config update.Config, keyID, directory string) error {
+	rejected := errors.New("shared policy key rotation requires every active source to trust the same key ID and bytes")
+	expectedKey := config.PublicKeys[keyID]
+	if directory == "" || expectedKey == "" {
+		return rejected
+	}
+	missing := map[string]update.Release{}
+	for _, release := range previous.Releases {
+		if !slices.Contains(previous.Revoked, release.ID) {
+			missing[release.ID] = release
+		}
+	}
+	err := filepath.WalkDir(directory, func(name string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || entry.Name() != "release.json" {
+			return err
+		}
+		var source record
+		if err := readJSON(name, &source); err != nil {
+			return err
+		}
+		prior, ok := missing[source.Release.ID]
+		c := source.Config
+		if !ok || source.Release != prior || c.ReleaseID != prior.ID || c.Version != prior.Version ||
+			c.Platform != prior.Platform || c.Arch != prior.Arch || c.SigningIdentity != prior.SigningIdentity ||
+			c.TrustDomain != config.TrustDomain || c.Channel != config.Channel || c.Audience != config.Audience ||
+			c.PolicyURL != config.PolicyURL || c.Mode != config.Mode || c.PublicKeys[keyID] != expectedKey {
+			return rejected
+		}
+		delete(missing, prior.ID)
+		return nil
+	})
+	if err != nil || len(missing) != 0 {
+		return rejected
+	}
+	return nil
+}
+
 func extendPublication(previous, next update.Policy) (update.Policy, error) {
 	if next.SchemaVersion != 2 || previous.SchemaVersion != next.SchemaVersion || next.Sequence <= previous.Sequence {
 		return next, errors.New("extension requires a newer sequence in the same v2 channel")
@@ -240,8 +281,10 @@ func extendPublication(previous, next update.Policy) (update.Policy, error) {
 	}
 
 	published := make(map[string]update.Release, len(previous.Releases))
+	platforms := make(map[string]bool)
 	for _, release := range previous.Releases {
 		published[release.ID] = release
+		platforms[release.Platform] = true
 	}
 	added := make(map[string]bool, len(next.Releases))
 	releases := slices.Clone(previous.Releases)
@@ -262,8 +305,19 @@ func extendPublication(previous, next update.Policy) (update.Policy, error) {
 		}
 		linked[edge.TargetID] = true
 	}
-	if len(added) == 0 || len(linked) != len(added) {
-		return next, errors.New("each new release requires a verified upgrade edge")
+	if len(added) == 0 {
+		return next, errors.New("extension requires a new release")
+	}
+	for _, release := range next.Releases {
+		if !added[release.ID] || linked[release.ID] {
+			continue
+		}
+		// There is no installed source for the first official release of a new OS.
+		// Subsequent releases (including after revocation) always require an edge.
+		if next.Audience != "official" || platforms[release.Platform] {
+			return next, errors.New("each new release on an existing platform requires a verified upgrade edge")
+		}
+		platforms[release.Platform] = true
 	}
 	next.Releases = releases
 	next.Edges = append(slices.Clone(previous.Edges), next.Edges...)
@@ -283,6 +337,8 @@ func run(args []string) error {
 	configPath := flags.String("config", "", "public configuration (verify)")
 	envelopePath := flags.String("envelope", "", "signed policy (verify)")
 	previousPath := flags.String("previous-envelope", "", "extend an already published signed v2 policy (sign)")
+	verifiedSources := flags.String("verified-source-records", "", "records recovered by native verification of installed source packages")
+	nextKey := flags.String("check-shared-key", "", "verify that all active sources accept this key (historical verify)")
 	planPath := flags.String("plan", "", "explicit release/compatibility plan")
 	recordsPath := flags.String("records", "", "directory containing release.json records")
 	keyPath := flags.String("key-file", "", "PKCS8 Ed25519 PEM private key")
@@ -301,9 +357,17 @@ func run(args []string) error {
 		if err := readJSON(*configPath, &config); err != nil {
 			return err
 		}
-		policy, err := readPublication(*envelopePath, config, now, *historical)
+		policy, _, err := readPublication(*envelopePath, config, now, *historical)
 		if err != nil {
 			return err
+		}
+		if *nextKey != "" {
+			if !*historical || *selectSource {
+				return errors.New("shared key verification requires historical policy verification")
+			}
+			if err := proveSharedKey(policy, config, *nextKey, *verifiedSources); err != nil {
+				return err
+			}
 		}
 		if *selectSource {
 			source, err := selectPublishedSource(policy, config)
@@ -345,8 +409,13 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	for _, id := range p.ReleaseIDs {
+		if !slices.Contains(policy.Revoked, id) && records[id].Config.PublicKeys[*keyID] != config.PublicKeys[*keyID] {
+			return errors.New("a selected release does not trust the publication signing key")
+		}
+	}
 	if *previousPath != "" {
-		previous, err := readPublication(*previousPath, config, now, true)
+		previous, priorKeyID, err := readPublication(*previousPath, config, now, true)
 		if err != nil {
 			return err
 		}
@@ -363,6 +432,13 @@ func run(args []string) error {
 		policy, err = extendPublication(previous, policy)
 		if err != nil {
 			return err
+		}
+		// One shared envelope is read by installed clients on every listed
+		// platform. Their original trust sets need not contain a new key ID.
+		if *keyID != priorKeyID && slices.ContainsFunc(policy.Releases, func(r update.Release) bool { return r.Platform != config.Platform }) {
+			if err := proveSharedKey(previous, config, *keyID, *verifiedSources); err != nil {
+				return err
+			}
 		}
 	}
 	keyRaw, err := os.ReadFile(*keyPath)

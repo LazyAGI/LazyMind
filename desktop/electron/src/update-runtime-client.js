@@ -4,24 +4,29 @@ const v1HandoffTimeoutMs = 180_000;
 
 function targetComponentRevisions(plan) {
   if (typeof plan?.sourceHadRAG !== "boolean" || plan.componentMode !== (plan.sourceHadRAG ? "sync-target" : "absent")) return null;
+  const missing = plan.unavailableComponents === undefined ? [] : plan.unavailableComponents;
+  if (!Array.isArray(missing) || missing.some(id => id !== "rag" && id !== "cluster")
+    || new Set(missing).size !== missing.length || (missing.includes("rag") && !plan.sourceHadRAG)) return null;
+  const expectsRAG = plan.sourceHadRAG && !missing.includes("rag");
   const validRevision = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
   const ragRevision = plan.targetRAG?.revision ?? plan.targetRAGRevision;
   if (plan.targetComponents === undefined) {
-    if (plan.sourceHadRAG) return validRevision(ragRevision) ? { rag: ragRevision } : null;
+    if (expectsRAG) return validRevision(ragRevision) ? { rag: ragRevision } : null;
     return plan.targetRAG === undefined && !ragRevision ? {} : null;
   }
   const targets = plan.targetComponents;
   if (!targets || typeof targets !== "object" || Array.isArray(targets)) return null;
   const entries = Object.entries(targets);
   if (!entries.length || entries.length > 32 || entries.some(([id, target]) => !/^[a-z][a-z0-9-]{0,63}$/.test(id)
-    || target?.id !== id || !validRevision(target.revision))) return null;
+    || missing.includes(id) || target?.id !== id || !validRevision(target.revision))) return null;
   const revisions = Object.fromEntries(entries.map(([id, target]) => [id, target.revision]));
-  if (Object.hasOwn(revisions, "rag") !== plan.sourceHadRAG || (ragRevision && revisions.rag !== ragRevision)) return null;
+  if (Object.hasOwn(revisions, "rag") !== expectsRAG || (ragRevision && revisions.rag !== ragRevision)) return null;
   return revisions;
 }
 
 function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAuxiliary, verifyStartup }) {
   let epoch, transactionId, preparation;
+  let lastEpoch = Date.now();
   async function bootstrap(action, extra = [], timeout = 180_000) {
     let value;
     try {
@@ -79,6 +84,7 @@ function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAu
     return value;
   }
   return {
+    nextEpoch() { return lastEpoch = Math.max(lastEpoch + 1, Date.now()); },
     async prepareComponents(release, receipt) {
       const value = await bootstrap("prepare-components", ["--release-id", release.releaseId,
         "--package", receipt.packagePath, "--components", receipt.componentsPath, "--control-stdin"], 40 * 60_000);

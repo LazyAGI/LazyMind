@@ -5,7 +5,7 @@ const path = require("node:path");
 const util = require("node:util");
 const { writeNativeUpdateMetadata } = require("../scripts/native-update-metadata.cjs");
 const unsignedTest = require("../scripts/unsigned-update-build.cjs").readUnsignedTestBuildConfig();
-const productName = unsignedTest ? "LazyMind Test" : "LazyMind";
+const productName = "LazyMind";
 
 const execFile = util.promisify(childProcess.execFile);
 const delay = (milliseconds) => new Promise((resolve) => {
@@ -468,7 +468,7 @@ module.exports = {
     if (!arch) throw new Error(`Unsupported macOS recording helper architecture: ${context.arch}`);
     require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch, identity });
   },
-  appId: unsignedTest ? "ai.lazymind.desktop.test" : "ai.lazymind.desktop",
+  appId: "ai.lazymind.desktop",
   productName,
   ...(unsignedTest ? { extraMetadata: { lazymindUnsignedTest: true } } : {}),
   artifactName: "LazyMind-${os}-${arch}.${ext}",

@@ -66,6 +66,19 @@ env:
   LAZYMIND_DESKTOP_PRUNE_PYTHON: "true"
 
 jobs:
+  publish_windows_update:
+    name: Publish signed Windows update
+    if: github.event_name == 'workflow_dispatch' && inputs.enable_updates && vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'
+    needs: [build-windows-installer, test-windows-installer]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/desktop-update-publish.yml
+    with:
+      use_current_run: true
+      platform: windows
+      source_build_run_id: ${{ vars.LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID }}
+
   build-windows-installer:
     name: Build Windows x64 installer
     runs-on: windows-2025

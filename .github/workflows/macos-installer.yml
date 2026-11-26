@@ -60,21 +60,21 @@ on:
         required: false
         type: string
       enable_unsigned_update_test:
-        description: "Build an isolated macOS ad-hoc app for v2 automatic update testing"
+        description: "Build an in-place ad-hoc LazyMind.app with a dedicated v2 update round"
         required: false
         type: boolean
         default: false
       test_version:
-        description: "Version of the isolated test app, for example 0.5.210"
+        description: "Version of the in-place test app, for example 0.5.229"
         required: false
         type: string
       test_round:
-        description: "Create a new isolated update round or continue a published baseline"
+        description: "Create or continue an in-place update round"
         required: false
         type: choice
         options: [new, continue]
       source_build_run_id:
-        description: "For continue: latest successful source run, published:legacy, or published:<first-run-id>"
+        description: "For continue: successful in-place source run or published:<first-run-id>"
         required: false
         type: string
 
@@ -107,7 +107,7 @@ env:
 
 jobs:
   build_unsigned_update_test:
-    name: Build isolated macOS v2 update test
+    name: Build in-place macOS v2 update test
     if: github.event_name == 'workflow_dispatch' && inputs.enable_unsigned_update_test
     runs-on: macos-15
     timeout-minutes: 180
@@ -129,7 +129,11 @@ jobs:
           set -euo pipefail
           [[ "${ENABLE_OFFICIAL_UPDATES}" != true ]]
           [[ "${TEST_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ -z "${TEST_SOURCE_RUN}" || "${TEST_SOURCE_RUN}" =~ ^[1-9][0-9]{0,19}$ || "${TEST_SOURCE_RUN}" =~ ^published:(legacy|[1-9][0-9]{0,19})$ ]]
+          if [[ "${TEST_SOURCE_RUN}" == published:legacy ]]; then
+            echo "::error::This baseline uses the old test app layout. Start a new round."
+            exit 1
+          fi
+          [[ -z "${TEST_SOURCE_RUN}" || "${TEST_SOURCE_RUN}" =~ ^[1-9][0-9]{0,19}$ || "${TEST_SOURCE_RUN}" =~ ^published:[1-9][0-9]{0,19}$ ]]
           case "${TEST_ROUND}" in
             new) [[ -z "${TEST_SOURCE_RUN}" ]] || { echo "::error::New rounds must leave source_build_run_id empty"; exit 1; } ;;
             continue) [[ -n "${TEST_SOURCE_RUN}" ]] || { echo "::error::Continued rounds require source_build_run_id"; exit 1; } ;;
@@ -143,6 +147,15 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || github.ref }}
           submodules: true
+          persist-credentials: false
+      - name: Check out the dispatch workflow's in-place build guard
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .in-place-workflow
+          sparse-checkout: |
+            .github/actions/check-in-place-build
+            desktop/scripts
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
@@ -171,7 +184,16 @@ jobs:
           test "${TEST_SOURCE_RUN}" != "${GITHUB_RUN_ID}"
           test "$(gh run view "${TEST_SOURCE_RUN}" --json conclusion --jq .conclusion)" = success
           gh run download "${TEST_SOURCE_RUN}" --name "desktop-update-macos-${TEST_SOURCE_RUN}" --dir "${RUNNER_TEMP}/unsigned-test-source"
-      - name: Build and stage the isolated test app
+      - name: Verify the selected checkout produces this in-place round
+        uses: ./.in-place-workflow/.github/actions/check-in-place-build
+        with:
+          phase: resolver
+        env:
+          TEST_VERSION: ${{ inputs.test_version }}
+          TEST_SOURCE_RUN: ${{ inputs.source_build_run_id }}
+          LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON }}
+          LAZYMIND_UPDATE_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
+      - name: Build and stage the in-place LazyMind.app
         env:
           TEST_VERSION: ${{ inputs.test_version }}
           TEST_SOURCE_RUN: ${{ inputs.source_build_run_id }}
@@ -193,7 +215,16 @@ jobs:
           export LAZYMIND_PYTHON_COMPONENT_BASE_URL="${LAZYMIND_UPDATE_BASE_URL%/}/RAG/"
           bash desktop/scripts/build-unsigned-update-test.sh "${TEST_VERSION}" "${RUNNER_TEMP}/unsigned-update-test"
           jq -r '"Test policy: \(.config.policyURL)\nTrust domain: \(.config.trustDomain)"' <<< "${round}" >> "${GITHUB_STEP_SUMMARY}"
-      - name: Upload isolated test update artifact
+      - name: Verify the built LazyMind.app before upload
+        uses: ./.in-place-workflow/.github/actions/check-in-place-build
+        with:
+          phase: artifact
+        env:
+          TEST_VERSION: ${{ inputs.test_version }}
+          TEST_SOURCE_RUN: ${{ inputs.source_build_run_id }}
+          LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON }}
+          LAZYMIND_UPDATE_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
+      - name: Upload in-place test update artifact
         uses: actions/upload-artifact@v7
         with:
           name: desktop-update-macos-${{ github.run_id }}
@@ -202,7 +233,7 @@ jobs:
           retention-days: 30
 
   publish_unsigned_update_test:
-    name: Publish isolated macOS test update
+    name: Publish in-place macOS test update
     if: github.event_name == 'workflow_dispatch' && inputs.enable_unsigned_update_test && !inputs.enable_updates
     needs: build_unsigned_update_test
     permissions:
@@ -216,6 +247,19 @@ jobs:
     secrets:
       LAZYMIND_UPDATE_POLICY_PRIVATE_KEY: ${{ secrets.LAZYMIND_UPDATE_POLICY_PRIVATE_KEY }}
       MODELSCOPE_UPDATE_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}
+
+  publish_macos_update:
+    name: Publish signed macOS update
+    if: github.event_name == 'workflow_dispatch' && inputs.enable_updates && !inputs.enable_unsigned_update_test && vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'
+    needs: [build-macos-installer, test-macos-installer]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/desktop-update-publish.yml
+    with:
+      use_current_run: true
+      platform: macos
+      source_build_run_id: ${{ vars.LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID }}
 
   build-macos-installer:
     name: Build macOS arm64 DMG

@@ -20,13 +20,14 @@ class PrebuildBaselineTest(unittest.TestCase):
             root = Path(temp)
             validator = FIXTURE['build_validator'](root, unsigned=True)
             a = FIXTURE['FIXTURE']['release_record']('0.5.224')
-            url = FIXTURE['FIXTURE']['BASE'] + 'updates/unsigned-test/demo/policy.json'
-            a['config'].update(publicKeys={'fixture': FIXTURE['PUBLIC']}, policyURL=url, trustDomain='personal-round',
+            prefix = 'updates/unsigned-test/demo/in-place/round-41/'
+            url = FIXTURE['FIXTURE']['BASE'] + prefix + 'policy.json'
+            a['config'].update(publicKeys={'fixture': FIXTURE['PUBLIC']}, policyURL=url, trustDomain='inplace-41-' + 'a' * 64,
                                audience='personal', channel='personal-test', mode='unsigned-test', signingIdentity='adhoc')
             a['release']['signingIdentity'] = 'adhoc'
             for kind in ('package', 'feed', 'components'):
                 descriptor = a['release'][kind]
-                descriptor['url'] = descriptor['url'].replace('/updates/releases/', '/updates/unsigned-test/demo/releases/')
+                descriptor['url'] = descriptor['url'].replace('/updates/releases/', '/' + prefix + 'releases/')
             rid = a['config']['releaseId']
             write = FIXTURE['write_json']
             write(root / 'records' / rid / 'release.json', a)
@@ -36,21 +37,26 @@ class PrebuildBaselineTest(unittest.TestCase):
                             '--key-id', 'fixture', '--key-file', 'key.pem', '--config-output', 'a.json', '--output', 'policy.json'],
                            cwd=root, check=True)
             envelope = (root / 'policy.json').read_bytes()
-            for case in ('valid', '404', 'wrong key', 'same version', 'downgrade'):
+            for case in ('valid', 'isolated round only', 'another trust domain', 'wrong key', 'same version', 'downgrade'):
                 with self.subTest(case=case):
                     version = {'same version': '0.5.224', 'downgrade': '0.5.223'}.get(case, '0.5.225')
                     target = {**a['config'], 'version': version, 'releaseId': 'darwin-arm64-' + version}
                     if case == 'wrong key':
                         target['publicKeys'] = {'fixture': 'gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q='}
+                    if case == 'another trust domain':
+                        target['trustDomain'] = 'inplace-41-' + 'b' * 64
                     filename = root / 'target.json'
                     filename.write_text(json.dumps(target))
                     def fetch(requested_url):
                         self.assertEqual(requested_url, url)
-                        if case == '404':
+                        if case == 'isolated round only':
                             raise HTTPError(url, 404, 'missing', {}, None)
                         return io.BytesIO(envelope)
                     if case == 'valid':
                         self.assertEqual(VERIFY['verify'](filename, validator, fetch)['releaseId'], rid)
+                    elif case == 'isolated round only':
+                        with self.assertRaisesRegex(VERIFY['plan'].PlanError, r'(?i)(new|fresh) (test )?round|test_round\s*[=:]\s*new'):
+                            VERIFY['verify'](filename, validator, fetch)
                     else:
                         with self.assertRaises(VERIFY['plan'].PlanError):
                             VERIFY['verify'](filename, validator, fetch)

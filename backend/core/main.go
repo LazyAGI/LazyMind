@@ -1022,6 +1022,7 @@ func run(ctx context.Context) error {
 			if !startBackgroundJobs {
 				log.Logger.Info().Msg("core background jobs are disabled")
 			} else {
+				backgroundDone = append(backgroundDone, startSelectedComponentRecovery(runtimeCtx))
 				// History samples have already been downloaded and imported above.
 				backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 				asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()

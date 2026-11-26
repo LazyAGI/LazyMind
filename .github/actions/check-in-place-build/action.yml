@@ -1,0 +1,13 @@
+name: Check the in-place update build
+description: Verify the selected checkout's update identity or its staged package using the dispatch workflow's code
+inputs:
+  phase:
+    description: resolver or artifact
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        CHECK_PHASE: ${{ inputs.phase }}
+      run: uv run --no-project --python 3.11 python "${GITHUB_ACTION_PATH}/check.py" "${CHECK_PHASE}"

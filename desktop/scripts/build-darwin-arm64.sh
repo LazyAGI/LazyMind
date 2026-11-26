@@ -53,8 +53,6 @@ if [[ -f "${ROOT}/desktop/scripts/.unsigned-update-test.local.json" ]]; then
     exit 2
   fi
   UNSIGNED_TEST_GO_FLAGS=(-tags=lazymind_unsigned_test)
-  CORE_LDFLAGS+=" -X lazymind/core/systemdeps.componentStateNamespace=LazyMindTestUpdater"
-  APP_NAME="LazyMind Test"
 fi
 
 : "${ELECTRON_CACHE:=${HOME}/Library/Caches/electron}"
@@ -299,7 +297,7 @@ shasum -a 256 "${RUNTIME_ROOT}/bin/feishu-credential-helper" | awk '{print $1}' 
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" ${UNSIGNED_TEST_GO_FLAGS[@]+"${UNSIGNED_TEST_GO_FLAGS[@]}"} -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -trimpath -buildvcs=false ${UNSIGNED_TEST_GO_FLAGS[@]+"${UNSIGNED_TEST_GO_FLAGS[@]}"} -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/lazymind-update-helper" ./cmd/update-helper)
 "${RUNTIME_ROOT}/bin/lazymind-update-helper" config >/dev/null
-if [[ "${APP_NAME}" == "LazyMind Test" ]]; then
+if [[ -f "${ROOT}/desktop/scripts/.unsigned-update-test.local.json" ]]; then
   (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -trimpath -buildvcs=false -tags=lazymind_unsigned_test -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/unsigned-update-helper" ./cmd/unsigned-update-helper)
 fi
 (cd "${ROOT}/local/lazymind-cli" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/lazymind" ./cmd/lazymind)

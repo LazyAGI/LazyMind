@@ -27,7 +27,7 @@ export async function prepareRelease({ resources, packagePath, baseURL, minimumS
   const config = status.config;
   if (unsigned) {
     testBuild.validateUnsignedTestConfig(config);
-    testBuild.unsignedTestBase(baseURL, config);
+    testBuild.inPlaceArtifactBase(baseURL, config);
     if (config.platform !== "darwin") throw new Error("Isolated update test must be a macOS package");
     const { version, releaseId, platform, arch, ...publicConfig } = config;
     if (!isDeepStrictEqual(publicConfig, unsigned)) throw new Error("Built test helper does not match the public test configuration");
@@ -52,11 +52,11 @@ export async function prepareRelease({ resources, packagePath, baseURL, minimumS
     const signature = inspectSignature("/usr/bin/codesign", ["-dv", "--verbose=4", app], { encoding: "utf8" });
     const team = String(signature.stderr).match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim();
     const signingMatches = unsigned
-      ? path.basename(app) === "LazyMind Test.app" && /^Signature=adhoc$/m.test(String(signature.stderr))
-        && /^Identifier=ai\.lazymind\.desktop\.test$/m.test(String(signature.stderr))
+      ? path.basename(app) === "LazyMind.app" && /^Signature=adhoc$/m.test(String(signature.stderr))
+        && /^Identifier=ai\.lazymind\.desktop$/m.test(String(signature.stderr))
       : team === config.signingIdentity && String(signature.stderr).includes("Authority=Developer ID Application:");
     if (verified.status !== 0 || signature.status !== 0 || !signingMatches) throw new Error("App signature does not match update identity");
-    const archiveApp = unsigned ? "LazyMind Test.app" : "LazyMind.app";
+    const archiveApp = "LazyMind.app";
     // Read only fixed members; do not extract an untrusted archive into the filesystem.
     for (const relative of ["runtime/manifest.json", "runtime/config/python-components.json", "app-update.yml"]) {
       const archived = execFileSync("/usr/bin/unzip", ["-p", packagePath, archiveApp + "/Contents/Resources/" + relative], { maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });

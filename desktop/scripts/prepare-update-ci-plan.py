@@ -165,8 +165,6 @@ def prepare(current, history, evidence, validator, output, *, repo=None, verify_
         if historical_records or reports:
             raise PlanError('No published policy exists for the requested upgrade source')
     else:
-        if not historical_records and not verify_source_only:
-            raise PlanError('An existing policy requires release records from native source verification')
         with tempfile.TemporaryDirectory(prefix='lm-published-policy-') as tmp:
             old_path = Path(tmp) / 'policy.json'
             write_bytes(old_path, previous)
@@ -177,6 +175,13 @@ def prepare(current, history, evidence, validator, output, *, repo=None, verify_
                 sequence = publication['policySequence'] + 1
                 if any(release['releaseId'] == target_id for release in publication['releases']):
                     raise PlanError('The release is already in the signed public policy')
+                # A shared official pointer can already contain the other OS.
+                # Revoked releases and prior signing identities still count as
+                # platform history: neither allows a new first-release bypass.
+                if mode == 'official' and not any(r['platform'] == target['config']['platform'] for r in publication['releases']):
+                    continue
+                if not historical_records and not verify_source_only:
+                    raise PlanError('An existing platform requires release records from native source verification')
                 # The verifier also checks that the target is newer than the latest matching release.
                 latest = verified_policy(validator, old_path, config_file, source_only=True)
                 revoked = set(publication['revoked'] or [])

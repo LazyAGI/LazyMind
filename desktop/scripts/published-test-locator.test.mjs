@@ -17,7 +17,7 @@ const template = { mode: "unsigned-test", audience: "fixture", trustDomain: "leg
   signingIdentity: "adhoc", channel: "personal-test", policyURL: base + "policy.json",
   allowedOrigins: ["https://modelscope.cn"], publicKeys: { fixture: Buffer.alloc(32, 4).toString("base64") } };
 
-for (const [locator, policy] of [["published:legacy", base + "policy.json"], ["published:41", base + "round-41/policy.json"]]) {
+for (const [locator, policy] of [["published:legacy", null], ["published:41", base + "in-place/round-41/policy.json"]]) {
   test(`${locator} uses the configured keys and requires verification before building`, { skip: process.platform === "win32" }, t => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lm-public-round-"));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -27,7 +27,8 @@ for (const [locator, policy] of [["published:legacy", base + "policy.json"], ["p
       LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: JSON.stringify(template), LAZYMIND_UPDATE_BASE_URL: base };
     const run = (step, mocks, extra = {}) => spawnSync("bash", ["-euc", mocks + "\n" + step.run],
       { cwd: root, env: { ...env, ...extra }, encoding: "utf8" });
-    assert.equal(run(steps.find(s => s.name === "Validate test build inputs"), "").status, 0);
+    const validate = run(steps.find(s => s.name === "Validate test build inputs"), "");
+    if (policy !== null) assert.equal(validate.status, 0);
     const lookup = steps.find(s => s.run?.includes("gh run download"));
     assert.equal(run(lookup, 'gh() { touch "$RUNNER_TEMP/queried-gh"; return 1; }').status, 0);
     assert.equal(fs.existsSync(path.join(dir, "queried-gh")), false);
@@ -43,6 +44,13 @@ for (const [locator, policy] of [["published:legacy", base + "policy.json"], ["p
         [[ "$1" == desktop/scripts/build-unsigned-update-test.sh && -f "$RUNNER_TEMP/verified.json" ]] || return 95
         printf '%s' "$LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON" > "$RUNNER_TEMP/built.json"
       }`;
+    if (policy === null) {
+      const rejected = validate.status === 0 ? run(build, external, { VERIFY_EXIT: "0" }) : validate;
+      assert.notEqual(rejected.status, 0, "the isolated legacy locator entered the in-place build");
+      assert.match(rejected.stdout + rejected.stderr, /(?:new|fresh) (?:test )?round|test_round\s*[=:]\s*new/i);
+      assert.equal(fs.existsSync(path.join(dir, "built.json")), false);
+      return;
+    }
     const rejected = run(build, external, { VERIFY_EXIT: "1" });
     assert.notEqual(rejected.status, 0);
     assert.equal(fs.existsSync(path.join(dir, "built.json")), false);
@@ -54,6 +62,6 @@ for (const [locator, policy] of [["published:legacy", base + "policy.json"], ["p
     assert.equal(verified.policyURL, policy);
     assert.deepEqual(verified.publicKeys, template.publicKeys);
     assert.deepEqual(verified, { ...built, version: "0.5.225", releaseId: "darwin-arm64-0.5.225", platform: "darwin", arch: "arm64" });
-    assert.equal(built.trustDomain === template.trustDomain, locator === "published:legacy");
+    assert.notEqual(built.trustDomain, template.trustDomain);
   });
 }

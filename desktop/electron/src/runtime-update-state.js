@@ -3,7 +3,8 @@ async function readRuntimeUpdateState(runSidecar, systemVersion) {
     const parts = String(systemVersion).split(".");
     while (parts.length < 3) parts.push("0");
     if (parts.length !== 3 || parts.some(value => !/^\d+$/.test(value))) throw new Error();
-    const raw = await runSidecar("update-state", [], { timeout: 30000 });
+    // Allow 25s for SQLite, 75s for an optional native identity check, and 10s for the sidecar.
+    const raw = await runSidecar("update-state", [], { timeout: 110_000 });
     if (typeof raw !== "string" || Buffer.byteLength(raw) > 1024 * 1024) throw new Error();
     const state = JSON.parse(raw);
     if (typeof state?.dirty !== "boolean" || typeof state.dataProfile !== "string"

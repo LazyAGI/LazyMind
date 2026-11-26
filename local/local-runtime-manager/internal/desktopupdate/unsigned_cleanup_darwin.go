@@ -34,6 +34,22 @@ func discardCompletedUnsignedInstall(ctx context.Context, root, tx string) error
 	if record, err := ReadNativeRecord(root); err != nil || record != nil {
 		return failure("update_incomplete", err)
 	}
+	return discardUnsignedInstallFiles(root, tx)
+}
+
+// Caller holds the native-state lock. A pending cancellation may remove its
+// own preparation before retiring the record; it cannot touch a foreign tx.
+func discardCancelledUnsignedInstall(root string, r *NativeRecord) error {
+	if r.SigningIdentity != "adhoc" || r.Channel != "personal-test" || !inPlaceTestDomain.MatchString(r.TrustDomain) {
+		return nil
+	}
+	return discardUnsignedInstallFiles(root, r.TransactionID)
+}
+
+func discardUnsignedInstallFiles(root, tx string) error {
+	if len(tx) != 32 || !digestPattern.MatchString(tx+tx) || NoUnsignedPathAliases(filepath.Join(root, "installs", tx)) != nil {
+		return failure("path_invalid", nil)
+	}
 	updater, err := os.OpenRoot(root)
 	if err != nil {
 		return err
@@ -53,6 +69,19 @@ func discardCompletedUnsignedInstall(ctx context.Context, root, tx string) error
 	}
 	if err != nil || !stage.IsDir() {
 		return failure("path_invalid", err)
+	}
+	path := filepath.Join(root, "installs", tx)
+	var loc unsignedWorkspaceLocation
+	if err := readMetadata(filepath.Join(path, "workspace.json"), &loc); err == nil {
+		account, system, e := UnsignedApplicationLocations()
+		if e != nil || root != account.Updater || !IsUnsignedApplication(loc.Application, account, system) {
+			return failure("unsigned_test_workspace", e)
+		}
+		if e := removeUnsignedWorkspace(path, tx, loc.Application); e != nil {
+			return e
+		}
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	return stages.RemoveAll(tx)
 }

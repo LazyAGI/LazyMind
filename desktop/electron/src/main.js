@@ -32,7 +32,7 @@ const { createInstallIntentStore, createCLIInstallIntentStore } = require("./upd
 const { createNativeUpdateInstaller } = require("./native-update-installer");
 const { createUpdateRuntimeClient } = require("./update-runtime-client");
 const { readRuntimeUpdateState } = require("./runtime-update-state");
-const { guardDesktopStartup, prepareDesktopStartup, adoptDesktopRepair } = require("./update-startup");
+const { guardDesktopStartup, prepareDesktopStartup, adoptDesktopRepair, recordUpdateStartup } = require("./update-startup");
 const { localFileAction, openChatExternal } = require("./chat-link-actions");
 const { revealDirectoryFile } = require("./directory-file");
 const {
@@ -131,7 +131,10 @@ const ownerToken = randomUUID();
 const localWorkspaceCandidates = new Map();
 const internalServiceToken = randomBytes(32).toString("base64url");
 const clientInstanceId = `ci_${randomBytes(24).toString("base64url")}`;
-const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
+// The in-place installer reads user data in its existing location, but
+// executes only the manager and update helpers bundled in the running app.
+const binaryPathOverrides = unsignedTestProfile ? {} : process.env;
+const runtimeResourcesRoot = binaryPathOverrides.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
   (isPackaged
     ? path.join(process.resourcesPath, "runtime")
     : path.resolve(__dirname, "..", "..", "build", desktopTarget, "runtime"));
@@ -142,14 +145,17 @@ const cloudConfiguration = loadDesktopCloudConfiguration({
 });
 const cloudBaseURL = cloudConfiguration.baseURL;
 const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
-const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
+const repoRoot = binaryPathOverrides.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
 let explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
-const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
+const sidecarPath = binaryPathOverrides.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
 try {
   guardDesktopStartup({ isPackaged, sidecarPath, args: sidecarArgs("startup-guard"), env: { ...process.env } });
 } catch (error) {
+  recordUpdateStartup(() => windowsDesktopPaths?.logsDir || app.getPath("logs"), {
+    installedVersion: currentVersion, action: "startup-guard", reason: error.code || "update_startup_blocked",
+  });
   dialog.showErrorBox("LazyMind update recovery", "Startup is blocked while an update requires recovery. Open the independent LazyMind update recovery entry to continue.");
   app.exit(1);
   throw error;
@@ -181,7 +187,7 @@ const editablePptDependencyConfigPath = path.join(
   "editable-ppt-dependencies.json",
 );
 const agentConnectorPath = resolveAgentConnectorPath({
-  override: process.env.LAZYMIND_DESKTOP_AGENT_CONNECTOR,
+  override: binaryPathOverrides.LAZYMIND_DESKTOP_AGENT_CONNECTOR,
   isExternalRuntimeDev,
   repoRoot,
   runtimeResourcesRoot,
@@ -230,6 +236,8 @@ let tray;
 let rendererReadyWait;
 let runtimeProcess;
 let runtimeRestartPromise;
+let checkingComponentRefresh = false;
+let componentRefreshLease;
 let runtimeStopping = false;
 let agentHostProcess;
 let agentHostRestartTimer;
@@ -1545,6 +1553,59 @@ function restartRuntimeAfterFolderAccessChange({ reload = true } = {}) {
   return runtimeRestartPromise;
 }
 
+// Core installs verified overlays in the background. Running Python processes
+// keep their original environment until the desktop can restart them at idle.
+function scheduleComponentRefresh(status) {
+  if (!isPackaged || isInstallerWarmup || checkingComponentRefresh || !status.ownerMatched || !status.runtimeRoot) return;
+  const selection = path.join(status.runtimeRoot, "deps", "python-components", "selected-update.json");
+  if (!fs.existsSync(selection)) return;
+  checkingComponentRefresh = true;
+  let identity;
+  const updating = () => { const state = desktopUpdater.getState(); return state.pendingUpdate || state.updating; };
+  async function check() {
+    let finished = false;
+    try {
+      if (componentRefreshLease) { await updateRuntime.resume(componentRefreshLease); componentRefreshLease = undefined; }
+      if (isQuitting || runtimeStopping || runtimeRestartPromise || !desktopUpdateAdmission || updating()) return;
+      const record = JSON.parse(await fs.promises.readFile(selection, "utf8"));
+      if (!Array.isArray(record.wanted) || !record.wanted.length) { finished = true; return; }
+      identity ??= await invokeUpdateHelper("config");
+      if (identity.status !== "enabled" || identity.config.releaseId !== record.releaseId) { finished = true; return; }
+      const port = Number(currentStatus?.config?.localProxy?.Port ?? currentStatus?.config?.localProxy?.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return;
+      const gateway = `http://127.0.0.1:${port}`;
+      const settings = { redirect: "error", signal: AbortSignal.timeout(10_000) };
+      const login = await fetch(`${gateway}/_local/admin-session`, { ...settings, method: "POST" });
+      if (!login.ok) return;
+      const { token } = await login.json();
+      if (!token) return;
+      const response = await fetch(`${gateway}/api/core/system-dependencies/python`, {
+        ...settings, headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const { data } = await response.json();
+      if (!Array.isArray(data)) return;
+      const selected = data.filter(row => record.wanted.includes(row.id));
+      if (selected.every(row => row.active)) { finished = true; return; }
+      if (!selected.some(row => row.installed && row.restartRequired && row.installedRevision && row.installedRevision === record.verifiedComponents?.[row.id])) return;
+      if ((await updateRuntime.status()).active || updating() || !desktopUpdateAdmission) return;
+      componentRefreshLease = updateRuntime.nextEpoch();
+      if (!(await updateRuntime.pause(componentRefreshLease)).active && !isQuitting && !updating()) {
+        await restartRuntimeAfterFolderAccessChange({ reload: false });
+      }
+      await updateRuntime.resume(componentRefreshLease);
+      componentRefreshLease = undefined;
+    } catch (error) {
+      if (error.code === "ENOENT" && !componentRefreshLease) finished = true;
+      else appendStartupLog("desktop", "Could not refresh optional components yet; will retry when idle");
+    } finally {
+      if (finished || isQuitting) checkingComponentRefresh = false;
+      else setTimeout(check, 30_000).unref();
+    }
+  }
+  setTimeout(check, 5_000).unref();
+}
+
 function logStartupContext() {
   appendStartupLog("desktop", `sidecar: ${sidecarPath}`);
   appendStartupLog("desktop", `resources: ${runtimeResourcesRoot}`);
@@ -1775,6 +1836,7 @@ async function waitForRuntimeReady(options = {}) {
       if (ownedReady && status.config?.frontendPort) {
         if (!targetCapability) {
           startupMetricsRecorder.mark("runtimeReady");
+          scheduleComponentRefresh(status);
           await startGuard();
           updateStartupState({ status: "ready", phase: "Ready", message: "LazyMind is ready." });
         }
@@ -2752,7 +2814,10 @@ const desktopUpdater = createDesktopUpdater({
   revealPackage: (file) => shell.showItemInFolder(file),
   report: (reason) => appendStartupLog("update", reason),
 });
-registerUpdateIPC({ ipcMain, updater: desktopUpdater,
+registerUpdateIPC({ ipcMain, updater: { ...desktopUpdater, install: (...args) => {
+  if (componentRefreshLease) throw Object.assign(new Error("runtime restart in progress"), { code: "tasks_active" });
+  return desktopUpdater.install(...args);
+} },
   authorize: (event) => isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin()),
 });
 desktopUpdater.subscribe((state) => sendUpdateState(mainWindow, notificationFrontendOrigin(), state));
@@ -2760,7 +2825,7 @@ app.on("will-quit", () => desktopUpdater.dispose());
 let nativeRecordingOwner = null;
 const nativeRecording = process.platform === "darwin" ? createRecordingHelper({
   source: app.isPackaged ? path.join(process.resourcesPath, "recording-helper", "LazyMind Recorder.app") : path.resolve(__dirname, "../../build/recording-helper/LazyMind Recorder.app"),
-  root: path.join(unsignedTestProfile?.runtime || path.join(app.getPath("appData"), "LazyMind"), "recording-helper"),
+  root: path.join(app.getPath("appData"), "LazyMind", "recording-helper"),
   onEvent: (message) => { if (nativeRecordingOwner && !nativeRecordingOwner.isDestroyed()) nativeRecordingOwner.send("lazymind:recordingNativeEvent", message); },
   log: (stage, message) => appendStartupLog("recording-helper", `${stage}: ${message}`),
 }) : null;
@@ -3456,6 +3521,7 @@ ipcMain.handle("lazymind:exportDiagnostics", async () => {
     logsDir: currentRuntimeLogsDir(),
     desktopLogsDir,
     desktopStartupLog: startupLogPath,
+    desktopUpdateRecoveryLog: path.join(desktopLogsDir, "desktop-update-recovery.log"),
     desktopStartupMetrics: startupMetricsHistoryPath,
     startupMetrics: startupMetricsRecorder.snapshot(),
     lastStartupError,
@@ -3491,6 +3557,7 @@ if (!hasSingleInstanceLock) {
   });
   app.whenReady().then(async () => {
     const startupParameters = { isPackaged, currentVersion, currentReleaseId, ownerToken, invoke: runSidecar,
+      onRecovery: event => recordUpdateStartup(() => app.getPath("logs"), event),
       onRuntimeStarted: (runtimeRoot) => {
         if (!runtimeRoot || !path.isAbsolute(runtimeRoot)) throw new Error("update_storage_mismatch");
         explicitRuntimeRoot = runtimeRoot;
@@ -3509,9 +3576,15 @@ if (!hasSingleInstanceLock) {
       runtimePrestarted = startup.runtimeStarted;
       if (startup.transactionId) desktopUpdater.completeNativeStartup(startup.transactionId);
     } catch (error) {
-      const message = error?.code === "handoff_restart_required"
-        ? 'Restart your computer, then reopen LazyMind and choose "Verify this version".'
-        : "The installed version could not be verified. Reopen the app or install a supported repair version.";
+      let message = "The installed version could not be verified. Reopen the app or install a supported repair version.";
+      if (error?.code === "handoff_restart_required") {
+        message = 'Restart your computer, then reopen LazyMind and choose "Verify this version".';
+      } else if (error?.code === "update_original_target_required") {
+        const target = error.targetVersion ? `version ${error.targetVersion}` : "the version from the interrupted update";
+        message = `Update verification for ${target} is unfinished. Reopen that version to resume. If you need the installer, contact support. Your update record has been kept.`;
+      } else if (error?.code === "repair_target_not_accepted") {
+        message = "This version could not take over the unfinished update. Contact support for a supported repair version. Your update record has been kept.";
+      }
       dialog.showErrorBox("LazyMind update needs repair", message);
       app.exit(1); return;
     }

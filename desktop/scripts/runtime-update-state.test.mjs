@@ -13,7 +13,7 @@ test("checks request a fresh read-only runtime measurement and add actual OS ver
   assert.equal((await readRuntimeUpdateState(invoke, "14.7")).dataProfile, profile);
   assert.equal(calls.length, 2);
   assert.equal(calls[0][0], "update-state");
-  assert.ok(calls[0][2].timeout > 0 && calls[0][2].timeout <= 30000);
+  assert.equal(calls[0][2].timeout, 110_000);
 });
 
 test("unknown or malformed local state never falls back to app version or cached status", async () => {

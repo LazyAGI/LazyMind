@@ -22,7 +22,7 @@ def verify(config_path, validator, fetch=None):
         fetch = lambda url: opener.open(url, timeout=60)
     envelope = plan.publisher.read_remote_policy(fetch, config['policyURL'])
     if envelope is None:
-        raise plan.PlanError('A public baseline locator requires an existing signed policy')
+        raise plan.PlanError('No signed in-place baseline exists at this locator. Start a new round.')
     with tempfile.TemporaryDirectory() as temp:
         previous = Path(temp) / 'policy.json'
         previous.write_bytes(envelope)

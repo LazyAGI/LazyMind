@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"lazymind/core/log"
 	"lazymind/core/systemdeps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -31,7 +32,7 @@ func runComponentMaintenanceEntry() bool {
 	raw := append([]byte(nil), scanner.Bytes()...)
 	err := scanner.Err()
 	var request struct{ TransactionID, ID string }
-	if len(os.Args) != 3 || (os.Args[2] != "stage" && os.Args[2] != "activate" && os.Args[2] != "independent") || err != nil || len(raw) > 4096 || json.Unmarshal(raw, &request) != nil || (os.Args[2] != "independent" && len(request.TransactionID) != 32) || (os.Args[2] == "independent" && request.ID != "rag") {
+	if len(os.Args) != 3 || (os.Args[2] != "stage" && os.Args[2] != "activate" && os.Args[2] != "defer" && os.Args[2] != "independent") || err != nil || len(raw) > 4096 || json.Unmarshal(raw, &request) != nil || (os.Args[2] != "independent" && len(request.TransactionID) != 32) || (os.Args[2] == "independent" && request.ID != "rag") {
 		emit("update_request_invalid")
 		return true
 	}
@@ -46,14 +47,10 @@ func runComponentMaintenanceEntry() bool {
 			emit("update_request_invalid")
 			return true
 		}
-		python := filepath.Join(resources, "deps", "python", "algorithm", "bin", "python")
-		if runtime.GOOS == "windows" {
-			python = filepath.Join(resources, "deps", "python", "algorithm", "Scripts", "python.exe")
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 		defer cancel()
 		go func() { scanner.Scan(); cancel() }()
-		result, err := systemdeps.RunIndependentPythonComponent(ctx, systemdeps.PythonComponentMaintenanceContext{RuntimeRoot: runtimeRoot, ResourcesRoot: resources, UpdaterRoot: root, Python: python, AlgorithmSource: filepath.Join(resources, "app", "algorithm")})
+		result, err := systemdeps.RunIndependentPythonComponent(ctx, componentEnvironment(runtimeRoot, resources, root))
 		if err != nil {
 			emit("component_install_failed")
 		} else {
@@ -73,33 +70,76 @@ func runComponentMaintenanceEntry() bool {
 		emit("update_record_read")
 		return true
 	}
-	helperName := "lazymind-update-helper"
-	python := filepath.Join(record.InstallationRoot, "deps", "python", "algorithm", "bin", "python")
-	if runtime.GOOS == "windows" {
-		helperName += ".exe"
-		python = filepath.Join(record.InstallationRoot, "deps", "python", "algorithm", "Scripts", "python.exe")
-	}
-	// Allow the helper's bounded 60-second signature verification to finish.
-	identityCtx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
-	command := exec.CommandContext(identityCtx, filepath.Join(record.InstallationRoot, "bin", helperName), "verify-identity")
-	var identity struct {
-		Status string
-		Config struct{ ReleaseID string }
-	}
-	output, err := command.Output()
-	cancel()
-	if err != nil || len(output) > 1024*1024 || json.Unmarshal(output, &identity) != nil || identity.Status != "enabled" || identity.Config.ReleaseID == "" {
-		emit("update_transaction_conflict")
-		return true
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	defer cancel()
 	go func() { scanner.Scan(); cancel() }()
-	result, err := systemdeps.RunPythonComponentMaintenance(ctx, os.Args[2], raw, systemdeps.PythonComponentMaintenanceContext{RuntimeRoot: record.RuntimeRoot, ResourcesRoot: record.InstallationRoot, UpdaterRoot: root, ReleaseID: identity.Config.ReleaseID, Python: python, AlgorithmSource: filepath.Join(record.InstallationRoot, "app", "algorithm")})
+	env := componentEnvironment(record.RuntimeRoot, record.InstallationRoot, root)
+	if err := env.VerifyInstalledRelease(ctx); err != nil {
+		emit("update_transaction_conflict")
+		return true
+	}
+	result, err := systemdeps.RunPythonComponentMaintenance(ctx, os.Args[2], raw, env)
 	if err != nil {
 		emit("component_maintenance_failed")
 	} else {
 		_, _ = os.Stdout.Write(result)
 	}
 	return true
+}
+
+func componentEnvironment(runtimeRoot, resources, updaterRoot string) systemdeps.PythonComponentMaintenanceContext {
+	python := filepath.Join(resources, "deps", "python", "algorithm", "bin", "python")
+	if runtime.GOOS == "windows" {
+		python = filepath.Join(resources, "deps", "python", "algorithm", "Scripts", "python.exe")
+	}
+	return systemdeps.PythonComponentMaintenanceContext{RuntimeRoot: runtimeRoot, ResourcesRoot: resources,
+		UpdaterRoot: updaterRoot, Python: python, AlgorithmSource: filepath.Join(resources, "app", "algorithm")}
+}
+
+func startSelectedComponentRecovery(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if !systemdeps.IsLocalRuntime() {
+			return
+		}
+		runtimeRoot, err := systemdeps.RuntimeRootFromEnv()
+		resources := os.Getenv("LAZYMIND_RUNTIME_RESOURCES_ROOT")
+		if err != nil || !filepath.IsAbs(runtimeRoot) || !filepath.IsAbs(resources) {
+			return
+		}
+		for delay := 30 * time.Second; ctx.Err() == nil; delay = min(2*delay, 5*time.Minute) {
+			if err := reconcileSelectedComponents(ctx, runtimeRoot, resources); err == nil || ctx.Err() != nil {
+				return
+			}
+			log.Logger.Warn().Dur("retry_after", delay).Msg("pending component recovery will retry")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+	}()
+	return done
+}
+
+// A retained selection can be completely healthy. Recheck it before each
+// costly identity lookup, including after another process finishes the work.
+func reconcileSelectedComponents(ctx context.Context, runtimeRoot, resources string) error {
+	pending, err := systemdeps.HasPendingSelectedComponentWork(runtimeRoot, resources)
+	if err != nil || !pending {
+		return err
+	}
+	root, err := resolveComponentMaintenanceRoot()
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(root) {
+		return errors.New("invalid component updater directory")
+	}
+	env := componentEnvironment(runtimeRoot, resources, root)
+	if err := env.VerifyInstalledRelease(ctx); err != nil {
+		return err
+	}
+	return env.ReconcileSelectedPythonComponents(ctx, 30*time.Second)
 }

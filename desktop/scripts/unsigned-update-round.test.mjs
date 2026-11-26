@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -65,10 +66,12 @@ function writeRecord(dir, record) {
   mkdirSync(folder, { recursive: true });
   writeFileSync(path.join(folder, "release.json"), JSON.stringify(record));
 }
-function sourceRecord(configuration, version) {
-  const bytes = prepareUpdateBuildConfig({ configuration, packageVersion: version, platform: "darwin",
-    arch: "arm64", signingMode: "adhoc", isolatedTestBuild: true });
-  const config = JSON.parse(Buffer.from(bytes, "base64").toString());
+function sourceRecord(configuration, version, { archived = false } = {}) {
+  // Already published records must remain usable as negative inputs even if
+  // the current producer refuses to create packages with that identity.
+  const config = archived ? { ...configuration, version, releaseId: "darwin-arm64-" + version, platform: "darwin", arch: "arm64" }
+    : JSON.parse(Buffer.from(prepareUpdateBuildConfig({ configuration, packageVersion: version, platform: "darwin",
+      arch: "arm64", signingMode: "adhoc", isolatedTestBuild: true }), "base64").toString());
   const { releaseId, platform, arch, signingIdentity, updaterProtocol } = config;
   const prefix = new URL(`releases/${releaseId}/`, config.policyURL);
   const artifact = name => ({ url: new URL(name, prefix).href, sha256: "a".repeat(64), size: 128 });
@@ -135,6 +138,8 @@ function runBuild(t, mode, run, version, sourceID = "", record, conclusion = "su
 const bashOnly = { skip: process.platform === "win32" };
 
 test("manual installer selects new or continued test rounds and leaves the ordinary installer runnable", () => {
+  assert.deepEqual(Object.keys(installer.on.workflow_dispatch.inputs).sort(),
+    ["enable_updates", "signing_mode", "git_ref", "enable_unsigned_update_test", "test_version", "test_round", "source_build_run_id"].sort());
   const choice = installer.on.workflow_dispatch.inputs.test_round;
   assert.equal(choice?.type, "choice");
   assert.deepEqual([...choice.options].sort(), ["continue", "new"]);
@@ -147,11 +152,12 @@ test("two new rounds can reuse an app version without reusing policy, trust or R
   const one = runBuild(t, "new", "45348758446", "0.5.223").read();
   const two = runBuild(t, "new", "45348758447", "0.5.223").read();
   for (const [built, run] of [[one, "45348758446"], [two, "45348758447"]]) {
-    assert.equal(built.baseURL, base + `round-${run}/`);
+    assert.equal(built.baseURL, base + `in-place/round-${run}/`);
     assert.equal(built.config.policyURL, built.baseURL + "policy.json");
     assert.equal(built.componentURL, built.baseURL + "RAG/");
     assert.match(built.config.trustDomain, /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
     assert.notEqual(built.config.trustDomain, template.trustDomain);
+    assert.notEqual(built.config.trustDomain, oldRound(run).trustDomain);
     assert.deepEqual(built.config, { ...template, policyURL: built.config.policyURL, trustDomain: built.config.trustDomain });
     assert.equal(built.version, "0.5.223");
   }
@@ -163,23 +169,32 @@ test("continuing from B keeps A's public identity through C", bashOnly, t => {
   const b = runBuild(t, "continue", "42", "1.2.0", "41", sourceRecord(a.config, a.version)).read();
   const c = runBuild(t, "continue", "43", "1.3.0", "42", sourceRecord(b.config, b.version)).read();
   for (const result of [b, c]) {
-    assert.equal(result.baseURL, base + "round-41/");
+    assert.equal(result.baseURL, base + "in-place/round-41/");
     assert.deepEqual(result.config, a.config);
     assert.equal(result.componentURL, result.baseURL + "RAG/");
   }
 });
 
-test("a published legacy baseline continues at its existing policy URL", bashOnly, t => {
-  const b = runBuild(t, "continue", "42", "1.2.0", "41", sourceRecord(template, "1.1.0")).read();
-  assert.deepEqual(b.config, template);
-  assert.equal(b.baseURL, base);
-});
+function oldRound(run) {
+  // Identity formula embedded in already-published isolated Desktop packages.
+  const digest = createHash("sha256").update(JSON.stringify([template.trustDomain, base, run])).digest("hex");
+  return { ...template, policyURL: base + `round-${run}/policy.json`, trustDomain: `round-${run}-${digest}` };
+}
 
-const valid = sourceRecord(template, "1.1.0");
-const foreign = sourceRecord({ ...template, policyURL: template.policyURL.replace("/fixture/", "/other/") }, "1.1.0");
-const sibling = sourceRecord({ ...template, policyURL: template.policyURL.replace("/demo/", "/demo-other/round-41/") }, "1.1.0");
-const official = { ...valid, config: { ...valid.config, audience: "official", mode: "official" } };
-for (const [name, mode, sourceID, record, conclusion] of [
+for (const [layout, config] of [["unversioned policy", template], ["isolated round", oldRound("41")]]) {
+  test(`continuing the raw successful run of an old ${layout} requires a new round`, bashOnly, t => {
+    const { call, captured } = runBuild(t, "continue", "42", "1.2.0", "41", sourceRecord(config, "1.1.0", { archived: true }));
+    assert.notEqual(call.status, 0);
+    assert.match(call.stdout + call.stderr, /(?:new|fresh) (?:test )?round|test_round\s*[=:]\s*new/i);
+    assert.equal(existsSync(captured), false);
+  });
+}
+
+const valid = config => config;
+const foreign = config => ({ ...config, policyURL: config.policyURL.replace("/fixture/", "/other/") });
+const sibling = config => ({ ...config, policyURL: config.policyURL.replace("/demo/", "/demo-other/") });
+const official = config => ({ ...config, audience: "official", mode: "official" });
+for (const [name, mode, sourceID, identity, conclusion] of [
   ["new with a source", "new", "41", valid], ["continue without an ID", "continue", ""],
   ["missing source artifact", "continue", "41"],
   ["failed source run with no authenticated published baseline", "continue", "41", valid, "failure"],
@@ -187,6 +202,7 @@ for (const [name, mode, sourceID, record, conclusion] of [
   ["official identity", "continue", "41", official],
 ]) {
   test(`reject ${name} before starting the native build`, bashOnly, t => {
+    const record = identity && sourceRecord(identity(runBuild(t, "new", "41", "1.1.0").read().config), "1.1.0", { archived: true });
     const { call, captured } = runBuild(t, mode, "42", "1.2.0", sourceID, record, conclusion);
     assert.notEqual(call.status, 0, `native build accepted ${name}`);
     assert.equal(existsSync(captured), false);
@@ -195,21 +211,36 @@ for (const [name, mode, sourceID, record, conclusion] of [
 
 test("a baseline cannot pair one round's policy URL with another round's trust domain", bashOnly, t => {
   const other = runBuild(t, "new", "42", "1.1.0").read();
-  const mixed = sourceRecord({ ...other.config, policyURL: base + "round-41/policy.json" }, "1.1.0");
+  const mixed = sourceRecord({ ...other.config, policyURL: base + "in-place/round-41/policy.json" }, "1.1.0", { archived: true });
   const { call, captured } = runBuild(t, "continue", "43", "1.2.0", "41", mixed);
   assert.notEqual(call.status, 0, "accepted a baseline from two different rounds");
   assert.equal(existsSync(captured), false);
 });
 
+function publishComponents(dir, builtConfig) {
+  writeFileSync(path.join(dir, "update-config.json"), JSON.stringify(builtConfig));
+  const step = publisher.steps.find(item => item.run?.includes("desktop/scripts/publish-python-components.py"));
+  return runStep(step, { github: { run_id: "42" }, vars: variables, secrets: { MODELSCOPE_UPDATE_TOKEN: "fixture" } }, dir,
+    `uv() { printf '%s\\n' "$@" > "$RUNNER_TEMP/upload.args"; }`);
+}
+
 test("the unsigned component upload uses the signed build's prefix alongside its policy", bashOnly, t => {
   const dir = temporary(t);
-  const config = { ...template, policyURL: base + "round-41/policy.json", trustDomain: "desktop-test-round-41" };
-  writeFileSync(path.join(dir, "update-config.json"), JSON.stringify(sourceRecord(config, "1.1.0").config));
-  const step = publisher.steps.find(item => item.run?.includes("desktop/scripts/publish-python-components.py"));
-  const call = runStep(step, { github: { run_id: "42" }, vars: variables, secrets: { MODELSCOPE_UPDATE_TOKEN: "fixture" } }, dir,
-    `uv() { printf '%s\\n' "$@" > "$RUNNER_TEMP/upload.args"; }`);
+  const config = runBuild(t, "new", "41", "1.1.0").read().config;
+  const call = publishComponents(dir, sourceRecord(config, "1.1.0").config);
   assert.equal(call.status, 0, call.stderr);
   const args = readFileSync(path.join(dir, "upload.args"), "utf8").trimEnd().split("\n");
   assert.ok(args.includes("desktop/scripts/publish-python-components.py"));
-  assert.equal(args[args.indexOf("--prefix") + 1], "updates/unsigned-test/demo/round-41/RAG");
+  assert.equal(args[args.indexOf("--prefix") + 1], "updates/unsigned-test/demo/in-place/round-41/RAG");
+});
+
+test("component publication rejects another round's trust domain before invoking the uploader", bashOnly, t => {
+  const dir = temporary(t);
+  const first = runBuild(t, "new", "41", "1.1.0").read().config;
+  const other = runBuild(t, "new", "42", "1.1.0").read().config;
+  assert.notEqual(first.trustDomain, other.trustDomain);
+  const mixed = { ...sourceRecord(first, "1.1.0").config, trustDomain: other.trustDomain };
+  const call = publishComponents(dir, mixed);
+  assert.notEqual(call.status, 0, "publisher accepted another trust domain at this policy URL");
+  assert.equal(existsSync(path.join(dir, "upload.args")), false);
 });

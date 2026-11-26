@@ -179,7 +179,7 @@ def release_inputs(directory, unsigned_test):
     if unsigned_test:
         require(native_os == 'darwin' and config['mode'] == 'unsigned-test'
                 and config['channel'] == 'personal-test' and config['audience'] != 'official'
-                and config['signingIdentity'] == 'adhoc', 'Expected isolated unsigned-test build identity')
+                and config['signingIdentity'] == 'adhoc', 'Expected in-place unsigned-test build identity')
     else:
         require(config['mode'] == 'official' and config['audience'] == 'official',
                 'Expected an officially signed build')
@@ -232,13 +232,12 @@ def output(command, *, timeout=90, env=None, include_stderr=False):
 def verify_macos_app(app, signing_identity, unsigned_test):
     with read_plain_file(app, 'Contents/Info.plist').open('rb') as stream:
         bundle_id = plistlib.load(stream)['CFBundleIdentifier']
-    require(bundle_id == ('ai.lazymind.desktop.test' if unsigned_test else 'ai.lazymind.desktop'),
-            'Unexpected macOS App identity')
+    require(bundle_id == 'ai.lazymind.desktop', 'Unexpected macOS App identity')
     output(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)])
     signature = output(['/usr/bin/codesign', '-dv', '--verbose=4', str(app)], include_stderr=True).splitlines()
     if unsigned_test:
         require('Signature=adhoc' in signature and 'TeamIdentifier=not set' in signature,
-                'Expected ad-hoc signature on isolated test App')
+                'Expected ad-hoc signature on in-place test App')
     else:
         require(f'TeamIdentifier={signing_identity}' in signature
                 and any(line.startswith('Authority=Developer ID Application:') for line in signature),
@@ -273,7 +272,7 @@ def run_windows_installer(executable, arguments, *, timeout):
 @contextmanager
 def materialized_app(package, release, directory, unsigned_test):
     if release['platform'] == 'darwin':
-        name = 'LazyMind Test.app' if unsigned_test else 'LazyMind.app'
+        name = 'LazyMind.app'
         validate_app_zip(package, name, release['package']['unpackedBytes'])
         output(['/usr/bin/ditto', '-x', '-k', str(package), str(directory)], timeout=600)
         app = directory / name
@@ -524,7 +523,7 @@ def main():
     parser.add_argument('--output', type=Path, help='New, immutable format evidence JSON')
     parser.add_argument('--source-components-dir', type=Path, help='Local source component bundle directory')
     parser.add_argument('--target-components-dir', type=Path, help='Local target component bundle directory')
-    parser.add_argument('--unsigned-test', action='store_true', help='Verify explicitly isolated macOS test packages')
+    parser.add_argument('--unsigned-test', action='store_true', help='Verify ad-hoc macOS in-place test packages')
     args = parser.parse_args()
     if args.worker:
         require(args.fixture, 'Expected a fixture directory')

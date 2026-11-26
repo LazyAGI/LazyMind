@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build an isolated macOS update test package without modifying the checkout.
+# Build the in-place macOS update test package in a private checkout.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -18,7 +18,7 @@ fi
 : "${LAZYMIND_UPDATE_BASE_URL:?Configure the isolated update artifact base URL}"
 : "${LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION:?Configure the minimum macOS system version}"
 if [[ ! -d "${root}/algorithm/lazyllm/lazyllm" ]]; then
-  echo "Initialize the LazyLLM submodule before building the isolated tester" >&2
+  echo "Initialize the LazyLLM submodule before building the in-place test app" >&2
   exit 2
 fi
 if [[ -e "${root}/desktop/scripts/.unsigned-update-test.local.json" ]]; then
@@ -41,7 +41,7 @@ const config = build.validateUnsignedTestConfig(JSON.parse(process.env.LAZYMIND_
 for (const field of ["version", "releaseId", "platform", "arch"]) {
   if (Object.hasOwn(config, field)) throw new Error(`Test build derives ${field}; omit it from the public test configuration`);
 }
-const base = build.unsignedTestBase(process.env.LAZYMIND_UPDATE_BASE_URL, config);
+const base = build.inPlaceArtifactBase(process.env.LAZYMIND_UPDATE_BASE_URL, config);
 const expectedComponents = new URL("RAG/", base).href;
 if (process.env.LAZYMIND_PYTHON_COMPONENT_BASE_URL && process.env.LAZYMIND_PYTHON_COMPONENT_BASE_URL !== expectedComponents) {
   throw new Error("Test components must use the RAG directory under the isolated update artifact prefix");
@@ -75,7 +75,7 @@ else
 fi
 dist="${stage}/desktop/dist"
 node "${stage}/desktop/scripts/prepare-update-release.mjs" \
-  --resources "${dist}/${app_directory}/LazyMind Test.app/Contents/Resources" \
+  --resources "${dist}/${app_directory}/LazyMind.app/Contents/Resources" \
   --package "${dist}/LazyMind-darwin-${target}.zip" \
   --base-url "${LAZYMIND_UPDATE_BASE_URL}" --minimum-system-version "${LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION}" \
   --output "${stage}/publication"

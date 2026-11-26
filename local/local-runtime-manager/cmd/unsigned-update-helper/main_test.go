@@ -9,12 +9,12 @@ import (
 	"testing"
 )
 
-func TestIsolatedBundleExtractionRejectsAliasesAndLimitsSize(t *testing.T) {
+func TestInPlaceBundleExtractionRejectsLegacyAliasesAndLimitsSize(t *testing.T) {
 	type entry struct {
 		name, content string
 		mode          os.FileMode
 	}
-	const app = "LazyMind Test.app"
+	const app = "LazyMind.app"
 	for _, tc := range []struct {
 		name    string
 		entries []entry
@@ -25,6 +25,7 @@ func TestIsolatedBundleExtractionRejectsAliasesAndLimitsSize(t *testing.T) {
 			{app + "/Contents/payload", "data", 0600},
 			{app + "/Contents/alias", "payload", os.ModeSymlink | 0777},
 		}, 100, true},
+		{"legacy isolated bundle", []entry{{"LazyMind Test.app/Contents/payload", "data", 0600}}, 100, false},
 		{"outside bundle", []entry{
 			{app + "/Contents/alias", "../../../outside", os.ModeSymlink | 0777},
 		}, 100, false},

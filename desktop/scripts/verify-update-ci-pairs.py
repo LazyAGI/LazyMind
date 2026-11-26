@@ -13,8 +13,9 @@ def verify_pairs(plan, current, baseline, output, platform, unsigned_test):
     reports = output / 'evidence' / platform
     reports.mkdir(parents=True)
     probe = Path(__file__).with_name('verify-update-format.py')
+    pairs = json.loads((plan / 'pairs.json').read_text(encoding='utf-8'))
     with tempfile.TemporaryDirectory() as scratch:
-        for pair in json.loads((plan / 'pairs.json').read_text(encoding='utf-8')):
+        for pair in pairs:
             source = pair['sourceReleaseId']
             target = pair['targetReleaseId']
             source_record = output / 'records' / platform / source / 'release.json'
@@ -40,6 +41,14 @@ def verify_pairs(plan, current, baseline, output, platform, unsigned_test):
             if use_build_artifact:
                 shutil.copyfile(local_source / 'release.json', source_record)
     shutil.copyfile(plan / 'expected-policy-sha256', output / (platform + '-policy-sha256'))
+    targets = list(current.glob('*/release.json'))
+    if len(targets) != 1:
+        raise ValueError('Expected exactly one current native release for the installed upgrade smoke')
+    shutil.copyfile(targets[0], output / (platform + '-target.json'))
+    baseline_pairs = [pair for pair in pairs if pair['baseline']]
+    if len(baseline_pairs) > 1 or (pairs and not baseline_pairs):
+        raise ValueError('Expected exactly one verified baseline for this platform')
+    (output / (platform + '-baseline.json')).write_text(json.dumps(baseline_pairs), encoding='utf-8')
 
 
 if __name__ == '__main__':

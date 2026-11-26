@@ -47,6 +47,7 @@ type componentMaintenanceRecord struct {
 	SourceHadRAG                     bool   `json:"sourceHadRAG"`
 	ComponentMode                    string `json:"componentMode"`
 	SourceComponent, TargetComponent *PythonComponent
+	WantedComponents                 []string                              `json:"wantedComponents"`
 	ComponentUpdates                 map[string]componentMaintenanceUpdate `json:"componentUpdates"`
 	ComponentsPath                   string                                `json:"componentsPath"`
 	ComponentsSHA256                 string                                `json:"componentsSHA256"`
@@ -205,7 +206,7 @@ func RunPythonComponentMaintenance(ctx context.Context, action string, input []b
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(input)))
 	decoder.DisallowUnknownFields()
-	if len(input) > 4096 || decoder.Decode(&request) != nil || decoder.Decode(new(any)) != io.EOF || len(request.TransactionID) != 32 || (action != "stage" && action != "activate") {
+	if len(input) > 4096 || decoder.Decode(&request) != nil || decoder.Decode(new(any)) != io.EOF || len(request.TransactionID) != 32 || (action != "stage" && action != "activate" && action != "defer") {
 		return blocked("update_request_invalid")
 	}
 	if id, err := hex.DecodeString(request.TransactionID); err != nil || hex.EncodeToString(id) != request.TransactionID {
@@ -240,12 +241,21 @@ func RunPythonComponentMaintenance(ctx context.Context, action string, input []b
 		record.ComponentsSHA256 = record.RepairTarget.ComponentsSHA256
 		record.ComponentsSize = record.RepairTarget.ComponentsSize
 	}
-	if action == "stage" && !((record.Phase == "pending" && environment.ReleaseID == record.SourceReleaseID) || (record.Phase == "repair" && record.RepairTarget != nil && environment.ReleaseID == targetRelease)) || action == "activate" && (environment.ReleaseID != targetRelease || record.Phase == "pending") {
+	if action == "stage" && !((record.Phase == "pending" && environment.ReleaseID == record.SourceReleaseID) || (record.Phase == "repair" && record.RepairTarget != nil && environment.ReleaseID == targetRelease)) || (action == "activate" || action == "defer") && (environment.ReleaseID != targetRelease || record.Phase == "pending") {
 		releaseComponentLock(stateLock)
 		return blocked("update_transaction_conflict")
 	}
 	releaseComponentLock(stateLock)
 
+	if action == "defer" {
+		if record.Phase != "installing" && record.Phase != "activated" && !(record.Phase == "repair" && record.RepairTarget != nil) {
+			return blocked("update_transaction_conflict")
+		}
+		if err := deferSelectedComponents(environment, record); err != nil {
+			return blocked(err.Error())
+		}
+		return result("deferred", "", map[string]any{"transactionId": request.TransactionID, "componentMode": record.ComponentMode})
+	}
 	updates, err := record.effectiveUpdates()
 	if err != nil {
 		return blocked("component_state_unknown")
@@ -274,7 +284,7 @@ func RunPythonComponentMaintenance(ctx context.Context, action string, input []b
 		if action == "stage" && record.Phase == "pending" && !exactComponentSelection(environment.RuntimeRoot, source) {
 			return blocked("component_state_unknown")
 		}
-		if source.PythonABI != target.PythonABI || target.Platform != source.Platform || target.Arch != source.Arch ||
+		if target.Platform != source.Platform || target.Arch != source.Arch ||
 			!reflect.DeepEqual(catalog.Components[id], target) {
 			return blocked("component_update_incompatible")
 		}
@@ -387,13 +397,17 @@ type maintenanceCatalog struct {
 }
 
 func readMaintenanceCatalog(record componentMaintenanceRecord) (maintenanceCatalog, error) {
-	var catalog maintenanceCatalog
 	raw, err := componentFileBytes(record.ComponentsPath, 1024*1024)
 	if err != nil || int64(len(raw)) != record.ComponentsSize {
-		return catalog, errors.New("artifact_size")
+		return maintenanceCatalog{}, errors.New("artifact_size")
 	}
+	return parseBoundComponentCatalog(raw, record.ComponentsSHA256)
+}
+
+func parseBoundComponentCatalog(raw []byte, digest string) (maintenanceCatalog, error) {
+	var catalog maintenanceCatalog
 	sum := sha256.Sum256(raw)
-	if hex.EncodeToString(sum[:]) != record.ComponentsSHA256 {
+	if hex.EncodeToString(sum[:]) != digest {
 		return catalog, errors.New("artifact_hash")
 	}
 	incompatible := errors.New("component_update_incompatible")
@@ -414,6 +428,14 @@ func readMaintenanceCatalog(record componentMaintenanceRecord) (maintenanceCatal
 }
 
 func stageTargetComponent(ctx context.Context, environment PythonComponentMaintenanceContext, root *os.Root, record componentMaintenanceRecord, target PythonComponent) (result componentMaintenanceStageItem, stageErr error) {
+	stageDir := filepath.Join("deps", "python-components", ".native-stages", record.TransactionID)
+	if record.ComponentUpdates != nil {
+		stageDir = filepath.Join(stageDir, target.ID)
+	}
+	return stageTargetComponentIn(ctx, environment, root, record, target, stageDir)
+}
+
+func stageTargetComponentIn(ctx context.Context, environment PythonComponentMaintenanceContext, root *os.Root, record componentMaintenanceRecord, target PythonComponent, stageDir string) (result componentMaintenanceStageItem, stageErr error) {
 	result = componentMaintenanceStageItem{Revision: target.Revision, SHA256: target.SHA256}
 	invalid := errors.New("component_state_unknown")
 	final := pythonComponentDir(environment.RuntimeRoot, target)
@@ -440,10 +462,6 @@ func stageTargetComponent(ctx context.Context, environment PythonComponentMainte
 	required := uint64(target.SizeBytes) + uint64(target.UnpackedBytes) + 256*1024*1024
 	if err != nil || free < required {
 		return result, errors.New("component_space_insufficient")
-	}
-	stageDir := filepath.Join("deps", "python-components", ".native-stages", record.TransactionID)
-	if record.ComponentUpdates != nil {
-		stageDir = filepath.Join(stageDir, target.ID)
 	}
 	result.StagePath = filepath.Join(stageDir, "payload")
 	if err := root.MkdirAll(stageDir, 0700); err != nil {
@@ -769,7 +787,7 @@ func RunIndependentPythonComponent(ctx context.Context, environment PythonCompon
 	}
 	_ = os.Setenv("LAZYMIND_ALGORITHM_PYTHON", environment.Python)
 	_ = os.Setenv("LAZYMIND_ALGORITHM_SOURCE", environment.AlgorithmSource)
-	if err := installPythonComponent(ctx, environment.RuntimeRoot, entry, entry.URL); err != nil {
+	if err := installRequestedPythonComponent(ctx, environment, entry); err != nil {
 		return emit("blocked", "component_install_failed")
 	}
 	return emit("installed", "")

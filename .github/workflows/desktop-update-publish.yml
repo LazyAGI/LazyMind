@@ -16,6 +16,10 @@ on:
       use_current_run:
         required: true
         type: boolean
+      platform:
+        description: "Official installer to publish (macos or windows); omit for existing joint callers"
+        required: false
+        type: string
       source_build_run_id:
         required: false
         type: string
@@ -36,6 +40,7 @@ permissions:
 concurrency:
   group: desktop-update-publication
   cancel-in-progress: false
+  queue: max
 
 jobs:
   verify:
@@ -44,10 +49,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: ${{ fromJSON(inputs.unsigned_update_test && '["macos"]' || '["macos","windows"]') }}
+        platform: ${{ fromJSON((inputs.unsigned_update_test || inputs.platform == 'macos') && '["macos"]' || inputs.platform == 'windows' && '["windows"]' || '["macos","windows"]') }}
     runs-on: ${{ matrix.platform == 'macos' && 'macos-15' || 'windows-latest' }}
     timeout-minutes: 90
     steps:
+      - name: Validate publication platform
+        shell: bash
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
+        run: |
+          case "${PLATFORM}" in ""|macos) ;; windows) [[ "${UNSIGNED_TEST}" != true ]] ;; *) exit 1 ;; esac
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -136,22 +148,22 @@ jobs:
           cache-dependency-path: local/local-runtime-manager/go.sum
       - uses: astral-sh/setup-uv@v6
       - uses: actions/download-artifact@v8
-        if: inputs.use_current_run
+        if: inputs.use_current_run && inputs.platform != 'windows'
         with:
           name: desktop-update-macos-${{ github.run_id }}
           path: publication/current-macos
       - uses: actions/download-artifact@v8
-        if: inputs.use_current_run && !inputs.unsigned_update_test
+        if: inputs.use_current_run && !inputs.unsigned_update_test && inputs.platform != 'macos'
         with:
           name: desktop-update-windows-${{ github.run_id }}
           path: publication/current-windows
       - uses: actions/download-artifact@v8
-        if: inputs.use_current_run
+        if: inputs.use_current_run && inputs.platform != 'windows'
         with:
           name: desktop-format-evidence-macos-${{ github.run_id }}
           path: verification
       - uses: actions/download-artifact@v8
-        if: inputs.use_current_run && !inputs.unsigned_update_test
+        if: inputs.use_current_run && !inputs.unsigned_update_test && inputs.platform != 'macos'
         with:
           name: desktop-format-evidence-windows-${{ github.run_id }}
           path: verification
@@ -190,21 +202,26 @@ jobs:
         if: inputs.use_current_run
         env:
           UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
+          PLATFORM: ${{ inputs.platform || '' }}
           UPDATE_REPO: ${{ vars.LAZYMIND_UPDATE_MODELSCOPE_REPO }}
         run: |
           set -euo pipefail
           test -n "${UPDATE_REPO}"
           historical=()
           plan_flags=()
-          if [[ "$(cat verification/macos-policy-sha256)" != absent ]]; then historical=(--history verification/records --evidence verification/evidence); fi
-          if [[ "${UNSIGNED_TEST}" == true ]]; then plan_flags=(--unsigned-test); fi
+          platforms=(macos windows)
+          if [[ "${PLATFORM}" == windows || "${PLATFORM}" == macos ]]; then platforms=("${PLATFORM}"); fi
+          if [[ "${UNSIGNED_TEST}" == true ]]; then platforms=(macos); plan_flags=(--unsigned-test); fi
+          # A platform joining a previously published channel has an envelope
+          # digest but no source App or report. Empty directories do not survive artifact upload.
+          if [[ -d verification/records ]]; then historical+=(--history verification/records); fi
+          if [[ -d verification/evidence ]]; then historical+=(--evidence verification/evidence); fi
           uv run --no-project --python 3.11 python desktop/scripts/prepare-update-ci-plan.py \
             --current publication "${historical[@]+"${historical[@]}"}" --validator "${RUNNER_TEMP}/update-publisher" --repo "${UPDATE_REPO}" \
             --output-dir "${RUNNER_TEMP}/update-ci-plan" "${plan_flags[@]+"${plan_flags[@]}"}"
-          cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" verification/macos-policy-sha256
-          if [[ "${UNSIGNED_TEST}" != true ]]; then
-            cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" verification/windows-policy-sha256
-          fi
+          for platform in "${platforms[@]}"; do
+            cmp "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256" "verification/${platform}-policy-sha256"
+          done
       - name: Assemble and sign explicit update policy
         env:
           UPDATE_PRIVATE_KEY: ${{ secrets.LAZYMIND_UPDATE_POLICY_PRIVATE_KEY }}
@@ -226,6 +243,9 @@ jobs:
             records="${plan_dir}/records"
             if [[ -f "${plan_dir}/previous-envelope.json" ]]; then
               signing_history=(--previous-envelope "${plan_dir}/previous-envelope.json")
+              if [[ -d verification/records/macos && -d verification/records/windows ]]; then
+                signing_history+=(--verified-source-records verification/records)
+              fi
             fi
           else
             plan="${RUNNER_TEMP}/update-plan.json"
@@ -262,6 +282,9 @@ jobs:
           expected=()
           if [[ "${USE_CURRENT_RUN}" == true ]]; then
             expected=(--expected-policy-sha256 "$(cat "${RUNNER_TEMP}/update-ci-plan/expected-policy-sha256")")
+            if [[ -d verification/records/macos && -d verification/records/windows ]]; then
+              expected+=(--verified-source-records verification/records)
+            fi
           fi
           uv run --no-project --python 3.11 --with modelscope-hub==0.4.6 \
             python desktop/scripts/publish-desktop-update.py \
@@ -272,7 +295,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-update-policy-${{ github.run_id }}
+          name: desktop-update-policy-${{ inputs.platform && format('{0}-', inputs.platform) || '' }}${{ github.run_id }}
           path: |
             ${{ runner.temp }}/update-policy.json
             ${{ runner.temp }}/update-config.json
@@ -280,3 +303,86 @@ jobs:
       - name: Remove signing material
         if: always()
         run: rm -f "${RUNNER_TEMP}/desktop-update-private.pem"
+
+  plan_installed_upgrade:
+    name: Select the published predecessor for the installed upgrade
+    needs: publish
+    if: inputs.use_current_run
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      lanes: ${{ steps.select.outputs.lanes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        if: inputs.platform != 'windows'
+        with:
+          name: desktop-format-evidence-macos-${{ github.run_id }}
+          path: verification
+      - uses: actions/download-artifact@v8
+        if: inputs.platform != 'macos' && !inputs.unsigned_update_test
+        with:
+          name: desktop-format-evidence-windows-${{ github.run_id }}
+          path: verification
+      - id: select
+        shell: bash
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
+        run: |
+          set -euo pipefail
+          platforms=(macos windows)
+          if [[ -n "${PLATFORM}" ]]; then platforms=("${PLATFORM}"); fi
+          if [[ "${UNSIGNED_TEST}" == true ]]; then platforms=(macos); fi
+          python3 desktop/scripts/run-published-upgrade-smoke.py matrix verification "${platforms[@]}" >> "${GITHUB_STEP_SUMMARY}"
+
+  test_installed_upgrade:
+    name: Verify installed A upgrades to published B (${{ matrix.platform }})
+    needs: plan_installed_upgrade
+    if: inputs.use_current_run && needs.plan_installed_upgrade.outputs.lanes != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan_installed_upgrade.outputs.lanes) }}
+    runs-on: ${{ matrix.platform == 'macos' && 'macos-15' || 'windows-2025' }}
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: local/local-runtime-manager/go.sum
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: desktop-format-evidence-${{ matrix.platform }}-${{ github.run_id }}
+          path: verification
+      - name: Install verified A and use its normal updater
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          UNSIGNED_TEST: ${{ inputs.unsigned_update_test }}
+          SMOKE_PUBLIC_CONFIG: ${{ inputs.unsigned_update_test && vars.LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_CONFIG_JSON || (matrix.platform == 'macos' && vars.LAZYMIND_MAC_UPDATE_CONFIG_JSON || vars.LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON) }}
+          TEST_BASE_URL: ${{ vars.LAZYMIND_UNSIGNED_UPDATE_TEST_BASE_URL }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [[ "${UNSIGNED_TEST}" == true ]]; then flags=(-tags lazymind_unsigned_test); fi
+          validator="${RUNNER_TEMP}/native-policy-validator.exe"
+          (cd local/local-runtime-manager && go build "${flags[@]+"${flags[@]}"}" -o "${validator}" ./cmd/update-publisher)
+          uv run --no-project --python 3.11 --with websockets==15.0.1 python desktop/scripts/run-published-upgrade-smoke.py run \
+            --platform "${PLATFORM}" --verification verification --validator "${validator}" --report "${RUNNER_TEMP}/installed-upgrade.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-installed-upgrade-${{ matrix.platform }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/installed-upgrade.json
+          if-no-files-found: error

@@ -313,6 +313,13 @@ jobs:
       - name: Test Local Runtime Manager
         working-directory: local/local-runtime-manager
         run: go test ./... -count=1 -v
+      - name: Test in-place macOS update builds
+        if: runner.os == 'macOS'
+        working-directory: local/local-runtime-manager
+        run: >-
+          go test -tags lazymind_unsigned_test -count=1 -v
+          -run '^(TestInPlace|TestCachedUnsignedHelper|TestUnsignedV2|TestVerifyUnsignedV2MacBundle|TestCompletedUnsignedInstall|TestUnsignedWorkspace|TestUnsignedRuntime)'
+          . ./internal/desktopupdate ./cmd/update-helper ./cmd/unsigned-update-helper
       - uses: actions/setup-python@v5
         if: runner.os == 'Linux'
         with:
@@ -417,6 +424,8 @@ jobs:
           python -m unittest
           desktop/scripts/test_publish_desktop_update.py
           desktop/scripts/test_update_publication_transport.py
+          desktop/scripts/test_platform_update_publication.py
+          desktop/scripts/test_shared_update_signing_key.py
           desktop/scripts/test_update_ci_plan.py
           desktop/scripts/test_update_evidence_artifacts.py
           desktop/scripts/test_update_historical_evidence.py

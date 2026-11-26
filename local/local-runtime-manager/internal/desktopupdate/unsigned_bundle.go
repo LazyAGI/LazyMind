@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// VerifyUnsignedMacBundle checks the deliberately distinct bundle identity as
+// VerifyUnsignedMacBundle checks the ordinary application identity as
 // well as the ad-hoc seal. The signed policy separately binds the ZIP bytes.
 func VerifyUnsignedMacBundle(ctx context.Context, bundle string, cfg Config) error {
 	invalid := errors.New("unsigned_test_bundle")

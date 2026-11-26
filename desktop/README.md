@@ -98,7 +98,7 @@ Both installer workflows have an `enable_updates` input (default `false`). Confi
 | `LAZYMIND_UPDATE_BASE_URL` | HTTPS dataset prefix, e.g. `https://modelscope.cn/datasets/OWNER/REPO/resolve/master/updates/` |
 | `LAZYMIND_MAC_UPDATE_MINIMUM_SYSTEM_VERSION` / `LAZYMIND_WINDOWS_UPDATE_MINIMUM_SYSTEM_VERSION` | Supported OS minimum as `major.minor.patch` |
 | `LAZYMIND_DESKTOP_UPDATES_ENABLED` | Optional `true` to enable update artifact generation in the tag release workflow |
-| `LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED` | Explicit `true` to enable automatic policy publication after the tag builds |
+| `LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED` | Set to `true` to publish signed tag builds and manually dispatched update-enabled installer builds |
 | `LAZYMIND_UPDATE_SOURCE_BUILD_RUN_ID` | Optional successful build run containing the currently published source artifacts. CI can recover the latest compatible source from the signed public policy when artifacts have expired. |
 
 macOS `signing_mode` accepts `auto`, `developer-id`, or `adhoc`. `auto` signs/notarizes
@@ -108,23 +108,34 @@ missing credentials never silently downgrade a requested signed build. Existing 
 environment protections still apply. Windows uses `WIN_CSC_LINK` and
 `WIN_CSC_KEY_PASSWORD`; enabled update builds require a valid Authenticode installer.
 Official automatic updates require these native signatures. The manual macOS
-Installer also offers `enable_unsigned_update_test` for an isolated v2 ad-hoc
-test. See [the fork test setup](#isolated-macos-ad-hoc-update-test).
+Installer also offers `enable_unsigned_update_test` for an in-place v2 ad-hoc
+test. See [the fork test setup](#in-place-macos-ad-hoc-update-test).
 
 Enabled builds export `desktop-update-macos-<run-id>` or
 `desktop-update-windows-<run-id>` containing one directory per release: the actual ZIP/EXE,
 `feed.json`, the exact built `components.json`, and `release.json` with identity, hashes,
 sizes and the runtime manifest digest. macOS ZIP metadata must match the built app.
-This creates GitHub artifacts only; the existing installer/RAG mirror jobs retain their
-own destinations and behavior. Release-specific Python components must also be published
-through the existing RAG workflow before users install those components.
+The build artifact is also the input to the ModelScope publication job. Publish the
+release-specific Python assets through the corresponding platform's RAG workflow.
 
-With automatic publication enabled and `updaterProtocol` set to `2`, `Desktop Release`
-uses its current signed artifacts and the configured source build to verify native
-A-to-B compatibility, extend the previous signed history, and publish the new policy.
-With no available source artifact, each native runner verifies the previous public
-policy, downloads its pinned source package and component catalog, checks their hashes
-and runs the same compatibility probe. A new channel starts only after a public 404.
+To test Windows A → B, enable automatic publication and use **Windows Desktop
+Installer** with `enable_updates` checked. Publish A and install its signed EXE.
+Then run the same workflow for a higher version B. For v2, CI verifies the native
+upgrade and publishes B's package, component catalog and signed policy to ModelScope.
+A checks that policy through its normal **Check for updates** action. A publication
+with a verified predecessor also starts a read-only job on a fresh native runner.
+It installs A, creates a knowledge base, uses the installed app to download and
+install B, and checks that B can reopen that same knowledge base. The run
+attaches the result as `desktop-installed-upgrade-<platform>-<run-id>`. The Windows
+workflow takes its baseline from the configured source run or from the signed public
+history for Windows. The macOS installer can publish its own signed releases in
+the same way. For a Mac without Developer ID, use the ad-hoc test round below.
+
+Each platform can publish its first A independently. When its previous release is
+already on ModelScope, CI verifies the public policy, downloads that release's
+package and component catalog and checks their hashes before extending its history.
+A public 404 permits the first channel publication. A transport or signature error
+stops the publication.
 The separate **Publish desktop update policy** manual workflow also accepts an explicit
 plan with successful build run IDs from the current repository. Configure its
 `desktop_updates` environment with approval/branch protection appropriate to the publisher:
@@ -197,7 +208,7 @@ go test ./internal/desktopupdate ./cmd/update-publisher -run 'TestPublication|Te
 Real signing/notarization, ModelScope download redirects and A→B installation are release
 acceptance checks, not established by these unit tests.
 
-### Isolated macOS ad-hoc update test
+### In-place macOS ad-hoc update test
 
 Configure the `desktop_updates_test` environment with its own `MODELSCOPE_UPDATE_TOKEN`,
 `LAZYMIND_UPDATE_POLICY_PRIVATE_KEY`, and `LAZYMIND_UPDATE_POLICY_KEY_ID`. The test App
@@ -210,33 +221,41 @@ under the dataset's `/resolve/master/updates/unsigned-test/` and set
 `LAZYMIND_MAC_UNSIGNED_UPDATE_TEST_MINIMUM_SYSTEM_VERSION` to the minimum macOS version
 for this test, using `major.minor.patch`.
 
-In **macOS Desktop Installer**, enable `enable_unsigned_update_test` and enter the
-version for build A. Choose **new** for `test_round` and leave `source_build_run_id`
-empty. The workflow creates `round-<A-run-id>/` under the configured test base,
-derives its trust domain and prints the policy URL in the build summary. Each round
-can start with the same version. Install A's `LazyMind Test.app` from `package.zip`
-in `~/Applications`.
+In **macOS Desktop Installer**, enable `enable_unsigned_update_test`, leave
+`enable_updates` unchecked, and enter the version for build A. Choose **new**
+for `test_round` and leave `source_build_run_id` empty. CI creates an
+`in-place/round-<A-run-id>/` directory under the test base and prints the
+policy URL and trust domain in the build summary.
 
-To build B, choose **continue**, set a higher `test_version` and enter A's successful
-run ID. After publication, check for updates from A. To build C, use B's successful
-run ID. The workflow reads the selected artifact's identity and verifies it against
-the published policy. Packages, Python components and policy stay in A's round.
-Previously published test baselines can continue at the original configured address.
-Keep the template's public keys, origins and identity settings stable while continuing
-a round. Older API callers can omit `test_round` and select continuation by supplying
-`source_build_run_id`.
+To test an existing 0.5 installation, open the old app, create an identifiable
+knowledge base or document, record its data location, and quit. Unzip A's
+`package.zip` and replace that copy of `LazyMind.app` in `~/Applications` or
+a writable `/Applications`. Open A from that same location and confirm the old
+data and settings are available. A uses the ordinary Desktop data directories
+and honors the existing runtime and SQLite directory settings.
 
-If the source run failed after publishing, or its artifacts expired, choose **continue**
-and enter a public baseline locator in `source_build_run_id`. Use `published:legacy`
-for the policy URL in the configured template, or `published:<first-run-id>` for a
-round created with **new**. To continue the legacy `0.5.224` published by run
-`45142962628`, keep its template configuration, enter `published:legacy` and build
-`0.5.225`. CI uses the configured test keys to verify the existing policy and checks
-that the target version is newer before packaging. The native job verifies the
-policy again and checks the public source bytes. Save the first run ID or policy URL
-from each new round's build summary for later recovery.
+To build B, choose **continue**, enter A's successful run ID and set a higher
+`test_version`. After publication, check for updates in A and install B. Verify
+the app reopened at the same path and can read and write the same data. To build
+C, continue from B's successful run ID. Keep the test keys, origins and identity
+settings stable throughout the round.
+
+If the latest successful source artifact is unavailable, choose **continue** and
+set `source_build_run_id` to `published:<first-run-id>` for this in-place round.
+The workflow verifies its public policy and source artifacts. Historical
+`LazyMind Test.app` builds (including 0.5.225–0.5.228) use a different layout
+and trust domain. Start a new round to switch to `LazyMind.app`.
 
 ### Component compatibility during updates
+
+For v2 updates, Desktop carries the user's RAG and Cluster choices across the
+application replacement. The main app can open while a selected component is
+offline or needs a different Python build. Core retries each selected download
+in the background, checks the archive against the new release's catalog and
+tests imports with its packaged Python. Desktop waits for idle services before
+restarting the runtime to load the verified revision. A component the user
+never installed stays uninstalled. When a release has no matching component
+descriptor, Desktop remembers the choice for a later release.
 
 Automatic installation checks the target's immutable `components` catalog against
 the runtime's actual installed-component selection before native preparation and
@@ -252,8 +271,8 @@ publish unsupported cross-tag edges to older clients.
 Starting with a source client that supports v1 component handoff, the last idle
 check is followed by a one-time receipt for the signed target and the installed
 component selections. Target startup checks that receipt before retaining those
-selections. Manual version changes and older source clients without a receipt use
-the existing component cleanup path.
+selections. For v1 targets, manual version changes and older source clients
+without a receipt use the v1 component cleanup path.
 
 If the source app closes during v1 preparation, reopen it to continue or
 postpone the update. The runtime checks the saved attempt and the previous
@@ -265,6 +284,14 @@ your computer if an older transaction has no conclusive installer-process
 information. Restart macOS, reopen the supported repair version, and select
 **Verify this version**. The app checks the boot session and signed repair
 permission again before resuming.
+
+If a different app version was copied over an update that had already reached
+activation, the startup message identifies the version awaiting verification.
+Use that target's supported installer to resume, or contact support. Keep the
+transaction record and the user data. Early recovery diagnostics are appended
+to `desktop-update-recovery.log` in the desktop logs directory, including the
+installed version, recovery step and reason. A later successful startup does
+not overwrite this log.
 
 macOS:
 
@@ -353,7 +380,7 @@ staple the DMG. Either notarization stage fails after its bounded timeout.
 
 When `signing_mode` is `auto`, tag builds use Developer ID in both the upstream
 repository and forks. Manual development builds can select `adhoc` to produce an
-unnotarized DMG. The explicit isolated update test option enables v2 testing.
+unnotarized DMG. The in-place ad-hoc update option tests v2 upgrades with the existing Desktop data.
 
 Desktop release tags containing a prerelease suffix, such as `v0.3.0-a0` or
 `v0.3.0-rc.1`, run the complete platform build and installer test workflows but

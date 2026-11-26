@@ -73,19 +73,23 @@ test("manual publication remains serialized and scoped to the release environmen
   assert.doesNotMatch(archive, /private|pem|key_path/);
 });
 
-test("enabled Desktop Release reuses the publisher with this run's two verified build artifacts", () => {
+test("enabled Desktop Release gates each platform publication on its own verified build", () => {
   const release = read("desktop-release");
   const reusable = read("desktop-update-publish");
-  const publishJob = release.match(/^  publish_update:\n([\s\S]*?)(?=^  [a-z][a-z_-]*:|$(?![\s\S]))/m)?.[1];
-  assert.ok(publishJob, "Desktop Release needs an update publication job");
-  assertConjunctiveGate(publishJob, ["vars.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true'",
-    "vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'"]);
-  assert.match(publishJob, /needs:[\s\S]*?\bmacos\b[\s\S]*?\bwindows\b/);
-  assert.match(publishJob, /uses: \.\/\.github\/workflows\/desktop-update-publish\.yml/);
+  const jobs = source => [...source.matchAll(/^  [a-z][\w-]*:\n([\s\S]*?)(?=^  [a-z][\w-]*:|$(?![\s\S]))/gm)].map(m => m[1]);
+  const publishing = job => job.includes("uses: ./.github/workflows/desktop-update-publish.yml") && !job.includes("unsigned_update_test: true");
   assert.match(reusable, /^  workflow_call:/m);
   for (const platform of ["macos", "windows"]) {
-    assert.ok(reusable.includes(`desktop-update-${platform}-\${{ github.run_id }}`),
-      `publication must select the ${platform} artifact from this run`);
+    const direct = jobs(release).find(job => publishing(job) && new RegExp(`\\bneeds: *\\[?${platform}\\]? *$`, "m").test(job));
+    if (direct) {
+      assertConjunctiveGate(direct, ["vars.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true'", "vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'"]);
+    } else {
+      const build = jobs(release).find(job => job.includes(`uses: ./.github/workflows/${platform}-installer.yml`));
+      assert.match(build, /enable_updates: .*vars\.LAZYMIND_DESKTOP_UPDATES_ENABLED == 'true'/);
+      const nested = jobs(read(platform + "-installer")).find(publishing);
+      assert.ok(nested, `missing gated ${platform} publication`);
+      assertConjunctiveGate(nested, ["inputs.enable_updates", "vars.LAZYMIND_DESKTOP_UPDATE_PUBLICATION_ENABLED == 'true'"]);
+    }
   }
   assert.match(reusable, /uses: actions\/download-artifact@/);
   assert.match(reusable, /environment:[^\n]*\bdesktop_updates\b/);
@@ -119,13 +123,13 @@ test("the same macOS Installer exposes a separate opt-in unsigned update test", 
     "the nested release workflow must be allowed to read action artifacts");
 });
 
-test("a legacy nested policy and a new round with the same URL keep their own component directories", t => {
+test("a legacy template at the new URL cannot resume or receive components with its old trust domain", t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lm-nested-legacy-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const repo = "fixture/updates", prefix = "updates/unsigned-test/demo/";
   const base = `https://modelscope.cn/datasets/${repo}/resolve/master/${prefix}`;
   const template = { mode: "unsigned-test", audience: "personal", channel: "personal-test", updaterProtocol: 2,
-    signingIdentity: "adhoc", trustDomain: "existing", policyURL: base + "round-41/policy.json",
+    signingIdentity: "adhoc", trustDomain: "existing", policyURL: base + "in-place/round-41/policy.json",
     publicKeys: { key: Buffer.alloc(32, 3).toString("base64") }, allowedOrigins: ["https://modelscope.cn"] };
   const script = fileURLToPath(new URL("./resolve-unsigned-test-round.mjs", import.meta.url));
   const env = { PATH: process.env.PATH, RUNNER_TEMP: dir, GITHUB_RUN_ID: "41", TEST_VERSION: "0.5.225",
@@ -147,9 +151,14 @@ test("a legacy nested policy and a new round with the same URL keep their own co
     const folder = path.join(dir, "unsigned-test-source", releaseId);
     fs.mkdirSync(folder, { recursive: true });
     fs.writeFileSync(path.join(folder, "release.json"), JSON.stringify({ release, config: built }));
-    assert.deepEqual(JSON.parse(invoke([], { TEST_SOURCE_RUN: "40", GITHUB_RUN_ID: "42" })), { config, baseURL: releaseBase });
     const signedConfig = path.join(dir, "update-config.json");
     fs.writeFileSync(signedConfig, JSON.stringify(built));
+    if (config === template) {
+      assert.throws(() => invoke([], { TEST_SOURCE_RUN: "40", GITHUB_RUN_ID: "42" }));
+      assert.throws(() => invoke(["--component-prefix", signedConfig]));
+      continue;
+    }
+    assert.deepEqual(JSON.parse(invoke([], { TEST_SOURCE_RUN: "40", GITHUB_RUN_ID: "42" })), { config, baseURL: releaseBase });
     assert.equal(invoke(["--component-prefix", signedConfig]), prefix + releaseBase.slice(base.length) + "RAG");
   }
 });

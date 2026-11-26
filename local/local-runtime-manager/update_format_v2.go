@@ -123,6 +123,22 @@ func stableUpdateFormat(shapes map[string]updateDatabaseShape) (string, error) {
 // This same read-only boundary is used by target startup with the frozen source
 // paths. It never reconstructs paths, creates a database or runs migrations.
 func inspectStoredUpdateFormat(ctx context.Context, storage *UpdateStorageSnapshot, ragDisabled bool) (string, bool, error) {
+	var optional []string
+	if ragDisabled {
+		optional = []string{"scan", "scan-state"}
+	}
+	return inspectStorageWithOptionalScan(ctx, storage, optional)
+}
+
+func inspectRecordedUpdateFormat(ctx context.Context, record *desktopupdate.NativeRecord) (string, bool, error) {
+	storage := nativeStorageSnapshot(record)
+	if len(record.WantedComponents) == 0 {
+		return inspectStoredUpdateFormat(ctx, storage, !record.SourceHadRAG)
+	}
+	return inspectStorageWithOptionalScan(ctx, storage, storage.OptionalAbsent)
+}
+
+func inspectStorageWithOptionalScan(ctx context.Context, storage *UpdateStorageSnapshot, optional []string) (string, bool, error) {
 	if storage == nil || storage.Version != 2 || len(storage.Databases) != 9 || storage.SegmentStore != "SQLiteStore" {
 		return "", false, updateStateFailure("unsupported_storage")
 	}
@@ -134,7 +150,7 @@ func inspectStoredUpdateFormat(ctx context.Context, storage *UpdateStorageSnapsh
 	}
 	sort.Strings(families)
 	for _, family := range families {
-		shape, dirty, err := inspectBoundUpdateDatabase(ctx, storage.Databases[family], family, ragDisabled, seen)
+		shape, dirty, err := inspectBoundUpdateDatabase(ctx, storage.Databases[family], family, slices.Contains(optional, family), seen)
 		if err != nil || dirty {
 			return "", dirty, err
 		}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -103,6 +104,7 @@ type NativeRecord struct {
 	Owner                string                `json:"owner,omitempty"`
 
 	ComponentUpdates map[string]NativeComponentUpdate `json:"componentUpdates,omitempty"`
+	WantedComponents []string                         `json:"wantedComponents,omitempty"`
 }
 
 func (r *NativeRecord) EffectiveTarget() (string, string, string, *ComponentDescriptor) {
@@ -130,7 +132,9 @@ func (r *NativeRecord) SourceComponents() map[string]ComponentDescriptor {
 	}
 	components := make(map[string]ComponentDescriptor, len(r.ComponentUpdates))
 	for id, update := range r.ComponentUpdates {
-		components[id] = update.Source
+		if update.Source.ID != "" {
+			components[id] = update.Source
+		}
 	}
 	return components
 }
@@ -148,7 +152,9 @@ func (r *NativeRecord) targetComponents() map[string]ComponentDescriptor {
 	}
 	components := make(map[string]ComponentDescriptor, len(r.ComponentUpdates))
 	for id, update := range r.ComponentUpdates {
-		components[id] = update.Target
+		if update.Target.ID != "" {
+			components[id] = update.Target
+		}
 	}
 	return components
 }
@@ -239,8 +245,16 @@ func validateNativeRecord(r *NativeRecord) error {
 	}
 	source := r.SourceComponents()
 	_, hadRAG := source["rag"]
+	if len(r.WantedComponents) != 0 {
+		for i, family := range r.SourceStorage.OptionalAbsent {
+			if hadRAG || (family != "scan" && family != "scan-state") || slices.Contains(r.SourceStorage.OptionalAbsent[:i], family) {
+				return bad()
+			}
+		}
+		hadRAG = slices.Contains(r.WantedComponents, "rag")
+	}
 	if r.SourceHadRAG != hadRAG || (hadRAG && r.ComponentMode != "sync-target") || (!hadRAG && r.ComponentMode != "absent") ||
-		!validNativeComponentUpdates(source, r.targetComponents(), r.Platform, r.Arch) {
+		!validRecordComponentUpdates(r) {
 		return bad()
 	}
 	if r.RepairTarget != nil && !validNativeRepairComponents(r, r.RepairTarget) {
@@ -250,6 +264,32 @@ func validateNativeRecord(r *NativeRecord) error {
 		return bad()
 	}
 	return nil
+}
+
+func validRecordComponentUpdates(r *NativeRecord) bool {
+	if len(r.WantedComponents) == 0 {
+		return validNativeComponentUpdates(r.SourceComponents(), r.targetComponents(), r.Platform, r.Arch)
+	}
+	if len(r.ComponentUpdates) != len(r.WantedComponents) || !validWantedComponents(r.WantedComponents) || r.TargetComponent != nil || r.SourceComponent != nil {
+		return false
+	}
+	for id, pair := range r.ComponentUpdates {
+		if !slices.Contains(r.WantedComponents, id) {
+			return false
+		}
+		for _, d := range []ComponentDescriptor{pair.Source, pair.Target} {
+			if d.ID == "" {
+				if !reflect.DeepEqual(d, ComponentDescriptor{}) {
+					return false
+				}
+				continue
+			}
+			if d.ID != id || !validUpdateComponent(d) || d.Platform != r.Platform || d.Arch != r.Arch {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validNativeComponentUpdates(source, target map[string]ComponentDescriptor, platform, arch string) bool {
@@ -267,6 +307,17 @@ func validNativeComponentUpdates(source, target map[string]ComponentDescriptor, 
 }
 
 func validNativeRepairComponents(r *NativeRecord, target *NativeRepairTarget) bool {
+	if len(r.WantedComponents) != 0 {
+		if target.TargetComponent != nil {
+			return false
+		}
+		for id, d := range target.TargetComponents {
+			if !slices.Contains(r.WantedComponents, id) || d.ID != id || !validUpdateComponent(d) || d.Platform != r.Platform || d.Arch != r.Arch {
+				return false
+			}
+		}
+		return true
+	}
 	return (len(target.TargetComponents) == 0 || target.TargetComponent == nil) &&
 		validNativeComponentUpdates(r.SourceComponents(), target.components(), r.Platform, r.Arch)
 }
@@ -374,6 +425,20 @@ func ReleaseNativeLock(file *os.File) { releaseLock(file) }
 // The caller owns signature, process identity and live-peer verification. This
 // boundary owns the single atomic record and enforces immutable transitions.
 func NativeUpdateStateCommand(ctx context.Context, root, action string, input []byte) ([]byte, error) {
+	return runNativeUpdateState(ctx, root, action, input, nil)
+}
+
+// Recheck the source selection under the same writer lock that publishes the
+// record. A user install or removal completed after discovery must win.
+func CreateNativeRecord(ctx context.Context, root string, record *NativeRecord, checkSelection func() error) ([]byte, error) {
+	raw, err := json.Marshal(record)
+	if err != nil {
+		return nil, err
+	}
+	return runNativeUpdateState(ctx, root, "create", raw, checkSelection)
+}
+
+func runNativeUpdateState(ctx context.Context, root, action string, input []byte, checkSelection func() error) ([]byte, error) {
 	result := func(status, reason string) ([]byte, error) {
 		return json.Marshal(map[string]any{"status": status, "reason": reason})
 	}
@@ -385,18 +450,20 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		return blocked("update_request_invalid")
 	}
 	var req struct {
-		TransactionID string            `json:"transactionId"`
-		ReleaseID     string            `json:"releaseId"`
-		DataProfile   string            `json:"dataProfile"`
-		ComponentMode string            `json:"componentMode"`
-		SourcePaused  bool              `json:"sourcePaused"`
-		SourceActive  int64             `json:"sourceActive"`
-		Dirty         bool              `json:"dirty"`
-		BootID        string            `json:"bootId,omitempty"`
-		Components    map[string]string `json:"components"`
-		Owner         string            `json:"owner"`
-		Actor         *ProcessIdentity  `json:"actor,omitempty"`
-		Peers         map[string]struct {
+		TransactionID         string            `json:"transactionId"`
+		ReleaseID             string            `json:"releaseId"`
+		DataProfile           string            `json:"dataProfile"`
+		ComponentMode         string            `json:"componentMode"`
+		SourcePaused          bool              `json:"sourcePaused"`
+		SourceActive          int64             `json:"sourceActive"`
+		Dirty                 bool              `json:"dirty"`
+		BootID                string            `json:"bootId,omitempty"`
+		Components            map[string]string `json:"components"`
+		PendingComponents     map[string]string `json:"pendingComponents,omitempty"`
+		UnavailableComponents []string          `json:"unavailableComponents,omitempty"`
+		Owner                 string            `json:"owner"`
+		Actor                 *ProcessIdentity  `json:"actor,omitempty"`
+		Peers                 map[string]struct {
 			TransactionID string `json:"transactionId"`
 			Owner         string `json:"owner"`
 			Ready         bool   `json:"ready"`
@@ -412,6 +479,13 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 	}
 	if action != "create" && decodeStrict(input, &req) != nil {
 		return blocked("update_request_invalid")
+	}
+	if UnsignedTestBuild && action == "create" {
+		admission, err := acquireAdmission(ctx, root)
+		if err != nil {
+			return blocked(ErrorCode(err))
+		}
+		defer releaseLock(admission)
 	}
 	lock, err := nativeStateLock(ctx, root)
 	if err != nil {
@@ -430,11 +504,25 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		if decodeStrict(input, &candidate) != nil || candidate.Phase != "pending" || validateNativeRecord(&candidate) != nil {
 			return blocked("update_request_invalid")
 		}
+		if UnsignedTestBuild {
+			scope, err := normalizeScope(candidate.Scope)
+			if err != nil {
+				return blocked(ErrorCode(err))
+			}
+			if err := checkJournals(root, scope); err != nil {
+				return blocked(ErrorCode(err))
+			}
+		}
 		component, err := NativeComponentLock(candidate.RuntimeRoot)
 		if err != nil {
 			return blocked("update_transaction_busy")
 		}
 		defer releaseLock(component)
+		if checkSelection != nil {
+			if err := checkSelection(); err != nil {
+				return nil, err
+			}
+		}
 		// An older target can complete without knowing about the sidecar.
 		// A new transaction never inherits an observation from a reused ID.
 		if removeBootObservation(root, candidate.TransactionID) != nil {
@@ -448,15 +536,17 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 	if r == nil || req.TransactionID != r.TransactionID {
 		return blocked("update_transaction_conflict")
 	}
-	component, err := NativeComponentLock(r.RuntimeRoot)
-	if err != nil {
-		return blocked("update_transaction_busy")
+	if len(r.WantedComponents) == 0 || action == "prepared" || action == "adopt-repair" {
+		component, err := NativeComponentLock(r.RuntimeRoot)
+		if err != nil {
+			return blocked("update_transaction_busy")
+		}
+		defer releaseLock(component)
 	}
-	defer releaseLock(component)
 	effective, _, profile, _ := r.EffectiveTarget()
 	targets := r.EffectiveComponents()
 	matchesComponents := func() bool {
-		if len(req.Components) != len(targets) {
+		if len(req.PendingComponents) != 0 || len(req.UnavailableComponents) != 0 || len(req.Components) != len(targets) {
 			return false
 		}
 		for id, target := range targets {
@@ -471,6 +561,9 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 	case "cancel":
 		if r.Phase != "pending" {
 			return blocked("native_handoff_unknown")
+		}
+		if err := discardCancelledUnsignedInstall(root, r); err != nil {
+			return blocked(ErrorCode(err))
 		}
 		if removeNativeRecord(root, r.TransactionID) != nil {
 			return blocked("update_record_write")
@@ -487,7 +580,7 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		r.ComponentStage = req.Stage
 		status = "prepared"
 	case "installing":
-		if r.Phase != "pending" || req.DataProfile != r.SourceDataProfile || req.ComponentMode != r.ComponentMode || !req.SourcePaused || req.SourceActive != 0 || len(targets) != 0 && r.ComponentStage == nil {
+		if r.Phase != "pending" || req.DataProfile != r.SourceDataProfile || req.ComponentMode != r.ComponentMode || !req.SourcePaused || req.SourceActive != 0 || len(r.WantedComponents) == 0 && len(targets) != 0 && r.ComponentStage == nil {
 			return blocked("update_transaction_conflict")
 		}
 		r.Phase = "installing"
@@ -506,10 +599,10 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		}
 		status = "installing"
 	case "activated":
-		if r.Phase == "pending" || req.ReleaseID != effective || req.DataProfile != profile || req.ComponentMode != r.ComponentMode || !matchesComponents() {
+		if r.Phase == "pending" || req.ReleaseID != effective || req.DataProfile != profile || req.ComponentMode != r.ComponentMode || (len(r.WantedComponents) == 0 && !matchesComponents()) {
 			return blocked("update_transaction_conflict")
 		}
-		if verifyNativeTargetSelections(r.RuntimeRoot, targets) != nil {
+		if proof, e := NativeComponentProof(r); e != nil || (len(r.WantedComponents) != 0 && !proof.matches(req.Components, req.PendingComponents, req.UnavailableComponents)) {
 			return blocked("component_state_unknown")
 		}
 		r.Phase = "activated"
@@ -560,10 +653,10 @@ func NativeUpdateStateCommand(ctx context.Context, root, action string, input []
 		r.ComponentStage = nil
 		status = "repair"
 	case "complete":
-		if r.Phase != "activated" || req.ReleaseID != effective || req.DataProfile != profile || req.Dirty || !matchesComponents() {
+		if r.Phase != "activated" || req.ReleaseID != effective || req.DataProfile != profile || req.Dirty || (len(r.WantedComponents) == 0 && !matchesComponents()) {
 			return blocked("update_startup_failed")
 		}
-		if verifyNativeTargetSelections(r.RuntimeRoot, targets) != nil {
+		if proof, e := NativeComponentProof(r); e != nil || (len(r.WantedComponents) != 0 && !proof.matches(req.Components, req.PendingComponents, req.UnavailableComponents)) {
 			return blocked("component_state_unknown")
 		}
 		owner := req.Owner
@@ -619,12 +712,14 @@ func NativeStartupPermission(ctx context.Context, root string, scope UpdateScope
 	if tx == "" || tx != r.TransactionID || r.Phase != "activated" || releaseID != effective {
 		return nil, failure("update_incomplete", nil)
 	}
-	component, err := NativeComponentLock(r.RuntimeRoot)
-	if err != nil {
-		return nil, err
+	if len(r.WantedComponents) == 0 {
+		component, err := NativeComponentLock(r.RuntimeRoot)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseLock(component)
 	}
-	defer releaseLock(component)
-	if err := verifyNativeTargetSelections(r.RuntimeRoot, r.EffectiveComponents()); err != nil {
+	if _, err := NativeComponentProof(r); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -703,6 +798,9 @@ func releaseNativeComponentFiles(record *NativeRecord, targets map[string]Compon
 	if info, err := components.Lstat(".native-stages"); err == nil && info.IsDir() {
 		_ = components.RemoveAll(filepath.Join(".native-stages", record.TransactionID))
 	}
+	if len(record.WantedComponents) != 0 {
+		return
+	} // deferred payloads are independent of app commit
 	for id, source := range record.SourceComponents() {
 		if target, ok := targets[id]; ok && source.Revision != target.Revision {
 			releaseNativeSourceComponent(components, source, target)

@@ -180,14 +180,15 @@ class PublicBaselineTests(unittest.TestCase):
     def test_failed_unsigned_source_record_cannot_replace_the_configured_trust_key(self):
         validator = build_validator(self.root, unsigned=True)
         source, current = 'failed-source', 'trusted-target'
-        url = FIXTURE['BASE'] + 'updates/unsigned-test/demo/policy.json'
+        prefix = 'updates/unsigned-test/demo/in-place/round-41/'
+        url = FIXTURE['BASE'] + prefix + 'policy.json'
         for record, directory in [(self.a, source), (self.b, current)]:
             record['config'].update(mode='unsigned-test', audience='personal', channel='personal-test', policyURL=url,
-                                    signingIdentity='adhoc')
+                                    signingIdentity='adhoc', trustDomain='inplace-41-' + 'a' * 64)
             record['release']['signingIdentity'] = 'adhoc'
             for kind in ('package', 'feed', 'components'):
                 artifact = record['release'][kind]
-                artifact['url'] = artifact['url'].replace('/updates/releases/', '/updates/unsigned-test/demo/releases/')
+                artifact['url'] = artifact['url'].replace('/updates/releases/', '/' + prefix + 'releases/')
             if directory == current:
                 record['config']['publicKeys'] = {'fixture': 'gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q='}
             write_json(self.root / directory / record['release']['releaseId'] / 'release.json', record)
