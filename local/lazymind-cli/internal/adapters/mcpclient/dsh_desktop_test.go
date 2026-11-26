@@ -762,7 +762,7 @@ func TestDesktopMalformedPatchReportsUnknownConfiguration(t *testing.T) {
 	}
 }
 
-func TestDesktopReconnectInstallsBundledReleaseAndRetriesFailedProfile(t *testing.T) {
+func TestDesktopReconnectInstallsSelectedReleaseAndRetriesFailedProfile(t *testing.T) {
 	a, desktop, web := connectedDSHFixture(t)
 	ctx := t.Context()
 	read := func(path string) string {
@@ -818,7 +818,7 @@ func TestDesktopReconnectInstallsBundledReleaseAndRetriesFailedProfile(t *testin
 	if err := workflowconnector.Provision(ctx, a.home, a.self, true); err != nil {
 		t.Fatal(err)
 	}
-	// The stable launcher and retained default still refer to the old package.
+	// Stage the new distribution separately from the stable launcher.
 	a.actualSelf = filepath.Join(t.TempDir(), filepath.Base(a.self))
 	writeTestFile(t, a.actualSelf, read(a.self))
 	if err := os.Chmod(a.actualSelf, 0700); err != nil {
@@ -831,7 +831,7 @@ func TestDesktopReconnectInstallsBundledReleaseAndRetriesFailedProfile(t *testin
 	a.dshRunner = func(_ context.Context, name string, args ...string) error {
 		calls[name]++
 		if len(args) != 2 || args[0] != "add" || filepath.Base(filepath.Dir(args[1])) != next.Release {
-			t.Fatalf("expected the active distribution's archive: %v", args)
+			t.Fatalf("expected the selected release's archive: %v", args)
 		}
 		if name == "web" && failWeb {
 			return errors.New("native installation interrupted")
@@ -852,6 +852,9 @@ func TestDesktopReconnectInstallsBundledReleaseAndRetriesFailedProfile(t *testin
 		t.Fatalf("invalid package displaced the working connection: %+v", s)
 	}
 	writeTestFile(t, archive, oldArchive)
+	if err := workflowconnector.Provision(ctx, a.home, a.actualSelf, true); err != nil {
+		t.Fatal(err)
+	}
 	a.dshRunning = func(context.Context, string) (bool, error) { return true, nil }
 	if s := a.Connect(ctx); s.Issue == nil || s.Issue.Code != "quit_required" || len(calls) != 0 {
 		t.Fatalf("profile changed before DSH exited: %+v, native calls %v", s, calls)

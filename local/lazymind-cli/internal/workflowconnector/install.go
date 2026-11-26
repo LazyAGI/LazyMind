@@ -182,7 +182,7 @@ func Resolve(home, host string) (Installation, error) {
 		return installation, err
 	}
 	if host == DSHHost {
-		return installation, installation.verifyRelease("")
+		return installation, installation.verifyRetainedDSHRelease(home)
 	}
 	for _, file := range installation.Files {
 		if err := installation.checkFile(file); err != nil {
@@ -263,32 +263,57 @@ func writeManifest(path string, manifest Manifest) error {
 	return localfile.Write(path, append(body, '\n'), 0600)
 }
 
-func (i Installation) install(ctx context.Context, home string, upgrade bool) error {
-	record := RecordPath(home, i.Host)
-	if err := os.MkdirAll(filepath.Dir(record), 0700); err != nil {
-		return err
+// A source is optional when recovering an older DSH selection without a sidecar.
+func selectRelease(ctx context.Context, home, host string, source *Installation, upgrade bool) (Installation, error) {
+	record := RecordPath(home, host)
+	dir := filepath.Dir(record)
+	if source == nil {
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			return Resolve(home, host)
+		}
+	} else if err := os.MkdirAll(dir, 0700); err != nil {
+		return Installation{}, err
 	}
 	unlock, err := localfile.LockContext(ctx, record+".lock")
 	if err != nil {
-		return err
+		return Installation{}, err
 	}
 	defer unlock()
-	previous, err := Read(home, i.Host)
-	if err == nil && (!upgrade || previous.Release == i.Release) {
-		// Same-release editable reconnects keep local changes. DSH archives
-		// are immutable and must still pass verification.
-		if i.Host == DSHHost {
-			return i.verifyRelease("")
+	previous, err := Read(home, host)
+	if err == nil && (source == nil || !upgrade || previous.Release == source.Release) {
+		// Same-release editable reconnects keep local changes. Verify the
+		// selected DSH archive before using it for a native installation.
+		if host == DSHHost {
+			return previous, previous.verifyRetainedDSHRelease(home)
 		}
-		return nil
+		return previous, nil
 	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return Installation{}, err
+		}
+		// A record that points at a missing file is still an existing record.
+		if _, statErr := os.Lstat(record); !errors.Is(statErr, os.ErrNotExist) {
+			return Installation{}, err
+		}
+		if host == DSHHost && !upgrade {
+			recovered, err := recoverDSHSelection(home)
+			if err != nil {
+				return Installation{}, err
+			}
+			if recovered.Release != "" {
+				return recovered, writeManifest(record, recovered.Manifest)
+			}
+		}
 	}
-	if _, err := i.retain(home); err != nil {
-		return err
+	if source == nil {
+		return Installation{}, err
 	}
-	return writeManifest(record, i.Manifest)
+	selected, err := source.retain(home)
+	if err != nil {
+		return Installation{}, err
+	}
+	return selected, writeManifest(record, selected.Manifest)
 }
 
 func (i Installation) retain(home string) (Installation, error) {
@@ -302,7 +327,7 @@ func (i Installation) retain(home string) (Installation, error) {
 	}
 	pending := Installation{Manifest: i.Manifest, Dir: dir}
 	if i.Host == DSHHost {
-		return pending, pending.verifyRelease("")
+		return pending, pending.verifyRetainedDSHRelease(home)
 	}
 	return pending, pending.checkFile(pending.Entry)
 }
@@ -320,8 +345,11 @@ func Provision(ctx context.Context, home, executable string, upgrade bool) error
 	var result error
 	for _, host := range distributionHosts(executable) {
 		source, err := packaged(executable, host)
+		if err == nil && host == DSHHost {
+			err = source.verifyRelease("")
+		}
 		if err == nil {
-			err = source.install(ctx, home, upgrade || host == DSHHost)
+			_, err = selectRelease(ctx, home, host, &source, upgrade)
 		}
 		result = errors.Join(result, err)
 	}
@@ -336,7 +364,7 @@ func Ensure(ctx context.Context, home, executable, host string) error {
 		if packageErr != nil {
 			return packageErr
 		}
-		if err := source.install(ctx, home, false); err != nil {
+		if _, err := selectRelease(ctx, home, host, &source, false); err != nil {
 			return err
 		}
 	}

@@ -13,19 +13,14 @@ import (
 
 	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowconnector/connectortest"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
-func TestProvisionSelectsReleaseAndPreservesLocalChangesAndPairing(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "bin", "lazymind")
+func TestProvisionPreservesSameReleaseCodexRepair(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "lazymind")
 	home := t.TempDir()
-	for _, host := range []string{"codex", "workbuddy"} {
-		connectortest.WriteMinimalPackage(t, executable, host)
-	}
-	pairing := filepath.Join(home, "existing-pairing.json")
-	originalPairing := []byte(`{"enabled":true,"connector_id":"existing"}`)
-	if err := os.WriteFile(pairing, originalPairing, 0600); err != nil {
-		t.Fatal(err)
-	}
+	connectortest.WriteMinimalPackage(t, executable, "codex")
+	connectortest.WriteMinimalPackage(t, executable, "workbuddy")
 	if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
 		t.Fatal(err)
 	}
@@ -33,48 +28,170 @@ func TestProvisionSelectsReleaseAndPreservesLocalChangesAndPairing(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(first.ControlPath(), []byte("export const fixed = true"), 0600); err != nil {
+	repair := []byte("export const fixed = true")
+	if err := os.WriteFile(first.ControlPath(), repair, 0600); err != nil {
 		t.Fatal(err)
 	}
 	edited, err := first.Revision()
 	if err != nil || edited == first.Release {
 		t.Fatalf("editable runtime revision: %q %v", edited, err)
 	}
+
 	if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
 		t.Fatal(err)
 	}
-	if reinstalled, err := workflowconnector.Resolve(home, "codex"); err != nil || reinstalled.EntryPath() != first.EntryPath() {
-		t.Fatalf("same-release install changed the entry path: %+v %v", reinstalled, err)
+	reinstalled, err := workflowconnector.Resolve(home, "codex")
+	if err != nil || reinstalled.Release != first.Release || reinstalled.EntryPath() != first.EntryPath() {
+		t.Fatalf("same-release install changed the selection: %+v %v", reinstalled, err)
 	}
-	if revision, err := first.Revision(); err != nil || revision != edited {
+	if revision, err := reinstalled.Revision(); err != nil || revision != edited {
 		t.Fatalf("same-release install overwrote the repair: %q %v", revision, err)
 	}
-	files := map[string]string{"main.mjs": "import './adapter.mjs'", "adapter.mjs": "", "presentation.mjs": ""}
-	next := connectortest.WritePackage(t, executable, "codex", "0.2.0", files)
+	if body, err := os.ReadFile(reinstalled.ControlPath()); err != nil || !bytes.Equal(body, repair) {
+		t.Fatalf("installed control module did not preserve the repair: %q %v", body, err)
+	}
+
+	next := connectortest.WritePackage(t, executable, "codex", "0.2.0", map[string]string{
+		"main.mjs": "import './adapter.mjs'", "adapter.mjs": "export const bundled = true", "presentation.mjs": "",
+	})
 	if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := workflowconnector.Resolve(home, "codex")
+	if err != nil || upgraded.Release != next.Release || upgraded.ControlPath() == first.ControlPath() {
+		t.Fatalf("explicit upgrade did not select a new control module: %+v %v", upgraded, err)
+	}
+	if body, err := os.ReadFile(first.ControlPath()); err != nil || !bytes.Equal(body, repair) {
+		t.Fatalf("explicit upgrade overwrote the old release's repair: %q %v", body, err)
+	}
+}
+
+func TestProvisionSelectsReleaseOnlyOnUpgrade(t *testing.T) {
+	hosts := []string{"codex", "workbuddy", workflowconnector.DSHHost}
+	for _, host := range hosts {
+		t.Run(host, func(t *testing.T) {
+			executable := filepath.Join(t.TempDir(), "lazymind")
+			home := t.TempDir()
+			write := func(target, version, build string) workflowconnector.Manifest {
+				t.Helper()
+				if target == workflowconnector.DSHHost {
+					return connectortest.WriteDSHPackage(t, executable, version+"+"+build)
+				}
+				return connectortest.WritePackage(t, executable, target, version, map[string]string{
+					"main.mjs":    "import './adapter.mjs' // " + version,
+					"adapter.mjs": "", "presentation.mjs": "",
+				})
+			}
+			provider := host
+			if host == workflowconnector.DSHHost {
+				provider = workflowhost.DSHProvider
+			}
+			pair, err := workflowhost.EnsureForProvider(home, provider, filepath.Join(home, "host-profile"), "test-account")
+			if err != nil {
+				t.Fatal(err)
+			}
+			pairPath := filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json")
+			originalPairing, err := os.ReadFile(pairPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var first workflowconnector.Manifest
+			for _, target := range hosts {
+				manifest := write(target, "0.1.0", "0000000000000001")
+				if target == host {
+					first = manifest
+				}
+			}
+			if err := workflowconnector.Provision(t.Context(), home, executable, false); err != nil {
+				t.Fatal(err)
+			}
+			selected, err := workflowconnector.Resolve(home, host)
+			if err != nil || selected.Release != first.Release || selected.Version != first.Version {
+				t.Fatalf("first provision did not select v1: %+v %v", selected, err)
+			}
+			oldPath := selected.EntryPath()
+			oldEntry, err := os.ReadFile(oldPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			next := write(host, "0.2.0", "0000000000000002")
+			if err := workflowconnector.Provision(t.Context(), home, executable, false); err != nil {
+				t.Fatal(err)
+			}
+			selected, err = workflowconnector.Resolve(home, host)
+			if err != nil || selected.Release != first.Release || selected.Version != first.Version || selected.EntryPath() != oldPath {
+				t.Fatalf("non-upgrade provision changed the selected v1 with v2 supplied: %+v %v", selected, err)
+			}
+
+			if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
+				t.Fatal(err)
+			}
+			selected, err = workflowconnector.Resolve(home, host)
+			if err != nil || selected.Release != next.Release || selected.Version != next.Version || selected.EntryPath() == oldPath {
+				t.Fatalf("explicit upgrade did not select v2: %+v %v", selected, err)
+			}
+			if body, err := os.ReadFile(oldPath); err != nil || !bytes.Equal(body, oldEntry) {
+				t.Fatalf("explicit upgrade changed the previous release: %v", err)
+			}
+			if body, err := os.ReadFile(pairPath); err != nil || !bytes.Equal(body, originalPairing) {
+				t.Fatalf("provisioning changed the existing pairing: %v", err)
+			}
+		})
+	}
+}
+
+func TestMissingCodexControlModuleRejectsResolveAndReload(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "lazymind")
+	home := t.TempDir()
+	connectortest.WriteMinimalPackage(t, executable, "codex")
+	if err := workflowconnector.Ensure(t.Context(), home, executable, "codex"); err != nil {
 		t.Fatal(err)
 	}
 	installed, err := workflowconnector.Resolve(home, "codex")
-	if err != nil || installed.Release != next.Release || installed.EntryPath() == first.EntryPath() {
-		t.Fatalf("new active Connector: %+v %v", installed, err)
-	}
-	if revision, err := first.Revision(); err != nil || revision != edited {
-		t.Fatalf("upgrade modified previous release: %q %v", revision, err)
-	}
-	if body, err := os.ReadFile(pairing); err != nil || !bytes.Equal(body, originalPairing) {
-		t.Fatalf("pairing changed during upgrade: %s %v", body, err)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := os.Remove(installed.ControlPath()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := workflowconnector.Resolve(home, "codex"); !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), installed.ControlPath()) {
-		t.Fatalf("missing module path: %v", err)
+		t.Fatalf("resolve did not report the missing control module: %v", err)
 	}
-	if _, err := workflowconnector.RequestReload(home, "codex"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("requested reload with incomplete package: %v", err)
+	if _, err := workflowconnector.RequestReload(home, "codex"); !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), installed.ControlPath()) {
+		t.Fatalf("reload did not report the missing control module: %v", err)
 	}
-	if _, err := workflowconnector.Resolve(home, "workbuddy"); err != nil {
-		t.Fatalf("other host has no active package: %v", err)
+}
+
+func TestDamagedCodexControlModuleLeavesWorkBuddyResolvable(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "lazymind")
+	home := t.TempDir()
+	connectortest.WriteMinimalPackage(t, executable, "codex")
+	workBuddy := connectortest.WritePackage(t, executable, "workbuddy", "0.1.0", map[string]string{
+		"main.mjs": "import './adapter.mjs'", "adapter.mjs": "", "presentation.mjs": "",
+	})
+	if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
+		t.Fatal(err)
+	}
+	codex, err := workflowconnector.Resolve(home, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(codex.ControlPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(codex.ControlPath(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflowconnector.Resolve(home, "codex"); err == nil || !strings.Contains(err.Error(), codex.ControlPath()) {
+		t.Fatalf("resolve accepted the damaged Codex control module: %v", err)
+	}
+	installed, err := workflowconnector.Resolve(home, "workbuddy")
+	if err != nil || installed.Release != workBuddy.Release || installed.Version != workBuddy.Version {
+		t.Fatalf("damaged Codex module affected the selected WorkBuddy release: %+v %v", installed, err)
+	}
+	if revision, err := installed.Revision(); err != nil || revision != workBuddy.Release {
+		t.Fatalf("resolved WorkBuddy modules changed: %q %v", revision, err)
 	}
 }
 
@@ -273,6 +390,131 @@ func TestProvisionIsolatesDamagedConnectorPackages(t *testing.T) {
 				t.Fatalf("updating the distribution changed the previous package: %v", err)
 			}
 		})
+	}
+}
+
+func TestDSHConnectionPreservesDamagedSelection(t *testing.T) {
+	for _, damaged := range []string{"record", "archive record", "archive", "missing archive"} {
+		t.Run(damaged, func(t *testing.T) {
+			executable := filepath.Join(t.TempDir(), "lazymind")
+			home := t.TempDir()
+			connectortest.WriteDSHPackage(t, executable, "0.1.0+0000000000000001")
+			if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
+				t.Fatal(err)
+			}
+			selected, err := workflowconnector.Resolve(home, workflowconnector.DSHHost)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := workflowconnector.RecordPath(home, workflowconnector.DSHHost)
+			damagedPath := selected.EntryPath()
+			switch damaged {
+			case "record":
+				damagedPath = record
+			case "archive record":
+				damagedPath = filepath.Join(selected.Dir, "connector.json")
+			}
+			if damaged == "missing archive" {
+				if err := os.Remove(damagedPath); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(damagedPath, []byte("damaged"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			oldRecord, err := os.ReadFile(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			connectortest.WriteDSHPackage(t, executable, "0.2.0+0000000000000002")
+
+			if _, err := workflowconnector.DSHRelease(t.Context(), home, executable); err == nil || !strings.Contains(err.Error(), damagedPath) {
+				t.Errorf("connect did not report the damaged selection at %s: %v", damagedPath, err)
+			}
+			if err := workflowconnector.Provision(t.Context(), home, executable, false); err == nil || !strings.Contains(err.Error(), damagedPath) {
+				t.Errorf("non-upgrade provision did not report the damaged selection at %s: %v", damagedPath, err)
+			}
+			if body, err := os.ReadFile(record); err != nil || !bytes.Equal(body, oldRecord) {
+				t.Errorf("the active record was overwritten: %s %v", body, err)
+			}
+			body, err := os.ReadFile(damagedPath)
+			if damaged == "missing archive" {
+				if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("missing archive was unexpectedly created: %v", err)
+				}
+			} else if err != nil || string(body) != "damaged" {
+				t.Fatalf("damaged selection was overwritten: %s %v", body, err)
+			}
+		})
+	}
+}
+
+func TestDSHRecoversSingleRetainedRelease(t *testing.T) {
+	for _, caller := range []string{"non-upgrade provision", "unbundled standalone connect"} {
+		t.Run(caller, func(t *testing.T) {
+			t.Setenv("LAZYMIND_RUNTIME_RESOURCES_ROOT", "")
+			executable := filepath.Join(t.TempDir(), "lazymind")
+			home := t.TempDir()
+			first := connectortest.WriteDSHPackage(t, executable, "0.1.0+0000000000000001")
+			if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(workflowconnector.RecordPath(home, workflowconnector.DSHHost)); err != nil {
+				t.Fatal(err)
+			}
+
+			if caller == "non-upgrade provision" {
+				connectortest.WriteDSHPackage(t, executable, "0.2.0+0000000000000002")
+				if err := workflowconnector.Provision(t.Context(), home, executable, false); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				unbundled := filepath.Join(t.TempDir(), "lazymind")
+				if _, err := workflowconnector.DSHRelease(t.Context(), t.TempDir(), unbundled); !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "DeepSeek Harness Connector installation record") {
+					t.Fatalf("unbundled connect without any installation returned %v", err)
+				}
+				installed, err := workflowconnector.DSHRelease(t.Context(), home, unbundled)
+				if err != nil || installed.Release != first.Release || installed.Version != first.Version {
+					t.Fatalf("unbundled connect did not reuse retained v1: %+v %v", installed, err)
+				}
+			}
+			selected, err := workflowconnector.Resolve(home, workflowconnector.DSHHost)
+			if err != nil || selected.Release != first.Release || selected.Version != first.Version {
+				t.Fatalf("v1 was not restored as the active release: %+v %v", selected, err)
+			}
+		})
+	}
+}
+
+func TestDSHLegacySelectionRejectsAmbiguousRetainedReleases(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "lazymind")
+	home := t.TempDir()
+	for _, build := range []string{"0.1.0+0000000000000001", "0.2.0+0000000000000002"} {
+		connectortest.WriteDSHPackage(t, executable, build)
+		if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record := workflowconnector.RecordPath(home, workflowconnector.DSHHost)
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	next := connectortest.WriteDSHPackage(t, executable, "0.3.0+0000000000000003")
+
+	if _, err := workflowconnector.DSHRelease(t.Context(), home, executable); err == nil || !strings.Contains(err.Error(), "multiple retained") {
+		t.Errorf("connect did not report an ambiguous selection: %v", err)
+	}
+	if err := workflowconnector.Provision(t.Context(), home, executable, false); err == nil || !strings.Contains(err.Error(), "multiple retained") {
+		t.Errorf("non-upgrade provision did not report an ambiguous selection: %v", err)
+	}
+	if _, err := os.Stat(record); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("an active record was written without a clear selection: %v", err)
+	}
+	if err := workflowconnector.Provision(t.Context(), home, executable, true); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := workflowconnector.Resolve(home, workflowconnector.DSHHost)
+	if err != nil || selected.Release != next.Release || selected.Version != next.Version {
+		t.Fatalf("explicit upgrade did not resolve the selection: %+v %v", selected, err)
 	}
 }
 

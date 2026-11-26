@@ -3,9 +3,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +28,7 @@ import (
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
-func TestDSHStandaloneCLIReconnectsWithBundledRelease(t *testing.T) {
+func TestDSHStandaloneCLIReconnectsWithSelectedRelease(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required to exercise both DSH entry points")
@@ -172,25 +174,86 @@ console.log(JSON.stringify({ build: connectorBuild, client_build: browser.connec
 		t.Logf("installed and loaded Node and client build %s", build)
 		return pair
 	}
+	requireInstalls := func(stage string, releases ...workflowconnector.Manifest) {
+		t.Helper()
+		body, err := os.ReadFile(filepath.Join(dshHome, "native-installations"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		invocations := strings.Split(strings.TrimSuffix(string(body), "\n"), "\n")
+		if len(invocations) != len(releases) {
+			t.Fatalf("%s: got %d native installations, want %d: %q", stage, len(invocations), len(releases), invocations)
+		}
+		for i, release := range releases {
+			if filepath.Base(filepath.Dir(invocations[i])) != release.Release || filepath.Base(invocations[i]) != release.Entry {
+				t.Fatalf("%s: native installation %d used %q, want %s/%s", stage, i+1, invocations[i], release.Release, release.Entry)
+			}
+		}
+	}
+	checkSelection := func(stage string, expected workflowconnector.Manifest) {
+		t.Helper()
+		active, err := workflowconnector.Resolve(home, workflowconnector.DSHHost)
+		if err != nil || active.Release != expected.Release || active.Version != expected.Version {
+			t.Errorf("%s: active DSH release is %+v, want build %s (%s): %v", stage, active, expected.Version, expected.Release, err)
+		}
+	}
+
 	v1 := connectortest.WriteDSHPackage(t, self, "0.1.0+0000000000000001")
-	if err := workflowconnector.Provision(t.Context(), home, self, true); err != nil {
-		t.Fatal(err)
+	if _, err := workflowconnector.Read(home, workflowconnector.DSHHost); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("first connect requires a home without a selected DSH release: %v", err)
 	}
 	pair := confirm(call("connect"), v1.Version)
-	v2 := connectortest.WriteDSHPackage(t, self, "0.2.0+0000000000000002")
-	if after := confirm(call("connect"), v2.Version); after != pair {
-		t.Fatalf("reconnect changed pairing: %s", pair.ConnectorID)
-	}
-	if status := call("connect"); !status.Connection.ControlReady {
-		t.Fatalf("same-release reconnect lost verified readiness: %+v", status.Connection)
-	}
-	body, err := os.ReadFile(filepath.Join(dshHome, "native-installations"))
+	requireInstalls("first connect", v1)
+	checkSelection("first connect", v1)
+	pairPath := filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json")
+	originalPairing, err := os.ReadFile(pairPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	invocations := strings.FieldsFunc(string(body), func(r rune) bool { return r == '\n' })
-	if len(invocations) != 2 || filepath.Base(filepath.Dir(invocations[0])) != v1.Release ||
-		filepath.Base(filepath.Dir(invocations[1])) != v2.Release {
-		t.Fatalf("native installation calls should be v1, v2: %q", invocations)
+	requirePairing := func(stage string) {
+		t.Helper()
+		current, err := os.ReadFile(pairPath)
+		if err != nil || !bytes.Equal(current, originalPairing) {
+			t.Fatalf("%s: existing pairing changed: %v", stage, err)
+		}
 	}
+
+	v2 := connectortest.WriteDSHPackage(t, self, "0.2.0+0000000000000002")
+	status := call("connect")
+	requireInstalls("ordinary reconnect with v2 supplied", v1)
+	checkSelection("ordinary reconnect with v2 supplied", v1)
+	if status.Connection.RuntimeState != "connected" || !status.Connection.ControlReady {
+		t.Fatalf("ordinary reconnect with v2 supplied lost v1 readiness: %+v", status.Connection)
+	}
+	requirePairing("ordinary reconnect with v2 supplied")
+
+	// Older CLIs retained the native archive without recording a home selection.
+	if err := os.Remove(workflowconnector.RecordPath(home, workflowconnector.DSHHost)); err != nil {
+		t.Fatal(err)
+	}
+	status = call("connect")
+	requireInstalls("legacy reconnect with v2 supplied", v1)
+	checkSelection("legacy reconnect with v2 supplied", v1)
+	if status.Connection.RuntimeState != "connected" || !status.Connection.ControlReady {
+		t.Fatalf("legacy reconnect with v2 supplied lost v1 readiness: %+v", status.Connection)
+	}
+	requirePairing("legacy reconnect with v2 supplied")
+
+	if err := workflowconnector.Provision(t.Context(), home, self, true); err != nil {
+		t.Fatalf("explicit deployment did not accept v2: %v", err)
+	}
+	checkSelection("explicit deployment", v2)
+	requireInstalls("explicit deployment", v1)
+
+	if after := confirm(call("connect"), v2.Version); after != pair {
+		t.Fatalf("reconnect after deployment changed pairing: %s", pair.ConnectorID)
+	}
+	requireInstalls("reconnect after explicit deployment", v1, v2)
+	requirePairing("reconnect after explicit deployment")
+
+	if status := call("connect"); status.Connection.RuntimeState != "connected" || !status.Connection.ControlReady {
+		t.Fatalf("same-release reconnect lost verified readiness: %+v", status.Connection)
+	}
+	requireInstalls("final reconnect", v1, v2)
+	requirePairing("final reconnect")
 }

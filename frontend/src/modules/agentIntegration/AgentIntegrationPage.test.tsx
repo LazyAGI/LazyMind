@@ -1531,16 +1531,16 @@ describe("AgentIntegrationPage", () => {
     expect(within(dialogs[1]).getByRole("img", { name: tr("imageAlt") })).toHaveAttribute("src", "/installation-guides/deepseek-harness/enable.png");
   });
 
-  it("opens DSH instructions and reconnects an enabled configuration on request", async () => {
+  const connectedDSH = {
+    agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+    can_connect: true, can_disconnect: true,
+    connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" },
+    requirements: [{ id: "dsh_desktop", satisfied: true }],
+  };
+
+  it("opens DSH instructions without reconnecting an enabled configuration", async () => {
     const copy = zhCN.agentIntegration.dshInstallGuide;
-    const connected = {
-      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
-      can_connect: true, can_disconnect: true,
-      connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" },
-      requirements: [{ id: "dsh_desktop", satisfied: true }],
-    };
-    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connected } });
-    mocks.action.mockResolvedValue({ ok: true, data: { ...connected, connection: { ...connected.connection, control_ready: false, runtime_state: "waiting" } } });
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connectedDSH } });
     render(<AgentIntegrationPage />);
     const card = expandAgent("deepseek-harness");
     fireEvent.click(await within(card).findByRole("button", { name: new RegExp(copy.entry) }));
@@ -1550,9 +1550,19 @@ describe("AgentIntegrationPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(mocks.action).not.toHaveBeenCalled();
     expect(within(card).getByRole("switch")).toBeChecked();
-    fireEvent.click(within(card).getByRole("button", { name: copy.reconnect }));
+  });
+
+  it("reconnects an enabled DSH configuration after confirmation", async () => {
+    const copy = zhCN.agentIntegration.dshInstallGuide;
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connectedDSH } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...connectedDSH, connection: { ...connectedDSH.connection, control_ready: false, runtime_state: "waiting" } } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    fireEvent.click(await within(card).findByRole("button", { name: copy.reconnect }));
     const reconnect = await screen.findByRole("dialog");
     expect(reconnect).toHaveTextContent(copy.prepareDescription);
+    expect(mocks.action).not.toHaveBeenCalled();
+    expect(within(card).getByRole("switch")).toBeChecked();
     fireEvent.click(within(reconnect).getByRole("button", { name: copy.continue }));
     await within(reconnect).findByText(copy.installedTitle);
     expect(mocks.action).toHaveBeenCalledTimes(1);

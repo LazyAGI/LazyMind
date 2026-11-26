@@ -13,8 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"lazymind/agentconnector/internal/localfile"
 )
 
 const maxDSHPluginFileSize = 8 << 20
@@ -26,16 +24,22 @@ func ValidDSHBuild(build string) bool { return dshBuildPattern.MatchString(build
 
 var dshFiles = []string{"package.json", "lib/index.js", "lib/client.js", "cordis.patch.yml", "README.md"}
 
-// DSHRelease retains the current distribution's verified archive for the
-// native installer. A standalone executable can use a provisioned archive.
+// DSHRelease resolves the selected archive for the native installer and
+// provisions it on the first connection from a distribution.
 func DSHRelease(ctx context.Context, home, executable string) (Installation, error) {
 	distributed, err := hasPackage(executable)
 	if err != nil {
 		return Installation{}, err
 	}
 	if !distributed {
-		return Resolve(home, DSHHost)
+		selected, err := Resolve(home, DSHHost)
+		if selected.Release != "" || !errors.Is(err, os.ErrNotExist) {
+			return selected, err
+		}
+		return selectRelease(ctx, home, DSHHost, nil, false)
 	}
+	// A distribution must supply its DSH member, even if the selected
+	// release is retained from an earlier distribution.
 	value, err := packaged(executable, DSHHost)
 	if err != nil {
 		return Installation{}, err
@@ -43,33 +47,77 @@ func DSHRelease(ctx context.Context, home, executable string) (Installation, err
 	if err := value.verifyRelease(""); err != nil {
 		return Installation{}, err
 	}
-	record := RecordPath(home, DSHHost)
-	if err := os.MkdirAll(filepath.Dir(record), 0700); err != nil {
-		return Installation{}, err
+	return selectRelease(ctx, home, DSHHost, &value, false)
+}
+
+func retainedDSHRelease(home, release string) (Installation, error) {
+	if !digestPattern.MatchString(release) {
+		return Installation{}, errors.New("invalid installed DSH Connector release")
 	}
-	unlock, err := localfile.LockContext(ctx, record+".lock")
+	dir := filepath.Join(filepath.Dir(RecordPath(home, DSHHost)), "connectors", release)
+	path := filepath.Join(dir, manifestName)
+	manifest, err := readManifest(path, DSHHost)
 	if err != nil {
 		return Installation{}, err
 	}
-	defer unlock()
-	return value.retain(home)
+	if manifest.Release != release {
+		return Installation{}, fmt.Errorf("retained DSH Connector release does not match its directory at %s", path)
+	}
+	return Installation{Manifest: manifest, Dir: dir}, nil
 }
 
-// CheckRetainedDSHInstall compares a native installation with the archive
-// that supplied it. Connect always resolves its install source separately.
-func CheckRetainedDSHInstall(home, release, build, directory string) error {
-	if !digestPattern.MatchString(release) {
-		return errors.New("invalid installed DSH Connector release")
-	}
-	dir := filepath.Join(filepath.Dir(RecordPath(home, DSHHost)), "connectors", release)
-	manifest, err := readManifest(filepath.Join(dir, manifestName), DSHHost)
+func (i Installation) verifyRetainedDSHRelease(home string) error {
+	retained, err := retainedDSHRelease(home, i.Release)
 	if err != nil {
 		return err
 	}
-	if manifest.Release != release || manifest.Version != build {
+	if retained.Version != i.Version {
+		return fmt.Errorf("retained DSH Connector version does not match the installation record at %s", retained.Dir)
+	}
+	return retained.verifyRelease("")
+}
+
+// Earlier connects retained the archive without writing an active record.
+// Recover an unambiguous release while holding the installation record lock.
+func recoverDSHSelection(home string) (Installation, error) {
+	dir := filepath.Join(filepath.Dir(RecordPath(home, DSHHost)), "connectors")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return Installation{}, nil
+	}
+	if err != nil {
+		return Installation{}, err
+	}
+	release := ""
+	for _, entry := range entries {
+		if !digestPattern.MatchString(entry.Name()) {
+			continue
+		}
+		if release != "" {
+			return Installation{}, fmt.Errorf("multiple retained DSH Connector releases at %s; deploy LazyMind again to select a release", dir)
+		}
+		release = entry.Name()
+	}
+	if release == "" {
+		return Installation{}, nil
+	}
+	selected, err := retainedDSHRelease(home, release)
+	if err != nil {
+		return Installation{}, err
+	}
+	return selected, selected.verifyRelease("")
+}
+
+// CheckRetainedDSHInstall compares a native installation with the archive
+// that supplied it. Connect uses the currently selected archive.
+func CheckRetainedDSHInstall(home, release, build, directory string) error {
+	value, err := retainedDSHRelease(home, release)
+	if err != nil {
+		return err
+	}
+	if value.Version != build {
 		return errors.New("retained DSH Connector does not match the installed build")
 	}
-	value := Installation{Manifest: manifest, Dir: dir}
 	if err := value.verifyRelease(""); err != nil {
 		return err
 	}

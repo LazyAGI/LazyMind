@@ -18,7 +18,7 @@ import (
 )
 
 // dshInstalledBuild records a successful native install for integrity checks
-// and restart verification. Connect resolves its source from the distribution.
+// and restart verification. Connect installs the selected Connector release.
 type dshInstalledBuild struct {
 	Profile      string `json:"profile"`
 	Release      string `json:"release"`

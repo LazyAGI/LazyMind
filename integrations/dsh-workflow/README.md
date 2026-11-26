@@ -1,6 +1,6 @@
 # LazyMind Workflow for DeepSeek Harness
 
-LazyMind distributes this precompiled bundle with its connector. Connect DeepSeek Harness from LazyMind to install the bundled release, configure MCP and create a private pairing file. LazyMind Desktop connects the Desktop and Web profiles through DSH's installer.
+LazyMind distributes this precompiled bundle with its connector. Connect DeepSeek Harness from LazyMind to install the selected release, configure MCP and create a private pairing file. A fresh installation with no selected or retained release selects the bundled release on first connection. LazyMind Desktop connects the Desktop and Web profiles through DSH's installer.
 
 The supported SDK baseline is DSH 0.1.6-alpha.1. The Node Host adapter uses public scoped tools, lifecycle gates and SessionController; the browser adapter opens the default panel for the current chat’s Core binding and projects standard tool events into historical cards. It never appends a custom `lazymind-workflow/open` event and never reads DSH's signing credentials.
 
@@ -39,7 +39,7 @@ From this directory, run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pn
 
 The desktop and local build scripts stage the DSH archive and manifest in `workflow-connectors/dsh` beside the LazyMind executable. For a standalone Go CLI, build the plugin as above and stage only the DSH sidecar by running `pnpm stage-connectors /absolute/path/to/cli/directory --dsh-only` from this directory.
 
-After installing a new LazyMind release, fully quit DeepSeek Harness and use Reconnect in the installation guide to install the bundled version. Restart DeepSeek Harness and check the connection in the guide. Reconnecting preserves the profile settings and pairing.
+Deploying a new LazyMind Desktop release selects the Connector version bundled with that deployment. Fully quit DeepSeek Harness and use Reconnect in the installation guide to apply the selected release, then restart DeepSeek Harness and check the connection. Reconnecting keeps the selected release, profile settings and pairing.
 
 ## Configuration
 
