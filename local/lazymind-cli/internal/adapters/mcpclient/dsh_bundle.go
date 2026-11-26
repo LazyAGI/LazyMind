@@ -2,7 +2,6 @@ package mcpclient
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/workflowconnector"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -158,7 +158,7 @@ func runDSHPluginWith(ctx context.Context, runtime dshPluginRuntime, profile str
 	return nil
 }
 
-func configureDSHWorkflow(path, configPath, command, bundleHash string, disabled bool) error {
+func configureDSHWorkflow(path, configPath, command string, disabled bool) error {
 	document, err := readYAMLDocument(path)
 	if err != nil {
 		return err
@@ -173,7 +173,7 @@ func configureDSHWorkflow(path, configPath, command, bundleHash string, disabled
 	}
 	value := map[string]any{"id": dshWorkflowRow, "disabled": disabled}
 	if !disabled {
-		value["config"] = map[string]string{"connectorConfig": configPath, "command": command, "bundleHash": bundleHash}
+		value["config"] = map[string]string{"connectorConfig": configPath, "command": command}
 	}
 	var replacement yaml.Node
 	if err := replacement.Encode(value); err != nil {
@@ -191,14 +191,14 @@ func configureDSHWorkflow(path, configPath, command, bundleHash string, disabled
 		if config == nil || config.Kind != yaml.MappingNode {
 			setDSHYAML(existing, "config", replacementConfig)
 		} else {
-			for _, key := range []string{"connectorConfig", "command", "bundleHash"} {
+			for _, key := range []string{"connectorConfig", "command"} {
 				setDSHYAML(config, key, mappingValue(replacementConfig, key))
 			}
-			// Earlier generated rows named the pairing file directly.
-			for index := 0; index < len(config.Content); index += 2 {
-				if config.Content[index].Value == "pairingFile" {
+			// Remove obsolete generated fields while preserving user settings.
+			for index := len(config.Content) - 2; index >= 0; index -= 2 {
+				switch config.Content[index].Value {
+				case "pairingFile", "bundleHash":
 					config.Content = append(config.Content[:index], config.Content[index+2:]...)
-					break
 				}
 			}
 		}
@@ -218,88 +218,48 @@ func setDSHYAML(mapping *yaml.Node, key string, value *yaml.Node) {
 	}
 }
 
-func (a *Adapter) setDSHPluginHash(hash string) error {
-	path := a.dshConfigPath()
-	doc, err := readYAMLDocument(path)
-	if err != nil {
-		return err
-	}
-	for _, row := range yamlSequence(doc).Content {
-		if scalarValue(row, "id") != dshWorkflowRow {
-			continue
-		}
-		config := mappingValue(row, "config")
-		if config == nil && scalarValue(row, "disabled") == "true" {
-			return nil
-		}
-		if config == nil || config.Kind != yaml.MappingNode {
-			return errors.New("DSH workflow patch is missing its connection configuration")
-		}
-		if scalarValue(config, "bundleHash") == hash {
-			return nil
-		}
-		setDSHYAML(config, "bundleHash", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: hash})
-		body, err := encodeYAML(doc)
-		if err != nil {
-			return err
-		}
-		return writeConfigFile(path, body)
-	}
-	return errors.New("DSH workflow patch is missing")
-}
-
-func (a *Adapter) dshWorkflowConfigured() bool {
-	record, err := a.dshPluginRecord()
-	return err == nil && record.Selected.Release != "" && a.dshWorkflowConfiguration(true)
+func (a *Adapter) dshWorkflowConfigured(source workflowconnector.Installation) bool {
+	build, err := a.readDSHBuild()
+	return err == nil && build.Release == source.Release && build.Build == source.Version &&
+		a.dshWorkflowConfiguration(true) && a.checkDSHInstall(source) == nil
 }
 
 // Installation survives a native plugin toggle, sign-out or a revoked pairing.
 // Those are reported separately as runtime prerequisites, not a missing bundle.
 func (a *Adapter) dshWorkflowInstalled() bool {
-	return a.dshWorkflowConfiguration(false)
+	if !a.dshWorkflowConfiguration(false) {
+		return false
+	}
+	build, err := a.readDSHBuild()
+	if err != nil {
+		return false
+	}
+	if build.Build == "" {
+		return true
+	}
+	dir, err := dshModuleDir(filepath.Dir(a.dshConfigPath()), dshWorkflowPackage)
+	return err == nil && workflowconnector.CheckRetainedDSHInstall(a.home, build.Release, build.Build, dir) == nil
 }
 
 func (a *Adapter) dshWorkflowConfiguration(requireEnabled bool) bool {
-	return a.dshWorkflowConfigurationVersion(requireEnabled, true)
-}
-
-// Only identify an update when the installed package and every other managed
-// configuration field are valid. Missing or unreadable files keep their errors.
-func (a *Adapter) dshWorkflowNeedsUpdate() bool {
-	return !a.dshWorkflowInstalled() && a.dshWorkflowConfigurationVersion(false, false)
-}
-
-func (a *Adapter) dshWorkflowConfigurationVersion(requireEnabled, currentBundle bool) bool {
 	document, err := readYAMLDocument(a.dshConfigPath())
 	if err != nil {
 		return false
 	}
-	if _, err := dshModuleVersion(filepath.Dir(a.dshConfigPath()), dshWorkflowPackage); err != nil {
+	profile := filepath.Dir(a.dshConfigPath())
+	if _, err := dshModuleVersion(profile, dshWorkflowPackage); err != nil {
 		return false
 	}
 	if a.dshTarget != "" {
 		if !a.dshMCPReady {
 			return false
 		}
-		body, err := os.ReadFile(filepath.Join(filepath.Dir(a.dshConfigPath()), "package.json"))
-		var manifest struct {
-			DSH struct {
-				Profile struct {
-					Bundles []string `json:"bundles"`
-				} `json:"profile"`
-			} `json:"dsh"`
-		}
-		if err != nil || json.Unmarshal(body, &manifest) != nil {
+		active, err := dshBundleEnabled(profile)
+		if err != nil || requireEnabled && !active {
 			return false
 		}
-		active := false
-		for _, bundle := range manifest.DSH.Profile.Bundles {
-			if bundle == dshWorkflowPackage {
-				active = true
-			}
-		}
 		c, configErr := connectorconfig.Load(decodeDSHStdio(findDSHEntry(document)).Env[connectorconfig.EnvironmentKey])
-		if requireEnabled && !active || configErr != nil || !c.Controlled {
+		if configErr != nil || !c.Controlled {
 			return false
 		}
 	}
@@ -308,28 +268,8 @@ func (a *Adapter) dshWorkflowConfigurationVersion(requireEnabled, currentBundle 
 			continue
 		}
 		config := mappingValue(item, "config")
-		if currentBundle {
-			record, err := a.dshPluginRecord()
-			if err != nil {
-				return false
-			}
-			hash := scalarValue(config, "bundleHash")
-			if record.Selected.Release == "" {
-				digest, err := hex.DecodeString(hash)
-				if err != nil || len(digest) != 32 {
-					return false
-				}
-			} else {
-				if record.Selected != record.Installed || record.Step != "restart" || hash != record.Installed.Release {
-					return false
-				}
-				if _, err := a.checkDSHPlugin(record.Installed.Release); err != nil {
-					return false
-				}
-			}
-		}
 		c, err := connectorconfig.Load(scalarValue(config, "connectorConfig"))
-		if err != nil || c.Home != a.home || c.Provider != string(DeepSeekHarness) || c.Profile != filepath.Dir(a.dshConfigPath()) || c.HostID != a.hostID || !c.Controlled {
+		if err != nil || c.Home != a.home || c.Provider != string(DeepSeekHarness) || c.Profile != profile || c.HostID != a.hostID || !c.Controlled {
 			return false
 		}
 		file := c.PairingFile
@@ -387,50 +327,46 @@ func (a *Adapter) runNativeDSHInstall(ctx context.Context, archive string) error
 	return run(ctx, a.dshProfile(), args...)
 }
 
-func (a *Adapter) installDSHWorkflow(ctx context.Context, beforePublish func() error) (dshPluginRecord, error) {
+func (a *Adapter) installDSHWorkflow(ctx context.Context, source workflowconnector.Installation, beforePublish func() error) error {
 	profile := filepath.Dir(a.dshConfigPath())
 	store, err := credentials.NewStore(a.home, "")
 	if err != nil {
-		return dshPluginRecord{}, err
+		return err
 	}
 	api, err := coreapi.New(store)
 	if err != nil {
-		return dshPluginRecord{}, err
+		return err
 	}
 	var capability struct {
 		SchemaReady bool   `json:"schema_ready"`
 		Protocol    string `json:"protocol"`
 	}
 	if err := api.DoJSON(ctx, "GET", "/workflow-control/capabilities", nil, &capability); err != nil {
-		return dshPluginRecord{}, err
+		return err
 	}
 	if !capability.SchemaReady || capability.Protocol != "workflow.control.v1" {
-		return dshPluginRecord{}, errors.New("update LazyMind Core and its database before enabling workflow control")
+		return errors.New("update LazyMind Core and its database before enabling workflow control")
 	}
 	account, err := store.AccountScope()
 	if err != nil {
-		return dshPluginRecord{}, err
+		return err
 	}
-	record, err := a.installDSHPlugin(ctx, "connect", "")
-	if err != nil {
-		return record, err
+	if err := a.installDSHBuild(ctx, source); err != nil {
+		return err
 	}
 	if err := beforePublish(); err != nil {
-		return record, err
+		return err
 	}
 	pair, err := workflowhost.Ensure(a.home, profile, account)
 	if err != nil {
-		return dshPluginRecord{}, err
+		return err
 	}
 	pairingFile := filepath.Join(a.home, "workflow-hosts", pair.ConnectorID+".json")
 	configPath, err := connectorconfig.Save(connectorconfig.Config{Home: a.home, Provider: string(DeepSeekHarness), HostID: a.hostID, Profile: profile, PairingFile: pairingFile, Controlled: true})
 	if err != nil {
-		return dshPluginRecord{}, err
+		return err
 	}
-	if err := configureDSHWorkflow(a.dshConfigPath(), configPath, a.self, record.Selected.Release, false); err != nil {
-		return dshPluginRecord{}, err
-	}
-	return record, nil
+	return configureDSHWorkflow(a.dshConfigPath(), configPath, a.self, false)
 }
 
 func (a *Adapter) disconnectDSHWorkflow() error {
@@ -457,7 +393,7 @@ func (a *Adapter) disconnectDSHWorkflow() error {
 				return err
 			}
 		}
-		return configureDSHWorkflow(a.dshConfigPath(), "", "", "", true)
+		return configureDSHWorkflow(a.dshConfigPath(), "", "", true)
 	}
 	return nil
 }

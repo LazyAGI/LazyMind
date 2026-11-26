@@ -89,20 +89,9 @@ type ConnectorDiagnostic struct {
 }
 
 type ProfileStatus struct {
-	Name    string        `json:"name"`
-	State   State         `json:"state"`
-	Message string        `json:"message,omitempty"`
-	Plugin  *PluginStatus `json:"plugin,omitempty"`
-}
-
-type PluginStatus struct {
-	SelectedVersion      string `json:"selected_version,omitempty"`
-	InstalledVersion     string `json:"installed_version,omitempty"`
-	PreviousVersion      string `json:"previous_version,omitempty"`
-	RunningVersion       string `json:"running_version,omitempty"`
-	RunningClientVersion string `json:"running_client_version,omitempty"`
-	State                string `json:"state"`
-	ProcessInstance      string `json:"process_instance,omitempty"`
+	Name    string `json:"name"`
+	State   State  `json:"state"`
+	Message string `json:"message,omitempty"`
 }
 
 func MissingRequirement(requirements []Requirement) bool {

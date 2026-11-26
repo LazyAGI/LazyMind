@@ -21,6 +21,7 @@ import (
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/localfile"
+	"lazymind/agentconnector/internal/workflowconnector"
 )
 
 var dshDesktopProfiles = []string{"desktop", "web"}
@@ -112,7 +113,7 @@ func validDSHDesktopManifest() error {
 
 // DSH's plugin add command selects newly added bundles, but leaves existing
 // dependencies unselected. An explicit LazyMind connection should enable its bundle.
-func setDSHWorkflowBundle(ctx context.Context, profile string, enabled bool) error {
+func enableDSHWorkflowBundle(ctx context.Context, profile string) error {
 	path := filepath.Join(profile, "package.json")
 	unlock, err := lockDSHPatch(ctx, path)
 	if err != nil {
@@ -138,7 +139,7 @@ func setDSHWorkflowBundle(ctx context.Context, profile string, enabled bool) err
 	if err := json.Unmarshal(settings["bundles"], &bundles); err != nil {
 		return err
 	}
-	if slices.Contains(bundles, dshWorkflowPackage) == enabled {
+	if slices.Contains(bundles, dshWorkflowPackage) {
 		return nil
 	}
 	var dependencies map[string]string
@@ -151,12 +152,7 @@ func setDSHWorkflowBundle(ctx context.Context, profile string, enabled bool) err
 	if _, err := dshModuleVersion(profile, dshWorkflowPackage); err != nil {
 		return fmt.Errorf("read installed DSH Workflow bundle: %w", err)
 	}
-	if enabled {
-		bundles = append(bundles, dshWorkflowPackage)
-	} else {
-		bundles = slices.DeleteFunc(bundles, func(bundle string) bool { return bundle == dshWorkflowPackage })
-	}
-	settings["bundles"], err = json.Marshal(bundles)
+	settings["bundles"], err = json.Marshal(append(bundles, dshWorkflowPackage))
 	if err != nil {
 		return err
 	}
@@ -299,7 +295,7 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 	if conflict {
 		s.Message = "Hand-written LazyMind configuration conflicts with this connection: " + globalPath
 	}
-	complete, outdated, partial, failed := 0, 0, false, false
+	complete, partial, failed := 0, false, false
 	for _, name := range dshDesktopProfiles {
 		target := a.forDSHProfile(name, cli)
 		for _, inspected := range inspection.Profiles {
@@ -307,7 +303,7 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 				target.dshMCPReady = inspected.Diagnostic == "" && inspected.MCPPath != "" && inspected.MCPVersion != ""
 			}
 		}
-		p := agentintegration.ProfileStatus{Name: name, State: agentintegration.Ready, Plugin: target.dshPluginStatus()}
+		p := agentintegration.ProfileStatus{Name: name, State: agentintegration.Ready}
 		if err := target.checkDSHOwnership(); err != nil {
 			p.State, p.Message = agentintegration.Conflict, err.Error()
 			conflict = true
@@ -327,8 +323,6 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 				if managed && state.current && target.dshWorkflowInstalled() {
 					p.State = agentintegration.Enabled
 					complete++
-				} else if managed && state.current && target.dshWorkflowNeedsUpdate() {
-					outdated++
 				}
 				if message := record.Profiles[name]; message != "" {
 					p.State, p.Message = agentintegration.Failed, message
@@ -356,9 +350,6 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 	case complete == len(dshDesktopProfiles) && !failed:
 		s.State = agentintegration.Enabled
 		s.Message = "Desktop and Web are configured. Restart DSH to activate plugins. This is installation status, not online status."
-	case outdated > 0 && complete+outdated == len(dshDesktopProfiles) && !failed:
-		s.State = agentintegration.Failed
-		s.Issue = dshIssue("plugin_update_required", "")
 	case cliErr != nil:
 		s.State = agentintegration.RequirementsMissing
 		s.Message = cliErr.Error()
@@ -419,14 +410,15 @@ func (s dshFileSnapshot) restore() error {
 
 // Package manager changes are intentionally retained. Roll back only the
 // profile patch and pairing if publication of the managed connection fails.
-func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error) {
-	unlock, err := a.lockDSHPlugin(ctx)
+func (a *Adapter) changeDSHProfile(ctx context.Context, source *workflowconnector.Installation) (err error) {
+	connect := source != nil
+	unlock, err := a.lockDSHProfile(ctx)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	if a.dshProfile() != "desktop" {
-		if running, err := a.dshProfileRunning(ctx); err != nil {
+		if running, err := a.dshProfileRunning(); err != nil {
 			return err
 		} else if running {
 			return errors.New("fully quit the selected DSH profile before changing its connection")
@@ -529,21 +521,18 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 		}
 	}()
 	if connect {
-		record, err := a.installDSHWorkflow(ctx, lockPatch)
-		if err != nil {
+		if err = a.installDSHWorkflow(ctx, *source, lockPatch); err != nil {
 			return err
 		}
 		if err = writeManagedConfig(DeepSeekHarness, a.dshConfigPath(), a.self, a.home, a.hostID, true); err != nil {
 			return err
 		}
-		if a.dshCLI != "" && record.KeepEnabled == nil {
-			if err = setDSHWorkflowBundle(ctx, filepath.Dir(a.dshConfigPath()), true); err != nil {
+		if a.dshCLI != "" {
+			if err = enableDSHWorkflowBundle(ctx, filepath.Dir(a.dshConfigPath())); err != nil {
 				return fmt.Errorf("enable installed DSH Workflow bundle: %w", err)
 			}
 		}
-		record.Step = "restart"
-		record.KeepEnabled = nil
-		return a.saveDSHPlugin(record)
+		return nil
 	}
 	if err = a.disconnectDSHWorkflow(); err != nil {
 		return err
@@ -594,6 +583,14 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	if connect && !s.CanConnect {
 		return s
 	}
+	var source *workflowconnector.Installation
+	if connect {
+		installed, err := workflowconnector.DSHRelease(ctx, a.home, a.diagnosticExecutable())
+		if err != nil {
+			return dshFailure(s, err)
+		}
+		source = &installed
+	}
 	r, err := a.dshRecord()
 	if err != nil {
 		return dshFailure(s, err)
@@ -623,9 +620,6 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	} else if running {
 		return agentintegration.RequireQuit(s, r.Action)
 	}
-	if connect && s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime) {
-		return s
-	}
 	if !connect {
 		globalPath := filepath.Join(dshHome(), "cordis.patch.yml")
 		global, readErr := readYAMLDocument(globalPath)
@@ -644,11 +638,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 			}
 		}
 	}
-	if connect {
-		if _, err := a.bridge.Probe(ctx); err != nil {
-			return dshFailure(s, fmt.Errorf("LazyMind MCP is unavailable: %w", err))
-		}
-	}
+	var targets []*Adapter
 	for _, p := range s.Profiles {
 		target := a.forDSHProfile(p.Name, cli)
 		for _, inspected := range runtime.inspection.Profiles {
@@ -656,20 +646,32 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 				target.dshMCPReady = inspected.Diagnostic == "" && inspected.MCPPath != "" && inspected.MCPVersion != ""
 			}
 		}
-		if connect && p.State == agentintegration.Enabled && target.dshWorkflowConfigured() {
+		if connect && p.State == agentintegration.Enabled && target.dshWorkflowConfigured(*source) {
 			continue
 		}
+		targets = append(targets, target)
+	}
+	if connect {
+		if len(targets) == 0 {
+			return s
+		}
+		if _, err := a.bridge.Probe(ctx); err != nil {
+			return dshFailure(s, fmt.Errorf("LazyMind MCP is unavailable: %w", err))
+		}
+	}
+	for _, target := range targets {
+		name := target.dshProfile()
 		if err := target.checkDSHOwnership(); err != nil {
-			r.Profiles[p.Name] = err.Error()
-			log.Printf("DSH %s integration: %v", p.Name, err)
-		} else if err := target.changeDSHProfile(ctx, connect); err != nil {
-			r.Profiles[p.Name] = err.Error()
-			log.Printf("DSH %s integration: %v", p.Name, err)
+			r.Profiles[name] = err.Error()
+			log.Printf("DSH %s integration: %v", name, err)
+		} else if err := target.changeDSHProfile(ctx, source); err != nil {
+			r.Profiles[name] = err.Error()
+			log.Printf("DSH %s integration: %v", name, err)
 		} else {
 			if connect {
-				r.Profiles[p.Name] = ""
+				r.Profiles[name] = ""
 			} else {
-				delete(r.Profiles, p.Name)
+				delete(r.Profiles, name)
 			}
 		}
 		body, _ := json.Marshal(r)
@@ -693,19 +695,4 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		}
 	}
 	return s
-}
-
-func (a *Adapter) dshDesktopWorkflowConfigured(runtime dshDesktopRuntime) bool {
-	for _, name := range dshDesktopProfiles {
-		target := a.forDSHProfile(name, runtime.cli)
-		for _, inspected := range runtime.inspection.Profiles {
-			if inspected.Name == name {
-				target.dshMCPReady = inspected.Diagnostic == "" && inspected.MCPPath != "" && inspected.MCPVersion != ""
-			}
-		}
-		if !target.dshWorkflowConfigured() {
-			return false
-		}
-	}
-	return true
 }

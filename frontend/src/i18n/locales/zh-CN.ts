@@ -2702,7 +2702,6 @@ const zhCN = {
     notEnabled: "未启用",
     enabled: "已启用",
     connected: "已连接",
-    dshPluginRestartRequired: "请完全退出并重启 DeepSeek Harness 配置以加载已安装的插件",
     enabledPendingConnection: "已启用，待连接",
     awaitingConfirmation: "等待确认",
     configurationIncomplete: "配置未完成",
@@ -2742,7 +2741,6 @@ const zhCN = {
       capability_unavailable: "接入能力不可用",
       host_unavailable: "会话控制不可用",
       installation_unavailable: "安装组件不可用",
-      plugin_update_required: "连接插件待更新", // workflow-naming: dsh-external
       mcp_unavailable: "工具连接不可用",
     },
     loginStates: {
@@ -2836,7 +2834,6 @@ const zhCN = {
       imageNote: "中文界面示意 · 点击图片放大",
     },
     dshErrors: {
-      plugin_update_required: "插件组件需要更新。请打开「安装引导」，重新连接以完成更新。", // workflow-naming: dsh-external
       unsupported_version: "当前版本不受支持。请更新至 DeepSeek Harness 0.2.0-rc.2 或更高版本后重试。",
       dependency_environment: "检测到应用依赖环境异常，无法完成接入。",
       operation_failed: "连接失败，请重试；若仍失败，请反馈诊断编号。",

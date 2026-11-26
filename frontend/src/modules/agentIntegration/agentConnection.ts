@@ -9,7 +9,7 @@ const connectionIssueCodes = new Set([
   "pairing_disabled", "pairing_account_mismatch", "pairing_credential_mismatch", "pairing_invalid",
   "pairing_unreadable", "mcp_trust_required", "mcp_enable_required", "unsupported_version", "dependency_environment",
   "operation_failed", "version_unreadable", "capability_unavailable", "host_unavailable", "installation_unavailable",
-  "plugin_update_required", "mcp_unavailable", // workflow-naming: dsh-external
+  "mcp_unavailable",
 ]);
 
 export function lazyMindConnectionIssue(status?: DesktopAgentIntegrationStatus) {
@@ -46,9 +46,6 @@ export function agentConnectionStatusKey(status: DesktopAgentIntegrationStatus |
     ? "agentIntegration.setupFeedback.disableFailed" : "agentIntegration.connectionIssues.operation_failed";
   if (status?.state === "action_required") return "agentIntegration.awaitingConfirmation";
   if (enabled) {
-    if (status?.agent === "deepseek-harness" && status.profiles?.some(({ plugin }) => plugin?.state === "restart_required")) {
-      return "agentIntegration.dshPluginRestartRequired";
-    }
     const connection = status?.connection;
     const issue = lazyMindConnectionIssue(status);
     if (issue && connection?.mcp_configured && connection.mcp_trusted && connection.mcp_enabled && connection.control_ready) {

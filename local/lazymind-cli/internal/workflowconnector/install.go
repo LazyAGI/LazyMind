@@ -28,6 +28,29 @@ const dshArchiveName = "dsh-workflow.tgz"
 
 var hosts = []string{"codex", "workbuddy", DSHHost}
 
+func hasPackage(executable string) (bool, error) {
+	if executable == "" {
+		return false, nil
+	}
+	dir := filepath.Dir(executable)
+	_, err := os.Lstat(filepath.Join(dir, packageDirectory))
+	if !errors.Is(err, os.ErrNotExist) {
+		return err == nil, err
+	}
+	// Desktop's runtime/bin is a distribution even if its sidecar directory
+	// is missing. A standalone binary can live outside that resource tree.
+	root := os.Getenv("LAZYMIND_RUNTIME_RESOURCES_ROOT")
+	if root == "" {
+		return false, nil
+	}
+	bin, err := os.Stat(filepath.Join(root, "bin"))
+	if err != nil {
+		return false, nil
+	}
+	actual, err := os.Stat(dir)
+	return err == nil && os.SameFile(bin, actual), nil
+}
+
 func distributionHosts(executable string) []string {
 	dir := filepath.Join(filepath.Dir(executable), packageDirectory)
 	absent := func(host string) bool {
@@ -331,11 +354,8 @@ type Package struct {
 // failed hosts. A missing package directory is valid for standalone builds.
 func ReadPackage(executable string) (Package, error) {
 	var result Package
-	_, err := os.Stat(filepath.Join(filepath.Dir(executable), packageDirectory))
-	if errors.Is(err, os.ErrNotExist) {
-		return result, nil
-	}
-	if err != nil {
+	distributed, err := hasPackage(executable)
+	if err != nil || !distributed {
 		return result, err
 	}
 	releases := make([]string, 0, len(hosts))
@@ -353,18 +373,23 @@ func ReadPackage(executable string) (Package, error) {
 		result.sources = append(result.sources, source)
 		releases[len(releases)-1] = source.Release
 	}
-	if len(result.sources) > 0 {
-		// Empty release slots distinguish partial packages from each other and
-		// from a full package while keeping existing full-package identities.
-		sum := sha256.Sum256([]byte(strings.Join(releases, "\x00")))
-		result.identity = hex.EncodeToString(sum[:])
-	}
+	// Empty release slots distinguish partial packages from each other and
+	// from a full package while keeping existing full-package identities.
+	sum := sha256.Sum256([]byte(strings.Join(releases, "\x00")))
+	result.identity = hex.EncodeToString(sum[:])
 	return result, failures
 }
 
 func (p Package) Identity() string { return p.identity }
 
 func (p Package) Stage(destination string) error {
+	if p.identity != "" {
+		// Preserve the distribution boundary even when every host failed
+		// validation, so a staged Bridge cannot select a stale DSH archive.
+		if err := os.MkdirAll(filepath.Join(filepath.Dir(destination), packageDirectory), 0700); err != nil {
+			return err
+		}
+	}
 	var failures error
 	for _, source := range p.sources {
 		staged, err := packaged(destination, source.Host)

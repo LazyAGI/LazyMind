@@ -68,8 +68,9 @@ if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
 # The CLI negotiates reuse and stages the daemon independently of this launcher.
 $digest = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $sidecar = Join-Path (Split-Path -Parent $SourcePath) 'workflow-connectors'
+$hasSidecar = Test-Path -LiteralPath $sidecar -PathType Container
 $sidecarHosts = @()
-if (Test-Path -LiteralPath $sidecar -PathType Container) {
+if ($hasSidecar) {
     $desktopSidecars = (Test-Path -LiteralPath (Join-Path $sidecar 'codex')) -or (Test-Path -LiteralPath (Join-Path $sidecar 'workbuddy'))
     $dshSidecar = Test-Path -LiteralPath (Join-Path $sidecar 'dsh')
     foreach ($connectorHost in @('codex', 'workbuddy', 'dsh')) {
@@ -102,6 +103,7 @@ if (Test-Path -LiteralPath $sidecar -PathType Container) {
             [Console]::Error.WriteLine("Workflow Connector source package ($connectorHost) ${hostPath}: $($_.Exception.Message)")
         }
     }
+    if ($sidecarHosts.Count -eq 0) { $digest += '-invalid-connectors' }
 }
 $versionDirectory = Join-Path $installDir $digest
 $installedBinary = Join-Path $versionDirectory 'lazymind.exe'
@@ -115,14 +117,16 @@ try {
 } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
 }
-foreach ($connectorHost in $sidecarHosts) {
+if ($hasSidecar) {
     $installedSidecar = Join-Path $versionDirectory 'workflow-connectors'
+    New-Item -ItemType Directory -Force -Path $installedSidecar | Out-Null
+}
+foreach ($connectorHost in $sidecarHosts) {
     $hostPath = Join-Path $sidecar $connectorHost
     $installedHost = Join-Path $installedSidecar $connectorHost
     if (Test-Path -LiteralPath $installedHost -PathType Container) { continue }
     $temporaryHost = "$installedHost.$PID.tmp"
     try {
-        New-Item -ItemType Directory -Force -Path $installedSidecar | Out-Null
         Copy-Item -LiteralPath $hostPath -Destination $temporaryHost -Recurse
         [IO.Directory]::Move($temporaryHost, $installedHost)
     } catch {

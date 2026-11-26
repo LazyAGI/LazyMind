@@ -286,8 +286,12 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 		}
 	}
 	if a.kind == DeepSeekHarness {
-		if err := a.changeDSHProfile(ctx, true); err != nil {
-			return agentintegration.FailError(status, err)
+		source, err := workflowconnector.DSHRelease(ctx, a.home, a.diagnosticExecutable())
+		if err != nil {
+			return dshFailure(status, err)
+		}
+		if err := a.changeDSHProfile(ctx, &source); err != nil {
+			return dshFailure(status, err)
 		}
 		return a.status(ctx)
 	}
@@ -368,7 +372,7 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 	status.Issue = nil
 	status.State = agentintegration.Ready
 	if a.kind == DeepSeekHarness {
-		if err := a.changeDSHProfile(ctx, false); err != nil {
+		if err := a.changeDSHProfile(ctx, nil); err != nil {
 			return agentintegration.FailError(status, err)
 		}
 		return a.status(ctx)
@@ -461,16 +465,9 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 		status.CanDisconnect = state.configured
 	}
 	if a.kind == DeepSeekHarness && state.configured && state.owned && state.current {
-		if plugin := a.dshPluginStatus(); plugin != nil {
-			status.Profiles = []agentintegration.ProfileStatus{{Name: a.dshProfile(), State: agentintegration.Enabled, Plugin: plugin}}
-		}
 		if !a.dshWorkflowInstalled() {
 			state.current = false
-			status.Message = "MCP is configured; reconnect to install or update the Workflow panel and host adapter."
-			if a.dshWorkflowNeedsUpdate() {
-				status.Issue = &agentintegration.Issue{Code: "plugin_update_required"}
-				status.Message = "The installed LazyMind plugin needs an update. Reconnect to update its components."
-			}
+			status.Message = "Reconnect to finish installing the LazyMind Workflow connector."
 		} else {
 			status.Message = "MCP and the Workflow bundle are configured. Restart DSH to activate updated plugins."
 		}

@@ -1,6 +1,6 @@
 # LazyMind Workflow for DeepSeek Harness
 
-LazyMind distributes this precompiled bundle with its connector. Connect DeepSeek Harness from LazyMind to install it into the selected DSH profile, configure MCP and create a private pairing file. Users do not build the bundle or modify DSH source.
+LazyMind distributes this precompiled bundle with its connector. Connect DeepSeek Harness from LazyMind to install the bundled release, configure MCP and create a private pairing file. LazyMind Desktop connects the Desktop and Web profiles through DSH's installer.
 
 The supported SDK baseline is DSH 0.1.6-alpha.1. The Node Host adapter uses public scoped tools, lifecycle gates and SessionController; the browser adapter opens the default panel for the current chat’s Core binding and projects standard tool events into historical cards. It never appends a custom `lazymind-workflow/open` event and never reads DSH's signing credentials.
 
@@ -39,20 +39,11 @@ From this directory, run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pn
 
 The desktop and local build scripts stage the DSH archive and manifest in `workflow-connectors/dsh` beside the LazyMind executable. For a standalone Go CLI, build the plugin as above and stage only the DSH sidecar by running `pnpm stage-connectors /absolute/path/to/cli/directory --dsh-only` from this directory.
 
-## Upgrade and rollback
-
-Connect DeepSeek Harness once to install the companion package. For an already connected Desktop or Web profile, quit that DSH instance and run one of these commands with the same LazyMind CLI.
-
-```sh
-lazymind internal agent deepseek-harness upgrade-plugin --profile desktop --package /absolute/path/to/workflow-connectors/dsh
-lazymind internal agent deepseek-harness rollback-plugin --profile desktop
-```
-
-Omit `--package` to use the companion package beside the CLI. Use `--profile web` for the Web instance. After the native installation, the status shows the selected and installed build and marks the profile as awaiting restart. Start the target profile and run `lazymind internal agent deepseek-harness status` to check the running Node and client builds. Both operations retain the profile’s existing enablement and pairing.
+After installing a new LazyMind release, fully quit DeepSeek Harness and use Reconnect in the installation guide to install the bundled version. Restart DeepSeek Harness and check the connection in the guide. Reconnecting preserves the profile settings and pairing.
 
 ## Configuration
 
-The connector writes `connectorConfig` (an absolute connection record path), `command` (the installed LazyMind CLI) and the installed archive’s `bundleHash` into the user-layer override. MCP receives the same record through `LAZYMIND_CONNECTOR_CONFIG`. The record references the LazyMind home, DSH profile and pairing; it does not copy credentials, service addresses or program bindings.
+The connector writes `connectorConfig` (an absolute connection record path) and `command` (the installed LazyMind CLI) into the user-layer override. MCP receives the same record through `LAZYMIND_CONNECTOR_CONFIG`. The record references the LazyMind home, DSH profile and pairing.
 
 The Node host runs `internal connection resolve` to read current credentials and validate the account and pairing. It checks for changes every three seconds, releases the previous controller before replacement, and stops control when configuration is invalid or pairing is revoked. Missing login credentials leave the plugin active and waiting, so signing in again can restore the connection without restarting DSH. Both clients use DSH’s authorized Connection RPC to look up the current native chat. The Node plugin checks that the chat exists in its profile, then reads Core through the scoped Bridge pairing. A chat change clears the old default panel. Temporary lookup failures retain the verified panel for the current chat, while a confirmed unbind or authorization rejection clears it. Historical cards can still be opened manually. The RPC returns public panel configuration together with the binding status. The pairing credential stays in the Node plugin.
 

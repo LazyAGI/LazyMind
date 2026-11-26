@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import { object } from '../../workflow-agent-core/src/protocol'
-import { BridgeError, type HostBridge, type Pairing } from '../../workflow-agent-core/src/transport'
+import type { HostBridge, Pairing } from '../../workflow-agent-core/src/transport'
 import { waitUntil } from '../../workflow-agent-core/src/request-retry'
 export * from '../../workflow-agent-core/src/transport'
 
@@ -20,7 +20,7 @@ export async function loadPairing(path: string): Promise<Pairing> {
 /** Report local runtime evidence independently of the dispatcher's Core backoff. */
 export async function reportRuntime(
   host: HostBridge, headers: (signal: AbortSignal) => Promise<Record<string, string>>,
-  useLegacyPoll: (legacy: boolean) => void, signal: AbortSignal,
+  signal: AbortSignal,
 ): Promise<void> {
   while (!signal.aborted) {
     try {
@@ -28,10 +28,8 @@ export async function reportRuntime(
       const current = await headers(bounded)
       bounded.throwIfAborted()
       await host.reportHeartbeat(current, bounded)
-      useLegacyPoll(false)
-    } catch (error) {
-      // An older installed Bridge still expects runtime headers on actions.
-      if (error instanceof BridgeError && [404, 405].includes(error.status)) useLegacyPoll(true)
+    } catch {
+      // Retry while the current profile stays active.
     }
     try { await waitUntil(Date.now() + 3000, signal) } catch { return }
   }

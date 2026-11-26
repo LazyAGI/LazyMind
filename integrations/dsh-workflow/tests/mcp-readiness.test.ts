@@ -34,7 +34,6 @@ describe('DSH live MCP readiness', () => {
     f.names.clear()
     expect(await f.ready(new AbortController().signal)).toBe(false)
   })
-
   it('does not claim readiness without the optional native connection service', async () => {
     const f = fixture(false)
     expect(await f.ready(new AbortController().signal)).toBe(false)
@@ -62,32 +61,12 @@ describe('DSH live MCP readiness', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('sends fresh MCP evidence with each authenticated action poll', async () => {
-    const f = fixture()
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ actions: [] }), { status: 200 }))
-    // Use a fresh response body for every call.
-    fetch.mockImplementation(async () => new Response(JSON.stringify({ actions: [] }), { status: 200 }))
-    vi.stubGlobal('fetch', fetch)
-    const bridge = new HostBridge('http://127.0.0.1:18086', { connector_id: 'profile-desktop', token: 'token' }, async signal => ({
-      'X-LazyMind-MCP-Ready': await f.ready(signal) ? '1' : '0',
-    }))
-    const signal = new AbortController().signal
-    await bridge.actions('', signal)
-    expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'X-LazyMind-MCP-Ready': '1',
-      'X-LazyMind-Connector-Id': 'profile-desktop', Authorization: 'Bearer token' })
-    f.request.mockRejectedValue(new Error('MCP connection closed'))
-    await bridge.actions('', signal)
-    expect(fetch.mock.calls[1][1].headers['X-LazyMind-MCP-Ready']).toBe('0')
-    // A missing MCP connection does not prevent control actions from being polled.
-    expect(fetch).toHaveBeenCalledTimes(2)
-  })
 })
 
 it('continues local heartbeats throughout the shared dispatcher authorization backoff', async () => {
   vi.useFakeTimers()
   const lifetime = new AbortController()
   const mcp = fixture()
-  let legacyPoll = true
   let actionCalls = 0
   const heartbeats: Array<{ time: number; headers: Record<string, string> }> = []
   const fetch = vi.fn(async (url: string, request: { headers: Record<string, string> }) => {
@@ -107,11 +86,10 @@ it('continues local heartbeats throughout the shared dispatcher authorization ba
     'X-LazyMind-DSH-Client-Build': '0.1.6+0000000000000002',
     'X-LazyMind-DSH-Panel': 'bound',
   })
-  const bridge = new HostBridge('http://127.0.0.1:19091', { connector_id: 'profile-desktop', token: 'token' }, async signal =>
-    legacyPoll ? headers(signal) : identity)
+  const bridge = new HostBridge('http://127.0.0.1:19091', { connector_id: 'profile-desktop', token: 'token' }, async () => identity)
   const native = { cancellation: 'none', warn: vi.fn() } as unknown as RuntimeAdapter<string>
   const dispatcher = createDispatcher(native, undefined, bridge, 'dispatcher', lifetime.signal)
-  const reporting = reportRuntime(bridge, headers, legacy => { legacyPoll = legacy }, lifetime.signal)
+  const reporting = reportRuntime(bridge, headers, lifetime.signal)
   const polling = dispatcher.poll()
   try {
     await vi.advanceTimersByTimeAsync(0)
@@ -127,7 +105,6 @@ it('continues local heartbeats throughout the shared dispatcher authorization ba
       'X-LazyMind-DSH-Build': '0.1.6+0000000000000001',
       'X-LazyMind-DSH-Client-Build': '0.1.6+0000000000000002', 'X-LazyMind-DSH-Panel': 'bound',
     })
-    expect(legacyPoll).toBe(false)
     await vi.advanceTimersByTimeAsync(12_000)
     expect(actionCalls).toBe(2)
     expect(dispatcher.connection).toEqual({ checked_at: Date.now(), issue: '' })
@@ -139,13 +116,4 @@ it('continues local heartbeats throughout the shared dispatcher authorization ba
   const stopped = heartbeats.length
   await vi.advanceTimersByTimeAsync(12_000)
   expect(heartbeats).toHaveLength(stopped)
-})
-
-it('keeps action-poll evidence available for a Bridge without the heartbeat route', async () => {
-  const lifetime = new AbortController()
-  const host = new HostBridge('http://127.0.0.1:19091', { connector_id: 'profile-desktop', token: 'token' })
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('missing route', { status: 404 })))
-  const observation = vi.fn(() => lifetime.abort())
-  await reportRuntime(host, async () => ({}), observation, lifetime.signal)
-  expect(observation.mock.calls).toEqual([[true]])
 })

@@ -26,7 +26,7 @@ import (
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
-func TestDSHStandaloneCLIInstallsUpgradesAndRollsBack(t *testing.T) {
+func TestDSHStandaloneCLIReconnectsWithBundledRelease(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required to exercise both DSH entry points")
@@ -116,7 +116,7 @@ printf '%s\n' "$1" >> "$DSH_HOME/native-installations"
 		if err := json.Unmarshal(body, &status); err != nil {
 			t.Fatalf("%v: %s %v", args, body, err)
 		}
-		if status.State != agentintegration.Enabled || len(status.Profiles) != 1 {
+		if status.State != agentintegration.Enabled || status.Connection == nil {
 			t.Fatalf("%v: %s", args, body)
 		}
 		if digest() != original {
@@ -124,11 +124,10 @@ printf '%s\n' "$1" >> "$DSH_HOME/native-installations"
 		}
 		return status
 	}
-	confirm := func(status agentintegration.Status, build string) {
+	confirm := func(status agentintegration.Status, build string) workflowhost.Pairing {
 		t.Helper()
-		p := status.Profiles[0].Plugin
-		if p == nil || p.SelectedVersion != build || p.InstalledVersion != build || p.State != "restart_required" {
-			t.Fatalf("expected %s installed and awaiting restart: %+v", build, p)
+		if status.Connection.RuntimeState != "waiting" || status.Connection.ControlReady {
+			t.Fatalf("expected %s installed and awaiting restart: %+v", build, status.Connection)
 		}
 		const script = `
 import { randomUUID } from 'node:crypto'
@@ -141,7 +140,7 @@ const source = await readFile(join(dir, 'lib', 'client.js'), 'utf8')
 let browser
 new Function('window', source)({ __ModuleLoader__: { load: ({ factory }) => { browser = factory(() => ({})) } } })
 if (connectorBuild !== expected || browser?.connectorBuild !== expected) throw new Error('incorrect DSH entry point build')
-console.log(JSON.stringify({ build: connectorBuild, process_instance: randomUUID(), process_started_at: Math.round(Date.now() - process.uptime()*1000) }))
+console.log(JSON.stringify({ build: connectorBuild, client_build: browser.connectorBuild, process_instance: randomUUID(), process_started_at: Math.round(Date.now() - process.uptime()*1000) }))
 `
 		loaded, err := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script, filepath.Join(profile, "node_modules", plugin), build).CombinedOutput()
 		if err != nil {
@@ -166,30 +165,32 @@ console.log(JSON.stringify({ build: connectorBuild, process_instance: randomUUID
 		if err := workflowhost.RecordRuntimeStatus(home, pair, "", true, runtime); err != nil {
 			t.Fatal(err)
 		}
-		p = call("status").Profiles[0].Plugin
-		if p == nil || p.State != "verified" || p.RunningVersion != build || p.ProcessInstance != runtime.Instance {
-			t.Fatalf("fresh process did not confirm %s: %+v", build, p)
+		status = call("status")
+		if status.Connection.RuntimeState != "connected" || !status.Connection.ControlReady || status.Connection.PresentationStatus != "available" {
+			t.Fatalf("fresh process did not confirm %s: %+v", build, status.Connection)
 		}
 		t.Logf("installed and loaded Node and client build %s", build)
+		return pair
 	}
 	v1 := connectortest.WriteDSHPackage(t, self, "0.1.0+0000000000000001")
-	confirm(call("connect"), v1.Version)
-	v2 := connectortest.WriteDSHPackage(t, self, "0.2.0+0000000000000002")
 	if err := workflowconnector.Provision(t.Context(), home, self, true); err != nil {
 		t.Fatal(err)
 	}
-	p := call("connect").Profiles[0].Plugin
-	if p == nil || p.SelectedVersion != v1.Version {
-		t.Fatalf("ordinary reconnect followed the package distribution: %+v", p)
+	pair := confirm(call("connect"), v1.Version)
+	v2 := connectortest.WriteDSHPackage(t, self, "0.2.0+0000000000000002")
+	if after := confirm(call("connect"), v2.Version); after != pair {
+		t.Fatalf("reconnect changed pairing: %s", pair.ConnectorID)
 	}
-	confirm(call("upgrade-plugin", "--profile", "web"), v2.Version)
-	confirm(call("rollback-plugin", "--profile", "web"), v1.Version)
+	if status := call("connect"); !status.Connection.ControlReady {
+		t.Fatalf("same-release reconnect lost verified readiness: %+v", status.Connection)
+	}
 	body, err := os.ReadFile(filepath.Join(dshHome, "native-installations"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	invocations := strings.FieldsFunc(string(body), func(r rune) bool { return r == '\n' })
-	if len(invocations) != 3 || invocations[0] != invocations[2] || invocations[0] == invocations[1] {
-		t.Fatalf("native installation calls should be v1, v2, v1: %q", invocations)
+	if len(invocations) != 2 || filepath.Base(filepath.Dir(invocations[0])) != v1.Release ||
+		filepath.Base(filepath.Dir(invocations[1])) != v2.Release {
+		t.Fatalf("native installation calls should be v1, v2: %q", invocations)
 	}
 }

@@ -2740,7 +2740,6 @@ const enUS = {
     notEnabled: "Not enabled",
     enabled: "Enabled",
     connected: "Connected",
-    dshPluginRestartRequired: "Restart the DeepSeek Harness profile to load the installed plugin",
     enabledPendingConnection: "Enabled, waiting for connection",
     awaitingConfirmation: "Awaiting confirmation",
     configurationIncomplete: "Setup incomplete",
@@ -2780,7 +2779,6 @@ const enUS = {
       capability_unavailable: "Connection capability unavailable",
       host_unavailable: "Session control unavailable",
       installation_unavailable: "Installation components unavailable",
-      plugin_update_required: "Connection plugin update pending", // workflow-naming: dsh-external
       mcp_unavailable: "Tool connection unavailable",
     },
     loginStates: {
@@ -2874,7 +2872,6 @@ const enUS = {
       imageNote: "Chinese interface shown · Click image to enlarge",
     },
     dshErrors: {
-      plugin_update_required: "The plugin components need an update. Open the Installation guide and reconnect to update them.", // workflow-naming: dsh-external
       unsupported_version: "This version is not supported. Update to DeepSeek Harness 0.2.0-rc.2 or later and retry.",
       dependency_environment: "The app dependency environment is invalid. Unable to connect.",
       operation_failed: "Connection failed. Retry, and report the diagnostic ID if it persists.",

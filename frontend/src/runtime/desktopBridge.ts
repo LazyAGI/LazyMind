@@ -145,15 +145,6 @@ export interface DesktopAgentIntegrationStatus {
     name: string;
     state: DesktopAgentIntegrationState;
     message?: string;
-    plugin?: {
-      state: string;
-      selected_version?: string;
-      installed_version?: string;
-      previous_version?: string;
-      running_version?: string;
-      running_client_version?: string;
-      process_instance?: string;
-    };
   }>;
   agent: DesktopAgent;
   display_name: string;

@@ -307,11 +307,13 @@ jobs:
             integrations/dsh-workflow/pnpm-lock.yaml
             integrations/codex-workflow/pnpm-lock.yaml
             integrations/workbuddy-workflow/connector/pnpm-lock.yaml
-      - name: Test and stage the desktop Workflow Connectors
+      - name: Test and verify the desktop Workflow Connector release packages
         if: runner.os == 'Linux'
         shell: bash
         run: |
           pnpm --dir integrations/dsh-workflow install --frozen-lockfile
+          pnpm --dir integrations/dsh-workflow typecheck
+          pnpm --dir integrations/dsh-workflow test
           pnpm --dir integrations/dsh-workflow bundle
           pnpm --dir integrations/dsh-workflow exec vitest run --root ../workflow-agent-core
           pnpm --dir integrations/codex-workflow install --frozen-lockfile
@@ -322,7 +324,7 @@ jobs:
           pnpm --dir integrations/workbuddy-workflow/connector test
           pnpm --dir integrations/dsh-workflow stage-connectors "$RUNNER_TEMP/workflow-cli/bin"
           LAZYMIND_TEST_DSH_CONNECTOR="$RUNNER_TEMP/workflow-cli/bin/workflow-connectors/dsh" go -C local/lazymind-cli test ./internal/workflowconnector -run TestBuiltDSHConnectorPackage -v
-          git diff --exit-code -- local/lazymind-cli/internal/workflowpresentation/assets/presentation.html
+          git diff --exit-code -- integrations/dsh-workflow/lib local/lazymind-cli/internal/workflowpresentation/assets/presentation.html
       - name: Test Local Proxy
         working-directory: local/local-proxy
         run: go test ./... -v
@@ -354,13 +356,6 @@ jobs:
         with:
           name: go-cli-diagnostics-windows
           path: ${{ runner.temp }}/go-cli-diagnostics
-      - name: Test the DSH plugin and verify tracked client artifacts
-        if: runner.os == 'Linux'
-        working-directory: integrations/dsh-workflow
-        run: |
-          pnpm typecheck
-          pnpm test
-          git diff --exit-code -- lib
 
   test-desktop-shell:
     needs: [lint, doc_check]

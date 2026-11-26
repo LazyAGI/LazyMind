@@ -52,13 +52,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         'X-LazyMind-DSH-Panel': panel && Date.now() - panel.at < 20_000 ? panel.status : 'waiting-session',
         ...(clientBuild ? { 'X-LazyMind-DSH-Client-Build': clientBuild } : {}),
       })
-      let legacyPoll = true
-      const host = new HostBridge(current.bridgeUrl, pairing, async signal =>
-        legacyPoll ? runtimeHeaders(signal) : identity)
+      const host = new HostBridge(current.bridgeUrl, pairing, async () => identity)
       const dispose = installHost(ctx, host, current, instance)
       const runtimeLifetime = new AbortController()
       const heartbeat = current.configRevision && pairing.runtime_revision
-        ? reportRuntime(host, runtimeHeaders, legacy => { legacyPoll = legacy }, runtimeLifetime.signal)
+        ? reportRuntime(host, runtimeHeaders, runtimeLifetime.signal)
         : Promise.resolve()
       presentation = { serverName: current.serverName, webUrl: current.webUrl }
       binding = { lookup: host.lookupBinding('deepseek-harness'), config: presentation }

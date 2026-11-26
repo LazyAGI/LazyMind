@@ -288,16 +288,6 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 		}
 		seen[candidate] = true
 		status, healthErr := Health(ctx, candidate)
-		if healthErr == nil && status["version"] == "v11" && bridgeMatchesScope(status, root, false) {
-			// Only replace the old broker automatically for the current
-			// deployment when no other deployment relies on it.
-			if previous, err := readBridgeClients(root); err == nil && ownsBridgeUpgrade(previous, client) {
-				if err := ReleaseClient(ctx, options); err != nil {
-					return nil, err
-				}
-				status, healthErr = Health(ctx, candidate)
-			}
-		}
 		if healthErr == nil && !compatibleBridge(status, root, false) {
 			// Old bridges have no scoped sessions. A second listener sharing their
 			// legacy credential directory would not be safe isolation.
@@ -309,8 +299,7 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 			}
 			continue
 		}
-		// Deployment startup is the package upgrade boundary. Both current
-		// releases are prepared before an isolated environment can use them.
+		// Provision the current distribution before the deployment uses it.
 		self, err := os.Executable()
 		if err != nil {
 			return nil, err
@@ -351,19 +340,6 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 		return status, nil
 	}
 	return nil, errors.New("Assistant Bridge unavailable: existing services are incompatible or ports are occupied; existing services were preserved. Close the obsolete bridge or configure a free loopback address and retry")
-}
-
-func ownsBridgeUpgrade(previous map[string]ClientOptions, client ClientOptions) bool {
-	if owner, ok := previous[client.ID]; !ok || owner.Home != client.Home {
-		return false
-	}
-	for id, owner := range previous {
-		if id == client.ID || (strings.HasPrefix(id, "browser:") && owner.Home == client.Home) {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 func manageBridge(ctx context.Context, address, token, action string, client ClientOptions, output any) error {

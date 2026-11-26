@@ -116,7 +116,7 @@ func validRuntimeIssue(issue string) bool {
 }
 
 // RecordRuntimeStatus preserves the combined action-poll report used by older
-// plugins, including rollback to an earlier plugin build.
+// plugins until their profiles reconnect.
 func RecordRuntimeStatus(home string, pair Pairing, issue string, mcpReady bool, loaded ...DSHLoad) error {
 	if !validRuntimeIssue(issue) {
 		return errors.New("invalid dispatcher runtime issue")

@@ -7,11 +7,10 @@ import type { WorkflowControl } from '../../../workflow-agent-core/src/protocol'
 function fixture() {
   const action: HostAction = { id: 'action-1', session_id: 'run-1', native_session_id: '8c76b002-6467-41f5-a6aa-f9e4242d8865', kind: 'continue', status: 'pending' }
   const control: WorkflowControl = { protocol: 'workflow.control.v1', session_id: action.session_id, state_version: 1, continuation: 'continue', admission: { can_begin: true } }
-  let busy = false, failSend = false, sends = 0
+  let busy = false, sends = 0
   const adapter = new WorkBuddyAdapter({ evaluate: async <T>(expression: string) => {
     if (expression.includes('"kind":"status"')) return { state: busy ? 'working' : 'idle' } as T
     sends++
-    if (failSend) throw new Error('connection lost after send')
     return { accepted: true } as T
   } })
   const bridge: HostTransport = {
@@ -25,7 +24,7 @@ function fixture() {
   }
   const signal = new AbortController().signal
   const dispatcher = createDispatcher(adapter, undefined, bridge, 'worker', signal)
-  return { action, control, bridge, dispatcher, adapter, sends: () => sends, busy: () => { busy = true }, fail: () => { failSend = true } }
+  return { action, control, bridge, dispatcher, adapter, sends: () => sends, busy: () => { busy = true } }
 }
 describe('independent HostAction delivery', () => {
   it('keeps busy sessions pending without claiming, reading Core state or sending', async () => {
@@ -38,16 +37,6 @@ describe('independent HostAction delivery', () => {
     await f.dispatcher.deliver(f.action)
     expect(f.action.status).toBe('accepted'); expect(f.sends()).toBe(1)
     expect(f.bridge.settle).toHaveBeenCalledWith('action-1', 'worker', 'lease', 'accepted', 0, '', expect.any(AbortSignal))
-  })
-  it('retains unknown after a timeout; restart cannot replay it', async () => {
-    const f = fixture(); f.fail(); await f.dispatcher.deliver(f.action)
-    expect(f.action.status).toBe('unknown'); await f.dispatcher.deliver(f.action); expect(f.sends()).toBe(1)
-  })
-  it('does not resend after the host accepted but the Core receipt was lost', async () => {
-    const f = fixture(); vi.mocked(f.bridge.settle).mockRejectedValue(new Error('receipt lost'))
-    await expect(f.dispatcher.deliver(f.action)).rejects.toThrow('receipt lost')
-    await f.dispatcher.deliver(f.action)
-    expect(f.sends()).toBe(1); expect(f.action.status).toBe('unknown')
   })
   it('advertises no cancellation and rejects a cancel offered by an older Core', async () => {
     const f = fixture(); f.busy(); f.action.kind = 'cancel'; f.control.continuation = 'stopped'

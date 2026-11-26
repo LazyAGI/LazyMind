@@ -92,12 +92,14 @@ describe('shared delivery contract with an SDK-free host', () => {
     expect(f.bridge.settle).toHaveBeenLastCalledWith('action-1', 'instance-2', '', 'accepted', 18, '', f.lifetime.signal)
   })
 
-  it('does not retry unknown delivery when history contains no evidence', async () => {
+  it.each(['unknown', 'dispatching'] as const)('does not resend %s delivery without receipt evidence', async status => {
     const f = fixture()
-    f.updateAction({ status: 'unknown' })
+    f.updateAction({ status })
     await f.dispatcher.deliver(f.action())
     expect(f.runtime.prompt).not.toHaveBeenCalled()
     expect(f.bridge.settle).not.toHaveBeenCalled()
+    expect(f.bridge.claim).toHaveBeenCalledOnce()
+    expect(f.bridge.claim).toHaveBeenCalledWith('action-1', 'instance-1', f.lifetime.signal)
     expect(f.action().status).toBe('unknown')
   })
 
@@ -108,14 +110,6 @@ describe('shared delivery contract with an SDK-free host', () => {
     await f.dispatcher.deliver(f.action())
     expect(f.runtime.reconcile).not.toHaveBeenCalled()
     expect(f.bridge.claim).not.toHaveBeenCalled()
-  })
-
-  it('does not resend after a dispatch lease expires without receipt evidence', async () => {
-    const f = fixture()
-    f.updateAction({ status: 'dispatching' })
-    await f.dispatcher.deliver(f.action())
-    expect(f.action().status).toBe('unknown')
-    expect(f.runtime.prompt).not.toHaveBeenCalled()
   })
 
   it.each(['awaiting_user', 'awaiting_executor', 'stopped', 'completed'])('delivers a wake without interpreting %s execution state', async continuation => {
@@ -272,15 +266,20 @@ describe('shared delivery contract with an SDK-free host', () => {
     expect(f.bridge.settle).not.toHaveBeenCalled()
   })
 
-  it('does not repeat cancellation when only the Core receipt failed', async () => {
+  it.each(['cancel', 'continue'] as const)('never resends %s when only the Core receipt failed', async kind => {
     const f = fixture()
-    await f.start()
-    f.updateAction({ kind: 'cancel' })
-    f.updateControl({ continuation: 'stopped' })
+    if (kind === 'cancel') {
+      await f.start()
+      f.updateAction({ kind })
+      f.updateControl({ continuation: 'stopped' })
+    }
+    vi.mocked(f.runtime.reconcile).mockResolvedValue(0)
     vi.mocked(f.bridge.settle).mockRejectedValueOnce(new Error('receipt lost'))
     await expect(f.dispatcher.deliver(f.action())).rejects.toThrow('receipt lost')
     await f.dispatcher.deliver(f.action())
-    expect(f.runtime.cancel).toHaveBeenCalledOnce()
+    expect(f.runtime.cancel).toHaveBeenCalledTimes(kind === 'cancel' ? 1 : 0)
+    expect(f.runtime.prompt).toHaveBeenCalledTimes(kind === 'continue' ? 1 : 0)
+    expect(f.bridge.settle).toHaveBeenCalledOnce()
     expect(f.action().status).toBe('unknown')
   })
 

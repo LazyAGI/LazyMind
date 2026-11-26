@@ -63,6 +63,8 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
   });
   await t.test('each sidecar is staged independently and repaired releases get a fresh launcher', t => {
     const f = fixture(t, binary);
+    success(f.run('start'), 'start');
+    const standalone = f.calls().at(-1).executable;
     const sidecars = path.join(path.dirname(f.source), 'workflow-connectors');
     const codex = path.join(sidecars, 'codex');
     const workbuddy = path.join(sidecars, 'workbuddy');
@@ -70,6 +72,10 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
     mkdirSync(codex, { recursive: true });
     mkdirSync(workbuddy);
     mkdirSync(dsh);
+    success(f.run('start'), 'start');
+    const invalid = f.calls().at(-1).executable;
+    assert.notEqual(invalid, standalone);
+    assert.ok(existsSync(path.join(path.dirname(invalid), 'workflow-connectors')));
     writeFileSync(path.join(dsh, 'connector.json'), 'dsh-manifest');
     writeFileSync(path.join(dsh, 'dsh-workflow.tgz'), 'dsh-package-v1');
     writeFileSync(path.join(codex, 'connector.json'), 'codex-manifest');
@@ -79,7 +85,7 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
     const partial = f.run('start');
     success(partial, 'start');
     assert.match(partial.stderr, /workbuddy.*connector\.json/i);
-    const partialExecutable = f.calls()[0].executable;
+    const partialExecutable = f.calls().at(-1).executable;
     const partialSidecars = path.join(path.dirname(partialExecutable), 'workflow-connectors');
     assert.equal(readFileSync(path.join(partialSidecars, 'codex', 'main.mjs'), 'utf8'), 'codex-module');
     assert.ok(!existsSync(path.join(partialSidecars, 'workbuddy')));

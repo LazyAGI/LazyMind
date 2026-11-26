@@ -93,8 +93,16 @@ func TestHostDeliveryUnknownDoesNotResendAndReconcilesExactReceipt(t *testing.T)
 	}
 	_, err = svc.Execute(ctx, "owner", "run", WorkflowControlCommand{CommandID: "continue-2", Kind: "continue", StateVersion: unknown.Control.StateVersion})
 	expectControlCode(t, err, "DELIVERY_UNKNOWN")
-	accepted, err := svc.SettleHostAction(ctx, "owner", claim.Action.ID, WorkflowHostReceipt{ConnectorID: other.ConnectorID, Credential: other.Credential, InstanceID: other.InstanceID, Status: "accepted", NativeEventSeq: 42})
-	if err != nil || accepted.Status != "accepted" {
+	receipt := WorkflowHostReceipt{ConnectorID: other.ConnectorID, Credential: other.Credential, InstanceID: other.InstanceID, Status: "accepted"}
+	_, err = svc.SettleHostAction(ctx, "owner", claim.Action.ID, receipt)
+	expectControlCode(t, err, "DELIVERY_UNKNOWN")
+	unconfirmed, err := svc.HostAction(ctx, "owner", claim.Action.ID, other)
+	if err != nil || unconfirmed.Action.Status != "unknown" || unconfirmed.Action.NativeEventSeq != 0 {
+		t.Fatalf("receipt without a durable event changed delivery: %+v %v", unconfirmed, err)
+	}
+	receipt.NativeEventSeq = 42
+	accepted, err := svc.SettleHostAction(ctx, "owner", claim.Action.ID, receipt)
+	if err != nil || accepted.Status != "accepted" || accepted.NativeEventSeq != receipt.NativeEventSeq {
 		t.Fatalf("reconcile: %+v %v", accepted, err)
 	}
 	page, err := svc.HostActions(ctx, "owner", id, "")
@@ -785,38 +793,6 @@ func TestWorkBuddyCoreStopOnly(t *testing.T) {
 	claim, err = svc.ClaimHostAction(ctx, "batch-user", resumed.Receipt.ActionID, id)
 	if err != nil || claim.DispatchToken == "" || claim.Action.Kind != "continue" {
 		t.Fatalf("WorkBuddy continue did not remain dispatchable: %+v %v", claim, err)
-	}
-}
-
-func TestLegacyWorkBuddyCancelDoesNotGrantDispatchAfterUpgrade(t *testing.T) {
-	svc, id := workBuddyStopFixture(t)
-	ctx := context.Background()
-	stopped, err := svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "old-stop", Kind: "stop"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldPage, err := svc.HostActions(ctx, "batch-user", id, "")
-	if err != nil || len(oldPage.Actions) != 1 || oldPage.Actions[0].Status != "pending" {
-		t.Fatalf("legacy worker never listed the pending cancel: %+v %v", oldPage, err)
-	}
-
-	markLegacyWorkBuddyBinding(t, svc.DB)
-	page, err := svc.HostActions(ctx, "batch-user", id, "")
-	if err != nil || len(page.Actions) != 0 {
-		t.Fatalf("upgraded list leaked legacy pending cancel: %+v %v", page, err)
-	}
-	claim, err := svc.ClaimHostAction(ctx, "batch-user", oldPage.Actions[0].ID, id)
-	if err != nil || claim.DispatchToken != "" || claim.Action.Status != "pending" {
-		t.Fatalf("old worker must not dispatch or rewrite the pending cancel: %+v %v", claim, err)
-	}
-	var stored orm.WorkflowHostAction
-	if err := svc.DB.First(&stored, "id = ?", oldPage.Actions[0].ID).Error; err != nil || stored.Status != "pending" ||
-		stored.DispatchTokenHash != "" || stored.DispatchOwner != "" || stored.DispatchExpiresAt != nil || stored.ConsumedAt != nil {
-		t.Fatalf("old pending action was mutated or granted a lease: %+v %v", stored, err)
-	}
-	resumed, err := svc.Execute(ctx, "batch-user", "batch-session", WorkflowControlCommand{CommandID: "resume", Kind: "resume", StateVersion: stopped.Control.StateVersion})
-	if err != nil || resumed.Control.Continuation == "stopped" {
-		t.Fatalf("Resume could not retire an undelivered action: %+v %v", resumed, err)
 	}
 }
 
