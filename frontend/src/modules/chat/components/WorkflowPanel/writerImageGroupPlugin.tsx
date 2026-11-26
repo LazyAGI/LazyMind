@@ -133,6 +133,7 @@ function GroupControls() {
   settingsRef.current = settings;
   const [editor] = useCellValues(rootEditor$);
   const { t } = useTranslation();
+  const mergeLabel = t('chat.writerImageGroups.merge');
   const [groups, setGroups] = useState<ReturnType<typeof groupState>>([]);
   const [editable, setEditable] = useState(false);
   useLayoutEffect(() => {
@@ -179,7 +180,7 @@ function GroupControls() {
           return node instanceof ImageNode && imageParagraph(node.getParentOrThrow());
         })) {
           const position = imageMergePosition(hitImage, x, y);
-          if (position) return { element: hitImage, position, label: t('chat.writerImageGroups.merge') };
+          if (position) return { element: hitImage, position, label: mergeLabel };
         }
         let target: HTMLElement | null = hovered;
         const targetGroup = hovered.closest('.writer-image-group');
@@ -232,7 +233,7 @@ function GroupControls() {
     });
     editor.update(() => $getRoot().markDirty());
     return () => { cancelDrag?.(); unsubscribe(); unsubscribeEditable(); unsubscribeRoot(); };
-  }, [editor, t]);
+  }, [editor, mergeLabel]);
   if (!editor) return null;
   return <>{groups.map(group => {
     const host = editor.getElementByKey(group.key)?.querySelector<HTMLElement>('.writer-image-group-host');
