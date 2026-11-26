@@ -1501,9 +1501,12 @@ export function MarkdownArtifactEditor({
     });
     sourceEditedRef.current = true;
     richSourceRef.current = merged;
-    replaceMarkdownSilently(normalizeMarkdownForMdxEditor(merged, literalHtml), true);
-    draftMarkdownRef.current = normalizeMarkdownForMdxEditor(merged, literalHtml);
-    setDraftMarkdown(draftMarkdownRef.current);
+    const nextDraft = normalizeMarkdownForMdxEditor(merged, literalHtml);
+    replaceMarkdownSilently(nextDraft, true);
+    draftMarkdownRef.current = nextDraft;
+    // The checkpoint starts before React renders the accepted edits.
+    dirtyRef.current = nextDraft !== anchorSourceMarkdown;
+    setDraftMarkdown(nextDraft);
     // The existing save path retains typing that happens while this request runs.
     void persistMarkdown(draftMarkdownRef.current, latestSourceRef.current.revision, 'checkpoint');
   };

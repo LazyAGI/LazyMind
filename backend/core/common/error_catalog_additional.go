@@ -924,6 +924,7 @@ func init() {
 	registerAdditionalError("cannot load tool configuration", http.StatusInternalServerError, 2002918)
 
 	// Writer document editing and publication errors.
+	registerAdditionalError("query publication history failed", http.StatusInternalServerError, 2003174)
 	registerAdditionalError("full_content required for selections", http.StatusBadRequest, 2003080)
 	registerAdditionalError("selection_ranges required with full_content", http.StatusBadRequest, 2003081)
 	registerAdditionalError("bound provider required", http.StatusConflict, 2003082)
