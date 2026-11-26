@@ -4,6 +4,7 @@ import { AdmissionRejected, type RuntimeAdapter } from '../../workflow-agent-cor
 import type { ActionClaim, HostTransport } from '../../workflow-agent-core/src/transport'
 import { CodexNative } from './native'
 import { NativeReceipts } from './receipts'
+import type { HostLogRead } from '../../workflow-agent-core/src/log-record'
 import { workflowTurnEvidence } from './ownership'
 
 export class CodexAdapter implements RuntimeAdapter<string> {
@@ -13,9 +14,12 @@ export class CodexAdapter implements RuntimeAdapter<string> {
     cacheClaim: (claim: ActionClaim) => { this.claims.set(claim.action.id, claim) },
     cancelSession: (thread: string, claim: ActionClaim) => this.cancelOwned(thread, claim),
   }
-  constructor(private native: Pick<CodexNative, 'read' | 'start' | 'interrupt'>,
+  constructor(private native: Pick<CodexNative, 'read' | 'start' | 'interrupt'> & Partial<Pick<CodexNative, 'readLogs'>>,
     private receipts: NativeReceipts, private bridge: HostTransport, private signal: AbortSignal,
     private recovery?: { available(): void; unavailable(thread?: string): Promise<void> }) {}
+  readLogs(read: HostLogRead, signal: AbortSignal) {
+    return this.native.readLogs?.(read, signal) ?? Promise.resolve([])
+  }
   id(thread: string) { return thread }
   warn(message: string) { console.warn(message) }
   async resolve(thread: string) {

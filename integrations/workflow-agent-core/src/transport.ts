@@ -1,3 +1,4 @@
+import type { HostLogEntry, HostLogRead } from './log-record'
 import type { WorkflowControl } from './protocol'
 
 export interface Pairing { connector_id: string; token: string }
@@ -15,7 +16,7 @@ export interface HostAction {
   consumed_at?: string
 }
 export interface ActionClaim { action: HostAction; dispatch_token?: string; control: WorkflowControl }
-export type HostTransport = Pick<HostBridge, 'bind' | 'state' | 'actions' | 'action' | 'claim' | 'settle'>
+export type HostTransport = Pick<HostBridge, 'bind' | 'state' | 'actions' | 'action' | 'claim' | 'settle'> & Partial<Pick<HostBridge, 'logResult'>>
 
 export class BridgeError extends Error {
   constructor(readonly code: string, message: string, readonly status: number) { super(message) }
@@ -65,8 +66,15 @@ export class HostBridge {
   async state(runId: string, signal: AbortSignal): Promise<WorkflowControl> {
     return (await this.request<{ control: WorkflowControl }>(`/runs/${encodeURIComponent(runId)}/control`, signal)).control
   }
-  async actions(after: string, signal: AbortSignal): Promise<{ actions: HostAction[]; next_page_token?: string }> {
-    return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ''}`, signal, undefined, await this.actionHeaders?.(signal))
+  async actions(after: string, signal: AbortSignal, readLogs = false): Promise<{ actions: HostAction[]; next_page_token?: string; log_read?: HostLogRead }> {
+    const query = new URLSearchParams()
+    if (after) query.set('after', after)
+    if (readLogs) query.set('log_export', '1')
+    return this.request(query.size ? `/actions?${query}` : '/actions', signal, undefined, await this.actionHeaders?.(signal))
+  }
+
+  async logResult(id: string, entries: HostLogEntry[] | null, signal: AbortSignal): Promise<void> {
+    await this.request(`/logs/${encodeURIComponent(id)}`, signal, entries)
   }
   async action(id: string, signal: AbortSignal): Promise<ActionClaim> {
     return this.request(`/actions/${encodeURIComponent(id)}`, signal)

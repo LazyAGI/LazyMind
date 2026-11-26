@@ -110,7 +110,7 @@ export async function assistantBridgeFetch(
     return await fetch(`${bridge}${path}`, {
       ...init,
       headers,
-      signal: controller.signal,
+      signal: init?.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal,
     });
   } catch (error) {
     discoveredBridge = undefined;

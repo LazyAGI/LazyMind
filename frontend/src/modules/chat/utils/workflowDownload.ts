@@ -1,3 +1,5 @@
+import { AssistantBridgeRequestError } from '@/runtime/assistantSession';
+
 /** File delivery adapter; the Workflow UI and file generation stay shared. */
 export interface WorkflowDownloadSource {
   filename: string;
@@ -6,6 +8,10 @@ export interface WorkflowDownloadSource {
 }
 
 interface DownloadHost { origin: string; bridgeId: string }
+
+export class WorkflowDownloadCancelled extends Error {
+  constructor() { super('Save cancelled.'); }
+}
 
 export function getWorkflowDownloadHost(): DownloadHost | null {
   const params = new URLSearchParams(window.location.search);
@@ -23,33 +29,44 @@ export function getWorkflowDownloadHost(): DownloadHost | null {
   return { origin, bridgeId };
 }
 
-function requestHost(host: DownloadHost, action: 'capabilities' | 'save', payload: object = {}): Promise<void> {
+function requestHost<T = void>(host: DownloadHost, action: 'capabilities' | 'save' | 'logs', payload: object = {}, signal?: AbortSignal): Promise<T> {
   const requestId = crypto.randomUUID();
+  const type = action === 'logs' ? 'lazymind.workflow.host-logs' : 'lazymind.workflow.download';
   return new Promise((resolve, reject) => {
-    const finish = (error?: Error) => {
+    const finish = (error?: Error, result?: T) => {
       clearTimeout(timer);
       window.removeEventListener('message', receive);
       window.removeEventListener('pagehide', closed);
-      error ? reject(error) : resolve();
+      signal?.removeEventListener('abort', closed);
+      error ? reject(error) : resolve(result as T);
     };
     const receive = (event: MessageEvent) => {
       const data = event.data;
       if (event.source !== window.parent || event.origin !== host.origin
-        || data?.type !== 'lazymind.workflow.download.result'
+        || data?.type !== `${type}.result`
         || data.bridgeId !== host.bridgeId || data.requestId !== requestId) return;
-      if (data.ok === true) finish();
+      if (data.ok === true) finish(undefined, data.result as T);
+      else if (action === 'save' && data.cancelled === true) finish(new WorkflowDownloadCancelled());
+      else if (action === 'logs') finish(new AssistantBridgeRequestError('Unable to read Workflow host logs.', data.code));
       else finish(new Error(typeof data.error === 'string' ? data.error : 'Download failed or was cancelled.'));
     };
     const closed = () => finish(new Error('Download panel was closed.'));
     const timer = window.setTimeout(() => finish(new Error('Download response timed out. Check the save dialog before retrying.')),
-      action === 'capabilities' ? 5000 : 310_000);
+      action === 'logs' ? 17_000 : action === 'capabilities' ? 5000 : 310_000);
+    if (signal?.aborted) { closed(); return; }
+    signal?.addEventListener('abort', closed, { once: true });
     window.addEventListener('message', receive);
     window.addEventListener('pagehide', closed, { once: true });
     try {
-      window.parent.postMessage({ type: 'lazymind.workflow.download', bridgeId: host.bridgeId,
+      window.parent.postMessage({ type, bridgeId: host.bridgeId,
         requestId, action, ...payload }, host.origin);
     } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
   });
+}
+
+export function readEmbeddedWorkflowHostLogs<T>(grant: string, signal: AbortSignal): Promise<T> | undefined {
+  const host = getWorkflowDownloadHost();
+  return host ? requestHost<T>(host, 'logs', { grant }, signal) : undefined;
 }
 
 export async function downloadWorkflowFile(source: WorkflowDownloadSource): Promise<void> {

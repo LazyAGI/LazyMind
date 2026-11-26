@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import type { RuntimeAdapter } from '../../workflow-agent-core/src/adapter'
 import { object } from '../../workflow-agent-core/src/protocol'
 import { eventRun } from './events'
+import { hostLogEntry, type HostLogEntry, type HostLogRead } from '../../workflow-agent-core/src/log-record'
 
 /** DSH SDK translation only. Core owns execution admission; the shared coordinator gates automatic turns. */
 export function dshRuntime(ctx: Context, serverName: string, webUrl: string): RuntimeAdapter<Agent> {
@@ -54,6 +55,50 @@ export function dshRuntime(ctx: Context, serverName: string, webUrl: string): Ru
     } finally { controller.abort() }
   }
 
+  async function readLogs(read: HostLogRead, signal: AbortSignal): Promise<HostLogEntry[]> {
+    const address = { kind: 'session' as const, sessionId: read.driver_session_id as SessionId }
+    for await (const frame of ctx.sessionController.follow({ address, maxMessages: 100 }, signal)) {
+      if (frame.type !== 'snapshot') continue
+      if (frame.header.id !== address.sessionId) return []
+      const matchesRun = (event: unknown) => eventRun(event, serverName, webUrl)?.runId === read.run_id
+      let records = [...frame.records]
+      let hasMore = frame.hasMore
+      while (hasMore && records.length && records[0].event.time >= read.started_ms - 1000) {
+        signal.throwIfAborted()
+        const beforeSeq = records[0].event.seq
+        const page = await ctx.sessionController.page({ address, throughSeq: frame.cursor, beforeSeq, maxMessages: 100 }, signal)
+        if (!page.records.length || page.records[0].event.seq >= beforeSeq) break
+        records = [...page.records, ...records]
+        hasMore = page.hasMore
+      }
+      const events = records.flatMap(record => record.type === 'event' ? [record.event] : [])
+      if (!events.some(matchesRun)) return []
+      const logs: HostLogEntry[] = []
+      const calls = new Map<unknown, { time: number; name: unknown }>()
+      for (const event of events) {
+        if (event.time < read.started_ms || event.time > read.cutoff_ms) continue
+        const data = object(event.data)
+        if (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch-start') {
+          calls.set(data?.callId ?? data?.subCallId, { time: event.time, name: data?.name })
+          const row = hostLogEntry('tool.call', event.time, read.cutoff_ms, 'running', data?.name)
+          if (row) logs.push(row)
+        } else if (event.type === 'tool/result' || event.type === 'tool/ptc-dispatch') {
+          const message = object(data?.message)
+          const blocks = Array.isArray(message?.content) ? message.content.map(object) : [message]
+          for (const block of blocks) {
+            const call = calls.get(data?.subCallId ?? block?.toolCallId ?? block?.callId ?? message?.toolCallId)
+            const failed = data?.error != null || data?.isError === true || block?.isError === true
+            const row = hostLogEntry('tool.result', event.time, read.cutoff_ms, failed ? 'failed' : 'completed',
+              call?.name ?? data?.name ?? block?.toolName ?? message?.toolName, call && event.time - call.time)
+            if (row) logs.push(row)
+          }
+        }
+      }
+      return logs
+    }
+    return []
+  }
+
   function parent(agent: Agent): Agent | undefined {
     // Before DSH 0.2.2-rc.2, the Agent registry tracked runtime parents.
     const agents = ctx.agents as typeof ctx.agents & { isOwnedBy?(id: SessionId, owner: Agent): boolean }
@@ -72,6 +117,7 @@ export function dshRuntime(ctx: Context, serverName: string, webUrl: string): Ru
 
   return {
     cancellation: 'session',
+    readLogs,
     id: agent => agent.session.id,
     parent,
     isLive: agent => ctx.agents.get(agent.session.id) === agent,

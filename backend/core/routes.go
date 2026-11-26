@@ -809,6 +809,8 @@ func registerAllRoutes(r *mux.Router) {
 		return projection, nil
 	}}
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/events", []string{"qa.read"}, workflowEvents.ServeHTTP)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/log-export", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowFacade.RunLogs)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/log-export", []string{"qa.read"}, workflowFacade.SessionAccess(http.HandlerFunc(workflowFacade.VerifyHostLogGrant)))
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions", []string{"qa.read"}, workflow.ListConversationSessions)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions:active", []string{"qa.read"}, workflow.GetActiveConversationSession)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions:latest", []string{"qa.read"}, workflow.GetLatestConversationSession)

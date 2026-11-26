@@ -73,12 +73,31 @@ export function startPresentationFrame() {
   if (native) (window as any).__lazymindWorkflowFrame = {
     drain: () => events.splice(0), receive: receiveHost, status: snapshot,
   }
+  async function readHostLogs(requestId: string, grant: string) {
+    let payload: object = { ok: false }
+    try {
+      const response = await fetch(`/v1/workflow-runs/${run}/host-logs`, {
+        method: 'POST', mode: 'same-origin', credentials: 'omit', redirect: 'error', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant }),
+        signal: AbortSignal.timeout(16_000),
+      })
+      const result = await response.json()
+      payload = response.ok ? { ok: true, result } : { ok: false, code: result?.code }
+    } catch { /* The run page shows the missing-source warning. */ }
+    if (!closed) frame.contentWindow?.postMessage({
+      type: 'lazymind.workflow.host-logs.result', bridgeId, requestId, ...payload,
+    }, url.origin)
+  }
   window.addEventListener('message', event => {
     const data = event.data
     if (!data || typeof data !== 'object') return
     if (event.source === frame.contentWindow && event.origin === url.origin) {
       if (childTypes.has(data.type) && data.sessionId === run) {
         emit({ type: data.type, sessionId: run, bridgeId })
+      } else if (hostDownloads && data.type === 'lazymind.workflow.host-logs' && data.bridgeId === bridgeId
+        && typeof data.requestId === 'string' && /^[a-zA-Z0-9-]{20,80}$/.test(data.requestId)
+        && typeof data.grant === 'string' && data.grant.length > 0 && data.grant.length < 512) {
+        void readHostLogs(data.requestId, data.grant)
       } else if (data.type === 'lazymind.workflow.download' && data.bridgeId === bridgeId
         && typeof data.requestId === 'string' && /^[a-zA-Z0-9-]{20,80}$/.test(data.requestId)) {
         if (pending.has(data.requestId)) return

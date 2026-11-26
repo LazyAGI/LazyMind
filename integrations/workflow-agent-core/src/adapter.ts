@@ -1,3 +1,4 @@
+import type { HostLogEntry, HostLogRead } from './log-record'
 import type { RunLink } from './protocol'
 
 /** Use only when the host definitely did not receive the input. */
@@ -5,6 +6,7 @@ export class AdmissionRejected extends Error {}
 
 /** A is an opaque host agent handle. Only delivery is required of every host. */
 export interface RuntimeAdapter<A> {
+  readLogs?(read: HostLogRead, signal: AbortSignal): Promise<HostLogEntry[]>
   /** Current adapters support session interruption or no interruption. */
   readonly cancellation: 'none' | 'session'
   id(agent: A): string

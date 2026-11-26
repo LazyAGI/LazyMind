@@ -1,3 +1,4 @@
+import type { HostLogRead } from './log-record'
 import { AdmissionRejected, type RuntimeAdapter } from './adapter'
 import type { Coordinator } from './coordinator'
 import { BridgeError, isHostAuthorizationError, type HostTransport, type HostAction } from './transport'
@@ -54,14 +55,26 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
     await bridge.settle(action.id, instanceId, claim.dispatch_token, 'accepted', seq, '', signal)
   }
 
+  async function readLogs(read: HostLogRead) {
+    if (!runtime.readLogs || !bridge.logResult) return
+    const readSignal = AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+    const entries = await runtime.readLogs(read, readSignal).catch(() => null)
+    await bridge.logResult(read.id, entries, signal)
+  }
+
   async function poll() {
     let failures = 0, lastWarning = ''
+    let logRead: Promise<void> | undefined
     while (!signal.aborted) {
       let retryMs = 1000
       try {
         let after = ''
         do {
-          const page = await bridge.actions(after, signal)
+          const page = await (runtime.readLogs && bridge.logResult && !logRead
+            ? bridge.actions(after, signal, true) : bridge.actions(after, signal))
+          if (page.log_read && !logRead) {
+            logRead = readLogs(page.log_read).catch(() => {}).finally(() => { logRead = undefined })
+          }
           for (const action of [...page.actions].sort((a, b) => Number(b.kind === 'cancel') - Number(a.kind === 'cancel'))) {
             try { await deliver(action) }
             catch (error) {
@@ -89,6 +102,7 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
       }
       try { await delay(retryMs, signal) } catch { break }
     }
+    await logRead
   }
   return { deliver, poll }
 }

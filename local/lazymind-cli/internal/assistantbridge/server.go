@@ -42,6 +42,7 @@ const (
 type Server struct {
 	codexRecovery       codexRecoveryBroker
 	workbuddyIdentities workbuddyhost.Broker
+	workflowLogs        map[string]*pendingWorkflowLog
 	address             string
 	bridge              *mcpbridge.Bridge
 	executorProbe       bridgeProber
@@ -207,6 +208,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/workflow-host/bind", s.handleWorkflowHostBind)
 	mux.HandleFunc("GET /v1/workflow-host/runs/{session}/control", s.handleWorkflowHostState)
 	mux.HandleFunc("GET /v1/workflow-host/actions", s.handleWorkflowHostActions)
+	mux.HandleFunc("POST /v1/workflow-runs/{session}/host-logs", s.handleWorkflowLogs)
+	mux.HandleFunc("POST /v1/workflow-host/logs/{request}", s.handleWorkflowLogResult)
 	mux.HandleFunc("GET /v1/workflow-host/actions/{action}", s.handleWorkflowHostAction)
 	mux.HandleFunc("POST /v1/workflow-host/actions/{action}/claim", s.handleWorkflowHostClaim)
 	mux.HandleFunc("POST /v1/workflow-host/actions/{action}/settle", s.handleWorkflowHostReceipt)
@@ -708,6 +711,13 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "Assistant Bridge only accepts local LazyMind pages"})
 			return
 		}
+		if selfWorkflowLogRequest(request, origin) {
+			// The loopback presentation wrapper uses this Bridge's account.
+			// The run grant is still verified by handleWorkflowLogs.
+			request = request.Clone(request.Context())
+			request.Header.Del("Origin")
+			origin = ""
+		}
 		if s.isolated && origin != "" && request.URL.Path != "/v1/health" && !s.originMatchesEnvironment(origin) {
 			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "Assistant Bridge belongs to another deployment"})
 			return
@@ -737,6 +747,15 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(writer, request)
 	})
+}
+
+func selfWorkflowLogRequest(r *http.Request, origin string) bool {
+	if r.Method != http.MethodPost || r.Header.Get("Sec-Fetch-Site") != "same-origin" || !sameOrigin(origin, "http://"+r.Host) {
+		return false
+	}
+	path, prefix := strings.CutPrefix(r.URL.Path, "/v1/workflow-runs/")
+	run, suffix := strings.CutSuffix(path, "/host-logs")
+	return prefix && suffix && presentationID.MatchString(run)
 }
 
 func clientPlatformMismatch(request *http.Request) bool {

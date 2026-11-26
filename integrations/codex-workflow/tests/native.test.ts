@@ -25,6 +25,31 @@ describe('Codex renderer native API mapping',()=>{
   expect(disposed).toHaveBeenCalledOnce();expect(roleDisposed).toHaveBeenCalledOnce()
   expect(cell.get).not.toHaveBeenCalled();expect(rpc.startTurn).not.toHaveBeenCalled();expect(rpc.interruptConversation).not.toHaveBeenCalled()
  })
+ it('projects bound Workflow tools in the renderer and keeps late results outside the cutoff', async()=>{
+  const start = Date.parse('2026-11-26T00:00:00Z')
+  const rpc = Object.assign(()=>{}, {
+   getHostId: vi.fn().mockResolvedValue('local'),
+   getConversation: vi.fn().mockResolvedValue({ id: 'thread', turnHistory: {
+    islands: [{ entries: [{ value: 't' }] }], entitiesByKey: {
+    t: { id: 'turn', status: 'inProgress', turnStartedAtMs: start, itemTimingsById: {
+     command: { startedAtMs: start + 100, completedAtMs: start + 1000 },
+    }, items: [
+     { type: 'mcpToolCall', server: 'lazymind', tool: 'workflow.step.complete', status: 'completed',
+       arguments: { session_id: 'run', secret: 'PRIVATE_ARGUMENT' } },
+     { id: 'command', type: 'commandExecution', status: 'completed', command: 'PRIVATE_ARGUMENT' },
+    ] },
+   } } }),
+   getStreamRole: vi.fn().mockRejectedValue(Error('No live stream for this conversation')),
+  })
+  rpcFixture(rpc)
+  const result = await (0,eval)(nativeExpression({ kind: 'logs', threadId: 'thread', run_id: 'run', cutoff_ms: start + 500 }))
+  expect(rpc.getStreamRole).not.toHaveBeenCalled()
+  expect(result.turns).toEqual([])
+  expect(result.logs).toContainEqual({
+   time: new Date(start + 100).toISOString(), event: 'tool.call', tool: 'commandExecution', status: 'running',
+  })
+  expect(JSON.stringify(result)).not.toContain('PRIVATE_')
+ })
  it('does not confuse a config-only RPC with the manager connection or retain a broken RPC',async()=>{
   const rpc=Object.assign(()=>{}, {getHostId:vi.fn().mockResolvedValue('local')})
   const {state,cell}=rpcFixture(rpc)

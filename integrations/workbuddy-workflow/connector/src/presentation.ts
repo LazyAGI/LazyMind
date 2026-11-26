@@ -47,7 +47,7 @@ const cleanupPresentation = 'window.__lazymindWorkflowTail?.dispose(); window.__
 // Serialized into the renderer: keep this function independent of module scope.
 export function mountPresentation(target: PresentationTarget, followTail = installTailFollow, fitTail = installTailExtent, versionIssue = workbuddyVersionIssue) {
   const host = window as any
-  const version = 'tail-v4'
+  const version = 'tail-v5'
   const key = '__lazymindWorkflowTail'
   const previous = host[key]
   const wb = host.wb
@@ -221,13 +221,14 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
     }
     if (data.type !== 'lazymind.workflow.download' || typeof data.requestId !== 'string'
       || !/^[a-zA-Z0-9-]{20,80}$/.test(data.requestId) || seen.has(data.requestId)) return
-    const respond = (ok: boolean, error?: string) => reply({ type: 'lazymind.workflow.download.result', requestId: data.requestId, ok, error })
-    if (seen.size >= 1000) { respond(false, '请重新打开面板后下载。'); return }
+    const respond = (result: { ok: boolean; error?: string; cancelled?: boolean }) =>
+      reply({ type: 'lazymind.workflow.download.result', requestId: data.requestId, ...result })
+    if (seen.size >= 1000) { respond({ ok: false, error: '请重新打开面板后下载。' }); return }
     seen.add(data.requestId)
     let ownsSave = false
     try {
       if (typeof wb.fileTransfer?.saveAs !== 'function') throw Error('WorkBuddy 文件保存不可用。')
-      if (data.action === 'capabilities') { respond(true); return }
+      if (data.action === 'capabilities') { respond({ ok: true }); return }
       if (data.action !== 'save' || !(data.blob instanceof Blob) || typeof data.filename !== 'string'
         || !data.filename.trim() || data.filename.length > 240 || /[\/\\\u0000-\u001f]/.test(data.filename)) throw Error('无效的下载文件。')
       if (saving) throw Error('请先完成当前保存对话框。')
@@ -240,9 +241,10 @@ export function mountPresentation(target: PresentationTarget, followTail = insta
       })
       if (disposed || wb.conversations.currentId !== target.session_id) return
       const result = await wb.fileTransfer.saveAs({ defaultFileName: data.filename, contentBase64: base64 })
-      if (result?.success !== true) throw Error('保存失败或已取消。')
-      respond(true)
-    } catch (error) { respond(false, error instanceof Error ? error.message : '文件保存失败。') }
+      if (result?.success === true) respond({ ok: true })
+      else if (result?.error === 'User cancelled') respond({ ok: false, cancelled: true })
+      else respond({ ok: false, error: '文件保存失败。' })
+    } catch (error) { respond({ ok: false, error: error instanceof Error ? error.message : '文件保存失败。' }) }
     finally { if (ownsSave) saving = false }
   }
   function status() { return { status: !layoutReady ? 'layout-unavailable' : panel.isConnected ? 'mounted' : 'detached', page_status: pageStatus, version, session_id: target.session_id, run_id: target.run_id, expanded, tail_blank_trimmed: tailExtent?.status().trimmed ?? 0 } }
