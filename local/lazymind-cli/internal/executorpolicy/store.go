@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-var providers = []string{"codex", "cursor", "workbuddy"}
+var providers = []string{"codex", "cursor", "workbuddy", "deepseek-harness"}
 
 type BridgeState string
 

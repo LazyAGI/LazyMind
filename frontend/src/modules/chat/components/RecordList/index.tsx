@@ -1,5 +1,6 @@
 import { TASKS_REMOVED_EVENT, WORKFLOW_TASKS_CHANGED } from '@/modules/taskCenter/events';
 import { getLocalizedErrorMessage } from "@/components/request";
+import { AGENTS } from "@/modules/agentIntegration/catalog";
 import {
   DndContext, PointerSensor, KeyboardSensor, closestCenter, pointerWithin, useSensor, useSensors,
   type DragEndEvent, type DragStartEvent, type DragOverEvent, type DragMoveEvent, type CollisionDetection,
@@ -71,7 +72,6 @@ import dayjs from "dayjs";
 import {
   ChatServiceApi,
   ConversationSettingsApi,
-  type ChatExecutorDescriptor,
 } from "@/modules/chat/utils/request";
 import {
   bumpConversationToTop,
@@ -249,10 +249,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [conversationFilters, setConversationFilters] = useState(readChatConversationFilters);
     const conversationFiltersRef = useRef(conversationFilters);
     conversationFiltersRef.current = conversationFilters;
-    const [externalAgents, setExternalAgents] = useState<ChatExecutorDescriptor[]>([]);
     const [knownSources, setKnownSources] = useState(readKnownConversationSources);
     const visibleSources = [...new Set([
-      "lazymind",
+      "lazymind", "deepseek-harness",
       ...knownSources,
       ...(conversationFilters.sources ?? []),
     ])];
@@ -329,11 +328,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       let active = true;
       ConversationSettingsApi().listChatExecutors().then((response) => {
         if (!active) return;
-        setExternalAgents(
-          response.data.data.executors.filter(
-            (executor) => executor.kind === "external",
-          ),
-        );
         setKnownSources(rememberConversationSources([
           ...response.data.data.executors.filter((executor) => executor.connected).map((executor) => executor.id),
           ...(conversationFiltersRef.current.sources ?? []),
@@ -1375,7 +1369,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                     {visibleSources.map((source) => (
                       <Checkbox key={source} value={source}>
                         {source === "lazymind" ? t("chat.lazyMindConversation")
-                          : externalAgents.find((agent) => agent.id === source)?.display_name ?? source}
+                          : AGENTS.find(agent => agent.id === source)?.conversationSourceLabel ?? source}
                       </Checkbox>
                     ))}
                   </Checkbox.Group>

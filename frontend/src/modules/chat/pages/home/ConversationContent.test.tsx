@@ -1,13 +1,20 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ConversationContent from './ConversationContent';
 import { CHAT_SELECT_CONVERSATION_EVENT } from '@/modules/chat/constants/chat';
 
-const fixture = vi.hoisted(() => ({ detail: vi.fn(), native: vi.fn(), workflow: vi.fn() }));
-vi.mock('@/modules/chat/utils/request', () => ({ ChatServiceApi: () => ({ conversationServiceGetConversationDetail: fixture.detail }) }));
+const fixture = vi.hoisted(() => ({ detail: vi.fn(), history: vi.fn(), latest: vi.fn(), native: vi.fn(), workflow: vi.fn() }));
+vi.mock('@/modules/chat/utils/request', () => ({
+  ChatServiceApi: () => ({ conversationServiceGetConversationDetail: fixture.detail, conversationServiceGetConversationHistory: fixture.history }),
+  WorkflowSessionApi: () => ({ getLatestSession: fixture.latest }),
+}));
 vi.mock('../newChat', () => ({ default: () => { fixture.native(); return <><p>Native chat composer</p><input aria-label='Native draft' /></>; } }));
-vi.mock('../workflowRun', () => ({ default: (props: unknown) => { fixture.workflow(props); return <p>External workflow artifacts</p>; } }));
+vi.mock('../workflowRun', () => ({ default: (props: { conversationContent?: ReactNode }) => {
+  fixture.workflow(props);
+  return <><p>External workflow artifacts</p>{props.conversationContent}</>;
+} }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 function Navigation() {
@@ -21,7 +28,10 @@ function Navigation() {
 const show = (path = '/chat/external') => render(<MemoryRouter initialEntries={[path]}><Navigation />
   <Routes><Route path='/chat/:conversationId?' element={<ConversationContent />} /></Routes>
 </MemoryRouter>);
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  fixture.latest.mockResolvedValue({ data: { data: { session: null } } });
+});
 afterEach(cleanup);
 
 it('opens external artifacts directly without mounting local model selection or a composer', async () => {
@@ -32,6 +42,62 @@ it('opens external artifacts directly without mounting local model selection or 
   await screen.findByText('External workflow artifacts');
   expect(fixture.workflow).toHaveBeenLastCalledWith({ sessionId: 'run-42', title: 'Research results', resultsOnly: true });
   expect(fixture.native).not.toHaveBeenCalled();
+  expect(fixture.latest).not.toHaveBeenCalled();
+});
+
+it('opens a DSH workflow in the workbench with the original read-only questions and replies', async () => {
+  fixture.detail.mockResolvedValue({ data: { conversation: { assistant: 'deepseek-harness', display_name: 'Make a PPT' } } });
+  fixture.latest.mockResolvedValue({ data: { data: { session: { session_id: 'ppt-42', conversation_id: 'external', controller_host: 'external-agent' } } } });
+  fixture.history.mockResolvedValue({ data: { history: [{ id: 'q1', query: 'Make a PPT', result: 'The outline is ready' }] } });
+  show();
+  await screen.findByText('External workflow artifacts');
+  await screen.findByText('The outline is ready');
+  expect(fixture.latest).toHaveBeenCalledWith('external', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  expect(fixture.workflow).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'ppt-42', resultsOnly: true }));
+  expect(screen.getAllByText('Make a PPT')).toHaveLength(1);
+  expect(fixture.native).not.toHaveBeenCalled();
+});
+
+it('keeps the DSH transcript readable on lookup failure and can retry without mounting a composer', async () => {
+  fixture.detail.mockResolvedValue({ data: { conversation: { assistant: 'deepseek-harness' } } });
+  fixture.history.mockResolvedValue({ data: { history: [{ id: 'q1', query: 'My original question' }] } });
+  fixture.latest.mockRejectedValueOnce(new Error('unavailable'));
+  show();
+  await screen.findByText('My original question');
+  fireEvent.click(screen.getByRole('button', { name: 'chat.workflowRunRefresh' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  expect(screen.getByText('My original question')).toBeInTheDocument();
+  expect(fixture.native).not.toHaveBeenCalled();
+});
+
+it('ignores a late DSH workflow lookup when a different conversation was opened', async () => {
+  let finish!: (value: unknown) => void;
+  fixture.detail.mockResolvedValueOnce({ data: { conversation: { assistant: 'deepseek-harness' } } })
+    .mockResolvedValueOnce({ data: { conversation: { external_workflow_session_id: 'other-run' } } });
+  fixture.latest.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  show('/chat/previous');
+  await waitFor(() => expect(fixture.latest).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'Switch conversation' }));
+  await screen.findByText('External workflow artifacts');
+  await act(async () => finish({ data: { data: { session: { session_id: 'old-run', conversation_id: 'previous', controller_host: 'external-agent' } } } }));
+  expect(fixture.workflow).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'other-run' }));
+});
+
+it('reads DSH chat history in chronological order without exposing a native composer', async () => {
+  fixture.detail.mockResolvedValue({ data: { conversation: {
+    assistant: 'deepseek-harness', chat_executor: 'lazymind', display_name: 'DSH transcript',
+  } } });
+  fixture.history.mockResolvedValueOnce({ data: { history: [{ id: '2', query: 'Second question', result: 'Second answer' }], next_page_token: 'older' } })
+    .mockResolvedValueOnce({ data: { history: [
+      { id: '2', query: 'Second question', result: 'Second answer' }, { id: '1', query: 'First question', result: 'First answer' },
+    ] } });
+  show();
+  await screen.findByText('Second answer');
+  fireEvent.click(screen.getByRole('button', { name: 'chat.fork.older' }));
+  await screen.findByText('First answer');
+  expect(screen.getAllByRole('article').map(article => article.textContent)).toEqual(['First questionFirst answer', 'Second questionSecond answer']);
+  expect(fixture.native).not.toHaveBeenCalled();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 });
 
 it('waits for authoritative metadata before mounting a native conversation', async () => {

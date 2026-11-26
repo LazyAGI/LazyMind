@@ -8,6 +8,7 @@ import {
   useChatInputStore,
 } from "@/modules/chat/store/chatInput";
 import NewChatPage from "./index";
+import { readChatConversationFilters } from "../../constants/chat";
 import type { ShowcaseCase } from "@/modules/showcase/api";
 import { useFeaturedSelectionStore } from "@/modules/chat/store/featuredSelection";
 
@@ -227,6 +228,7 @@ describe("NewChatPage featured templates", () => {
   beforeEach(() => {
     useChatInputStore.getState().clearAllInputContents();
     useFeaturedSelectionStore.setState({ selections: {} });
+    window.localStorage.clear();
     window.sessionStorage.clear();
     mocks.setThinkingDepth.mockClear();
     mocks.listShowcaseCases.mockReset();
@@ -555,7 +557,7 @@ describe("NewChatPage featured templates", () => {
         entryDefaults.new_task.conversation_settings,
       );
     });
-    expect(window.sessionStorage.getItem("chat_conversation_mode")).toBe("task");
+    expect(readChatConversationFilters().filter).toBe("task");
   });
 
   it("opens a chat demo in Quick Q&A mode even when New task was active", async () => {
@@ -578,7 +580,7 @@ describe("NewChatPage featured templates", () => {
         entryDefaults.quick_question.conversation_settings,
       );
     });
-    expect(window.sessionStorage.getItem("chat_conversation_mode")).toBe("normal");
+    expect(readChatConversationFilters().filter).toBe("normal");
   });
 
   it("derives the correct mode from the case type for legacy links", async () => {
@@ -605,7 +607,7 @@ describe("NewChatPage featured templates", () => {
 
     await waitFor(() => {
       expect(mocks.latestChatInputProps.runInBackground).toBe(true);
-      expect(window.sessionStorage.getItem("chat_conversation_mode")).toBe("task");
+      expect(readChatConversationFilters().filter).toBe("task");
     });
   });
 

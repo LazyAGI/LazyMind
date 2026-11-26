@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CHAT_ENTRY_DEFAULTS_CHANGED_EVENT } from '@/modules/chat/constants/chat';
 import { useSettingsDraft } from '@/modules/settings/SettingsNavigationGuard';
 import { Alert, Button, Radio, Select, Skeleton, Switch } from 'antd';
@@ -15,7 +15,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
-import { buildExecutorCatalog } from '@/modules/chat/components/ChatInput/ChatConfigModal';
+import { buildExecutorCatalog, executorUnavailableReason, useChatExecutors } from '@/modules/chat/hooks/useChatExecutors';
 import { THINKING_DEPTH_VALUES, type ThinkingDepth } from '@/modules/chat/store/chatThink';
 import {
   ConversationSettingsApi,
@@ -24,7 +24,6 @@ import {
   type ChatEntryDefault,
   type ChatEntryDefaults,
   type ChatEntryKind,
-  type ChatExecutorDescriptor,
 } from '@/modules/chat/utils/request';
 
 interface TaskEntryDefaultsProps {
@@ -81,8 +80,7 @@ export default function TaskEntryDefaults({
   );
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [executors, setExecutors] = useState<ChatExecutorDescriptor[]>([]);
-  const [executorLoadFailed, setExecutorLoadFailed] = useState(false);
+  const { executors, error: executorLoadFailed, refresh: loadExecutors } = useChatExecutors(true);
   const profilesRef = useRef(profiles);
   const savedProfilesRef = useRef(savedProfiles);
   const savingRef = useRef(false);
@@ -105,27 +103,11 @@ export default function TaskEntryDefaults({
     }
   }, []);
 
-  const loadExecutors = useCallback(async (signal?: AbortSignal) => {
-    setExecutorLoadFailed(false);
-    try {
-      const response = await ConversationSettingsApi().listChatExecutors({ signal });
-      if (signal?.aborted) return;
-      const values = response.data.data.executors;
-      setExecutors(values.filter(
-        (item: ChatExecutorDescriptor) =>
-          item && typeof item.id === 'string' && typeof item.display_name === 'string',
-      ));
-    } catch {
-      if (!signal?.aborted) setExecutorLoadFailed(true);
-    }
-  }, []);
-
   useEffect(() => {
     const controller = new AbortController();
     void loadProfiles(controller.signal);
-    void loadExecutors(controller.signal);
     return () => controller.abort();
-  }, [loadExecutors, loadProfiles]);
+  }, [loadProfiles]);
 
   useEffect(() => () => {
     saveControllerRef.current?.abort();
@@ -202,7 +184,6 @@ export default function TaskEntryDefaults({
   };
 
   const controlsDisabled = loadState !== 'ready';
-  const hasUnavailableExecutors = executors.some((executor) => !executor.available);
 
   const renderFields = (kind: ChatEntryKind) => {
     const profile = profiles[kind];
@@ -213,6 +194,7 @@ export default function TaskEntryDefaults({
       settings.chat_executor,
       t('chat.conversationConfigExecutorUnavailable'),
     );
+    const hasUnavailableExecutors = executorCatalog.some((executor) => !executor.available && executor.unavailable_reason_code !== 'inbound_only');
     const selectedExecutor = executorCatalog.find((executor) => executor.id === settings.chat_executor);
 
     return loadState === 'loading' ? (
@@ -253,9 +235,12 @@ export default function TaskEntryDefaults({
             value: executor.id,
             label: executor.display_name,
             disabled: !executor.available,
-            title: executor.unavailable_reason,
+            title: executorUnavailableReason(executor, t),
           }))}
-          popupRender={(menu) => (
+          optionRender={({ data }: { data: { label?: ReactNode; disabled?: boolean; title?: string } }) => (
+            <>{data.label}{data.disabled && <small className="settings-entry-defaults-option-reason">{data.title}</small>}</>
+          )}
+          popupRender={(menu: ReactNode) => (
             <>
               {menu}
               {hasUnavailableExecutors && onConnectExecutors ? (
@@ -278,7 +263,7 @@ export default function TaskEntryDefaults({
         />
         {selectedExecutor && !selectedExecutor.available ? (
           <button type="button" className="settings-entry-defaults-unavailable" onClick={onConnectExecutors}>
-            <InfoCircleOutlined /> {t('settingsPage.tasks.executorSelectedUnavailable')}
+            <InfoCircleOutlined /> {executorUnavailableReason(selectedExecutor, t)}
           </button>
         ) : null}
         </div>

@@ -1,3 +1,5 @@
+import { AUTH_USER_STORAGE_KEY, principalFor } from "@/components/authPrincipal";
+import { AGENTS } from "@/modules/agentIntegration/catalog";
 
 export const CHAT_HOME_PATH = "/agent/chat/home";
 // Kept as a deprecated export so Vite can hot-reload modules compiled before
@@ -74,15 +76,19 @@ export interface ChatConversationFilters {
   sources: string[] | null;
 }
 
+const supportedConversationSources = new Set<string>([
+  "lazymind", ...AGENTS.filter(agent => agent.conversationSourceLabel).map(agent => agent.id),
+]);
+
 function validConversationSources(values: unknown[]): string[] {
   return [...new Set(values.filter((value): value is string =>
-    typeof value === "string" && ["lazymind", "codex", "cursor", "workbuddy"].includes(value),
+    typeof value === "string" && supportedConversationSources.has(value),
   ))];
 }
 
 export function readKnownConversationSources(): string[] {
   try {
-    const parsed: unknown = JSON.parse(sessionStorage.getItem(CHAT_KNOWN_CONVERSATION_SOURCES_KEY) || "[]");
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(`${preferenceKey()}:${CHAT_KNOWN_CONVERSATION_SOURCES_KEY}`) || "[]");
     return Array.isArray(parsed) ? validConversationSources(parsed) : [];
   } catch {
     return [];
@@ -94,64 +100,87 @@ export function readKnownConversationSources(): string[] {
 export function rememberConversationSources(sources: string[]): string[] {
   const known = validConversationSources([...readKnownConversationSources(), ...sources]);
   try {
-    sessionStorage.setItem(CHAT_KNOWN_CONVERSATION_SOURCES_KEY, JSON.stringify(known));
+    sessionStorage.setItem(`${preferenceKey()}:${CHAT_KNOWN_CONVERSATION_SOURCES_KEY}`, JSON.stringify(known));
   } catch { /* The mounted list can still use the returned options. */ }
   return known;
 }
 
-export function readChatConversationFilters(): ChatConversationFilters {
+function preferenceKey() {
+  let user = null;
+  try { user = JSON.parse(localStorage.getItem(AUTH_USER_STORAGE_KEY) || "null"); } catch { /* No readable profile yet. */ }
+  return `lazymind:chat-conversation-filters:${principalFor(user)}`;
+}
+
+let liveFilters: { key: string; value: ChatConversationFilters } | undefined;
+
+function readSavedFilters(key: string): ChatConversationFilters {
+  const fallback: ChatConversationFilters = { filter: "normal", sources: ["lazymind"] };
   try {
+    const saved = localStorage.getItem(key);
+    if (saved !== null) {
+      const value = JSON.parse(saved);
+      const sources = Array.isArray(value?.sources) ? validConversationSources(value.sources) : [];
+      return { filter: value?.filter === "task" ? "task" : "normal", sources: sources.length ? sources : fallback.sources };
+    }
+
     const legacy = sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY);
-    let legacyValues: unknown[] = [];
-    if (legacy?.startsWith("[")) {
+    let values: unknown[] = [];
+    if (legacy) {
       try {
-        const parsed: unknown = JSON.parse(legacy);
-        if (Array.isArray(parsed)) legacyValues = parsed;
-      } catch { /* Ignore invalid legacy storage. */ }
-    } else if (legacy) {
-      legacyValues = [legacy];
+        const parsed = legacy.startsWith("[") ? JSON.parse(legacy) : [legacy];
+        if (Array.isArray(parsed)) values = parsed;
+      } catch { /* The independent mode and source keys can still be recovered. */ }
     }
     const storedMode = sessionStorage.getItem(CHAT_CONVERSATION_MODE_KEY);
-    const legacyMode = legacyValues.includes("task") !== legacyValues.includes("normal")
-      ? (legacyValues.includes("task") ? "task" : "normal")
+    const filter = storedMode === "normal" || storedMode === "task" ? storedMode
+      : values.includes("task") !== values.includes("normal") ? (values.includes("task") ? "task" : "normal")
       : sessionStorage.getItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY) === "1" ? "task" : "normal";
-    const filter = storedMode === "task" || storedMode === "normal" ? storedMode : legacyMode;
-    const storedSources = sessionStorage.getItem(CHAT_CONVERSATION_SOURCES_KEY);
-    if (storedSources !== null) {
-      let parsed: unknown;
-      try { parsed = JSON.parse(storedSources); } catch { /* Keep the independent mode. */ }
-      const sources = Array.isArray(parsed) ? validConversationSources(parsed) : [];
-      return { filter, sources: sources.length ? sources : null };
+    const raw = sessionStorage.getItem(CHAT_CONVERSATION_SOURCES_KEY);
+    let selected: unknown;
+    try { selected = raw === null ? undefined : JSON.parse(raw); } catch { /* Preserve the saved mode. */ }
+    const legacySources = values.flatMap(value => value === "normal" ? ["lazymind"]
+      : typeof value === "string" && value.startsWith("agent:") ? [value.slice(6)] : []);
+    const sources = validConversationSources(raw === null ? legacySources : Array.isArray(selected) ? selected : []);
+    const filters = { filter, sources: sources.length ? sources : fallback.sources } as ChatConversationFilters;
+    if (legacy || storedMode || raw) {
+      localStorage.setItem(key, JSON.stringify(filters));
+      for (const old of [CHAT_CONVERSATION_FILTER_KEY, CHAT_CONVERSATION_MODE_KEY, CHAT_CONVERSATION_SOURCES_KEY]) sessionStorage.removeItem(old);
     }
-    const sources = validConversationSources(legacyValues.flatMap((value) =>
-      value === "normal" ? ["lazymind"]
-        : typeof value === "string" && value.startsWith("agent:") ? [value.slice(6)] : [],
-    ));
-    return { filter, sources: sources.length ? sources : null };
+    return filters;
   } catch {
-    return { filter: "normal", sources: null };
+    return fallback;
   }
 }
 
-function persistChatConversationFilters(filters: ChatConversationFilters) {
-  try {
-    sessionStorage.setItem(CHAT_CONVERSATION_MODE_KEY, filters.filter);
-    sessionStorage.setItem(CHAT_CONVERSATION_SOURCES_KEY, JSON.stringify(filters.sources));
-  } catch {
-    // Ignore storage errors; the live event still updates the current sidebar.
-  }
-  window.dispatchEvent(
-    new CustomEvent(CHAT_CONVERSATION_FILTER_EVENT, { detail: filters }),
-  );
+export function readChatConversationFilters(): ChatConversationFilters {
+  const key = preferenceKey();
+  return liveFilters?.key === key ? liveFilters.value : readSavedFilters(key);
 }
 
-export function selectChatConversationFilter(filter: ChatConversationFilter) {
-  persistChatConversationFilters({ ...readChatConversationFilters(), filter });
+function applyChatConversationFilters(filters: ChatConversationFilters, saved?: ChatConversationFilters) {
+  const key = preferenceKey();
+  liveFilters = { key, value: filters };
+  if (saved) {
+    try {
+      localStorage.setItem(key, JSON.stringify(saved));
+      if (filters.filter === saved.filter && JSON.stringify(filters.sources) === JSON.stringify(saved.sources)) {
+        liveFilters = undefined;
+      }
+    } catch { /* The live selection still applies. */ }
+  }
+  window.dispatchEvent(new CustomEvent(CHAT_CONVERSATION_FILTER_EVENT, { detail: filters }));
+}
+
+export function selectChatConversationFilter(filter: ChatConversationFilter, { remember = true } = {}) {
+  applyChatConversationFilters({ ...readChatConversationFilters(), filter },
+    remember ? { ...readSavedFilters(preferenceKey()), filter } : undefined);
 }
 
 export function selectChatConversationSources(sources: string[]) {
   const valid = validConversationSources(sources);
-  if (valid.length) persistChatConversationFilters({ ...readChatConversationFilters(), sources: valid });
+  if (!valid.length) return;
+  const filters = { ...readChatConversationFilters(), sources: valid };
+  applyChatConversationFilters(filters, { ...readSavedFilters(preferenceKey()), sources: valid });
 }
 
 export function revealChatConversation(conversation: { conversation_id?: string; is_task_conv?: boolean; assistant?: string } | undefined) {
@@ -161,9 +190,7 @@ export function revealChatConversation(conversation: { conversation_id?: string;
   const assistant = validConversationSources([conversation.assistant || "lazymind"])[0];
   const sources = current.sources && assistant && !current.sources.includes(assistant)
     ? [...current.sources, assistant] : current.sources;
-  if (filter !== current.filter || sources !== current.sources) {
-    persistChatConversationFilters({ filter, sources });
-  }
+  if (filter !== current.filter || sources !== current.sources) applyChatConversationFilters({ filter, sources });
 }
 
 export type ChatAutoAdvancePhase = "append" | "resume";

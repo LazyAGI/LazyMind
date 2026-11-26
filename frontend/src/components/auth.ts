@@ -6,43 +6,10 @@ import axios from "axios";
 import { authServiceApiUrl, coreApiUrl } from "@/runtime/apiBase";
 import i18n from "@/i18n";
 import { clearLocalAssistantSession } from "@/runtime/assistantSession";
+import { AUTH_USER_STORAGE_KEY as STORAGE_KEY, principalFor, resolveUserId, tenantFor } from "./authPrincipal";
 
-const STORAGE_KEY = "lazymind:user";
 export const AUTH_USER_CHANGE_EVENT = "lazymind:user-change";
 export const AUTH_LOGOUT_EVENT = "lazymind:logout";
-
-function decodeBase64Url(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-  return atob(padded);
-}
-
-function decodeJwtPayload(token?: string): Record<string, unknown> | null {
-  if (!token) return null;
-  const parts = token.split(".");
-  if (parts.length < 2) return null;
-
-  try {
-    const decoded = decodeBase64Url(parts[1]);
-    return JSON.parse(decoded) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function resolveUserId(userInfo?: Partial<UserInfo> | null) {
-  if (userInfo?.userId) {
-    return userInfo.userId;
-  }
-
-  const payload = decodeJwtPayload(userInfo?.token);
-  const candidate = payload?.sub || payload?.user_id || payload?.uid;
-  if (typeof candidate === "string") {
-    return candidate;
-  }
-
-  return userInfo?.username || undefined;
-}
 
 export interface UserInfo {
   token: string;
@@ -104,14 +71,6 @@ function getStored(): UserInfo | null {
 
 function refreshStorageKey(info: UserInfo) {
   return `lazymind:refresh:${info.sessionId || info.token}`;
-}
-
-function tenantFor(info?: Partial<UserInfo> | null) {
-  return info?.tenantId || info?.tenant_id || info?.tenantKey || info?.tenant_key || "";
-}
-
-function principalFor(info?: Partial<UserInfo> | null) {
-  return JSON.stringify([resolveUserId(info) || "", tenantFor(info)]);
 }
 
 function identityFor(info: UserInfo | null) {

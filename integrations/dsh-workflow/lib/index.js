@@ -1,7 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { open, readFile, stat, unlink } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { isAbsolute } from "node:path";
+import { setTimeout as setTimeout$1 } from "node:timers/promises";
 
 //#region ../workflow-agent-core/src/protocol.ts
 const WORKFLOW_OPERATIONS = new Set([
@@ -110,6 +111,9 @@ var HostBridge = class {
 		if (!response.ok) throw new BridgeError(typeof value.code === "string" ? value.code : "BRIDGE_ERROR", typeof value.error === "string" ? value.error : "Workflow Bridge request failed", response.status);
 		return value;
 	}
+	async syncConversation(snapshot, signal) {
+		await this.request("/conversation", signal, snapshot);
+	}
 	async bind(runId, driver, signal) {
 		return (await this.request("/bind", signal, {
 			run_id: runId,
@@ -141,6 +145,21 @@ var HostBridge = class {
 
 //#endregion
 //#region src/bridge.ts
+var DshBridge = class extends HostBridge {
+	claimChat(status, signal) {
+		return this.request("/chat/claim", signal, status);
+	}
+	heartbeatChat(run, signal) {
+		return this.request(`/chat/${encodeURIComponent(run.run_id)}/heartbeat`, signal, { lease_token: run.lease_token });
+	}
+	async publishChat(run, id, event, signal) {
+		await this.request(`/chat/${encodeURIComponent(run.run_id)}/event`, signal, {
+			lease_token: run.lease_token,
+			event_id: id,
+			...event
+		});
+	}
+};
 /** The only credential loaded is LazyMind's scoped local pairing, never DSH's signing key. */
 async function loadPairing(path) {
 	if (!path) throw new Error("Reconnect DeepSeek Harness from LazyMind to configure the workflow bundle");
@@ -898,13 +917,112 @@ function workflowTool(original, hooks) {
 }
 
 //#endregion
+//#region src/conversation.ts
+function visibleText(message) {
+	const content = object(message)?.content;
+	if (!Array.isArray(content)) return "";
+	return content.flatMap((block) => block?.type === "text" && typeof block.text === "string" ? [block.text] : []).join("\n").trim();
+}
+function signedThread(digest$1, pairing) {
+	return `session-lm-${digest$1}-${createHmac("sha256", pairing.token).update(`dsh-chat:${pairing.connector_id}:${digest$1}`).digest("hex").slice(0, 32)}`;
+}
+function managedThreadId(runId, pairing) {
+	return signedThread(createHash("sha256").update(runId).digest("hex").slice(0, 32), pairing);
+}
+function isManagedThread(id, pairing) {
+	const match = /^session-lm-([0-9a-f]{32})-[0-9a-f]{32}$/.exec(id);
+	return !!match && match[0] === id && timingSafeEqual(Buffer.from(id), Buffer.from(signedThread(match[1], pairing)));
+}
+function nativeConversation(session) {
+	if (session.header.origin === "subagent" || session.header.delegationDepth) return;
+	const turns = [];
+	let active;
+	let title = "";
+	let updated = session.header.createdAt;
+	for (const event of session.ownEvents()) {
+		const data = object(event.data);
+		if (!data) continue;
+		if (event.type === "session/title" && typeof data.title === "string") title = data.title;
+		if (event.type === "turn/start") active = void 0;
+		if (event.type === "user/message") {
+			const message = object(data.message) ?? data;
+			const user = visibleText(message);
+			if (object(message.source)?.kind !== "user" || !user) continue;
+			active = {
+				turn_id: typeof message.id === "string" ? message.id : "user-" + event.seq,
+				user,
+				assistant: "",
+				created_at: new Date(event.time).toISOString()
+			};
+			turns.push(active);
+		} else if (event.type === "assistant/message" && active) {
+			const answer = visibleText(data.message);
+			if (answer) active.assistant += (active.assistant ? "\n\n" : "") + answer;
+		}
+		updated = event.time;
+	}
+	if (!turns.length) return;
+	return {
+		thread_id: session.id,
+		cwd: session.header.cwd ?? "",
+		display_name: title || turns[0].user,
+		native_updated_at: new Date(updated).toISOString(),
+		turns
+	};
+}
+function nativeConversationTool(original, pairing, observed) {
+	return {
+		...original,
+		async execute(args, exec) {
+			if (!exec.agent) return original.execute(args, exec);
+			const session = nativeConversation(exec.agent.session);
+			if (!session) return original.execute(args, exec);
+			const latest = session.turns[session.turns.length - 1];
+			const body = JSON.stringify({
+				thread_id: session.thread_id,
+				turn_id: latest.turn_id,
+				message: latest.user.slice(0, 8192),
+				cwd: session.cwd,
+				issued_at: Date.now(),
+				tool: original.name,
+				...isManagedThread(session.thread_id, pairing) ? { managed: true } : {}
+			});
+			const mac = createHmac("sha256", pairing.token).update(body).digest("hex");
+			const value = await original.execute({
+				...object(args),
+				__lazymind_dsh_source: {
+					body,
+					mac
+				}
+			}, exec);
+			observed.add(exec.agent);
+			return value;
+		},
+		output: {
+			...original.output,
+			presentationMeta(args, value) {
+				const meta = original.output.presentationMeta?.(args, value);
+				return {
+					...object(meta),
+					lazymind_conversation_connector: pairing.connector_id
+				};
+			}
+		}
+	};
+}
+function hasNativeConversation(agent, connectorId) {
+	return agent.session.ownEvents().some((event) => event.type === "tool/result" && object(object(event.data)?.meta)?.lazymind_conversation_connector === connectorId);
+}
+
+//#endregion
 //#region src/host.ts
 /** Wire DSH public hooks to the shared coordinator. MCP execution remains in workflowTool. */
-function installHost(ctx, bridge, config, instanceId) {
+function installHost(ctx, bridge, config, instanceId, conversations) {
 	const lifetime = new AbortController();
 	const runtime = dshRuntime(ctx, config.serverName, config.webUrl);
 	const coordinator = createCoordinator(runtime, bridge, config.webUrl, lifetime.signal);
 	const registrations = /* @__PURE__ */ new Map();
+	const observed = /* @__PURE__ */ new WeakSet();
 	const tracked = /* @__PURE__ */ new Set();
 	const own = (promise) => {
 		tracked.add(promise);
@@ -925,13 +1043,13 @@ function installHost(ctx, bridge, config, instanceId) {
 		const live = /* @__PURE__ */ new Set();
 		for (const schema of ctx.tools.schemas()) {
 			const operation = workflowOperation(schema.name, config.serverName);
-			if (operation === null) continue;
+			if (operation === null && (!conversations || !schema.name.startsWith(`mcp__${config.serverName}__`))) continue;
 			live.add(schema.name);
 			const original = ctx.tools.get(schema.name);
 			const previous = registration.wrappers.get(schema.name);
 			if (!original || previous?.original === original) continue;
 			previous?.dispose();
-			const definition = workflowTool(original, {
+			const definition = operation === null ? original : workflowTool(original, {
 				hostSessionId: runtime.id(coordinator.driver(agent)),
 				operation,
 				afterResult: (value, exec) => own(coordinator.afterResult(value, call(exec))),
@@ -939,7 +1057,7 @@ function installHost(ctx, bridge, config, instanceId) {
 			});
 			registration.wrappers.set(schema.name, {
 				original,
-				dispose: context.tools.register(definition)
+				dispose: context.tools.register(conversations ? nativeConversationTool(definition, conversations.pairing, observed) : definition)
 			});
 		}
 		for (const [name, value] of registration.wrappers) if (!live.has(name)) {
@@ -1001,6 +1119,12 @@ function installHost(ctx, bridge, config, instanceId) {
 	const removeHook2 = ctx.on("agent/status", ({ agent, status }) => {
 		if (status !== "idle") return;
 		coordinator.idle(agent);
+		if (conversations && !isManagedThread(agent.session.id, conversations.pairing) && (observed.has(agent) || hasNativeConversation(agent, conversations.pairing.connector_id))) {
+			const snapshot = nativeConversation(agent.session);
+			if (snapshot) own(conversations.sync(snapshot, lifetime.signal).catch(() => {
+				if (!lifetime.signal.aborted) ctx.logger.warn("LazyMind conversation history sync failed");
+			}));
+		}
 		const registration = registrations.get(agent);
 		if (!registration?.resumeInbox) return;
 		registration.resumeInbox = false;
@@ -1235,15 +1359,15 @@ function mcpReadiness(ctx, serverName) {
 		const current = resources;
 		if (!current || !toolsReady() || signal.aborted) return false;
 		const bounded = new AbortController();
-		let interrupt;
+		let interrupt$1;
 		const interrupted = new Promise((_resolve, reject) => {
-			interrupt = () => {
+			interrupt$1 = () => {
 				bounded.abort();
 				reject(/* @__PURE__ */ new Error("MCP readiness check interrupted"));
 			};
 		});
-		const timer = setTimeout(interrupt, 2e3);
-		signal.addEventListener("abort", interrupt, { once: true });
+		const timer = setTimeout(interrupt$1, 2e3);
+		signal.addEventListener("abort", interrupt$1, { once: true });
 		try {
 			await Promise.race([interrupted, current.request(serverName, { method: "resources/list" }, {
 				agent: void 0,
@@ -1254,10 +1378,193 @@ function mcpReadiness(ctx, serverName) {
 			return false;
 		} finally {
 			clearTimeout(timer);
-			signal.removeEventListener("abort", interrupt);
+			signal.removeEventListener("abort", interrupt$1);
 			bounded.abort();
 		}
 	};
+}
+
+//#endregion
+//#region src/outbound-chat.ts
+const digest = (input) => createHash("sha256").update(input).digest("hex");
+function readTurn(agent, requestId) {
+	let matched = false, otherUser = false;
+	let text = [];
+	for (const event of agent.session.ownEvents()) {
+		if (event.type === "turn/start") {
+			matched = otherUser = false;
+			text = [];
+		}
+		if (event.type === "user/message") {
+			const source = object(event.data.source);
+			if (source?.kind === "user") if (source.rpcId === requestId) matched = true;
+			else otherUser = true;
+		}
+		if (!matched) continue;
+		if (event.type === "assistant/message") {
+			const content = visibleText(event.data.message);
+			if (content) text.push(content);
+		}
+		if (event.type === "turn/end") return {
+			matched,
+			otherUser,
+			reason: event.data.reason.kind,
+			text
+		};
+	}
+	return {
+		matched,
+		otherUser,
+		reason: void 0,
+		text
+	};
+}
+function queued(agent, requestId) {
+	return [...agent.inbox.nextTurn, ...agent.inbox.nextStep].find((item) => object(item.source)?.rpcId === requestId);
+}
+async function interrupt(ctx, agent, id) {
+	const sessionId = agent.session.id;
+	const pending = queued(agent, id);
+	if (pending) await ctx.sessionController.updateQueue({
+		sessionId,
+		itemId: pending.id,
+		action: { kind: "remove" }
+	});
+	else {
+		const turn = readTurn(agent, id);
+		if (turn.matched && !turn.reason && !turn.otherUser) ctx.sessionController.cancel({ sessionId });
+	}
+}
+async function untilAborted(promise, signal) {
+	signal.throwIfAborted();
+	const ended = Promise.withResolvers();
+	const abort = () => ended.reject(signal.reason);
+	signal.addEventListener("abort", abort, { once: true });
+	try {
+		return await Promise.race([promise, ended.promise]);
+	} finally {
+		signal.removeEventListener("abort", abort);
+	}
+}
+var ChatFailure = class extends Error {};
+async function executeChat(ctx, bridge, pairing, run, lifetime) {
+	if (run.provider !== "deepseek-harness" || run.host_id !== pairing.connector_id) return;
+	const lease = new AbortController();
+	const signal = AbortSignal.any([lease.signal, lifetime]);
+	const requestId = digest("dsh-prompt:" + run.run_id);
+	let agent;
+	async function heartbeat() {
+		if ((await bridge.heartbeatChat(run, signal)).stop_requested) lease.abort();
+	}
+	async function emit(event, part = 0) {
+		const id = digest(`${run.run_id}:${event.type}:${part}`);
+		for (;;) {
+			signal.throwIfAborted();
+			try {
+				await bridge.publishChat(run, id, event, signal);
+				return;
+			} catch (error) {
+				if (error instanceof BridgeError && error.status < 500 && error.status !== 429) {
+					if ([
+						401,
+						403,
+						409,
+						410
+					].includes(error.status)) lease.abort();
+					throw error;
+				}
+				await setTimeout$1(250, void 0, { signal });
+			}
+		}
+	}
+	const monitoring = (async () => {
+		while (!signal.aborted) {
+			await setTimeout$1(2e3, void 0, { signal });
+			await heartbeat();
+		}
+	})().catch(() => lease.abort());
+	try {
+		await heartbeat();
+		signal.throwIfAborted();
+		if (run.action !== "finalize") {
+			const id = run.provider_thread_id || managedThreadId(run.run_id, pairing);
+			if (!isManagedThread(id, pairing)) throw new ChatFailure("DSH thread does not belong to this connection");
+			if (!run.provider_thread_id) {
+				if (run.action !== "start" && run.action !== "regenerate") throw new ChatFailure("Missing DSH thread");
+				if ((await ctx.sessionController.create({ sessionId: id })).sessionId !== id) throw new ChatFailure("DSH returned an unexpected thread");
+			}
+			const resolved = await ctx.sessionController.resolveAgent(id);
+			if ("error" in resolved || resolved.agent.session.header.origin === "subagent" || resolved.agent.session.header.delegationDepth) throw new ChatFailure("DSH thread is unavailable");
+			agent = resolved.agent;
+			await emit({
+				type: "thread_started",
+				provider_thread_id: id
+			});
+			let turn = readTurn(agent, requestId);
+			if (!turn.matched && !queued(agent, requestId)) {
+				if (run.action === "recover") throw new ChatFailure("DSH could not verify delivery of the previous prompt");
+				signal.throwIfAborted();
+				await ctx.sessionController.prompt({
+					sessionId: agent.session.id,
+					requestId,
+					mode: "queue",
+					content: [{
+						type: "text",
+						text: run.prompt
+					}]
+				}, signal);
+			}
+			if (!turn.reason) {
+				await untilAborted(agent.whenIdle(), signal);
+				turn = readTurn(agent, requestId);
+			}
+			if (turn.otherUser || turn.reason !== "completed" || !turn.text.length) throw new ChatFailure("DSH did not complete this prompt with a separate text response");
+			let part = 0;
+			for (const chunk of turn.text.join("\n\n").matchAll(/[\s\S]{1,65536}/gu)) await emit({
+				type: "message",
+				text: chunk[0]
+			}, part++);
+			await emit({ type: "turn_completed" });
+		}
+		await emit({ type: "completed" });
+	} catch (error) {
+		if (!signal.aborted) await emit({
+			type: "failed",
+			error: error instanceof ChatFailure ? error.message : "DSH execution failed"
+		});
+	} finally {
+		const interrupted = signal.aborted;
+		lease.abort();
+		await monitoring;
+		if (interrupted && agent) await interrupt(ctx, agent, requestId);
+	}
+}
+async function pollChat(ctx, bridge, pairing, signal) {
+	let status = { ready: false };
+	let refreshAt = 0;
+	while (!signal.aborted) try {
+		if (Date.now() >= refreshAt) {
+			try {
+				const catalog = await untilAborted(ctx.sessionController.modelCatalog(), AbortSignal.any([signal, AbortSignal.timeout(5e3)]));
+				status = catalog.default?.model && catalog.routableProviders.includes(catalog.default.provider) && catalog.groups.some((group) => group.id === catalog.default.provider && group.models.some((model) => model.id === catalog.default.model)) ? { ready: true } : {
+					ready: false,
+					unavailable_reason: "DSH default model unavailable"
+				};
+			} catch {
+				status = {
+					ready: false,
+					unavailable_reason: "DSH execution unavailable"
+				};
+			}
+			refreshAt = Date.now() + 15e3;
+		}
+		const { run } = await bridge.claimChat(status, signal);
+		if (run && status.ready) await executeChat(ctx, bridge, pairing, run, signal);
+		else await setTimeout$1(1e3, void 0, { signal });
+	} catch (error) {
+		if (signal.aborted) break;
+		await setTimeout$1(error instanceof BridgeError && error.status === 404 ? 15e3 : 2e3, void 0, { signal }).catch(() => {});
+	}
 }
 
 //#endregion
@@ -1283,12 +1590,19 @@ async function apply(ctx, config) {
 				mcpReady = mcpReadiness(ctx, current.serverName);
 				readiness.set(current.serverName, mcpReady);
 			}
-			const dispose = installHost(ctx, new HostBridge(current.bridgeUrl, pairing, async (signal) => ({ "X-LazyMind-MCP-Ready": await mcpReady(signal) ? "1" : "0" })), current, instance);
+			const bridge = new DshBridge(current.bridgeUrl, pairing, async (signal) => ({ "X-LazyMind-MCP-Ready": await mcpReady(signal) ? "1" : "0" }));
+			const dispose = installHost(ctx, bridge, current, instance, {
+				pairing,
+				sync: (snapshot, signal) => bridge.syncConversation(snapshot, signal)
+			});
+			const chat = new AbortController();
+			const polling = pollChat(ctx, bridge, pairing, chat.signal);
 			presentation = current;
 			lastError = "";
 			return async () => {
+				chat.abort();
 				try {
-					await dispose();
+					await Promise.all([dispose(), polling]);
 				} finally {
 					await release();
 				}

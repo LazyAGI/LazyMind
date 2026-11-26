@@ -1505,6 +1505,7 @@ export interface ChatExecutorDescriptor {
   available: boolean;
   connected?: boolean;
   unavailable_reason?: string;
+  unavailable_reason_code?: 'host_offline' | 'not_installed' | 'not_activated' | 'login_required' | 'model_unavailable' | 'unavailable' | 'inbound_only';
 }
 
 interface ChatExecutorsResponse {
@@ -1729,7 +1730,7 @@ export function ConversationSettingsApi() {
         options,
       );
     },
-    listChatExecutors(options?: RawAxiosRequestConfig) {
+    listChatExecutors(options?: RawAxiosRequestConfig & { silentError?: boolean }) {
       return axiosInstance.get<ChatExecutorsResponse>(
         `${coreApiBaseUrl}/chat/executors`,
         options,

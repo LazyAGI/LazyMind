@@ -99,29 +99,43 @@ func (a *externalChatApplication) hostStatus(ctx context.Context, owner, provide
 	status := chatExecutorStatus{ID: provider}
 	if a == nil || a.db == nil {
 		status.UnavailableReason = "LazyMind Core database is unavailable"
+		status.UnavailableReasonCode = "unavailable"
 		return status, nil
 	}
-	var hosts []orm.ExternalChatHost
-	if err := a.db.WithContext(ctx).
+	var host orm.ExternalChatHost
+	// Report one usable host, or the most recent installed host that the user can fix.
+	result := a.db.WithContext(ctx).
 		Where("actor_user_id = ? AND provider = ? AND last_seen >= ?", owner, provider, a.now().Add(-a.hostTTL)).
-		Order("last_seen DESC").Find(&hosts).Error; err != nil {
-		return status, err
+		Order("installed DESC, ready DESC, last_seen DESC").Limit(1).Find(&host)
+	if result.Error != nil {
+		return status, result.Error
 	}
-	for _, host := range hosts {
-		status.HostOnline = true
-		status.Installed = status.Installed || host.Installed
-		if host.Ready {
-			status.Available = true
-			status.UnavailableReason = ""
-			continue
-		}
-		if !status.Available && status.UnavailableReason == "" {
-			status.UnavailableReason = host.UnavailableReason
-		}
-	}
-	if !status.HostOnline {
+	if result.RowsAffected == 0 {
 		status.UnavailableReason = "LazyMind Agent Host is offline"
-	} else if !status.Available && status.UnavailableReason == "" {
+		status.UnavailableReasonCode = "host_offline"
+		return status, nil
+	}
+	status.HostOnline, status.Installed = true, host.Installed
+	status.Available = host.Installed && host.Ready
+	if status.Available {
+		return status, nil
+	}
+	status.UnavailableReason = host.UnavailableReason
+	// Existing hosts report a diagnostic string. Only classify explicit outcomes
+	// so a failed availability check isn't mistaken for a confirmed logout.
+	switch reason := strings.ToLower(strings.TrimSpace(host.UnavailableReason)); {
+	case reason == "disabled in lazymind settings":
+		status.UnavailableReasonCode = "not_activated"
+	case reason == "dsh sign-in required", strings.Contains(reason, " is not signed in;"), strings.Contains(reason, " sign-in has expired;"):
+		status.UnavailableReasonCode = "login_required"
+	case reason == "dsh default model unavailable":
+		status.UnavailableReasonCode = "model_unavailable"
+	case !host.Installed && (reason == "" || strings.Contains(reason, " is not installed")):
+		status.UnavailableReasonCode = "not_installed"
+	default:
+		status.UnavailableReasonCode = "unavailable"
+	}
+	if status.UnavailableReason == "" {
 		status.UnavailableReason = "External Agent is not ready"
 	}
 	return status, nil

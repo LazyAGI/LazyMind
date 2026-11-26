@@ -1,3 +1,4 @@
+import { AGENTS } from "@/modules/agentIntegration/catalog";
 import { chatProviderDisplayName } from "@/modules/chat/utils/providerDisplay";
 import KnowledgeConfirmationCard from "../KnowledgeConfirmationCard";
 import type { KnowledgeConfirmation } from "@/modules/chat/types/knowledgeConfirmation";
@@ -70,10 +71,8 @@ interface FeedbackState {
 }
 
 export function externalProviderDisplayName(provider: string): string {
-  if (provider.toLowerCase() === "workbuddy") {
-    return "WorkBuddy";
-  }
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
+  const id = provider.toLowerCase();
+  return AGENTS.find((agent) => agent.id === id)?.name ?? (provider.charAt(0).toUpperCase() + provider.slice(1));
 }
 
 function ExternalExecutionSummary({

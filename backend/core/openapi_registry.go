@@ -2829,7 +2829,7 @@ type personalizationSettingOpenAPIResponse struct {
 }
 
 type chatConversationDefaultsOpenAPI struct {
-	ChatExecutor   string `json:"chat_executor" enum:"lazymind,codex,cursor,workbuddy"`
+	ChatExecutor   string `json:"chat_executor" enum:"lazymind,codex,cursor,workbuddy,deepseek-harness"`
 	EnableWorkflow bool   `json:"enable_workflow"`
 	WorkflowMode   string `json:"workflow_mode" enum:"auto,dynamic"`
 	EnableSubagent bool   `json:"enable_subagent"`
@@ -2841,7 +2841,7 @@ type chatEntryDefaultsOpenAPI struct {
 }
 
 type chatConversationDefaultsPatchOpenAPIRequest struct {
-	ChatExecutor   *string `json:"chat_executor,omitempty" enum:"lazymind,codex,cursor,workbuddy"`
+	ChatExecutor   *string `json:"chat_executor,omitempty" enum:"lazymind,codex,cursor,workbuddy,deepseek-harness"`
 	EnableWorkflow *bool   `json:"enable_workflow,omitempty"`
 	WorkflowMode   *string `json:"workflow_mode,omitempty" enum:"auto,dynamic"`
 	EnableSubagent *bool   `json:"enable_subagent,omitempty"`

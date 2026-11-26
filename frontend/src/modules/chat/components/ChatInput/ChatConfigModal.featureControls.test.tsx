@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatConfigPopover from './ChatConfigModal';
 import { useWorkflowStore } from '../../store/workflowPanel';
 import type { WorkflowSession } from '../../store/workflowPanel';
+import { MemoryRouter } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
   fetchUserUiPreferences: vi.fn(),
@@ -33,7 +34,17 @@ vi.mock('antd', async () => {
 vi.mock('react-i18next', async () => ({
   ...await vi.importActual<typeof import('react-i18next')>('react-i18next'),
   useTranslation: () => ({
-    t: (key: string) => ({
+    t: (key: string, values?: { name?: string }) => ({
+      'chat.executorGuide.title': '对话执行者配置指南',
+      'chat.executorGuide.helpFor': `查看 ${values?.name} 的配置指南`,
+      'chat.executorGuide.openSettings': `打开 ${values?.name} 集成设置`,
+      'chat.executorGuide.connectTitle': '连接 LazyMind 插件',
+      'chat.executorUnavailableReason.login_required': '未登录',
+      'chat.executorUnavailableReason.not_installed': '未安装',
+      'chat.executorUnavailableReason.not_activated': '未激活',
+      'chat.executorUnavailableReason.inbound_only': '仅支持 MCP',
+      'chat.executorGuide.inboundDescription': `${values?.name} 仅支持通过 MCP 调用 LazyMind`,
+
       'chat.conversationConfig': '对话配置',
       'chat.conversationConfigExecutor': '对话执行者',
       'chat.conversationConfigExecutorTooltip': '执行者说明',
@@ -93,6 +104,56 @@ describe('ChatConfigPopover feature control independence', () => {
     mocks.applyApproval.mockReset().mockResolvedValue(undefined);
     mocks.refresh.mockReset().mockResolvedValue(undefined);
     useWorkflowStore.setState({ sessionByConversation: {}, loadActiveSession: mocks.refresh });
+  });
+
+  it('shows the reason for each disabled executor and opens its specific guide without switching the chat', async () => {
+    const core = (id: string, unavailable_reason_code: string) => ({
+      id, display_name: id, kind: 'external', installed: true, host_online: true, available: false, unavailable_reason_code,
+    });
+    const statuses = [core('codex', 'not_activated'), core('cursor', 'not_installed'), core('workbuddy', 'login_required')];
+    mocks.listChatExecutors.mockResolvedValue({ data: { data: { executors: statuses } } });
+    render(<MemoryRouter><ChatConfigPopover conversationId="test-chat" initialSettings={{ chat_executor: 'lazymind' }} onSave={mocks.onSave} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: '对话配置' }));
+    const group = await screen.findByRole('radiogroup', { name: '对话执行者' });
+    expect(within(group).getAllByRole('radio')).toHaveLength(7);
+    for (const [name, reason] of [['Codex', '未激活'], ['Cursor', '未安装'], ['WorkBuddy', '未登录'], ['Raccoon', '仅支持 MCP']]) {
+      const radio = within(group).getByRole('radio', { name });
+      await waitFor(() => expect(radio).toHaveAccessibleDescription(reason));
+      expect(radio).toBeDisabled();
+    }
+
+    fireEvent.click(within(group).getByRole('button', { name: '查看 Cursor 的配置指南' }));
+    const guide = await screen.findByRole('dialog');
+    expect(within(guide).getByText('对话执行者配置指南')).toBeInTheDocument();
+    expect(within(guide).getAllByRole('listitem')).toHaveLength(3);
+    const link = within(guide).getByRole('link', { name: '打开 Cursor 集成设置' });
+    expect(link).toHaveAttribute('href', '/settings?section=assistants&agent=cursor');
+    expect(link).toHaveAttribute('target', '_blank');
+    fireEvent.click(within(guide).getByRole('button', { name: /close/i }));
+    expect(mocks.patchConversationSettings).not.toHaveBeenCalled();
+
+    mocks.listChatExecutors.mockResolvedValue({ data: { data: { executors: [{ ...statuses[1], available: true }] } } });
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    const cursor = within(group).getByRole('radio', { name: 'Cursor' });
+    await waitFor(() => expect(cursor).toBeEnabled());
+    fireEvent.click(cursor);
+    await waitFor(() => expect(mocks.patchConversationSettings).toHaveBeenCalledWith('test-chat', { chat_executor: 'cursor' }));
+  });
+
+  it('opens the header question mark and distinguishes the DSH plugin guide from an inbound-only integration', async () => {
+    render(<MemoryRouter><ChatConfigPopover initialSettings={{ chat_executor: 'deepseek-harness' }} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: '对话配置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '对话执行者配置指南' }));
+    const guide = await screen.findByRole('dialog');
+    expect(within(guide).getByText(/连接 LazyMind 插件/)).toBeInTheDocument();
+    expect(within(guide).getByAltText('agentIntegration.dshInstallGuide.imageAlt')).toHaveAttribute('src', '/installation-guides/deepseek-harness/enable.png');
+    expect(within(guide).getByRole('link')).toHaveAttribute('href', '/settings?section=assistants&agent=deepseek-harness');
+    fireEvent.click(within(guide).getByRole('button', { name: /close/i }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看 Raccoon 的配置指南' }));
+    const inboundGuide = await screen.findByRole('dialog');
+    expect(within(inboundGuide).getByText('Raccoon 仅支持通过 MCP 调用 LazyMind')).toBeInTheDocument();
+    expect(within(inboundGuide).queryByRole('list')).toBeNull();
   });
 
   it('stays closed after being disabled while open', async () => {

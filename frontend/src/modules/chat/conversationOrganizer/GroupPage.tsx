@@ -91,7 +91,7 @@ export default function ConversationGroupPage() {
   }, [load]);
 
   useEffect(() => {
-    if (group) selectChatConversationFilter(group.is_task_conv ? "task" : "normal");
+    if (group) selectChatConversationFilter(group.is_task_conv ? "task" : "normal", { remember: false });
   }, [group?.id, group?.is_task_conv, group?.kind]);
 
   const startChat = () => {

@@ -485,6 +485,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
 
+    > .agent-integration-stage:first-child:nth-last-child(2),
     > .agent-integration-stage:last-child {
       grid-column: 1 / -1;
     }
@@ -556,6 +557,7 @@
 
   .agent-integration-stage-content {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 9px;
   }
 
@@ -610,7 +612,7 @@
 
   .agent-integration-methods {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
     gap: 9px;
   }
 
@@ -666,10 +668,11 @@
   }
 
   .agent-integration-method-status {
-    margin-right: auto;
+    flex: 1 1 auto;
+    min-width: 0;
     color: #7b8799;
     font-size: 11px;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .agent-integration-card-footer {
@@ -814,10 +817,6 @@
     .agent-integration-header {
       align-items: stretch;
       flex-direction: column;
-    }
-
-    .agent-integration-methods {
-      grid-template-columns: 1fr;
     }
 
     .agent-integration-flow {

@@ -424,7 +424,7 @@ func (s *Service) SyncSessionCatalog(
 	}
 	projects := make(map[string]NativeSession, len(sessions))
 	totalTurns := 0
-	accepted := 0
+	accepted := make(map[string]int, len(sessions))
 	for _, session := range sessions {
 		session.ThreadID = strings.TrimSpace(session.ThreadID)
 		session.ProjectKey = strings.TrimSpace(session.ProjectKey)
@@ -459,8 +459,12 @@ func (s *Service) SyncSessionCatalog(
 			turn.Images = validImages
 			validTurns = append(validTurns, turn)
 		}
+		// A DSH binding is published in the list only with real transcript content.
+		if provider == "deepseek-harness" && len(validTurns) == 0 {
+			continue
+		}
 		session.Turns = validTurns
-		accepted++
+		accepted[session.ThreadID]++
 		totalTurns += len(validTurns)
 		if totalTurns > 100000 {
 			return 0, ErrInvalidSource
@@ -474,7 +478,7 @@ func (s *Service) SyncSessionCatalog(
 		projects[session.ThreadID] = session
 	}
 	now := s.now()
-	updated := accepted
+	updated := 0
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if reset {
 			if err := tx.Model(&orm.ExternalAgentSession{}).
@@ -486,7 +490,24 @@ func (s *Service) SyncSessionCatalog(
 		service := New(tx)
 		service.now = s.now
 		for _, session := range projects {
-			if err := service.adoptLegacyHost(ctx, owner, provider, hostID, session.ThreadID); err != nil {
+			if provider == "deepseek-harness" {
+				// DSH projects only threads observed by the MCP connector. A transcript
+				// upload cannot establish its own binding or adopt another host's.
+				var binding orm.ExternalAgentBinding
+				err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "managed_by_lazymind").
+					Where("created_by_user_id = ? AND provider = ? AND host_id = ? AND provider_thread_id = ?", owner, provider, hostID, session.ThreadID).
+					Take(&binding).Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrInvalidSource
+				}
+				if err != nil {
+					return err
+				}
+				if binding.ManagedByLazyMind {
+					// Managed runs already stream their canonical messages into Chat.
+					continue
+				}
+			} else if err := service.adoptLegacyHost(ctx, owner, provider, hostID, session.ThreadID); err != nil {
 				return err
 			}
 			var current orm.ExternalAgentSession
@@ -526,6 +547,7 @@ func (s *Service) SyncSessionCatalog(
 			}).Create(&row).Error; err != nil {
 				return err
 			}
+			updated += accepted[session.ThreadID]
 		}
 		return nil
 	})
@@ -801,6 +823,11 @@ func (s *Service) ensureConversation(
 	if err == nil {
 		if conversation.CreateUserID != owner {
 			return ErrThreadOwned
+		}
+		if source.Provider == "deepseek-harness" && binding.ManagedByLazyMind {
+			// Inbound MCP links to the active run without editing the user's
+			// executor selection, title, or archive state.
+			return nil
 		}
 		updates := map[string]any{
 			"deleted_at": nil, "archived_at": nil, "archive_folder_id": nil,

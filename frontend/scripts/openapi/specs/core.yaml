@@ -3854,6 +3854,7 @@ components:
                         - codex
                         - cursor
                         - workbuddy
+                        - deepseek-harness
                     type: string
                 chat_executor:
                     enum:
@@ -3861,6 +3862,7 @@ components:
                         - codex
                         - cursor
                         - workbuddy
+                        - deepseek-harness
                     type: string
                 chat_times:
                     format: int64
@@ -4523,6 +4525,7 @@ components:
                         - codex
                         - cursor
                         - workbuddy
+                        - deepseek-harness
                     type: string
                 chat_executor:
                     enum:
@@ -4530,6 +4533,7 @@ components:
                         - codex
                         - cursor
                         - workbuddy
+                        - deepseek-harness
                     type: string
                 chat_times:
                     format: int64
@@ -15396,6 +15400,7 @@ components:
                         - codex
                         - cursor
                         - workbuddy
+                        - deepseek-harness
                     type: string
                 enable_subagent:
                     type: boolean
@@ -15420,6 +15425,7 @@ components:
                         - codex
                         - cursor
                         - workbuddy
+                        - deepseek-harness
                     type: string
                 enable_subagent:
                     type: boolean
@@ -25774,6 +25780,7 @@ paths:
                         - codex
                         - cursor
                         - workbuddy
+                        - deepseek-harness
                     type: string
                 - in: query
                   name: page_size
