@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -106,7 +106,26 @@ async function finish({ updater, events }) {
   for (let i = 0; i < 150 && !events.includes("native") && !["error", "repair"].includes(updater.getState().phase); i++) await tick();
 }
 
+function trace(t, message) {
+  const line = `${new Date().toISOString()} [owner-restart] ${t.name} | ${message}`;
+  console.log(line);
+  if (process.env.OWNER_RESTART_TRACE) appendFileSync(process.env.OWNER_RESTART_TRACE, line + "\n");
+}
+
+async function tracedCall(t, updater, method) {
+  trace(t, `before updater.${method}()`);
+  try {
+    const result = await updater[method]();
+    trace(t, `after updater.${method}() resolved`);
+    return result;
+  } catch (error) {
+    trace(t, `after updater.${method}() rejected: ${error.message}`);
+    throw error;
+  }
+}
+
 function directory(t) {
+  trace(t, "case started");
   const dir = mkdtempSync(path.join(os.tmpdir(), "v1-owner-restart-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
@@ -126,8 +145,10 @@ function deferred() {
   return { promise, resolve };
 }
 
-function interrupt(dir, point) {
+function interrupt(t, dir, point) {
+  trace(t, `before interrupt child: ${point}`);
   const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--interrupt", dir, point], { encoding: "utf8", timeout: 5000 });
+  trace(t, `after interrupt child: ${point}, status=${child.status}, error=${child.error?.code || "none"}`);
   assert.equal(child.status, 37, `source never reached ${point}: ${child.stdout} ${child.stderr}`);
 }
 
@@ -142,17 +163,17 @@ if (process.argv[2] === "--interrupt") {
     for (const choice of ["continue", "later"]) {
       test(`source restart permits explicit ${choice} at ${point}`, async t => {
         const dir = directory(t);
-        interrupt(dir, point);
+        interrupt(t, dir, point);
         const prepared = readGo(dir);
         assert.equal(prepared?.phase, "prepared", "the interrupted source must leave only a recoverable preparation");
         const current = session(dir, "replacement");
         t.after(() => current.updater.dispose());
-        await current.updater.start();
+        await tracedCall(t, current.updater, "start");
         const view = current.updater.getState();
         assert.ok(view.pendingUpdate && view.phase !== "repair" && !view.updating, "renderer must expose both Continue and Later");
         assert.ok(!current.events.some(event => ["download", "prepare", "authorize", "stop", "native"].includes(event)));
         if (choice === "later") {
-          await current.updater.later();
+          await tracedCall(t, current.updater, "later");
           assert.equal(readGo(dir), null);
           assert.equal(shell(dir).read(), null);
           assert.ok(!current.updater.getState().pendingUpdate);
@@ -169,9 +190,9 @@ if (process.argv[2] === "--interrupt") {
   for (const scenario of ["authorized", "legacy", "unknown", "different-target", "different-attempt"]) {
     test(`a reopened source cannot clear or dispatch the handoff: ${scenario}`, async t => {
       const dir = directory(t);
-      if (scenario === "authorized") interrupt(dir, "after-final");
+      if (scenario === "authorized") interrupt(t, dir, "after-final");
       else if (scenario === "different-attempt") {
-        interrupt(dir, "before-final");
+        interrupt(t, dir, "before-final");
         const prior = readGo(dir);
         assert.equal(prior?.phase, "prepared");
         // The Go proof for a different attempt at the same public release
@@ -188,10 +209,10 @@ if (process.argv[2] === "--interrupt") {
       }
       const before = readGo(dir), current = session(dir, "replacement");
       t.after(() => current.updater.dispose());
-      await current.updater.start();
+      await tracedCall(t, current.updater, "start");
       assert.equal(current.updater.getState().phase, "repair");
       await assert.rejects(current.updater.install(target.releaseId));
-      await assert.rejects(current.updater.later());
+      await assert.rejects(tracedCall(t, current.updater, "later"));
       assert.deepEqual(readGo(dir), before);
       assert.ok(shell(dir).read());
       assert.ok(!current.events.some(event => ["prepare", "authorize", "discard", "stop", "native"].includes(event)));
@@ -209,10 +230,10 @@ if (process.argv[2] === "--interrupt") {
       return reply.promise;
     } });
     t.after(() => { reply.resolve(); current.updater.dispose(); });
-    const starting = current.updater.start();
+    const starting = tracedCall(t, current.updater, "start");
     const observed = await Promise.race([captured.promise, starting.then(() => assert.fail("startup returned without inspecting the prepared handoff"))]);
     assert.deepEqual(observed, { status: "prepared", releaseId: target.releaseId, attemptId: prepared.attemptId });
-    const done = Promise.allSettled([starting, current.updater.later()]);
+    const done = Promise.allSettled([starting, tracedCall(t, current.updater, "later")]);
     // An independent cancel can finish now. A serialized cancel can wait for
     // the captured read; both must leave the Go and shell receipts cleared.
     await tick();
@@ -232,13 +253,13 @@ if (process.argv[2] === "--interrupt") {
       return acknowledge.promise;
     } });
     t.after(() => { acknowledge.resolve(); current.updater.dispose(); });
-    await current.updater.start();
+    await tracedCall(t, current.updater, "start");
     const view = current.updater.getState();
     assert.ok(view.pendingUpdate && view.phase !== "repair", "Later was not initially available");
     const reminder = shell(dir).read();
     const newer = { ...prepared, attemptId: "3".repeat(32), owner: "another-owner" };
     writeFileSync(goFile(dir), JSON.stringify(newer));
-    const outcome = current.updater.later().then(() => "accepted", () => "rejected");
+    const outcome = tracedCall(t, current.updater, "later").then(() => "accepted", () => "rejected");
     const requested = await Promise.race([checked.promise, outcome.then(() => assert.fail("Later returned without an attempt-bound discard acknowledgement"))]);
     assert.equal(requested.id, prepared.attemptId);
     assert.equal(requested.result.status, "blocked");

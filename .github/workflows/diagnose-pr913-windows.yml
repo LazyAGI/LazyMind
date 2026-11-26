@@ -1,4 +1,4 @@
-name: Diagnose PR 913 Windows packaging test
+name: Diagnose PR 913 Windows owner restart tests
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  packaging-test:
+  owner-restart-tests:
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
@@ -26,15 +26,21 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.0.0 --activate
           pnpm install --frozen-lockfile
-      - name: Run the Windows packaging test
+      - name: Run the Windows owner restart tests
         shell: bash
-        timeout-minutes: 5
+        timeout-minutes: 2
+        env:
+          OWNER_RESTART_TRACE: ${{ runner.temp }}/owner-restart.log
         run: |
           set -uo pipefail
           node --version
-          node --test --test-reporter=tap \
-            --test-name-pattern='^Windows packaging pins the signed runtime copies and preserves other manifest entries$' \
-            desktop/scripts/update-release-foundation.test.mjs
+          node --test --test-reporter=tap desktop/scripts/update-v1-owner-restart.test.mjs
           status=$?
           echo "Node exited with status $status"
           exit "$status"
+      - name: Read the trace if the test process did not finish successfully
+        if: ${{ failure() || cancelled() }}
+        shell: pwsh
+        run: |
+          $trace = Join-Path $env:RUNNER_TEMP 'owner-restart.log'
+          if (Test-Path $trace) { Get-Content $trace }
