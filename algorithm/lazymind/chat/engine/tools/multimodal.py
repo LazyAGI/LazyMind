@@ -185,7 +185,7 @@ def image_generator(
 
     Uses the configured ``image_generator`` role in runtime_models (type
     ``text2image``). Model files are written under lazyllm temp first, then
-    moved into ``shared_upload_dir/ai_generated/`` for signed static URLs.
+    moved into the current user's managed upload directory for signed static URLs.
 
     Args:
         prompt: Natural-language description of the image to generate.
@@ -284,7 +284,7 @@ def video_generator(
     returns an explicit error; explain that configuration mismatch to the user
     instead of retrying the same arguments. ``urls`` is a backward-compatible
     generic image list. Generated files are relocated under
-    ``shared_upload_dir/ai_generated/`` for signed static URLs.
+    the current user's managed upload directory for signed static URLs.
 
     To generate multiple videos (e.g. three stickers), emit multiple
     ``video_generator`` tool calls in the **same** assistant turn; the runtime
