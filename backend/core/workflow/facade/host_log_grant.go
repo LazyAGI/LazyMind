@@ -70,6 +70,6 @@ func (h Handler) VerifyHostLogGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
 		"connector_id": binding.ConnectorID, "driver_session_id": binding.DriverSession, "provider": binding.Provider,
-		"cutoff_ms": through, "started_ms": session.CreatedAt.UnixMilli(),
+		"cutoff_ms": through, "results_cutoff_ms": cutoff, "started_ms": session.CreatedAt.UnixMilli(),
 	}})
 }

@@ -27,7 +27,7 @@ export function diagnosedTransport(bridge: HostTransport, log: Diagnostic, healt
   const tracked = <T>(request: () => Promise<T>) => health ? health.track('workflow', request) : request()
   return {
     bind: (...args) => tracked(() => bridge.bind(...args)), state: (...args) => tracked(() => bridge.state(...args)),
-    actions: (...args) => tracked(() => bridge.actions(...args)), logResult: bridge.logResult?.bind(bridge), action: (...args) => tracked(() => bridge.action(...args)),
+    actions: (...args) => tracked(() => bridge.actions(...args)), action: (...args) => tracked(() => bridge.action(...args)),
     async claim(...args) {
       const started = performance.now()
       try {

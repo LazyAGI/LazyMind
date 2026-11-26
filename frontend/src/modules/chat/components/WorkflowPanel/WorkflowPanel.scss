@@ -5075,6 +5075,11 @@
   }
 }
 
+.workflow-panel__log-export.ant-btn,
+.workflow-panel__follow-mode button {
+  font-size: 12px;
+}
+
 .workflow-panel__follow-mode {
   display: inline-flex;
   align-items: center;
@@ -5090,7 +5095,6 @@
     border-radius: 4px;
     background: transparent;
     color: #475569;
-    font-size: 12px;
     white-space: nowrap;
     cursor: pointer;
     &[aria-pressed='true'] { background: #fff; color: #2563eb; box-shadow: 0 1px 3px #0f172a1a; }

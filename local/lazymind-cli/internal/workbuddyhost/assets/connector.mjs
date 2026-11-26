@@ -261,43 +261,6 @@ async function dispatcherLock(pairingFile, instanceId) {
 }
 
 //#endregion
-//#region ../../workflow-agent-core/src/log-record.ts
-/** Also serialized into desktop renderers. Extract only fields safe for export. */
-function hostLogEntry(event, time, cutoff, status, tool, duration) {
-	const stamp = typeof time === "number" ? time : typeof time === "string" ? Date.parse(time) : NaN;
-	if (!Number.isFinite(stamp) || stamp <= 0 || stamp > cutoff) return;
-	const row = {
-		time: new Date(stamp).toISOString(),
-		event
-	};
-	if (typeof tool === "string" && /^[a-zA-Z0-9_][a-zA-Z0-9_.:-]{0,127}$/.test(tool)) row.tool = tool;
-	switch (status) {
-		case "in_progress":
-		case "inProgress":
-		case "working":
-		case "running":
-			row.status = "running";
-			break;
-		case "completed":
-		case "success":
-		case "succeeded":
-			row.status = "completed";
-			break;
-		case "failed":
-		case "error":
-			row.status = "failed";
-			break;
-		case "cancelled":
-		case "canceled":
-		case "interrupted":
-			row.status = "interrupted";
-			break;
-	}
-	if (typeof duration === "number" && Number.isFinite(duration) && duration >= 0) row.duration_ms = Math.round(duration);
-	return row;
-}
-
-//#endregion
 //#region src/compatibility.ts
 function workbuddyVersionIssue(version) {
 	if (typeof version !== "string") return "version_unreadable";
@@ -319,7 +282,7 @@ function workbuddyVersionIssue(version) {
 
 //#endregion
 //#region src/sdk.ts
-async function sdkOperation(input, versionIssue = workbuddyVersionIssue, logEntry) {
+async function sdkOperation(input, versionIssue = workbuddyVersionIssue) {
 	const host = globalThis;
 	const version = host.workbuddyDesktop?.appVersion;
 	const sdk = host.wb?.conversations;
@@ -400,37 +363,6 @@ async function sdkOperation(input, versionIssue = workbuddyVersionIssue, logEntr
 		throw error;
 	}
 	if (!conversation || conversation.info?.id !== input.sessionId) return { missing: true };
-	if (input.kind === "logs") {
-		const record = logEntry ?? hostLogEntry;
-		const page = await conversation.requests(null);
-		if (!Array.isArray(page?.items)) return [];
-		const requests = [...page.items].sort((left, right) => {
-			const stamp = (request) => typeof request.createdAt === "number" ? request.createdAt : Date.parse(request.createdAt);
-			return stamp(left) - stamp(right);
-		});
-		const name = (block) => {
-			const tool = block.toolName ?? block._meta?.["codebuddy.ai/toolName"];
-			return tool === "DeferExecuteTool" ? block.rawInput?.toolName : tool;
-		};
-		const start = requests.findIndex((request) => request.assistantMessage?.content?.some((block) => block.type === "tool" && name(block) === "mcp__lazymind__workflow.start"));
-		if (start < 0) return [];
-		const logs = [];
-		for (const request of requests.slice(start)) {
-			const time = request.createdAt ?? request.clientTimestamp ?? input.started_ms;
-			const state = record("agent.turn", request.finishedAt ?? request.updatedAt ?? time, input.cutoff_ms, request.state);
-			if (state) logs.push(state);
-			for (const block of request.assistantMessage?.content ?? []) {
-				if (block.type !== "tool") continue;
-				const called = block.startedAt ?? block.createdAt ?? time;
-				const completed = block.finishedAt ?? block.completedAt ?? block.updatedAt ?? request.finishedAt;
-				const status = block.isError === true || block.result?.isError === true ? "failed" : block.status;
-				const pending = status === "in_progress" || status === "running" || completed != null && !record("tool.result", completed, input.cutoff_ms);
-				const row = record(pending ? "tool.call" : "tool.result", pending ? called : completed ?? called, input.cutoff_ms, pending ? "running" : status, name(block), pending ? void 0 : block.durationMs);
-				if (row) logs.push(row);
-			}
-		}
-		return logs;
-	}
 	if (input.kind === "status") return {
 		state: conversation.info.state,
 		version: host.workbuddyDesktop.appVersion
@@ -481,7 +413,7 @@ var WorkBuddyAdapter = class {
 		return this.call({ kind: "probe" }, signal);
 	}
 	call(input, signal) {
-		return this.cdp.evaluate(`(${sdkOperation.toString()})(${JSON.stringify(input)}, ${workbuddyVersionIssue.toString()}, ${hostLogEntry.toString()})`, signal);
+		return this.cdp.evaluate(`(${sdkOperation.toString()})(${JSON.stringify(input)}, ${workbuddyVersionIssue.toString()})`, signal);
 	}
 	async admission(kind, sessionId, input, signal, fields) {
 		const started = performance.now();
@@ -549,15 +481,6 @@ var WorkBuddyAdapter = class {
 				});
 			}
 		};
-	}
-	async readLogs(read, signal) {
-		if (!sessionPattern.test(read.driver_session_id)) return [];
-		const rows = await this.call({
-			...read,
-			kind: "logs",
-			sessionId: read.driver_session_id
-		}, signal);
-		return Array.isArray(rows) ? rows : [];
 	}
 	async identify(args, signal) {
 		const result = await this.call({
@@ -1393,7 +1316,6 @@ function diagnosedTransport(bridge, log, health) {
 		bind: (...args) => tracked(() => bridge.bind(...args)),
 		state: (...args) => tracked(() => bridge.state(...args)),
 		actions: (...args) => tracked(() => bridge.actions(...args)),
-		logResult: bridge.logResult?.bind(bridge),
 		action: (...args) => tracked(() => bridge.action(...args)),
 		async claim(...args) {
 			const started = performance.now();

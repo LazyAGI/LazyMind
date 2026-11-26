@@ -75,11 +75,14 @@ export function dshRuntime(ctx: Context, serverName: string, webUrl: string): Ru
       if (!events.some(matchesRun)) return []
       const logs: HostLogEntry[] = []
       const calls = new Map<unknown, { time: number; name: unknown }>()
+      const resultsCutoff = read.results_cutoff_ms ?? read.cutoff_ms
       for (const event of events) {
-        if (event.time < read.started_ms || event.time > read.cutoff_ms) continue
+        if (event.time < read.started_ms || event.time > resultsCutoff) continue
         const data = object(event.data)
         if (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch-start') {
-          calls.set(data?.callId ?? data?.subCallId, { time: event.time, name: data?.name })
+          if (event.time > read.cutoff_ms) continue
+          const id = data?.callId ?? data?.subCallId
+          if (id != null) calls.set(id, { time: event.time, name: data?.name })
           const row = hostLogEntry('tool.call', event.time, read.cutoff_ms, 'running', data?.name)
           if (row) logs.push(row)
         } else if (event.type === 'tool/result' || event.type === 'tool/ptc-dispatch') {
@@ -87,8 +90,9 @@ export function dshRuntime(ctx: Context, serverName: string, webUrl: string): Ru
           const blocks = Array.isArray(message?.content) ? message.content.map(object) : [message]
           for (const block of blocks) {
             const call = calls.get(data?.subCallId ?? block?.toolCallId ?? block?.callId ?? message?.toolCallId)
+            if (event.time > read.cutoff_ms && !call) continue
             const failed = data?.error != null || data?.isError === true || block?.isError === true
-            const row = hostLogEntry('tool.result', event.time, read.cutoff_ms, failed ? 'failed' : 'completed',
+            const row = hostLogEntry('tool.result', event.time, resultsCutoff, failed ? 'failed' : 'completed',
               call?.name ?? data?.name ?? block?.toolName ?? message?.toolName, call && event.time - call.time)
             if (row) logs.push(row)
           }

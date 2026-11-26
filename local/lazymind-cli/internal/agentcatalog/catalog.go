@@ -586,7 +586,9 @@ func workBuddySessionMeta(path string) (sessionMeta, bool) {
 		}
 		row.SessionID = strings.TrimSpace(row.SessionID)
 		row.CWD = strings.TrimSpace(row.CWD)
-		return sessionMeta{ID: row.SessionID, CWD: row.CWD}, row.SessionID != "" && row.CWD != ""
+		if row.SessionID != "" && row.CWD != "" {
+			return sessionMeta{ID: row.SessionID, CWD: row.CWD}, true
+		}
 	}
 	return sessionMeta{}, false
 }

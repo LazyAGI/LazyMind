@@ -1,9 +1,8 @@
-import { hostLogEntry, type HostLogEntry } from '../../../workflow-agent-core/src/log-record'
 import { workbuddyVersionIssue } from './compatibility'
 
 // Serialized with its version check supplied explicitly.
 // Native SDK records are the only identity source; currentId is never consulted.
-export async function sdkOperation(input: any, versionIssue = workbuddyVersionIssue, logEntry?: typeof hostLogEntry): Promise<any> {
+export async function sdkOperation(input: any, versionIssue = workbuddyVersionIssue): Promise<any> {
   const host = globalThis as any
   const version = host.workbuddyDesktop?.appVersion
   const sdk = host.wb?.conversations
@@ -61,41 +60,6 @@ export async function sdkOperation(input: any, versionIssue = workbuddyVersionIs
     throw error
   }
   if (!conversation || conversation.info?.id !== input.sessionId) return { missing: true }
-  if (input.kind === 'logs') {
-    const record = logEntry ?? hostLogEntry
-    const page = await conversation.requests(null)
-    if (!Array.isArray(page?.items)) return []
-    const requests = [...page.items].sort((left, right) => {
-      const stamp = (request: any) => typeof request.createdAt === 'number' ? request.createdAt : Date.parse(request.createdAt)
-      return stamp(left) - stamp(right)
-    })
-    const name = (block: any) => {
-      const tool = block.toolName ?? block._meta?.['codebuddy.ai/toolName']
-      return tool === 'DeferExecuteTool' ? block.rawInput?.toolName : tool
-    }
-    // The validated binding identifies the one Workflow in this conversation.
-    const start = requests.findIndex(request => request.assistantMessage?.content?.some((block: any) =>
-      block.type === 'tool' && name(block) === 'mcp__lazymind__workflow.start'))
-    if (start < 0) return []
-    const logs: HostLogEntry[] = []
-    for (const request of requests.slice(start)) {
-      const time = request.createdAt ?? request.clientTimestamp ?? input.started_ms
-      const state = record('agent.turn', request.finishedAt ?? request.updatedAt ?? time, input.cutoff_ms, request.state)
-      if (state) logs.push(state)
-      for (const block of request.assistantMessage?.content ?? []) {
-        if (block.type !== 'tool') continue
-        const called = block.startedAt ?? block.createdAt ?? time
-        const completed = block.finishedAt ?? block.completedAt ?? block.updatedAt ?? request.finishedAt
-        const status = block.isError === true || block.result?.isError === true ? 'failed' : block.status
-        const pending = status === 'in_progress' || status === 'running'
-          || completed != null && !record('tool.result', completed, input.cutoff_ms)
-        const row = record(pending ? 'tool.call' : 'tool.result', pending ? called : completed ?? called,
-          input.cutoff_ms, pending ? 'running' : status, name(block), pending ? undefined : block.durationMs)
-        if (row) logs.push(row)
-      }
-    }
-    return logs
-  }
   if (input.kind === 'status') return { state: conversation.info.state, version: host.workbuddyDesktop.appVersion }
   if (input.kind === 'send') {
     if (conversation.info.state !== 'idle') return { rejected: 'Conversation became busy before admission' }

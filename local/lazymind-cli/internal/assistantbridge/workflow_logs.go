@@ -14,11 +14,12 @@ import (
 )
 
 type workflowLogRead struct {
-	ID        string `json:"id"`
-	RunID     string `json:"run_id"`
-	DriverID  string `json:"driver_session_id"`
-	CutoffMS  int64  `json:"cutoff_ms"`
-	StartedMS int64  `json:"started_ms"`
+	ID              string `json:"id"`
+	RunID           string `json:"run_id"`
+	DriverID        string `json:"driver_session_id"`
+	CutoffMS        int64  `json:"cutoff_ms"`
+	ResultsCutoffMS int64  `json:"results_cutoff_ms"`
+	StartedMS       int64  `json:"started_ms"`
 }
 
 type workflowHostLog struct {
@@ -39,11 +40,12 @@ type pendingWorkflowLog struct {
 }
 
 type workflowLogBinding struct {
-	Connector string `json:"connector_id"`
-	Provider  string `json:"provider"`
-	Driver    string `json:"driver_session_id"`
-	Cutoff    int64  `json:"cutoff_ms"`
-	Started   int64  `json:"started_ms"`
+	Connector     string `json:"connector_id"`
+	Provider      string `json:"provider"`
+	Driver        string `json:"driver_session_id"`
+	Cutoff        int64  `json:"cutoff_ms"`
+	ResultsCutoff int64  `json:"results_cutoff_ms"`
+	Started       int64  `json:"started_ms"`
 }
 
 func (s *Server) handleWorkflowLogs(w http.ResponseWriter, r *http.Request) {
@@ -85,8 +87,28 @@ func (s *Server) handleWorkflowLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job := &pendingWorkflowLog{read: workflowLogRead{ID: rand.Text(), RunID: runID, DriverID: binding.Driver, CutoffMS: binding.Cutoff, StartedMS: binding.Started},
-		pair: pair, entries: make(chan []workflowHostLog, 1)}
+	read := workflowLogRead{ID: rand.Text(), RunID: runID, DriverID: binding.Driver, CutoffMS: binding.Cutoff,
+		ResultsCutoffMS: max(binding.ResultsCutoff, binding.Cutoff), StartedMS: binding.Started}
+	finish := func(entries []workflowHostLog) {
+		if entries == nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"code": "LOG_HOST_UNAVAILABLE"})
+			return
+		}
+		if _, err := workflowhost.Verify(s.store.Directory(), pair.ConnectorID, pair.Token, scope); err != nil {
+			workflowHostError(w, err)
+			return
+		}
+		if err := api.DoJSONHeaders(ctx, http.MethodPost, path, input, nil, headers); err != nil {
+			workflowHostError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"run_id": runID, "entries": filterWorkflowHostLogs(read, entries)})
+	}
+	if pair.Provider == "workbuddy" {
+		finish(readWorkBuddyWorkflowLogs(ctx, read))
+		return
+	}
+	job := &pendingWorkflowLog{read: read, pair: pair, entries: make(chan []workflowHostLog, 1)}
 	s.mu.Lock()
 	if s.workflowLogs[pair.ConnectorID] != nil {
 		s.mu.Unlock()
@@ -106,19 +128,7 @@ func (s *Server) handleWorkflowLogs(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case entries := <-job.entries:
-		if entries == nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"code": "LOG_HOST_UNAVAILABLE"})
-			return
-		}
-		if _, err := workflowhost.Verify(s.store.Directory(), pair.ConnectorID, pair.Token, scope); err != nil {
-			workflowHostError(w, err)
-			return
-		}
-		if err := api.DoJSONHeaders(ctx, http.MethodPost, path, input, nil, headers); err != nil {
-			workflowHostError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"run_id": runID, "entries": entries})
+		finish(entries)
 	case <-ctx.Done():
 		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"code": "LOG_HOST_TIMEOUT"})
 	}
@@ -154,12 +164,21 @@ func (s *Server) handleWorkflowLogResult(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusNotFound, map[string]string{"code": "LOG_HOST_REQUEST_EXPIRED"})
 		return
 	}
-	var valid []workflowHostLog
-	if entries != nil {
-		valid = make([]workflowHostLog, 0, len(entries))
+	select {
+	case job.entries <- entries:
+	default:
 	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func filterWorkflowHostLogs(read workflowLogRead, entries []workflowHostLog) []workflowHostLog {
+	valid := make([]workflowHostLog, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Time.IsZero() || entry.Time.UnixMilli() > job.read.CutoffMS {
+		at := entry.Time.UnixMilli()
+		if entry.Time.IsZero() || at > read.ResultsCutoffMS {
+			continue
+		}
+		if at > read.CutoffMS && (entry.Event != "tool.result" || entry.DurationMS == nil || *entry.DurationMS < at-read.CutoffMS) {
 			continue
 		}
 		switch entry.Event {
@@ -184,9 +203,5 @@ func (s *Server) handleWorkflowLogResult(w http.ResponseWriter, r *http.Request)
 		}
 		valid = append(valid, entry)
 	}
-	select {
-	case job.entries <- valid:
-	default:
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	return valid
 }

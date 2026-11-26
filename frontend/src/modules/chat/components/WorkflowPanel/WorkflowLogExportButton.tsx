@@ -78,5 +78,7 @@ export function WorkflowLogExportButton({ runId }: { runId: string }) {
     }
   }
 
-  return <Button size='small' loading={busy} onClick={() => void exportLogs()}>{t('chat.workflowLogsExport')}</Button>;
+  return <Button className='workflow-panel__log-export' size='small' loading={busy} onClick={() => void exportLogs()}>
+    {t('chat.workflowLogsExport')}
+  </Button>;
 }

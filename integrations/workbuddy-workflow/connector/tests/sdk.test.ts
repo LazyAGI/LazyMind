@@ -55,18 +55,6 @@ describe('WorkBuddy native SDK contract', () => {
     expect(f.sessions[A].sendPrompt).toHaveBeenCalledWith([{ type: 'text', text: 'wake' }], expect.objectContaining({ clientRequestId: 'action-1' }))
     expect(f.sessions[B].sendPrompt).not.toHaveBeenCalled()
   })
-  it('exports only tool metadata from the bound Workflow request', async () => {
-    const f = fixture()
-    const stamp = Date.parse('2026-11-26T00:00:00Z')
-    Object.assign(f.request, { createdAt: stamp, state: 'completed' })
-    Object.assign(f.block, { status: 'completed', completedAt: stamp + 500, result: { content: 'PRIVATE_RESULT' } })
-    const logs = await sdkOperation({ kind: 'logs', sessionId: A, started_ms: stamp, cutoff_ms: stamp + 1000 })
-    expect(logs).toEqual([
-      { time: new Date(stamp).toISOString(), event: 'agent.turn', status: 'completed' },
-      { time: new Date(stamp + 500).toISOString(), event: 'tool.result', status: 'completed', tool: 'mcp__lazymind__workflow.start' },
-    ])
-    expect(f.sessions[B].requests).not.toHaveBeenCalled()
-  })
   it('rejects a busy race before any input is sent', async () => {
     const f = fixture()
     expect(await sdkOperation({ kind: 'send', sessionId: A })).toHaveProperty('rejected')

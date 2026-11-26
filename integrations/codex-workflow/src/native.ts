@@ -164,6 +164,7 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
         && ['workflow.state', 'workflow.step.begin', 'workflow.step.claim', 'workflow.step.resume', 'workflow.step.complete'].includes(item.tool)
         && item.status === 'completed' && !item.error && item.result?.isError !== true && item.arguments?.session_id === input.run_id))
     const logs: HostLogEntry[] = []
+    const resultsCutoff = input.results_cutoff_ms ?? input.cutoff_ms
     if (start >= 0) for (const turn of turns.slice(start)) {
       const startTime = turn.startedAt ?? input.started_ms
       const finished = turn.finishedAt ?? (turn.startedAt != null && typeof turn.durationMs === 'number'
@@ -177,14 +178,19 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
         const status = item.error || item.result?.isError === true || (typeof item.exitCode === 'number' && item.exitCode !== 0)
           ? 'failed' : item.status
         const timing = turn.itemTimings?.[item.id]
-        const started = item.startedAtMs ?? timing?.startedAtMs
+        const began = item.startedAtMs ?? timing?.startedAtMs
+        const reportedDuration = typeof item.durationMs === 'number' && item.durationMs >= 0 ? item.durationMs : undefined
+        const resultTime = item.completedAtMs ?? timing?.completedAtMs ?? (began != null && reportedDuration != null
+          ? began + reportedDuration : undefined)
+        const started = began ?? (resultTime != null && reportedDuration != null ? resultTime - reportedDuration : undefined)
+        // Late receipts must have a known start before Workflow finished.
         const callTime = started ?? startTime
-        const resultTime = item.completedAtMs ?? timing?.completedAtMs ?? (started != null && typeof item.durationMs === 'number'
-          ? started + item.durationMs : undefined)
-        const pending = status === 'inProgress' || status === 'in_progress' || resultTime > input.cutoff_ms
-        const duration = item.durationMs ?? (resultTime != null && started != null ? resultTime - started : undefined)
+        if (callTime > input.cutoff_ms || (resultTime > input.cutoff_ms && started == null)) continue
+        const pending = status === 'inProgress' || status === 'in_progress' || resultTime > resultsCutoff
+        const elapsed = resultTime != null && started != null ? resultTime - started : undefined
+        const duration = resultTime > input.cutoff_ms ? elapsed : reportedDuration ?? elapsed
         const row = record(pending ? 'tool.call' : 'tool.result', pending ? callTime : resultTime ?? callTime,
-          input.cutoff_ms, pending ? 'running' : status ?? 'completed', tool, pending ? undefined : duration)
+          pending ? input.cutoff_ms : resultsCutoff, pending ? 'running' : status ?? 'completed', tool, pending ? undefined : duration)
         if (row) logs.push(row)
       }
     }

@@ -1,4 +1,3 @@
-import { hostLogEntry, type HostLogEntry, type HostLogRead } from '../../../workflow-agent-core/src/log-record'
 import { AdmissionRejected, type RuntimeAdapter } from '../../../workflow-agent-core/src/adapter'
 import type { ActionClaim } from '../../../workflow-agent-core/src/transport'
 import { Cdp } from './cdp'
@@ -17,7 +16,7 @@ export class WorkBuddyAdapter implements RuntimeAdapter<string> {
   }
   probe(signal: AbortSignal) { return this.call({ kind: 'probe' }, signal) }
   private call(input: unknown, signal: AbortSignal): Promise<any> {
-    return this.cdp.evaluate(`(${sdkOperation.toString()})(${JSON.stringify(input)}, ${workbuddyVersionIssue.toString()}, ${hostLogEntry.toString()})`, signal)
+    return this.cdp.evaluate(`(${sdkOperation.toString()})(${JSON.stringify(input)}, ${workbuddyVersionIssue.toString()})`, signal)
   }
   private async admission(kind: 'send' | 'cancel', sessionId: string, input: object, signal: AbortSignal, fields: DiagnosticFields) {
     const started = performance.now()
@@ -68,11 +67,6 @@ export class WorkBuddyAdapter implements RuntimeAdapter<string> {
         await this.cancel(sessionId, { action_id: action.id, run_id: action.session_id, execution_id: action.execution_id })
       },
     }
-  }
-  async readLogs(read: HostLogRead, signal: AbortSignal): Promise<HostLogEntry[]> {
-    if (!sessionPattern.test(read.driver_session_id)) return []
-    const rows = await this.call({ ...read, kind: 'logs', sessionId: read.driver_session_id }, signal)
-    return Array.isArray(rows) ? rows : []
   }
   async identify(args: unknown, signal: AbortSignal) {
     const result = await this.call({ kind: 'identity', arguments: args }, signal)

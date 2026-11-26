@@ -1685,6 +1685,7 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence, logEnt
 			"workflow.step.complete"
 		].includes(item.tool) && item.status === "completed" && !item.error && item.result?.isError !== true && item.arguments?.session_id === input.run_id));
 		const logs = [];
+		const resultsCutoff = input.results_cutoff_ms ?? input.cutoff_ms;
 		if (start >= 0) for (const turn of turns.slice(start)) {
 			const startTime = turn.startedAt ?? input.started_ms;
 			const turnLog = record("agent.turn", turn.finishedAt ?? (turn.startedAt != null && typeof turn.durationMs === "number" ? turn.startedAt + turn.durationMs : void 0) ?? startTime, input.cutoff_ms, turn.status, void 0, turn.durationMs);
@@ -1699,12 +1700,16 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence, logEnt
 				if (!tool) continue;
 				const status = item.error || item.result?.isError === true || typeof item.exitCode === "number" && item.exitCode !== 0 ? "failed" : item.status;
 				const timing = turn.itemTimings?.[item.id];
-				const started = item.startedAtMs ?? timing?.startedAtMs;
+				const began = item.startedAtMs ?? timing?.startedAtMs;
+				const reportedDuration = typeof item.durationMs === "number" && item.durationMs >= 0 ? item.durationMs : void 0;
+				const resultTime = item.completedAtMs ?? timing?.completedAtMs ?? (began != null && reportedDuration != null ? began + reportedDuration : void 0);
+				const started = began ?? (resultTime != null && reportedDuration != null ? resultTime - reportedDuration : void 0);
 				const callTime = started ?? startTime;
-				const resultTime = item.completedAtMs ?? timing?.completedAtMs ?? (started != null && typeof item.durationMs === "number" ? started + item.durationMs : void 0);
-				const pending = status === "inProgress" || status === "in_progress" || resultTime > input.cutoff_ms;
-				const duration = item.durationMs ?? (resultTime != null && started != null ? resultTime - started : void 0);
-				const row = record(pending ? "tool.call" : "tool.result", pending ? callTime : resultTime ?? callTime, input.cutoff_ms, pending ? "running" : status ?? "completed", tool, pending ? void 0 : duration);
+				if (callTime > input.cutoff_ms || resultTime > input.cutoff_ms && started == null) continue;
+				const pending = status === "inProgress" || status === "in_progress" || resultTime > resultsCutoff;
+				const elapsed = resultTime != null && started != null ? resultTime - started : void 0;
+				const duration = resultTime > input.cutoff_ms ? elapsed : reportedDuration ?? elapsed;
+				const row = record(pending ? "tool.call" : "tool.result", pending ? callTime : resultTime ?? callTime, pending ? input.cutoff_ms : resultsCutoff, pending ? "running" : status ?? "completed", tool, pending ? void 0 : duration);
 				if (row) logs.push(row);
 			}
 		}

@@ -25,7 +25,7 @@ describe('Codex renderer native API mapping',()=>{
   expect(disposed).toHaveBeenCalledOnce();expect(roleDisposed).toHaveBeenCalledOnce()
   expect(cell.get).not.toHaveBeenCalled();expect(rpc.startTurn).not.toHaveBeenCalled();expect(rpc.interruptConversation).not.toHaveBeenCalled()
  })
- it('projects bound Workflow tools in the renderer and keeps late results outside the cutoff', async()=>{
+ it('keeps receipts for bound Workflow tools through the export cutoff', async()=>{
   const start = Date.parse('2026-11-26T00:00:00Z')
   const rpc = Object.assign(()=>{}, {
    getHostId: vi.fn().mockResolvedValue('local'),
@@ -37,6 +37,7 @@ describe('Codex renderer native API mapping',()=>{
      { type: 'mcpToolCall', server: 'lazymind', tool: 'workflow.step.complete', status: 'completed',
        arguments: { session_id: 'run', secret: 'PRIVATE_ARGUMENT' } },
      { id: 'command', type: 'commandExecution', status: 'completed', command: 'PRIVATE_ARGUMENT' },
+     { type: 'dynamicToolCall', tool: 'after_workflow', startedAtMs: start + 501, completedAtMs: start + 550, status: 'completed' },
     ] },
    } } }),
    getStreamRole: vi.fn().mockRejectedValue(Error('No live stream for this conversation')),
@@ -49,6 +50,11 @@ describe('Codex renderer native API mapping',()=>{
    time: new Date(start + 100).toISOString(), event: 'tool.call', tool: 'commandExecution', status: 'running',
   })
   expect(JSON.stringify(result)).not.toContain('PRIVATE_')
+  const later = await (0,eval)(nativeExpression({ kind: 'logs', threadId: 'thread', run_id: 'run',
+   started_ms: start, cutoff_ms: start + 500, results_cutoff_ms: start + 1000 }))
+  expect(later.logs).toContainEqual({ time: new Date(start + 1000).toISOString(),
+   event: 'tool.result', tool: 'commandExecution', status: 'completed', duration_ms: 900 })
+  expect(later.logs.map((row: any) => row.tool)).not.toContain('after_workflow')
  })
  it('does not confuse a config-only RPC with the manager connection or retain a broken RPC',async()=>{
   const rpc=Object.assign(()=>{}, {getHostId:vi.fn().mockResolvedValue('local')})

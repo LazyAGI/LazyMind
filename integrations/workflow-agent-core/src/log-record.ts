@@ -3,6 +3,7 @@ export interface HostLogRead {
   run_id: string
   driver_session_id: string
   cutoff_ms: number
+  results_cutoff_ms?: number
   started_ms: number
 }
 
