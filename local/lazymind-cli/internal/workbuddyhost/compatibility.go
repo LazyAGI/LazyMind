@@ -51,10 +51,7 @@ func VersionIssue(version string) string {
 }
 
 func desktopApplication() (string, error) {
-	return agentexec.FindDesktopApplication(agentexec.DesktopApplication{
-		BindingTarget: agentexec.WorkBuddyDesktop, DisplayNames: []string{"WorkBuddy", "WorkBuddy CN"},
-		ExecutableNames: []string{"WorkBuddy.exe", "WorkBuddy CN.exe"},
-	})
+	return agentexec.FindDesktopApplication(agentexec.WorkBuddyDesktopApplication())
 }
 
 // Inspect the desktop package, never the bundled CLI (which has its own version).

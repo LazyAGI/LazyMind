@@ -295,7 +295,6 @@ jobs:
             local/local-runtime-manager/go.sum
             local/lazymind-cli/go.sum
       - uses: pnpm/action-setup@v4
-        if: runner.os == 'Linux'
         with:
           version: '10.0.0'
       - uses: actions/setup-node@v4
@@ -329,6 +328,14 @@ jobs:
           pnpm --dir integrations/dsh-workflow stage-connectors "$RUNNER_TEMP/workflow-cli/bin"
           LAZYMIND_TEST_DSH_CONNECTOR="$RUNNER_TEMP/workflow-cli/bin/workflow-connectors/dsh" go -C local/lazymind-cli test ./internal/workflowconnector -run TestBuiltDSHConnectorPackage -v
           git diff --exit-code -- integrations/dsh-workflow/lib local/lazymind-cli/internal/workflowpresentation/assets/presentation.html
+      - name: Verify the packaged WorkBuddy connector process on macOS and Windows
+        if: runner.os != 'Linux'
+        working-directory: integrations/workbuddy-workflow/connector
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          pnpm exec vitest run tests/process.test.ts --reporter=verbose
       - name: Test Local Proxy
         working-directory: local/local-proxy
         run: go test ./... -v

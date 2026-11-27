@@ -20,6 +20,7 @@ import agent_e2e as e2e
 import agent_e2e_platform as platform
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKBUDDY_RELEASE = '5.11.4.44121853'
 
 
 def run(command, *, cwd=ROOT, env=None, timeout=1800):
@@ -254,6 +255,72 @@ def setup_codex_windows_sandbox(p, command):
     return home
 
 
+def download_workbuddy(root):
+    # These URLs and hashes are the vendor's public /v2/update metadata.
+    # Keep a fixed version; do not silently follow a new latest installer.
+    distributions = {
+        'darwin-x64': ('zip', 'f17292ee0a9702670d739679b76d3a84a012dbd232f45c6479bf37cc00cf402c'),
+        'win32-x64-user': ('exe', '38841a16a766e488eeba9adf322b92239e69cbb7a309dac7a35fee495496441c')}
+    target = 'win32-x64-user' if platform.IS_WINDOWS else 'darwin-x64'
+    ext, digest = distributions[target]
+    url = f'https://download.codebuddy.ai/workbuddy/saas/{target}/WorkBuddy-{target}-{WORKBUDDY_RELEASE}-0026dff0.{ext}'
+    archive = root / ('workbuddy-download.' + ext)
+    print(f'Downloading official WorkBuddy {WORKBUDDY_RELEASE} for {target}', flush=True)
+    with urllib.request.urlopen(url, timeout=120) as response, archive.open('wb') as stream:
+        shutil.copyfileobj(response, stream)
+    with archive.open('rb') as stream:
+        if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
+            raise RuntimeError('Official WorkBuddy installer SHA-256 mismatch')
+    return archive, digest
+
+
+def install_workbuddy_windows(archive, destination):
+    # The vendor executable is NSIS 3.11. /D= must be the last argument.
+    run([str(archive), '/S', '/D=' + str(destination)], timeout=600)
+
+
+def verify_workbuddy_desktop(p):
+    """Install the pinned desktop release and exercise native auto-discovery."""
+    if sys.platform not in ('win32', 'darwin'):
+        raise RuntimeError('WorkBuddy desktop verification requires a macOS or Windows hosted runner')
+    archive, digest = download_workbuddy(p.root)
+    print('Verified official WorkBuddy package SHA-256: ' + digest, flush=True)
+    if platform.IS_WINDOWS:
+        installed = p.root / 'workbuddy-desktop'
+        if installed.exists():
+            raise RuntimeError('WorkBuddy test installation directory already exists')
+        install_workbuddy_windows(archive, installed)
+        expected = installed / 'WorkBuddyAI.exe'
+        if not expected.is_file():
+            raise RuntimeError(f'Official installer did not install {expected}')
+    else:
+        unpacked = p.root / 'workbuddy-unpacked'
+        run(['/usr/bin/ditto', '-x', '-k', str(archive), str(unpacked)], timeout=600)
+        bundle = unpacked / 'WorkBuddy AI.app'
+        if not (bundle / 'Contents/Resources/app.asar').is_file():
+            raise RuntimeError(f'Official ZIP did not contain the desktop bundle {bundle}')
+        expected = Path.home() / 'Applications' / bundle.name
+        if os.path.lexists(expected):
+            raise RuntimeError('WorkBuddy is already installed at the intended test path')
+        expected.parent.mkdir(parents=True, exist_ok=True)
+        run(['/usr/bin/ditto', str(bundle), str(expected)], timeout=600)
+    # The fourth segment identifies the official release build. The desktop
+    # manifest records its three-part version.
+    env = dict(os.environ, LAZYMIND_TEST_WORKBUDDY_DESKTOP=str(expected),
+               LAZYMIND_TEST_WORKBUDDY_DESKTOP_VERSION=WORKBUDDY_RELEASE.rsplit('.', 1)[0])
+    name = 'TestInstalledWorkBuddyDesktopDiscovery'
+    result = subprocess.run(
+        ['go', 'test', './internal/workbuddyhost', '-count=1', '-json', '-run', f'^{name}$'],
+        cwd=ROOT / 'local/lazymind-cli', env=env, timeout=600, stdout=subprocess.PIPE, encoding='utf-8',
+    )
+    print(result.stdout, end='', flush=True)
+    result.check_returncode()
+    events = (json.loads(line) for line in result.stdout.splitlines() if line.startswith('{'))
+    if not any(event.get('Test') == name and event.get('Action') == 'pass' for event in events):
+        raise RuntimeError(f'{name} did not run and pass')
+    archive.unlink()
+
+
 def install_agents(p):
     """Install pinned vendor distributions, without a desktop login dependency."""
     p.output.mkdir(parents=True, exist_ok=True)
@@ -268,25 +335,10 @@ def install_agents(p):
     modules = tools / 'node_modules'
     commands = {'codex': [node, str(modules / '@openai/codex/bin/codex.js')],
                 'deepseek-harness': [node, str(modules / '@deepseek-ai/dsh/lib/bin.js')]}
-    # These URLs and hashes are the vendor's public /v2/update metadata.
-    # Keep a fixed version; do not silently follow a new latest installer.
-    distributions = {
-        'darwin-x64': ('zip', 'f17292ee0a9702670d739679b76d3a84a012dbd232f45c6479bf37cc00cf402c'),
-        'win32-x64-user': ('exe', '38841a16a766e488eeba9adf322b92239e69cbb7a309dac7a35fee495496441c')}
-    target = 'win32-x64-user' if platform.IS_WINDOWS else 'darwin-x64'
-    ext, digest = distributions[target]
-    url = f'https://download.codebuddy.ai/workbuddy/saas/{target}/WorkBuddy-{target}-5.11.4.44121853-0026dff0.{ext}'
-    archive = p.root / ('workbuddy-download.' + ext)
-    print('Downloading official WorkBuddy 5.11.4.44121853 for ' + target, flush=True)
-    with urllib.request.urlopen(url, timeout=120) as response, archive.open('wb') as stream:
-        shutil.copyfileobj(response, stream)
-    if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
-        raise RuntimeError('Official WorkBuddy installer SHA-256 mismatch')
+    archive, digest = download_workbuddy(p.root)
     buddy = p.root / 'workbuddy'
     if platform.IS_WINDOWS:
-        # Verified in the vendor executable: Nullsoft.NSIS.exehead / NSIS 3.11.
-        # NSIS requires /D= last; the hosted runner's temp root has no spaces.
-        run([str(archive), '/S', '/D=' + str(buddy)], timeout=600)
+        install_workbuddy_windows(archive, buddy)
     else:
         with zipfile.ZipFile(archive) as source:
             # Only the genuine bundled CLI is needed for headless CI.
@@ -328,7 +380,7 @@ def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise SystemExit('This bootstrap runs only on a disposable GitHub Actions VM.')
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('start', 'stop', 'diagnose', 'install-agents'))
+    parser.add_argument('action', choices=('start', 'stop', 'diagnose', 'install-agents', 'verify-workbuddy-desktop'))
     parser.add_argument('--root', type=Path, default=Path(os.environ['RUNNER_TEMP']) / 'lazymind-hosted')
     args = parser.parse_args()
     root = args.root.resolve()
@@ -337,7 +389,8 @@ def main():
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding='utf-8')
-    {'start': start, 'stop': stop, 'diagnose': diagnose, 'install-agents': install_agents}[args.action](paths(root))
+    {'start': start, 'stop': stop, 'diagnose': diagnose, 'install-agents': install_agents,
+     'verify-workbuddy-desktop': verify_workbuddy_desktop}[args.action](paths(root))
 
 
 if __name__ == '__main__':

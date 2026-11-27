@@ -15,6 +15,18 @@ type DesktopApplication struct {
 	Protocols       []string
 	DisplayNames    []string
 	StatePaths      []string
+	// RequireNamedExecutable makes Windows discovery check the installed executable
+	// instead of treating a matching registry display name as sufficient.
+	RequireNamedExecutable bool
+}
+
+func WorkBuddyDesktopApplication() DesktopApplication {
+	return DesktopApplication{
+		BindingTarget:          WorkBuddyDesktop,
+		DisplayNames:           []string{"WorkBuddy", "WorkBuddy CN", "WorkBuddy AI"},
+		ExecutableNames:        []string{"WorkBuddy.exe", "WorkBuddy CN.exe", "WorkBuddyAI.exe"},
+		RequireNamedExecutable: true,
+	}
 }
 
 type DesktopApplicationState struct {

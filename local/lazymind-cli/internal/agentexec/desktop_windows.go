@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -21,7 +22,10 @@ type windowsInstalledApplication struct {
 }
 
 func platformDesktopInstalled(spec DesktopApplication, _ bool) bool {
-	return platformDesktopApplication(spec) != "" || hasInstalledApplication(spec.DisplayNames)
+	if platformDesktopApplication(spec) != "" {
+		return true
+	}
+	return !spec.RequireNamedExecutable && hasInstalledApplication(spec.DisplayNames)
 }
 
 func platformDesktopApplication(spec DesktopApplication) string {
@@ -44,8 +48,25 @@ func platformDesktopApplications(spec DesktopApplication) []string {
 			paths = append(paths, executable)
 		}
 	}
-	for _, application := range windowsInstalledApplications() {
-		if !matchesInstalledDisplayName(application.displayName, normalizedDisplayNames(spec.DisplayNames)) {
+	paths = append(paths, registeredDesktopApplicationPaths(spec, windowsInstalledApplications())...)
+	paths = append(paths, findWindowsPackagedDesktopApplications(spec, queryWindowsAppPackages)...)
+	return windowsDesktopApplicationPaths(spec, paths)
+}
+
+func windowsDesktopApplicationPaths(spec DesktopApplication, paths []string) []string {
+	if spec.RequireNamedExecutable {
+		paths = slices.DeleteFunc(paths, func(path string) bool {
+			return !matchesDesktopExecutable(path, spec.ExecutableNames)
+		})
+	}
+	return uniqueWindowsPaths(paths)
+}
+
+func registeredDesktopApplicationPaths(spec DesktopApplication, applications []windowsInstalledApplication) []string {
+	var paths []string
+	wanted := normalizedDisplayNames(spec.DisplayNames)
+	for _, application := range applications {
+		if !matchesInstalledDisplayName(application.displayName, wanted) {
 			continue
 		}
 		if fileExists(application.location) {
@@ -59,8 +80,12 @@ func platformDesktopApplications(spec DesktopApplication) []string {
 			}
 		}
 	}
-	paths = append(paths, findWindowsPackagedDesktopApplications(spec, queryWindowsAppPackages)...)
-	return uniqueWindowsPaths(paths)
+	return paths
+}
+
+func matchesDesktopExecutable(path string, names []string) bool {
+	executable := filepath.Base(path)
+	return slices.ContainsFunc(names, func(name string) bool { return strings.EqualFold(executable, name) })
 }
 
 func registeredProtocolExecutable(protocol string) string {

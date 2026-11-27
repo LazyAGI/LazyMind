@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       component:
-        description: Select platform tests or fresh source runtime bootstrap
+        description: Select platform, runtime, or installed Agent checks
         type: choice
-        options: [tests, runtime, agents, all]
+        options: [tests, runtime, agents, workbuddy-desktop, all]
         default: tests
       platform:
         description: Operating system for runtime and Agent installation checks
@@ -41,7 +41,7 @@ jobs:
       - name: Verify platform locks, process cleanup, transport and credential boundaries
         run: python -m unittest discover -s scripts/tests -p "test_agent_e2e*.py" -v
   fresh-runtime:
-    if: ${{ inputs.component != 'tests' }}
+    if: ${{ inputs.component == 'runtime' || inputs.component == 'agents' || inputs.component == 'all' }}
     strategy:
       fail-fast: false
       matrix:
@@ -103,3 +103,25 @@ jobs:
             ${{ runner.temp }}/lazymind-hosted/results/installed-agents.json
           if-no-files-found: warn
           retention-days: 7
+
+  workbuddy-desktop:
+    if: ${{ inputs.component == 'workbuddy-desktop' || inputs.component == 'all' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.platform == 'all' && '["macos-15-intel","windows-2025"]' || format('["{0}"]', inputs.platform)) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.11'
+          cache-dependency-path: local/lazymind-cli/go.sum
+      - name: Install official WorkBuddy and verify native desktop discovery
+        run: python scripts/agent_e2e_hosted.py verify-workbuddy-desktop

@@ -54,6 +54,15 @@ func runDSHNativeInstallFixture(args []string) error {
 }
 
 func TestDSHStandaloneCLIReconnectsWithSelectedRelease(t *testing.T) {
+	testDSHStandaloneCLIReconnect(t, false)
+}
+
+func TestDSHStandaloneCLIRecoversRetainedReleaseWithoutReinstalling(t *testing.T) {
+	testDSHStandaloneCLIReconnect(t, true)
+}
+
+func testDSHStandaloneCLIReconnect(t *testing.T, recoverLegacy bool) {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		if os.Getenv("CI") == "true" {
@@ -263,25 +272,24 @@ console.log(JSON.stringify({ build: connectorBuild, client_build: browser.connec
 	}
 
 	v2 := connectortest.WriteDSHPackage(t, self, "0.2.0+0000000000000002")
+	stage := "ordinary reconnect with v2 supplied"
+	if recoverLegacy {
+		// Older CLIs retained the native archive without recording a home selection.
+		if err := os.Remove(workflowconnector.RecordPath(home, workflowconnector.DSHHost)); err != nil {
+			t.Fatal(err)
+		}
+		stage = "legacy reconnect with v2 supplied"
+	}
 	status := call("connect")
-	requireInstalls("ordinary reconnect with v2 supplied", v1)
-	checkSelection("ordinary reconnect with v2 supplied", v1)
+	requireInstalls(stage, v1)
+	checkSelection(stage, v1)
 	if status.Connection.RuntimeState != "connected" || !status.Connection.ControlReady {
-		t.Fatalf("ordinary reconnect with v2 supplied lost v1 readiness: %+v", status.Connection)
+		t.Fatalf("%s lost v1 readiness: %+v", stage, status.Connection)
 	}
-	requirePairing("ordinary reconnect with v2 supplied")
-
-	// Older CLIs retained the native archive without recording a home selection.
-	if err := os.Remove(workflowconnector.RecordPath(home, workflowconnector.DSHHost)); err != nil {
-		t.Fatal(err)
+	requirePairing(stage)
+	if recoverLegacy {
+		return
 	}
-	status = call("connect")
-	requireInstalls("legacy reconnect with v2 supplied", v1)
-	checkSelection("legacy reconnect with v2 supplied", v1)
-	if status.Connection.RuntimeState != "connected" || !status.Connection.ControlReady {
-		t.Fatalf("legacy reconnect with v2 supplied lost v1 readiness: %+v", status.Connection)
-	}
-	requirePairing("legacy reconnect with v2 supplied")
 
 	if err := workflowconnector.Provision(t.Context(), home, self, true); err != nil {
 		t.Fatalf("explicit deployment did not accept v2: %v", err)

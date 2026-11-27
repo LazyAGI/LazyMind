@@ -222,3 +222,41 @@ func TestWindowsDesktopDiscoveryUsesUninstallerDirectory(t *testing.T) {
 		t.Fatalf("resolved=%q err=%v, want desktop %q", resolved, err, desktop)
 	}
 }
+
+func TestWindowsWorkBuddyDiscoveryUsesKnownExecutables(t *testing.T) {
+	spec := WorkBuddyDesktopApplication()
+	for _, test := range []struct {
+		display    string
+		executable string
+		directPath bool
+		want       bool
+	}{
+		{"WorkBuddy", "WorkBuddy.exe", false, true},
+		{"WorkBuddy CN", "WorkBuddy CN.exe", false, true},
+		{"WorkBuddy AI", "WorkBuddyAI.exe", false, true},
+		{"WorkBuddy AI 5.11.4", "WorkBuddyAI.exe", true, true},
+		{"WorkBuddy AI Toolkit", "WorkBuddyAIToolkit.exe", false, false},
+		{"WorkBuddy AI Toolkit", "WorkBuddyAIToolkit.exe", true, false},
+	} {
+		t.Run(test.display+"/"+test.executable+fmt.Sprint("/direct=", test.directPath), func(t *testing.T) {
+			root := t.TempDir()
+			executable := filepath.Join(root, test.executable)
+			if err := os.WriteFile(executable, []byte("discovery fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			location := root
+			if test.directPath {
+				location = executable
+			}
+			registered := []windowsInstalledApplication{{displayName: strings.ToLower(test.display), location: location}}
+			paths := windowsDesktopApplicationPaths(spec, registeredDesktopApplicationPaths(spec, registered))
+			if test.want {
+				if len(paths) != 1 || paths[0] != executable {
+					t.Fatalf("registered application discovery = %v; want %s", paths, executable)
+				}
+			} else if len(paths) != 0 {
+				t.Fatalf("accepted an unrelated executable from its similar registration: %v", paths)
+			}
+		})
+	}
+}

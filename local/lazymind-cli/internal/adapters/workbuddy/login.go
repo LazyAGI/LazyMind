@@ -45,13 +45,15 @@ func waitForLogin(ctx context.Context, path string, launch func(context.Context)
 	}
 }
 
+func desktopApplication() (string, error) {
+	spec := agentexec.WorkBuddyDesktopApplication()
+	spec.ExecutableNames = append([]string{"WorkBuddy"}, spec.ExecutableNames...)
+	spec.Protocols = []string{"workbuddy"}
+	return agentexec.FindDesktopApplication(spec)
+}
+
 func launchForLogin(ctx context.Context) error {
-	application, err := agentexec.FindDesktopApplication(agentexec.DesktopApplication{
-		BindingTarget:   agentexec.WorkBuddyDesktop,
-		ExecutableNames: []string{"WorkBuddy", "WorkBuddy.exe", "WorkBuddy CN.exe"},
-		Protocols:       []string{"workbuddy"},
-		DisplayNames:    []string{"WorkBuddy", "WorkBuddy CN"},
-	})
+	application, err := desktopApplication()
 	if err != nil {
 		return fmt.Errorf("locate WorkBuddy desktop: %w", err)
 	}

@@ -82,14 +82,7 @@ func findRuntime(configured, configDir string) (runtimeCommand, error) {
 	if value := strings.TrimSpace(connectorconfig.Value("LAZYMIND_WORKBUDDY_AGENT_BIN")); value != "" {
 		return configuredBinary(value)
 	}
-	application, err := agentexec.FindDesktopApplication(agentexec.DesktopApplication{
-		BindingTarget: agentexec.WorkBuddyDesktop,
-		ExecutableNames: []string{
-			"WorkBuddy", "WorkBuddy.exe",
-		},
-		Protocols:    []string{"workbuddy"},
-		DisplayNames: []string{"WorkBuddy"},
-	})
+	application, err := desktopApplication()
 	if err != nil {
 		return runtimeCommand{}, errors.New("WorkBuddy is not installed; install and open WorkBuddy once")
 	}

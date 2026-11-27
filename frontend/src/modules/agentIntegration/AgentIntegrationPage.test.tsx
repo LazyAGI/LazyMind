@@ -1531,43 +1531,87 @@ describe("AgentIntegrationPage", () => {
     expect(within(dialogs[1]).getByRole("img", { name: tr("imageAlt") })).toHaveAttribute("src", "/installation-guides/deepseek-harness/enable.png");
   });
 
-  const connectedDSH = {
-    agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
-    can_connect: true, can_disconnect: true,
-    connection: { mcp_configured: true, mcp_enabled: true, mcp_trusted: true, control_ready: true, runtime_state: "connected", lazymind_state: "connected" },
-    requirements: [{ id: "dsh_desktop", satisfied: true }],
-  };
+  const guidedAgents = [
+    {
+      agent: "codex",
+      guide: zhCN.agentIntegration.codexInstallGuide,
+      image: zhCN.agentIntegration.codexInstallGuide.enableImageAlt,
+      dismiss: zhCN.agentIntegration.codexInstallGuide.later,
+      prepare: zhCN.agentIntegration.codexInstallGuide.saveDescription,
+      confirm: zhCN.agentIntegration.codexInstallGuide.saveAndContinue,
+    },
+    {
+      agent: "workbuddy",
+      guide: zhCN.agentIntegration.workbuddyInstallGuide,
+      image: zhCN.agentIntegration.workbuddyInstallGuide.entryImageAlt,
+      dismiss: zhCN.agentIntegration.workbuddyInstallGuide.later,
+      prepare: zhCN.agentIntegration.workbuddyInstallGuide.saveDescription,
+      confirm: zhCN.agentIntegration.workbuddyInstallGuide.saveAndContinue,
+    },
+    {
+      agent: "deepseek-harness",
+      guide: zhCN.agentIntegration.dshInstallGuide,
+      image: zhCN.agentIntegration.dshInstallGuide.imageAlt,
+      dismiss: /关\s*闭/,
+      prepare: zhCN.agentIntegration.dshInstallGuide.prepareDescription,
+      confirm: zhCN.agentIntegration.dshInstallGuide.continue,
+    },
+  ] as const;
 
-  it("opens DSH instructions without reconnecting an enabled configuration", async () => {
-    const copy = zhCN.agentIntegration.dshInstallGuide;
-    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connectedDSH } });
+  it.each(guidedAgents)("opens installation help without reconnecting $agent", async ({ agent, guide, image, dismiss }) => {
+    const status = connectedInboundStatus(agent);
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
     render(<AgentIntegrationPage />);
-    const card = expandAgent("deepseek-harness");
-    fireEvent.click(await within(card).findByRole("button", { name: new RegExp(copy.entry) }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("img", { name: copy.imageAlt })).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: /关\s*闭/ }));
+    const card = expandAgent(agent);
+    const toggle = await within(card).findByRole("switch", { name: /使用 LazyMind/ });
+    expect(toggle).toBeChecked();
+    fireEvent.click(within(card).getByRole("button", { name: new RegExp(guide.entry) }));
+    const dialog = await screen.findByRole("dialog", { name: guide.title });
+    expect(within(dialog).getByRole("img", { name: image })).toBeInTheDocument();
+    expect(mocks.action).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: dismiss }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(mocks.action).not.toHaveBeenCalled();
-    expect(within(card).getByRole("switch")).toBeChecked();
+    expect(toggle).toBeChecked();
   });
 
-  it("reconnects an enabled DSH configuration after confirmation", async () => {
-    const copy = zhCN.agentIntegration.dshInstallGuide;
-    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connectedDSH } });
-    mocks.action.mockResolvedValue({ ok: true, data: { ...connectedDSH, connection: { ...connectedDSH.connection, control_ready: false, runtime_state: "waiting" } } });
+  it.each(guidedAgents)("reconnects $agent only after confirmation", async ({ agent, guide, prepare, confirm }) => {
+    const configured = connectedInboundStatus(agent);
+    const waiting = {
+      ...configured,
+      connection: { ...configured.connection, control_ready: false, runtime_state: "waiting" },
+    };
+    mocks.statuses.mockResolvedValue({ ok: true, data: {
+      [agent]: { ...waiting, issue: { code: "pairing_account_mismatch" } },
+    } });
+    mocks.action.mockResolvedValue({ ok: true, data: waiting });
     render(<AgentIntegrationPage />);
-    const card = expandAgent("deepseek-harness");
-    fireEvent.click(await within(card).findByRole("button", { name: copy.reconnect }));
-    const reconnect = await screen.findByRole("dialog");
-    expect(reconnect).toHaveTextContent(copy.prepareDescription);
+    const card = expandAgent(agent);
+    fireEvent.click(await within(card).findByRole("button", { name: guide.reconnect }));
+    const dialog = await screen.findByRole("dialog", { name: guide.title });
+    expect(dialog).toHaveTextContent(prepare);
     expect(mocks.action).not.toHaveBeenCalled();
-    expect(within(card).getByRole("switch")).toBeChecked();
-    fireEvent.click(within(reconnect).getByRole("button", { name: copy.continue }));
-    await within(reconnect).findByText(copy.installedTitle);
-    expect(mocks.action).toHaveBeenCalledTimes(1);
-    expect(mocks.action).toHaveBeenCalledWith("deepseek-harness", "connect");
-    expect(within(card).getByRole("switch")).toBeChecked();
+    const toggle = within(card).getByRole("switch", { name: /使用 LazyMind/ });
+    expect(toggle).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: confirm }));
+    await within(dialog).findByText(guide.installedTitle);
+    expect(mocks.action.mock.calls).toEqual([[agent, "connect"]]);
+    expect(toggle).toBeChecked();
+  });
+
+  it("offers an explicit reconnect while DSH is healthy", async () => {
+    const agent = "deepseek-harness";
+    const guide = zhCN.agentIntegration.dshInstallGuide;
+    const status = connectedInboundStatus(agent);
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent(agent);
+    const toggle = await within(card).findByRole("switch", { name: /使用 LazyMind/ });
+    await within(card).findByText("已连接");
+    fireEvent.click(within(card).getByRole("button", { name: guide.reconnect }));
+    expect(await screen.findByRole("dialog", { name: guide.title })).toHaveTextContent(guide.prepareDescription);
+    expect(mocks.action).not.toHaveBeenCalled();
+    expect(toggle).toBeChecked();
   });
 
   it("detects DSH from the Web profile and does not ask for a local path", async () => {

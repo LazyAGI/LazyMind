@@ -3,6 +3,7 @@ package workbuddyhost
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,37 @@ return my quitApplications("/Applications/WorkBuddy.app", {targetApp})
 			}
 			if strings.Contains(err.Error(), "private-profile-path") || strings.Contains(err.Error(), "secret-access-token") {
 				t.Fatalf("raw output leaked: %v", err)
+			}
+		})
+	}
+}
+
+func TestFindWorkBuddyDesktopBundles(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want bool
+	}{
+		{"WorkBuddy.app", true},
+		{"WorkBuddy CN.app", true},
+		{"WorkBuddy AI.app", true},
+		{"WorkBuddy AI Toolkit.app", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			applications := t.TempDir()
+			t.Setenv("LAZYMIND_HOME", t.TempDir())
+			t.Setenv("LAZYMIND_CONNECTOR_CONFIG", "")
+			t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", applications)
+			bundle := filepath.Join(applications, test.name)
+			if err := os.Mkdir(bundle, 0700); err != nil {
+				t.Fatal(err)
+			}
+			found, err := desktopApplication()
+			if test.want {
+				if err != nil || found != bundle {
+					t.Fatalf("automatic discovery = %q, %v; want %q", found, err, bundle)
+				}
+			} else if err == nil || found != "" {
+				t.Fatalf("automatic discovery accepted an unrelated app: %q, %v", found, err)
 			}
 		})
 	}

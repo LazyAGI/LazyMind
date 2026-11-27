@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -287,11 +288,27 @@ const timer = setInterval(() => {
 func TestInstalledHeartbeatCanUseCanonicalPath(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "lazymind")
 	connectortest.WriteMinimalPackage(t, executable, "codex")
-	realHome := t.TempDir()
-	alias := filepath.Join(t.TempDir(), "alias")
-	if err := os.Symlink(realHome, alias); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
+	realHome := filepath.Join(t.TempDir(), "real home")
+	if err := os.Mkdir(realHome, 0700); err != nil {
+		t.Fatal(err)
 	}
+	alias := filepath.Join(t.TempDir(), "Connector alias")
+	aliasKind := "directory symlink"
+	if runtime.GOOS == "windows" {
+		// Directory junctions do not require the Windows symlink privilege.
+		aliasKind = "directory junction"
+		cmd := exec.CommandContext(t.Context(), "cmd.exe", "/d", "/c", "mklink", "/J", alias, realHome)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("create Windows directory junction: %v (%s)", err, output)
+		}
+	} else if err := os.Symlink(realHome, alias); err != nil {
+		t.Fatalf("create directory symlink: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Remove(alias); err != nil {
+			t.Errorf("remove Connector alias: %v", err)
+		}
+	})
 	if err := workflowconnector.Ensure(t.Context(), alias, executable, "codex"); err != nil {
 		t.Fatal(err)
 	}
@@ -303,6 +320,9 @@ func TestInstalledHeartbeatCanUseCanonicalPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if filepath.Clean(canonical) == filepath.Clean(installed.EntryPath()) {
+		t.Fatalf("canonical entry did not resolve through the %s: %q", aliasKind, canonical)
+	}
 	heartbeat := workflowconnector.Runtime{
 		ConnectorEntry: canonical, ConnectorVersion: installed.Version, ConnectorRevision: installed.Release,
 	}
@@ -313,6 +333,7 @@ func TestInstalledHeartbeatCanUseCanonicalPath(t *testing.T) {
 	if installed.Matches(heartbeat) {
 		t.Fatal("heartbeat reported a different file")
 	}
+	t.Logf("accepted the selected entry through a %s and rejected a different module", aliasKind)
 }
 
 func TestProvisionIsolatesDamagedConnectorPackages(t *testing.T) {

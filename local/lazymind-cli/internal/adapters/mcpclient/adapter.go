@@ -525,10 +525,9 @@ func requirements(kind Kind) ([]agentintegration.Requirement, error) {
 			StatePaths: []string{userPath(".cursor")},
 		}, "cursor_desktop", "Cursor Desktop")
 	case WorkBuddy:
-		return desktopRequirements(agentexec.DesktopApplication{
-			BindingTarget: agentexec.WorkBuddyDesktop, ExecutableNames: []string{"WorkBuddy.exe", "WorkBuddy CN.exe"},
-			DisplayNames: []string{"WorkBuddy", "WorkBuddy CN"}, StatePaths: []string{userPath(".workbuddy")},
-		}, "workbuddy_desktop", "WorkBuddy")
+		application := agentexec.WorkBuddyDesktopApplication()
+		application.StatePaths = []string{userPath(".workbuddy")}
+		return desktopRequirements(application, "workbuddy_desktop", "WorkBuddy")
 	case Raccoon:
 		return desktopRequirements(agentexec.DesktopApplication{
 			BindingTarget:   agentexec.RaccoonDesktop,

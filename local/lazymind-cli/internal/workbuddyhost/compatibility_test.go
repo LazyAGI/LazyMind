@@ -3,10 +3,13 @@ package workbuddyhost
 import (
 	"encoding/binary"
 	"encoding/json"
-	"lazymind/agentconnector/internal/agentexec"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+
+	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 func TestVersionMinimum(t *testing.T) {
@@ -63,4 +66,43 @@ func TestDesktopManifestOnMacAndWindowsLayouts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The expected path is an assertion only. Discovery still uses the platform's
+// normal installation registrations or standard Applications directories.
+func TestInstalledWorkBuddyDesktopDiscovery(t *testing.T) {
+	expected := os.Getenv("LAZYMIND_TEST_WORKBUDDY_DESKTOP")
+	if expected == "" {
+		t.Skip("set LAZYMIND_TEST_WORKBUDDY_DESKTOP to the expected installed WorkBuddy desktop path")
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Fatal("installed WorkBuddy desktop discovery requires macOS or Windows")
+	}
+	if !filepath.IsAbs(expected) {
+		t.Fatalf("expected desktop installation must be an absolute path: %q", expected)
+	}
+	want, err := os.Stat(expected)
+	if err != nil {
+		t.Fatalf("read installed WorkBuddy at %s: %v", expected, err)
+	}
+	t.Setenv("LAZYMIND_HOME", t.TempDir())
+	t.Setenv(connectorconfig.EnvironmentKey, "")
+	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", "")
+
+	application, err := desktopApplication()
+	if err != nil {
+		t.Fatalf("discover installed WorkBuddy: %v", err)
+	}
+	found, err := os.Stat(application)
+	if err != nil || !os.SameFile(found, want) {
+		t.Fatalf("discovered WorkBuddy at %q, wanted installed copy at %q: %v", application, expected, err)
+	}
+	version := CurrentVersion()
+	if version == "" {
+		t.Fatalf("could not read the installed WorkBuddy desktop manifest at %s", application)
+	}
+	if expectedVersion := os.Getenv("LAZYMIND_TEST_WORKBUDDY_DESKTOP_VERSION"); expectedVersion != "" && version != expectedVersion {
+		t.Fatalf("installed WorkBuddy desktop manifest version = %q, want %q", version, expectedVersion)
+	}
+	t.Logf("automatically discovered installed WorkBuddy at %s; desktop manifest version %s", application, version)
 }
