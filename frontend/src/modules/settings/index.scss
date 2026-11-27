@@ -392,21 +392,20 @@
 .settings-entry-defaults-executor-control { min-width: 0; }
 .settings-entry-defaults-select { width: 100%; }
 .settings-entry-defaults-select .ant-select-selector { min-height: 38px; align-items: center; border-color: #d7e2ef !important; border-radius: 8px !important; }
+.settings-entry-defaults-option-reason { display: block; color: #697587; font-size: 12px; white-space: normal; }
 .settings-entry-defaults-connect { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; padding: 8px 10px 2px; border-top: 1px solid #eef2f7; color: #718096; font-size: 12px; }
 .settings-entry-defaults-unavailable { display: flex; align-items: center; gap: 5px; margin-top: 5px; padding: 0; border: 0; color: #d97706; background: none; cursor: pointer; font-size: 12px; }
 .settings-entry-defaults-loading { padding: 22px 20px; }
 .settings-entry-defaults-load-error { margin: 0 0 12px; }
 .settings-entry-defaults-inline-alert { margin: 0 0 8px; }
-.settings-entry-defaults-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding-top: 16px; }
-.settings-entry-defaults-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 16px;
-}
-.settings-entry-defaults-save-state { min-width: 112px; color: #64748b; font-size: 12px; text-align: right; }
+.settings-entry-defaults-row p.settings-entry-defaults-mode-description { margin-top: 8px; }
+.settings-entry-defaults-save-state { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin-top: 6px; color: #64748b; font-size: 12px; }
 .settings-entry-defaults-save-state.is-saved { color: #158354; }
-.settings-entry-defaults-footer .ant-btn-primary { min-width: 96px; font-weight: 650; }
+.settings-entry-defaults-save-state.is-error { color: #c24134; }
+.settings-entry-defaults-notice { display: flex; align-items: flex-start; gap: 10px; padding: 18px 4px 0; }
+.settings-entry-defaults-notice > .anticon { flex: 0 0 auto; margin-top: 3px; color: #a97924; font-size: 16px; }
+.settings-entry-defaults-notice strong { color: #526177; font-size: 13px; font-weight: 500; }
+.settings-entry-defaults-notice p { margin: 4px 0 0; color: #718096; font-size: 12px; line-height: 1.8; }
 .settings-integrated-surface { min-width: 0; }
 .settings-integrated-surface.is-assistants .agent-integration-page {
   min-height: 0;
@@ -1509,7 +1508,7 @@
   .settings-entry-defaults-row > .settings-ref-switch { justify-self: start; }
   .settings-entry-defaults-choice { overflow-x: auto; padding-bottom: 2px; }
   .settings-entry-defaults-choice .ant-radio-button-wrapper { min-width: 68px; }
-  .settings-entry-defaults-actions { flex-wrap: wrap; }
+  .settings-entry-defaults-save-state { justify-content: flex-start; }
   .settings-knowledge-header { display: block; }
   .settings-knowledge-group-head { grid-template-columns: 40px minmax(0, 1fr); }
   .settings-knowledge-group-head > span:not(.ant-tag) { width: 40px; height: 40px; }

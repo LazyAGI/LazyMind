@@ -97,6 +97,19 @@ export function irImageCandidates(document: WriterDocument): WriterImageCandidat
   return candidates;
 }
 
+// Match original block identities before deriving occurrence numbers in the new order.
+export function movedIRImageLayouts(before: WriterDocument, after: WriterDocument, mergedId?: string): WriterDocument {
+  const configured = imageGroups(before.metadata?.image_groups);
+  if (!configured.length && !mergedId) return after;
+  const old = irImageCandidates(before);
+  const groups = irImageCandidates(after).flatMap(candidate => {
+    const previous = old.find(entry => candidate.nodeIds!.filter(id => entry.nodeIds!.includes(id)).length >= 2);
+    const layout = mergedId && candidate.nodeIds!.includes(mergedId) ? 'sliding' : previous && imageGroupLayout(configured, previous.images);
+    return layout ? [{ images: candidate.images, layout }] : [];
+  });
+  return { ...after, metadata: { ...after.metadata, image_groups: groups } };
+}
+
 export function markdownImageCandidates(markdown: string): WriterImageCandidate[] {
   const html = markdownParser.render(writerMarkdownForEditing(stripImageGroupMarkdown(markdown)));
   const body = new DOMParser().parseFromString(html, 'text/html').body;

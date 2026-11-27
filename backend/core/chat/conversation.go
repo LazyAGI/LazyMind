@@ -2555,11 +2555,11 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	q = q.Where("conversations.id IN (?)", sourceIDs)
 	assistantFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistant")))
 	if assistantFilter != "" {
-		if normalized, valid := normalizeChatExecutor(assistantFilter); !valid || normalized != assistantFilter {
-			common.ReplyErr(w, "assistant must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest)
+		sourceIDs, err := common.ConversationSourceIDs(db, userID, assistantFilter)
+		if err != nil || strings.Contains(assistantFilter, ",") {
+			common.ReplyErr(w, "assistant must be a supported conversation source", http.StatusBadRequest)
 			return
 		}
-		sourceIDs, _ := common.ConversationSourceIDs(db, userID, assistantFilter)
 		q = q.Where("conversations.id IN (?)", sourceIDs)
 	}
 	if keyword != "" {
@@ -2758,12 +2758,13 @@ func conversationSources(ctx context.Context, db *gorm.DB, owner string, convers
 		Select("bindings.conversation_id, bindings.provider, sessions.project_key, sessions.project_name").
 		Joins("LEFT JOIN external_agent_sessions AS sessions ON sessions.owner_user_id = bindings.created_by_user_id AND sessions.provider = bindings.provider AND sessions.host_id = bindings.host_id AND sessions.provider_thread_id = bindings.provider_thread_id AND sessions.active = ?", true).
 		Where("bindings.created_by_user_id = ? AND bindings.conversation_id IN ?", owner, conversationIDs).
+		Where("(bindings.provider <> ? OR bindings.managed_by_lazymind = ?)", ChatExecutorDSH, false).
 		Order("bindings.created_at ASC, bindings.id ASC").
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	for _, row := range rows {
-		if !isExternalChatProvider(row.Provider) {
+		if !common.ExternalConversationSource(row.Provider) {
 			continue
 		}
 		if values[row.ConversationID].Assistant == ChatExecutorLazyMind {

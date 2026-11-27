@@ -14,7 +14,10 @@ import (
 func TestMarkdownSourcePreviewsScopeIdenticalRelativeImagePaths(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
-	db := orm.MigrateTestDB(t, &orm.DocumentPublicationOperation{}, &orm.DocumentPublicationBinding{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowSlotRevision{})
+	db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.DocumentPublicationOperation{}, &orm.DocumentPublicationBinding{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowSlotRevision{})
+	if err := db.Create(&orm.WorkflowSession{ID: "session", StateVersion: 7}).Error; err != nil {
+		t.Fatal(err)
+	}
 	assets := map[string]any{}
 	for index := range 2 {
 		filename := filepath.Join(root, fmt.Sprintf("image-%d.png", index))
@@ -40,7 +43,10 @@ func TestMarkdownSourcePreviewsScopeIdenticalRelativeImagePaths(t *testing.T) {
 	}
 	for _, index := range []*int{&first, &second} {
 		selected, err := loadSelectedWriterArtifact(context.Background(), db.DB, "session", "source_materials", index)
-		if err != nil || selected.Revision.ListIndex == nil || *selected.Revision.ListIndex != *index {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selected.Revision.SelectionVersion != 7 || selected.Revision.ListIndex == nil || *selected.Revision.ListIndex != *index {
 			t.Fatalf("selected wrong document: %v %+v", err, selected)
 		}
 	}

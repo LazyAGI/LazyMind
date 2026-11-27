@@ -66,7 +66,9 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   parentSignatureRef.current = parentSignature;
   const [restoredSelection, setRestoredSelection] = useState<{ superseded: string[]; slot: SlotRevision }>();
   const rollbackPrevious = useRef<string[]>([]);
-  const slot = restoredSelection?.superseded.includes(parentSignature) ? restoredSelection.slot : incomingSlot;
+  const slot = restoredSelection?.superseded.includes(parentSignature)
+    && (incomingSlot.selection_version ?? 0) <= (restoredSelection.slot.selection_version ?? 0)
+    ? restoredSelection.slot : incomingSlot;
   useEffect(() => {
     const selected = restoredSelection?.slot;
     if (selected && parentSignature === JSON.stringify([selected.artifact_id, selected.revision, selected.draft_version])) {
@@ -98,6 +100,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const dirty = useRef(false);
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const seen = useRef('');
+  const selectionVersion = useRef(slot.selection_version ?? 0);
   const retainedPublicationSource = useRef<unknown>();
   const incomingValue = useRef(initial.value);
   incomingValue.current = initial.value;
@@ -151,6 +154,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const availability = useWriterProviderAvailability(providers.map(provider => provider.id));
   const previewSource = useRef<Baseline>();
 
+  const writerCheckpoints = !paperDocument && ['draft_document', 'flat_draft_document'].includes(slot.slot_id);
   const writerSlot = (['source_document', 'source_materials', 'outline_document', 'flat_draft_document', 'draft_document'] as const).find(id => id === slot.slot_id);
   const sourceMaterial = useWorkflowStore(state => {
     const session = Object.values(state.sessionByConversation).find(item => item?.session_id === sessionId);
@@ -166,9 +170,12 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       .filter(item => item.selected && ['media_assets', 'resolved_media_assets', 'flat_resolved_media_assets', 'target_document'].includes(item.slot_id))
       .map(item => [item.slot_id, item.artifact_id, item.revision, item.draft_version]));
   });
-  const mediaKey = JSON.stringify([sessionId, slot.artifact_id, slot.revision, slot.draft_version, mediaIndex, mediaSlot, sourceMaterial?.artifact_id, sourceMaterial?.revision, mediaRevision]);
+  // Keep draft previews stable, but never reuse aliases from another source snapshot.
+  const mediaKey = JSON.stringify([editingKey, mediaSlot, mediaIndex,
+    mediaSlot === 'source_materials' ? sourceMaterial?.artifact_id ?? slot.artifact_id : undefined,
+    mediaSlot === 'source_materials' ? sourceMaterial?.revision ?? slot.revision : undefined]);
   const [media, setMedia] = useState<{ key: string; urls?: Record<string, string> }>();
-  const mediaUrls = boundMediaUrls ?? (media?.key === mediaKey || retainedPublicationSource.current !== undefined ? media?.urls : undefined);
+  const mediaUrls = boundMediaUrls ?? (media?.key === mediaKey && mediaRevision !== undefined ? media?.urls : undefined);
   const latestMediaUrls = useRef(mediaUrls);
   latestMediaUrls.current = mediaUrls;
   const resolveImageUrl = useCallback(async (url: string) => {
@@ -196,10 +203,8 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       ? WorkflowSessionApi().renderWriterDocument(sessionId, mediaSlot, options, mediaIndex ?? 0)
       : WorkflowSessionApi().renderWriterDocument(sessionId, mediaSlot, options);
     void request.then(response => {
-      if (!controller.signal.aborted) setMedia({ key: mediaKey, urls: response.data.code === 0 ? response.data.data.media_urls : undefined });
-    }).catch(() => {
-      if (!controller.signal.aborted) setMedia({ key: mediaKey });
-    });
+      if (!controller.signal.aborted && response.data.code === 0) setMedia({ key: mediaKey, urls: response.data.data.media_urls });
+    }).catch(() => { /* Keep the current preview if a media refresh fails. */ });
     return () => controller.abort();
   }, [descriptor.representation, mediaSlot, mediaRevision, mediaIndex, sessionId, mediaKey]);
 
@@ -207,7 +212,12 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
 
   useEffect(() => {
     const signature = JSON.stringify([slot.artifact_id, slot.revision, slot.draft_version]);
-    if (seen.current === signature) return;
+    const clock = slot.selection_version;
+    if ((clock ?? 0) < selectionVersion.current) return;
+    if (seen.current === signature) {
+      selectionVersion.current = clock ?? selectionVersion.current;
+      return;
+    }
     let canceled = false;
     async function load() {
       let content = incomingValue.current;
@@ -216,10 +226,13 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       }
       if (canceled) return;
       content = paperValue(content);
-      seen.current = signature;
       const next = { id: slot.artifact_id!, revision: slot.revision, draft: slot.draft_version, value: content };
-      // A delayed parent refresh must not undo a save or publication we accepted.
-      if (next.revision < latest.current.revision || (next.revision === latest.current.revision && (next.draft ?? 0) < (latest.current.draft ?? 0))) return;
+      // Undo may select an older content revision at a newer session clock.
+      const previous = external.current;
+      if ((clock ?? 0) < selectionVersion.current || (clock === undefined && next.revision < previous.revision)) return;
+      if (next.id === previous.id && (next.draft ?? 0) < (previous.draft ?? 0)) return;
+      selectionVersion.current = clock ?? selectionVersion.current;
+      seen.current = signature;
       external.current = next;
       if (!dirty.current) { latest.current = next; draftContent.current = content; setCurrentSignature(signature); }
       // A publication refresh must not replace the editor holding newer local edits.
@@ -229,7 +242,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     }
     void load().catch(() => { if (!canceled) setError(String(i18n.t('chat.writerIR.saveFailed'))); });
     return () => { canceled = true; };
-  }, [slot.artifact_id, slot.revision, slot.draft_version, sourceUrl, descriptor.representation]);
+  }, [slot.artifact_id, slot.revision, slot.draft_version, slot.selection_version, sourceUrl, descriptor.representation]);
 
   useEffect(() => {
     if (!descriptor.capabilities.includes('publish_document') || !writable) return;
@@ -240,11 +253,15 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     return () => { canceled = true; };
   }, [descriptor.capabilities, writable, providerRefresh]);
 
-  const accept = useCallback((id: string, revision: number, draft: number | undefined, content: unknown, submitted: unknown = draftContent.current) => {
+  const accept = useCallback((id: string, revision: number, draft: number | undefined, content: unknown, clock?: number, submitted: unknown = draftContent.current) => {
+    const signature = JSON.stringify([id, revision, draft]);
+    if ((clock ?? 0) < selectionVersion.current && seen.current !== signature) throw rewriteConflict('DRAFT_VERSION_CONFLICT');
+    selectionVersion.current = Math.max(clock ?? 0, selectionVersion.current);
+    seen.current = signature;
     const newerEdits = JSON.stringify(draftContent.current) !== JSON.stringify(submitted);
     const next = { id, revision, draft, value: content };
     latest.current = next; external.current = next;
-    setCurrentSignature(JSON.stringify([id, revision, draft]));
+    setCurrentSignature(signature);
     if (!newerEdits) { dirty.current = false; draftContent.current = content; }
     setHasLocalChanges(dirty.current);
     retainedPublicationSource.current = newerEdits && typeof submitted !== typeof content ? submitted : undefined;
@@ -276,11 +293,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       if (!selected?.artifact_id || !selected.document) throw new Error('selected document unavailable');
       const content = paperValue(await readDocumentValue(selected.artifact_value, selected.document.representation));
       // Replace the save baseline as well as the visible text, before editing resumes.
-      dirty.current = false;
-      draftContent.current = content;
-      retainedPublicationSource.current = undefined;
-      accept(selected.artifact_id, selected.revision, selected.draft_version, content);
-      seen.current = JSON.stringify([selected.artifact_id, selected.revision, selected.draft_version]);
+      accept(selected.artifact_id, selected.revision, selected.draft_version, content, selected.selection_version);
       setRestoredSelection({ superseded: [...rollbackPrevious.current, parentSignatureRef.current], slot: selected });
       setPreview(null); setSelection(null); setError(''); setErrorAction(null);
       setRestoring(false);
@@ -301,7 +314,8 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       JSON.stringify([latest.current.id, latest.current.revision, latest.current.draft])];
     setRestoring(true);
     try {
-      await useWorkflowStore.getState().rollbackSlotItem(sessionId, slot.slot_id, slot.list_index ?? -1, revision);
+      const restored = await useWorkflowStore.getState().rollbackSlotItem(sessionId, slot.slot_id, slot.list_index ?? -1, revision);
+      revision = typeof restored === 'number' ? restored : revision;
     } catch (error) {
       setRestoring(false);
       throw error;
@@ -320,8 +334,9 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       numbering_update: numbering, content_type: ir ? 'json' : 'text/markdown', value: artifact, command_id: key(),
     }, { silentError: true } as never);
     const result = response.data.result;
-    if (!response.data.ok || !result?.artifact_id || typeof result.revision !== 'number' || typeof result.draft_version !== 'number') throw new Error('invalid save response');
-    accept(result.artifact_id, result.revision, result.draft_version, unwrap(result.value ?? artifact), content);
+    if (!response.data.ok || !result?.artifact_id || typeof result.revision !== 'number' || (result.draft_version === undefined && result.revision > base)) throw new Error('invalid save response');
+    const savedContent = await readDocumentValue(result.value ?? artifact, ir ? 'ir' : 'markdown');
+    accept(result.artifact_id, result.revision, result.draft_version, savedContent, result.selection_version, content);
     onRefresh?.();
     return latest.current;
   }, [accept, onRefresh]);
@@ -389,7 +404,11 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     const result = response.data.data;
     const fetched = await WorkflowSessionApi().getDocumentArtifact(result.artifact_id);
     const artifact = fetched.data.result;
-    accept(artifact.artifact_id, artifact.revision, artifact.draft_version, unwrap(artifact.value));
+    if (artifact.selected === false) {
+      onRefresh?.();
+      throw rewriteConflict('SELECTION_STALE');
+    }
+    accept(artifact.artifact_id, artifact.revision, artifact.draft_version, unwrap(artifact.value), artifact.selection_version);
     setPreview(null); onRefresh?.(); return artifact.revision;
   };
   const canRewrite = writable && descriptor.capabilities.includes('rewrite_selection') && !selection && !preview;
@@ -458,6 +477,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     listIndex={slot.list_index ?? -1} revisionCount={revisionCount ?? version} currentRevision={version}
     currentVersionNumber={slot.version_number} currentValue={value} currentChangeSource={slot.change_source}
     previewKind={writerSlot && !paperDocument ? 'writer' : undefined} resolveImageUrl={resolveImageUrl}
+    beforeOpen={writerCheckpoints ? () => flushEditor.current?.() ?? Promise.resolve(true) : undefined}
     readCurrentValue={() => getSnapshot?.(editingKey) ?? draftContent.current} contentType='text'
     readOnly={!writable} triggerLabel={String(i18n.t('chat.slots.versionHistory'))} onRollback={rollback} /> : undefined;
   return <SlotEditingContext.Provider value={editorContext}><div className={`workflow-slot workflow-slot--artifact${paperDocument ? ' workflow-slot--paper-document' : ''}`}>
@@ -468,7 +488,8 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       if (src) setPreviewImage({ key: editingKey, src, alt: image.alt });
     }}>
     {representation === 'markdown' && typeof value === 'string'
-      ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
+      ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} writerCheckpoints={writerCheckpoints} initialWorkingDraft={slot.change_source === 'human' && writerCheckpoints} allowMultipleParagraphs
+        disableImageSettingsButton={Boolean(writerSlot) && !paperDocument}
         numberingDocument={typeof currentNumbering?.document === 'string' ? currentNumbering.document : undefined}
         resolveImageUrl={resolveImageUrl} onDownloadImage={imageDownloads.downloadImage} onContentChange={edit} numbering={numbering} toolbarActions={versionHistory}
         onRewriteSelection={canRewrite ? (picked) => { if (picked.supported) setSelection({ type: 'markdown', selected_text: picked.text, selectedText: picked.text, paragraph: picked.paragraph, paragraphs: picked.paragraphSelections?.map(item => item.paragraph), startOffset: picked.startOffset, sourceRange: picked.sourceRange, sourceRanges: picked.sourceRanges, anchor: picked.anchor }); } : undefined}
@@ -477,7 +498,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           sessionId, slotId: slot.slot_id, listIndex: slot.list_index ?? -1, preview: preview.value, applyPreview } : null}
         onRewritePreviewApplied={() => setPreview(null)} onRewritePreviewRejected={() => setPreview(null)}
         onSave={async (text, revision, mode, numbering) => { const saved = await save(text, revision, mode, numbering); return { markdown: String(saved.value), revision: saved.revision }; }} />
-      : isWriterDocument(value) ? <WriterIRControl document={value as WriterDocument} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
+      : isWriterDocument(value) ? <WriterIRControl document={value as WriterDocument} sourceRevision={version} editingKey={editingKey} readOnly={!writable} writerCheckpoints={writerCheckpoints} initialWorkingDraft={slot.change_source === 'human' && writerCheckpoints} allowMultipleParagraphs
         onDocumentChange={edit} numbering={numbering} toolbarActions={versionHistory}
         onRewriteSelection={canRewrite ? (picked) => setSelection({ type: 'ir', node_id: picked.nodeId, nodeSelections: picked.nodeSelections, selectedText: picked.selectedText, anchor: picked.anchor }) : undefined}
         rewriteDialogOpen={selection !== null}
@@ -532,7 +553,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           if (!keepVertical) return undefined;
           const current = draftContent.current;
           if (typeof current !== 'string' && !isWriterDocument(current)) throw new Error(String(i18n.t('chat.writerIR.saveFailed')));
-          await save(keepVerticalImageGroups(current, pending), latest.current.revision, 'draft');
+          await save(keepVerticalImageGroups(current, pending), latest.current.revision, writerCheckpoints ? 'checkpoint' : 'draft');
           pending.forEach(group => imageGroupReminders.current.add(imageGroupKey(group.images)));
         }
         return { ...latest.current };

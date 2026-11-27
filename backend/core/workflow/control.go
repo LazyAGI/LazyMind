@@ -462,7 +462,7 @@ func confirmWorkflowReview(ctx context.Context, tx *gorm.DB, session *orm.Workfl
 		return err
 	}
 	if command.PreferenceScope != "" {
-		if _, err := saveWorkflowApprovalPreference(tx, owner, session.WorkflowID, review.StepID, command.PreferenceScope); err != nil {
+		if err := saveApprovalContinuationPreference(tx, session, review.StepID, command.PreferenceScope); err != nil {
 			return err
 		}
 	}
@@ -576,6 +576,9 @@ func (h WorkflowControlHandler) Read(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		dto := toSessionDTO(session)
+		if err := enrichApprovalPreference(tx, session, &dto); err != nil {
+			return err
+		}
 		revisions, err := LoadDisplaySlots(r.Context(), tx, session.ID)
 		if err != nil {
 			return err

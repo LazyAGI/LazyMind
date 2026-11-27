@@ -12,6 +12,8 @@ import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingCont
 import { WorkflowPanel } from './index';
 import { controlActions, externalPanelAction, externalContinuationStep, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
+import { applyWorkflowApprovalSettings } from '@/modules/chat/utils/workflowApprovalSettings';
+import { flushWorkflowEdits } from '@/modules/chat/utils/workflowEditFlush';
 import { ArtifactPreviewContext, useArtifactPreviewController } from '../ArtifactPreview/context';
 
 setupAntdStaticCleanup();
@@ -80,7 +82,8 @@ vi.mock('@/modules/user/uiPreferencesApi', () => ({
   fetchUserUiPreferences: async () => ({ workflow_trust_notice_dismissed: false }),
   USER_UI_PREFERENCES_CHANGED_EVENT: 'test:preferences-changed',
 }));
-vi.mock('@/components/StateGraphModal', () => ({ default: () => null }));
+vi.mock('@/components/StateGraphModal', () => ({ default: ({ open, inline, onClose }: any) => open
+  ? <div role={inline ? 'region' : 'dialog'} aria-label='测试执行图'>{inline ? '内嵌执行图' : <button onClick={onClose}>关闭执行图窗口</button>}</div> : null }));
 vi.mock('./actions/WorkflowTabActions', () => ({ WorkflowTabActions: () => null }));
 vi.mock('./ppt/SlideThumb', () => ({ SlideThumb: () => null }));
 vi.mock('./SlotComponents', () => ({
@@ -165,6 +168,23 @@ async function waitForCompletedContinueButton() {
 }
 
 describe('shared workflow compact layout', () => {
+  it('shows a failed native image step instead of waiting for a result', async () => {
+    fixture.ui = { name: 'AI 图片生成', tabs: [{ id: 'generate_image', step_id: 'generate_image', label: '生成',
+      layout: 'composite', slots: [{ id: 'image', label: '图片', type: 'image' }] }] };
+    fixture.session = { ...fixture.session, status: 'failed', current_step_id: 'generate_image', slots: [],
+      steps: [{ id: 'attempt', session_id: 'layout-test', step_id: 'generate_image', task_id: 'image-task',
+        attempt: 1, status: 'failed', created_at: '', updated_at: '' }],
+      projection: { ...fixture.session.projection!, current: ['generate_image'], nodes: { generate_image: {
+        execution: 'failed', validity: 'effective', branch: 'normal', requires_approval: false,
+        reachability: 'reachable', readiness: 'not_applicable',
+      } }, display: { status: 'failed', reason: 'execution_failed', approval_step_id: '' } },
+    };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const panel = await screen.findByRole('tabpanel', { name: /生成/ });
+    expect(within(panel).getByText('步骤执行失败')).toBeVisible();
+    expect(within(panel).queryByText('正在等待步骤结果…')).not.toBeInTheDocument();
+  });
+
   it.each(['missing', 'stale', 'composite', 'hidden'])(
     'uses the saved step name for rollback with a %s result tab and targets the stable ID', async (tabKind) => {
       const stepId = 'step_dfb9f0';
@@ -204,7 +224,7 @@ describe('shared workflow compact layout', () => {
 
     const panel = await screen.findByRole('tabpanel', { name: /可选步骤/ });
     expect(within(panel).getByText('本次流程的分支决策跳过了此步骤，无需等待执行结果。')).toBeVisible();
-    expect(screen.getByRole('button', { name: '自由浏览' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '自由浏览' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it.each(['pruned', 'bypassed'])('explains a %s step in native Chat without waiting for nonexistent output', async branch => {
@@ -701,6 +721,27 @@ describe('shared workflow compact layout', () => {
     },
   );
 
+  it('switches artifacts to an inline graph and opens its separate window without remounting artifacts', async () => {
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const entry = await screen.findByRole('button', { name: /执行图/ });
+    await screen.findByRole('tab', { name: '成稿' });
+    const mounts = fixture.onSlotMount.mock.calls.length;
+    const body = document.querySelector('.workflow-panel__body')!;
+    fireEvent.click(entry);
+    expect(body).not.toBeVisible();
+    expect(screen.getByRole('region', { name: '测试执行图' })).toBeVisible();
+    const back = screen.getByRole('button', { name: /返回产物/ });
+    const popout = screen.getByRole('button', { name: '在独立窗口查看执行图' });
+    expect(back.compareDocumentPosition(popout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(popout);
+    expect(screen.getByRole('dialog', { name: '测试执行图' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '关闭执行图窗口' }));
+    expect(screen.getByRole('region', { name: '测试执行图' })).toBeVisible();
+    fireEvent.click(back);
+    expect(body).toBeVisible();
+    expect(fixture.onSlotMount).toHaveBeenCalledTimes(mounts);
+  });
+
   it.each(['completed', 'failed'] as const)('binds the %s rerun to Chat and still saves before rerunning', async (status) => {
     fixture.session.status = status;
     fixture.session.projection!.display!.status = status;
@@ -775,7 +816,8 @@ describe('shared workflow compact layout', () => {
     const execute = vi.fn(async () => {});
     render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={{ execute }} />);
     await screen.findByRole('tab', { name: /^成稿/ });
-    fireEvent.click(screen.getByRole('button', { name: '自由浏览' }));
+    fireEvent.click(screen.getByRole('button', { name: '跟随进度' }));
+    expect(screen.getByRole('button', { name: '自由浏览' })).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(screen.getByRole('tab', { name: /^成稿/ }));
     expect(execute).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '重新执行' }));
@@ -804,6 +846,19 @@ describe('shared workflow compact layout', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('blocks approval from outside the panel when its editor cannot save and unregisters on unmount', async () => {
+    fixture.flush.mockResolvedValue(false);
+    const send = vi.fn();
+    const view = render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('button', { name: '发布' });
+    await expect(applyWorkflowApprovalSettings(fixture.session, 'auto', false, send)).rejects.toThrow('编辑内容尚未保存成功');
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    view.unmount();
+    expect(await flushWorkflowEdits(fixture.session.session_id)).toBe(true);
+    expect(fixture.flush).toHaveBeenCalledOnce();
+  });
+
   it('keeps shortcuts available for completed workflows without document footer actions', async () => {
     fixture.session.slots = [];
     render(<WorkflowPanel conversationId='layout-test' />);
@@ -821,8 +876,12 @@ describe('shared workflow compact layout', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: /用户意图/ }));
     const dialog = screen.getByRole('dialog', { name: '用户意图' });
     expect(dialog).toHaveTextContent('保留原文和图片');
+    // The panel clips its contents even when no artifacts have given it height.
+    expect(trigger.closest('.workflow-panel')).not.toContainElement(dialog);
+    expect(trigger).not.toHaveAttribute('title');
     fireEvent.keyDown(within(dialog).getByRole('button', { name: '关闭' }), { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Ant Design waits for the exit motion (1s deadline without browser CSS events).
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '用户意图' })).not.toBeInTheDocument(), { timeout: 2000 });
     expect(trigger).toHaveFocus();
   });
 
@@ -1139,7 +1198,7 @@ describe('shared workflow compact layout', () => {
     expect(stopping).toBeDisabled();
     fireEvent.click(stopping);
     expect(fixture.pause).toHaveBeenCalledOnce();
-    expect(screen.getByRole('button', { name: String(i18n.t('chat.workflowStatusAria', { status: labels.running })) })).toBeVisible();
+    expect(screen.getByLabelText(String(i18n.t('chat.workflowStatusAria', { status: labels.running })))).toBeVisible();
     expect(screen.getByText(new RegExp(String(i18n.t('chat.workflowStoppingHint'))))).toBeVisible();
     expect(screen.queryByRole('button', { name: labels.resume })).not.toBeInTheDocument();
 
@@ -1156,7 +1215,7 @@ describe('shared workflow compact layout', () => {
     } };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     expect(screen.getByRole('button', { name: labels.resume })).toBeEnabled();
-    expect(screen.getByRole('button', { name: String(i18n.t('chat.workflowStatusAria', { status: labels.paused })) })).toBeVisible();
+    expect(screen.getByLabelText(String(i18n.t('chat.workflowStatusAria', { status: labels.paused })))).toBeVisible();
     expect(screen.queryByRole('button', { name: labels.stopping })).not.toBeInTheDocument();
 
     fixture.session = { ...fixture.session, status: 'active', projection: {
@@ -1405,7 +1464,7 @@ describe('shared workflow compact layout', () => {
 
   it.each([
     ['chat.workflowContinueExecution', undefined],
-    ['chat.workflowSkipThisApproval', 'step'],
+    ['chat.workflowSkipThisApproval', 'session'],
     ['chat.workflowSkipFollowingApprovals', 'following'],
   ] as const)('keeps shared approval choice %s on the native path', async (label, scope) => {
     fixture.session.status = 'waiting';
@@ -1694,12 +1753,12 @@ describe('external workflow surface boundary', () => {
     render(<WorkflowPanel conversationId='layout-test' controlAdapter={panelAdapter(control, execute)} />);
     const approval = await screen.findByRole('group', { name: '工作流审批操作' });
     expect(within(approval).getAllByRole('button').map(button => button.textContent)).toEqual([
-      '继续执行', '此步骤不需审批', '以后此工作流无需审批',
+      '继续执行', '本次自动执行', '以后此工作流无需审批',
     ]);
     expect(screen.queryByRole('group', { name: '回退到步骤：' })).not.toBeInTheDocument();
-    fireEvent.click(within(approval).getByRole('button', { name: '此步骤不需审批' }));
+    fireEvent.click(within(approval).getByRole('button', { name: '本次自动执行' }));
     await waitFor(() => expect(execute).toHaveBeenCalledWith({
-      kind: 'confirm_and_continue', stepId: 'write_document', review, preferenceScope: 'step',
+      kind: 'confirm_and_continue', stepId: 'write_document', review, preferenceScope: 'session',
     }));
   });
 
@@ -1938,8 +1997,8 @@ describe('workflow follow and session presentation', () => {
     fixture.ui = { ...fixture.ui, source_type: 'builtin', follow_mode: { default: 'following' } };
     fixture.session = { ...fixture.session, status: 'active', current_step_id: 'prepare', steps: [], projection: undefined };
   }
-  const following = () => screen.getByRole('button', { name: '跟随进度' });
-  const browsing = () => screen.getByRole('button', { name: '自由浏览' });
+  const following = () => screen.getByRole('button', { name: /^(跟随进度|自由浏览)$/ });
+  const browsing = following;
 
   it('points the browse marker at the completed retry instead of an earlier step', async () => {
     fixture.ui.follow_mode = { default: 'following' };
@@ -1972,7 +2031,7 @@ describe('workflow follow and session presentation', () => {
     expect(following()).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(screen.getByRole('tab', { name: '研究设计' }));
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     fixture.session = { ...fixture.session, current_step_id: 'write_paper_draft' };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     expect(screen.getByRole('tab', { name: '研究设计', selected: true })).toBeVisible();
@@ -1982,26 +2041,18 @@ describe('workflow follow and session presentation', () => {
     expect(following()).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('explains each explicit mode change without notifying on mount or repeated selection', async () => {
+  it('toggles the icon and accessible name without notifying on mount', async () => {
     enableFollowing();
     const notice = vi.spyOn(message, 'info');
     render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('button', { name: '跟随进度' });
+    const toggle = await screen.findByRole('button', { name: '跟随进度' });
+    expect(toggle).toHaveTextContent('');
     expect(notice).not.toHaveBeenCalled();
-    fireEvent.click(following());
-    await waitFor(() => expect(following()).toBeEnabled());
-    expect(notice).not.toHaveBeenCalled();
-    fireEvent.click(browsing());
-    expect(await screen.findByText('已切换为自由浏览，可手动查看各步骤，页面不再随进度自动跳转。')).toBeVisible();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: '自由浏览' })).toHaveAttribute('aria-pressed', 'false');
     expect(notice).toHaveBeenCalledTimes(1);
-    fireEvent.click(browsing());
-    expect(notice).toHaveBeenCalledTimes(1);
-    fireEvent.click(following());
-    await waitFor(() => expect(following()).toHaveAttribute('aria-pressed', 'true'));
-    expect(await screen.findByText('已切换为跟随进度，页面将自动跟随工作流当前步骤。')).toBeVisible();
-    expect(notice).toHaveBeenCalledTimes(2);
-    fireEvent.click(following());
-    await waitFor(() => expect(following()).toBeEnabled());
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByRole('button', { name: '跟随进度' })).toHaveAttribute('aria-pressed', 'true'));
     expect(notice).toHaveBeenCalledTimes(2);
   });
 
@@ -2023,7 +2074,7 @@ describe('workflow follow and session presentation', () => {
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
     await screen.findByRole('button', { name: '跟随进度' });
     fireEvent.click(screen.getByRole('tab', { name: /写作准备/ }));
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(following());
     await waitFor(() => expect(screen.getByRole('tab', { name: /成稿/ })).toHaveAttribute('aria-selected', 'true'));
     expect(following()).toHaveAttribute('aria-pressed', 'true');
@@ -2070,9 +2121,9 @@ describe('workflow follow and session presentation', () => {
     fixture.ui.tabs!.unshift({ id: 'new', label: '新增步骤', slots: [], hide_when_material: 'skip_new' });
     fixture.ui.tab_visibility_ready_material = 'plan_ready';
     let view = render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('button', { name: '自由浏览' });
+    await screen.findByRole('button', { name: /^(跟随进度|自由浏览)$/ });
     fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     fixture.session = { ...fixture.session, slots: [...fixture.session.slots!,
       { slot: 'plan_ready', slot_id: 'plan_ready', selected: true, revision: 1 } as SlotRevision,
     ] };
@@ -2083,7 +2134,7 @@ describe('workflow follow and session presentation', () => {
     fixture.focusedTab = undefined;
     view = render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('tab', { name: '成稿', selected: true });
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('enters browse for editing and history and protects edits when resume saving fails', async () => {
@@ -2093,11 +2144,11 @@ describe('workflow follow and session presentation', () => {
     const view = render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('button', { name: '跟随进度' });
     fireEvent.click(screen.getByRole('button', { name: '查看历史' }));
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(following());
     await waitFor(() => expect(following()).toHaveAttribute('aria-pressed', 'true'));
     fireEvent.doubleClick(screen.getByText('正文 document'));
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     fixture.session = { ...fixture.session, current_step_id: 'prepare' };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     fixture.flush.mockResolvedValue(false);
@@ -2107,7 +2158,7 @@ describe('workflow follow and session presentation', () => {
     await waitFor(() => expect(fixture.flush).toHaveBeenCalledOnce());
     expect(await screen.findByText('保存未完成，请保存成功后再恢复跟随。')).toBeVisible();
     expect(notice).not.toHaveBeenCalled();
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('tab', { name: '成稿', selected: true })).toBeVisible();
     fixture.flush.mockResolvedValue(true);
     fireEvent.click(following());
@@ -2119,7 +2170,7 @@ describe('workflow follow and session presentation', () => {
     enableFollowing();
     fixture.session.current_step_id = 'write_document';
     const view = render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('button', { name: '自由浏览' });
+    await screen.findByRole('button', { name: /^(跟随进度|自由浏览)$/ });
     fireEvent.click(browsing());
     notice.mockClear();
     let complete!: (saved: boolean) => void;
@@ -2129,7 +2180,7 @@ describe('workflow follow and session presentation', () => {
     fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
     await act(async () => complete(true));
     expect(notice).not.toHaveBeenCalled();
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
     expect(following()).toBeEnabled();
     fireEvent.click(screen.getByRole('tab', { name: /成稿/ }));
@@ -2137,11 +2188,11 @@ describe('workflow follow and session presentation', () => {
     fireEvent.click(following());
     fixture.session = { ...fixture.session, session_id: 'next-run', current_step_id: 'prepare' };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
-    fireEvent.click(await screen.findByRole('button', { name: '自由浏览' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^(跟随进度|自由浏览)$/ }));
     notice.mockClear();
     await act(async () => complete(true));
     expect(notice).not.toHaveBeenCalled();
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
     expect(following()).toBeEnabled();
   });
@@ -2158,12 +2209,12 @@ describe('workflow follow and session presentation', () => {
       </ArtifactPreviewContext.Provider>;
     }
     render(<Host />);
-    await screen.findByRole('button', { name: '自由浏览' });
+    await screen.findByRole('button', { name: /^(跟随进度|自由浏览)$/ });
     fireEvent.click(screen.getByRole('button', { name: '预览计划' }));
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
-    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(browsing()).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(screen.getByRole('button', { name: '预览计划' }));
     fireEvent.click(following());
     await screen.findByRole('tab', { name: '成稿', selected: true });

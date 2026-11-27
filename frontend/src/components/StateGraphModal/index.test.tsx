@@ -6,6 +6,7 @@ import StateGraphModal from './index';
 import type { StateGraphData } from './StateGraphView';
 
 vi.mock('@/components/request', () => ({ axiosInstance: { get: vi.fn() }, BASE_URL: '', localizeErrorCode: (code: string) => code }));
+vi.mock('@/modules/chat/store/workflowPanel', () => ({ loadWorkflowUI: vi.fn(), workflowStageLabels: vi.fn() }));
 vi.mock('./StateGraphView', () => ({ default: ({ data }: { data: StateGraphData }) => <div data-testid='graph'>{JSON.stringify(data)}</div> }));
 vi.mock('antd', () => ({ Modal: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, Spin: () => <span>Loading</span> }));
 beforeEach(async () => { await i18n.changeLanguage('zh-CN'); });
@@ -27,7 +28,7 @@ it('keeps readiness and invalidated results as pending explanations, preserving 
       { from: 'stale', to: 'blocked', state: 'stale', when: '旧分支条件' },
     ] }, graph: { static_order: Object.keys(states) },
   } });
-  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' />);
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' stepLabels={{}} />);
   const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
   const nodes = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
   expect(nodes.blocked.status).toBe('pending');
@@ -63,7 +64,7 @@ it.each(['pruned', 'bypassed'])('shows %s only for a skipped node and preserves 
     prompts: { execution: 'none', readiness: 'not_applicable', branch },
     outline: { execution: 'succeeded', readiness: 'not_applicable', branch },
   } }, graph: { static_order: ['outline', 'prompts'] } } });
-  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' />);
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' stepLabels={{}} />);
   const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
   expect(graph.nodes.find(node => node.id === 'prompts')?.status).toBe('skipped');
   expect(graph.nodes.find(node => node.id === 'outline')?.status).toBe('succeeded');
@@ -77,7 +78,7 @@ it.each(['paused', 'failed'])('keeps graph interruption consistent with the %s w
     { attempt: 2, status: 'interrupted', duration_sec: 1, artifact_count: 0, started_at: '' },
   ] } } });
 
-  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' />);
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' stepLabels={{}} />);
   const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
   const node = graph.nodes.find(item => item.id === 'search')!;
   expect(node.status).toBe(status);
@@ -92,7 +93,7 @@ it('keeps a replaced interrupted attempt out of the current node status', async 
     { attempt: 1, status: 'interrupted', validity: 'stale' },
     { attempt: 2, status: 'running', validity: 'effective' },
   ] } } });
-  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' />);
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' stepLabels={{}} />);
   const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
   expect(graph.nodes.find(node => node.id === 'search')?.status).toBe('running');
 });
@@ -107,7 +108,7 @@ it('translates pending explanations and input lists in English', async () => {
       stale: { execution: 'none', readiness: 'ready', branch: 'active', validity: 'stale' },
     } }, graph: { static_order: ['blocked', 'ready', 'stale'] },
   } });
-  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' />);
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' stepLabels={{}} />);
   const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
   const notes = graph.nodes.flatMap(node => node.status_notes ?? []);
   expect(notes).toEqual([
@@ -124,7 +125,7 @@ it('shows the input checkpoint as waiting while keeping its successful attempt h
     graph: { static_order: ['collect'] },
     attempt_history: { collect: [{ attempt: 1, status: 'succeeded', validity: 'effective' }] },
   } });
-  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' />);
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' stepLabels={{}} />);
   const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
   expect(graph.nodes.find(node => node.id === 'collect')).toMatchObject({
     status: 'waiting_input', is_current: true, step_attempts: [{ attempt: 1, status: 'succeeded' }],

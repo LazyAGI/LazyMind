@@ -53,6 +53,9 @@ func runControlCheckpoint(t *testing.T, provider, scenario string) (*orm.DB, orm
 				must(db.First(&review, "attempt_id = ?", step.ID).Error)
 			}
 		} else {
+			session.ApprovalMode = "dynamic"
+			must(db.Model(&session).Update("approval_mode", "dynamic").Error)
+			must(db.Create(&orm.WorkflowReviewCheckpoint{ID: step.ID + "-review", SessionID: session.ID, StepID: step.StepID, AttemptID: step.ID, Status: "pending"}).Error)
 			must(freezeRouteDecision(t.Context(), db.DB, session.ID, id, step.TaskID))
 		}
 	}
@@ -199,7 +202,7 @@ func TestExternalContinueSharesNativePreparationState(t *testing.T) {
 		t.Run(provider, func(t *testing.T) {
 			db, session, review := runControlCheckpoint(t, provider, "next")
 			if provider == "native" {
-				if err := db.Create(&orm.WorkflowReviewCheckpoint{ID: "accepted", SessionID: session.ID, AttemptID: "review-attempt", StepID: "review", Status: "accepted"}).Error; err != nil {
+				if err := db.Model(&orm.WorkflowReviewCheckpoint{}).Where("attempt_id = ?", "review-attempt").Update("status", "accepted").Error; err != nil {
 					t.Fatal(err)
 				}
 				admitted, err := prepareContinuation(t.Context(), db.DB, session.ID)

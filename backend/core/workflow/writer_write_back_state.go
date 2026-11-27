@@ -139,6 +139,31 @@ func writerWriteBackState(
 	} else if !hasBinding && source == nil {
 		binding, hasBinding = writerProviderBindingFromArtifact(draftValue)
 	}
+	// Single-target Feishu publication can mark an existing immutable version.
+	// Its current binding identifies the last write even without a provider_sync row.
+	if !hasBinding || binding.Provider == "feishu" {
+		var published struct {
+			TargetDocument   json.RawMessage
+			SourceRevision   int
+			SourceRevisionID string
+		}
+		result := db.WithContext(ctx).Table("document_publication_bindings AS b").
+			Select("b.target_document, r.revision AS source_revision, b.source_revision_id").
+			Joins("JOIN plugin_slot_revisions AS r ON r.id = b.source_revision_id").
+			Where("b.session_id = ? AND b.slot_id = ? AND b.item_index = -1 AND b.binding_scope = '' AND b.provider = ? AND b.source_revision_id = b.result_revision_id", sessionID, draft.SlotID, "feishu").
+			Limit(1).Scan(&published)
+		if result.Error == nil && result.RowsAffected == 1 {
+			if targetBinding, ok := writerProviderBindingFromTargetArtifact(published.TargetDocument); ok {
+				applyWriterProviderBinding(&info, targetBinding)
+				info.State = writerWriteBackSyncedDirty
+				if draft.ArtifactID == published.SourceRevisionID {
+					info.State = writerWriteBackSyncedClean
+				}
+				info.LastSyncedRevision = writerRevisionPointer(published.SourceRevision)
+				return info
+			}
+		}
+	}
 	if !hasBinding && source != nil {
 		if sourceIsUnboundIR || draftIsMarkdown {
 			info.State = writerWriteBackInitialDelivery

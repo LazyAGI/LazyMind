@@ -1,5 +1,5 @@
 import { useExecutionActivity } from '@/modules/chat/components/WorkflowPanel/external/useExecutionActivity';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Spin, Tabs } from 'antd';
 import TaskCenter from '@/modules/chat/components/TaskCenter';
 import { useParams } from 'react-router-dom';
@@ -17,11 +17,12 @@ import WorkflowRequestMessage from './WorkflowRequestMessage';
 import WorkflowStarInvite from './WorkflowStarInvite';
 
 /** Shared run workbench: user intent goes to Core, never to an interpreted chat prompt. */
-export default function WorkflowRunPage({ embedded = false, sessionId: suppliedSessionId, title, resultsOnly = false }: {
+export default function WorkflowRunPage({ embedded = false, sessionId: suppliedSessionId, title, resultsOnly = false, conversationContent }: {
   embedded?: boolean;
   sessionId?: string;
   title?: string;
   resultsOnly?: boolean;
+  conversationContent?: ReactNode;
 }) {
   const { sessionId: routeSessionId = '' } = useParams();
   const sessionId = suppliedSessionId ?? routeSessionId;
@@ -149,6 +150,8 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
   const bannerFromNotice = Boolean(infoBanner && (!liveDelivery || infoBanner.key === noticeKey));
 
   const splitWorkbench = resultsOnly && !embedded;
+  const showWorkspace = Boolean(snapshot) || (splitWorkbench && conversationContent != null);
+  const waitingForSnapshot = !snapshot && !error && !syncError;
   const refreshSnapshot = () => refresh().then(() => {});
 
   return <main className={`workflow-run${embedded || resultsOnly ? ' workflow-run--embedded' : ''}${resultsOnly ? ' workflow-run--results' : ''}${splitWorkbench ? ' workflow-run--workbench' : ''}`}
@@ -160,9 +163,11 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
       message={t('chat.workflowHostBindingRequiredHint')} />}
     {!error && infoBanner && <Alert type={infoBanner.tone} showIcon
       closable={bannerFromNotice} onClose={() => setNoticeKey('')} message={t(infoBanner.key)} />}
-    {!snapshot && !error && !syncError && <Spin />}
-    {snapshot && <div className={splitWorkbench ? 'workflow-run__workspace' : 'workflow-run__content'}>
+    {!showWorkspace && waitingForSnapshot && <Spin />}
+    {showWorkspace && <div className={splitWorkbench ? 'workflow-run__workspace' : 'workflow-run__content'}>
       <section className='workflow-run__canvas'>
+      {waitingForSnapshot && <Spin />}
+      {snapshot && <>
       {!embedded && !resultsOnly && <Button onClick={() => { void refresh().catch(reason => setError(String(reason))); }}>{t('chat.workflowRunRefresh')}</Button>}
       {control?.input_request && <WorkflowInputRequestCard request={control.input_request}
         onAnswer={answerText => act({ kind: 'answer_input', input: control.input_request!, answerText })} />}
@@ -176,13 +181,14 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
           execute: async intent => { await act(intent); },
           continuationStep: () => latest.current && externalContinuationStep(latest.current.session, latest.current.control),
         } : undefined} />
+      </>}
       </section>
       {splitWorkbench && <aside className='workflow-run__rail'>
         <Tabs defaultActiveKey='chat' items={[
           { key: 'chat', label: t('chat.workflowRailConversation'), children:
-            <WorkflowRequestMessage session={snapshot.session} fallback={title} /> },
-          { key: 'tasks', label: t('taskCenter.panelTitle'), children:
-            <TaskCenter sessionId={key} workflowSteps={snapshot.session.steps}
+            conversationContent ?? (snapshot && <WorkflowRequestMessage session={snapshot.session} fallback={title} />) },
+          { key: 'tasks', label: t('taskCenter.panelTitle'), disabled: !snapshot, children:
+            snapshot && <TaskCenter sessionId={key} workflowSteps={snapshot.session.steps}
               showHeader={false} onRefreshSnapshot={refreshSnapshot} /> },
         ]} />
       </aside>}

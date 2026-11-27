@@ -598,9 +598,13 @@ func TestPatchSlotItemArtifactBackedSourcesEnforceDraftVersion(t *testing.T) {
 				).Order("revision ASC").Find(&revisions).Error; err != nil {
 					t.Fatalf("load revisions: %v", err)
 				}
+				expectedSource := "human"
+				if mode == "checkpoint" {
+					expectedSource = "writer_edit"
+				}
 				if len(revisions) != 2 || revisions[0].Selected ||
 					revisions[0].ChangeSource != changeSource || !revisions[1].Selected ||
-					revisions[1].ChangeSource != "human" || revisions[1].HumanArtifactID == nil ||
+					revisions[1].ChangeSource != expectedSource || revisions[1].HumanArtifactID == nil ||
 					*revisions[1].HumanArtifactID == "human-draft" {
 					t.Fatalf("copy-on-write revisions = %#v", revisions)
 				}

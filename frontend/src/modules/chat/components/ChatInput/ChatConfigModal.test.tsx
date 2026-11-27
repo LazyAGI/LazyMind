@@ -6,10 +6,12 @@ describe('buildExecutorCatalog', () => {
   it('always keeps LazyMind selectable when the external catalog is unavailable', () => {
     const catalog = buildExecutorCatalog([], 'codex', 'host unavailable');
 
-    expect(catalog).toEqual([
+    expect(catalog).toHaveLength(7);
+    expect(catalog).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'lazymind', available: true }),
       expect.objectContaining({ id: 'codex', available: false }),
-    ]);
+      expect.objectContaining({ id: 'raccoon', available: false }),
+    ]));
   });
 
   it('uses the live catalog for connected external executors', () => {
@@ -32,11 +34,11 @@ describe('buildExecutorCatalog', () => {
       },
     ];
 
-    expect(buildExecutorCatalog(externalExecutors, 'codex', 'unavailable')).toEqual([
+    expect(buildExecutorCatalog(externalExecutors, 'codex', 'unavailable')).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'lazymind', available: true }),
       expect.objectContaining({ id: 'codex', available: true }),
       expect.objectContaining({ id: 'cursor', available: true }),
-    ]);
+    ]));
   });
 });
 

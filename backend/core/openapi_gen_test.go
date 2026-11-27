@@ -261,6 +261,7 @@ func TestOpenAPIChatEntryDefaultsEnumsMatchValidation(t *testing.T) {
 		chat.ChatExecutorCodex,
 		chat.ChatExecutorCursor,
 		chat.ChatExecutorWorkBuddy,
+		chat.ChatExecutorDSH,
 	}
 	for _, schemaName := range []string{
 		"chatEntryDefaultsOpenAPI",

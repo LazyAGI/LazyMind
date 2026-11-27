@@ -151,7 +151,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   ];
 
   const openConversation = (id: string) => {
-    selectChatConversationFilter('task');
+    selectChatConversationFilter('task', { remember: false });
     navigate(getChatConversationPath(id));
   };
 

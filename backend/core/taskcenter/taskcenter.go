@@ -557,6 +557,10 @@ func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTa
 					status = "succeeded"
 				} else if status == "waiting_input" {
 					status = "waiting_inputs"
+				} else if status == "waiting" && display.Reason == "next_step_required" {
+					// An ordinary hand-off needs attention, but is not an approval.
+					// Keep the panel-only description out of task/node status enums.
+					status = "pending"
 				}
 				if status != "" {
 					t.Status = status

@@ -1,6 +1,15 @@
 export interface WriterImageDropTarget {
   element: HTMLElement;
-  position: 'before' | 'after' | 'child';
+  position: 'before' | 'after' | 'child' | 'merge-before' | 'merge-after';
+  label?: string;
+}
+
+// Only the middle band of another image accepts a gallery drop.
+export function imageMergePosition(image: HTMLElement, x: number, y: number) {
+  const rect = image.getBoundingClientRect();
+  if (!rect.width || !rect.height || x < rect.left || x > rect.right
+    || y < rect.top + rect.height * 0.25 || y > rect.bottom - rect.height * 0.25) return null;
+  return x < rect.left + rect.width / 2 ? 'merge-before' : 'merge-after';
 }
 
 export function startWriterImageDrag(
@@ -74,8 +83,9 @@ export function startWriterImageDrag(
     indicator!.hidden = !target;
     if (target) {
       const rect = target.element.getBoundingClientRect();
-      const horizontal = Boolean(target.element.parentElement?.closest('.writer-image-group[data-layout="sliding"]'));
-      const child = target.position === 'child', after = target.position === 'after';
+      const horizontal = target.position.startsWith('merge-') || Boolean(target.element.parentElement?.closest('.writer-image-group[data-layout="sliding"]'));
+      const child = target.position === 'child', after = target.position === 'after' || target.position === 'merge-after';
+      indicator!.dataset.label = target.label ?? '';
       indicator!.dataset.position = target.position;
       Object.assign(indicator!.style, {
         left: `${horizontal && after && !child ? rect.right : rect.left}px`,

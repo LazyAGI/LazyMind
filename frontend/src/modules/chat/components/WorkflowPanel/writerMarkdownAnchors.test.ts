@@ -16,6 +16,13 @@ import {
 } from './writerMarkdownAnchors';
 
 describe('Writer Markdown system anchors', () => {
+  it('keeps distinct image anchors with their captions when the same asset is swapped', () => {
+    const a = '![First](same.png)', b = '![Second](same.png)';
+    const original = `<a id="block-a"></a>\n${a}\n\n<a id="block-b"></a>\n${b}`;
+    const moved = protectWriterMarkdownHeadingAnchors(original, `${b}\n\n${a}`);
+    expect(collectWriterMarkdownDomAnchors(moved).map(entry => entry.anchorId)).toEqual(['block-b', 'block-a']);
+  });
+
   it.each(['新增段落', '新增段落\n\n第二段'])('moves the old sidecar when inserting %s before a heading', (inserted) => {
     const anchor = '<a id="block-sec-1" numbering="restart"></a>';
     const source = `${anchor}\n## 原标题\n\n[引用](#block-sec-1)`;

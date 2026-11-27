@@ -88,6 +88,24 @@ describe('document artifact image previews', () => {
     expect(screen.getByRole('article').textContent).toBe(markdown);
   });
 
+  it('keeps source images after a failed refresh without reusing them for another snapshot', async () => {
+    const url = 'https://example.test/material.png';
+    api.renderWriterDocument.mockResolvedValueOnce(response(url)).mockRejectedValue(new Error('offline'));
+    const material = { ...slot, slot_id: 'source_materials', list_index: 0 } as SlotRevision;
+    const view = render(<DocumentArtifactEditor sessionId='session' slot={material} readOnly />);
+    const image = await screen.findByAltText('Document illustration');
+    await waitFor(() => expect(image).toHaveAttribute('src', url));
+    await act(async () => useWorkflowStore.setState({ sessionByConversation: { conversation: session('session', 2) } }));
+    expect(api.renderWriterDocument).toHaveBeenCalledTimes(2);
+    expect(image).toHaveAttribute('src', url);
+
+    view.rerender(<DocumentArtifactEditor sessionId='session'
+      slot={{ ...material, artifact_id: 'replacement-source', revision: 2 }} readOnly />);
+    await waitFor(() => expect(api.renderWriterDocument).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(image.getAttribute('src')).toContain('data:image/svg+xml,'));
+    expect(screen.getByRole('article').textContent).toBe(markdown);
+  });
+
   it('opens the clicked image directly without starting an export', async () => {
     const url = 'https://example.test/illustration.png';
     api.renderWriterDocument.mockResolvedValue(response(url));
@@ -155,6 +173,35 @@ describe('document artifact image previews', () => {
     fireEvent.click(screen.getByText('Save document'));
     await waitFor(() => expect(api.saveDocumentArtifact).toHaveBeenCalledWith('source-artifact',
       expect.objectContaining({ value: { text: edited } }), expect.any(Object)));
+  });
+
+  it('reuses the media mapping when a saved draft changes image order', async () => {
+    const url = 'https://example.test/preview.jpg';
+    api.renderWriterDocument.mockResolvedValueOnce(response(url)).mockReturnValue(pending<ReturnType<typeof response>>().promise);
+    const view = render(<DocumentArtifactEditor slot={slot} sessionId='session' />);
+    const image = await screen.findByAltText('Document illustration');
+    await waitFor(() => expect(image).toHaveAttribute('src', url));
+
+    const reordered = `![Knowledge library](${source})\n\n# README`;
+    view.rerender(<DocumentArtifactEditor slot={{ ...slot, draft_version: 2, artifact_value: { text: reordered } }} sessionId='session' />);
+    await waitFor(() => expect(screen.getByRole('article').textContent).toBe(reordered));
+    expect(api.renderWriterDocument).toHaveBeenCalledTimes(1);
+    expect(image).toHaveAttribute('src', url);
+  });
+
+  it('keeps the image visible until an updated media mapping arrives', async () => {
+    const media = pending<ReturnType<typeof response>>();
+    const oldUrl = 'https://example.test/old.jpg';
+    const newUrl = 'https://example.test/new.jpg';
+    api.renderWriterDocument.mockResolvedValueOnce(response(oldUrl)).mockReturnValueOnce(media.promise);
+    render(<DocumentArtifactEditor slot={slot} sessionId='session' />);
+    const image = await screen.findByAltText('Document illustration');
+    await waitFor(() => expect(image).toHaveAttribute('src', oldUrl));
+    await act(async () => useWorkflowStore.setState({ sessionByConversation: { conversation: session('session', 2) } }));
+    expect(api.renderWriterDocument).toHaveBeenCalledTimes(2);
+    expect(image).toHaveAttribute('src', oldUrl);
+    await act(async () => media.resolve(response(newUrl)));
+    expect(image).toHaveAttribute('src', newUrl);
   });
 
   it('refreshes previews when media arrives without changing the document revision', async () => {

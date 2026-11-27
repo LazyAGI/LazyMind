@@ -1,5 +1,21 @@
 @use '../../../../styles/taskStatus' as status;
 
+.workflow-panel-tooltip .ant-tooltip-inner {
+  padding: 6px 12px;
+  border: 1px solid #303337;
+  border-radius: 999px;
+  background: #1c1e20;
+  color: #fff;
+  font-size: 12px;
+  line-height: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.workflow-panel-intent-overlay .ant-popover-inner {
+  padding: 0;
+  border-radius: 10px;
+}
+
 // Flow layouts scroll the entire artifact, regardless of whether a text slot
 // resolves to plain Markdown, a persisted document editor, or a PPT prompt.
 // Bounded document workspaces and nested composite frames keep their own scroller.
@@ -283,7 +299,7 @@
     display: grid;
     grid-template-areas: 'title actions' 'tabs tabs';
     grid-template-columns: minmax(0, 1fr) auto;
-    column-gap: 12px;
+    column-gap: 2px;
     flex: 0 0 auto;
     padding: 0 12px;
     border-bottom: 1px solid #f0f1f3;
@@ -294,20 +310,65 @@
     display: contents;
   }
 
-  &__header-left {
+  // Let intrinsic content widths decide when the tools wrap. Window actions
+  // keep their own first-row column, independent of labels and visible controls.
+  &__header-main {
     grid-area: title;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 12px;
+    min-width: 0;
+    padding: 6px 0;
+  }
+
+  &__header-left {
+    flex: 1 1 auto;
+    width: max-content;
+    max-width: 100%;
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
-    min-height: 48px;
+    min-height: 36px;
   }
 
-  &__header-right {
-    grid-area: actions;
+  &__header-tools {
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    max-width: 100%;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
+    min-height: 36px;
+
+    .workflow-panel__tool {
+      gap: 4px;
+      height: 32px;
+      min-height: 32px;
+      padding: 0 2px;
+    }
+
+    .workflow-panel__follow-button {
+      width: 26px;
+      padding: 0;
+      flex-shrink: 0;
+    }
+
+    .workflow-panel__toolbar-icon {
+      width: 16px;
+      height: 16px;
+
+      &--chevron { width: 12px; height: 12px; }
+    }
+  }
+
+  &__window-actions {
+    grid-area: actions;
+    align-self: start;
+    display: flex;
+    align-items: center;
+    gap: 2px;
     min-height: 48px;
   }
 
@@ -339,7 +400,6 @@
 
   &__status {
     border: 0;
-    cursor: pointer;
     flex-shrink: 0;
     white-space: nowrap;
     font-size: 11px;
@@ -375,24 +435,44 @@
   }
 
   &__intent-popover {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    width: 280px;
-    max-width: calc(100cqw - 40px);
+    display: flex;
+    flex-direction: column;
+    width: 360px;
+    max-width: calc(100vw - 32px);
     max-height: min(60dvh, 480px);
-    overflow-y: auto;
+    overflow: hidden;
     box-sizing: border-box;
     background: #fff;
     border: 1px solid #e5e7eb;
     border-radius: 10px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  &__intent-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  &__intent-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: #aebbd0 #f7f9fc;
+    overflow-wrap: anywhere;
     padding: 14px 16px;
-    z-index: 200;
+
+    &::-webkit-scrollbar { width: 7px; }
+    &::-webkit-scrollbar-track { background: #f7f9fc; }
+    &::-webkit-scrollbar-thumb { background: #aebbd0; border-radius: 4px; }
   }
 
   &__intent-close {
-    float: right;
     width: 24px;
     height: 24px;
     border: 0;
@@ -407,7 +487,6 @@
     font-size: 14px;
     font-weight: 600;
     color: #1a1d23;
-    margin-bottom: 10px;
   }
 
   &__intent-section {
@@ -442,7 +521,7 @@
 
   &__intent-step-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     font-size: 12px;
     color: #374151;
@@ -464,9 +543,8 @@
 
   &__intent-step-text {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    white-space: pre-wrap;
   }
 
   &__intent-step-arrow {
@@ -478,6 +556,7 @@
     color: #2563eb;
     font-weight: 500;
     flex-shrink: 0;
+    max-width: 30%;
   }
 
   &__intent-step-note {
@@ -497,8 +576,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 32px;
     border: none;
     background: transparent;
     border-radius: 4px;
@@ -525,8 +604,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 32px;
     border: none;
     background: transparent;
     border-radius: 4px;
@@ -652,22 +731,6 @@
     height: 12px;
     flex-shrink: 0;
     color: #cbd5e1;
-  }
-
-  @container workflow-panel (min-width: 700px) {
-    &__topbar--few-steps {
-      grid-template-areas: 'title tabs actions';
-      grid-template-columns: minmax(0, 1fr) minmax(0, max-content) minmax(0, 1fr);
-
-      .workflow-panel__header-right {
-        justify-self: end;
-      }
-
-      .workflow-panel__tabs {
-        max-width: min(48cqw, 420px);
-        margin-bottom: 0;
-      }
-    }
   }
 
   &__step-status {
@@ -5075,27 +5138,92 @@
   }
 }
 
-.workflow-panel__follow-mode {
+// Quiet text controls share one height; color communicates the active view/mode.
+.workflow-panel__logo { color: #475569; font-size: 18px; flex-shrink: 0; }
+.workflow-panel__tool {
   display: inline-flex;
   align-items: center;
-  flex-shrink: 0;
-  gap: 2px;
-  padding: 2px;
-  background: #f1f5f9;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 0;
   border-radius: 6px;
-
-  button {
-    padding: 4px 8px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: #475569;
-    font-size: 12px;
-    white-space: nowrap;
-    cursor: pointer;
-    &[aria-pressed='true'] { background: #fff; color: #2563eb; box-shadow: 0 1px 3px #0f172a1a; }
-    &:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
-    &:disabled { opacity: 0.6; cursor: wait; }
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  > .anticon { font-size: 15px; }
+  &:hover, &[aria-expanded='true'] { color: #1677ff; background: #f5f8ff; }
+  &[aria-pressed='true'] { color: #1677ff; }
+  &:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+  &:disabled { opacity: .5; cursor: not-allowed; }
+}
+.workflow-panel__toolbar-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  &--chevron { width: 12px; height: 12px; }
+}
+.workflow-panel__graph { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.workflow-panel__graph-heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; font-size: 12px; color: #64748b;
+}
+.workflow-panel__graph-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  .workflow-panel__tool { line-height: 20px; }
+  .workflow-panel__tool > .anticon { font-size: 14px; }
+  .workflow-panel__toolbar-icon { width: 14px; height: 14px; }
+  .workflow-panel__graph-popout { width: 30px; height: 30px; padding: 0; }
+}
+.workflow-panel__graph > .state-graph-modal__content { flex: 1; min-height: 300px; height: 420px; }
+.workflow-approval-popover .ant-popover-inner {
+  padding: 8px;
+  border: 1px solid #e8edf3;
+  border-radius: 11px;
+  box-shadow: 0 7px 24px #22395514, 0 2px 5px #22395514;
+}
+.workflow-approval-settings {
+  width: 246px;
+  font-size: 14px;
+  .ant-radio-group { display: flex; flex-direction: column; gap: 4px; }
+  .ant-radio-wrapper {
+    position: relative; margin: 0; padding: 8px 11px; min-height: 39px;
+    border-radius: 6px; color: #394657; font-size: 14px; line-height: 22px;
+    .ant-radio { position: absolute; opacity: 0; }
+    .ant-radio + span { width: 100%; padding: 0; }
+    &:not(.ant-radio-wrapper-disabled):hover { background: #f7f9fc; }
+    &.ant-radio-wrapper-checked { background: #f1f6ff; color: #2673ef; }
+    &.ant-radio-wrapper-checked:not(.ant-radio-wrapper-disabled):hover { background: #f1f6ff; }
+    &:has(input:focus-visible) { outline: 2px solid #91caff; outline-offset: 1px; }
+    &.ant-radio-wrapper-disabled { color: #a1aab7; }
+  }
+  &__option {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    > .anticon { font-size: 16px; visibility: hidden; }
+  }
+  .ant-radio-wrapper-checked .workflow-approval-settings__option > .anticon { visibility: visible; }
+  &__footer {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    border-top: 1px solid #edf0f5; margin: 8px 3px 0; padding: 10px 1px 2px 8px;
+    .ant-checkbox-wrapper { min-height: 30px; align-items: center; color: #627187; font-size: 14px; line-height: 22px; }
+    .ant-checkbox-inner { width: 15px; height: 15px; border-radius: 3px; }
+    .ant-checkbox:not(.ant-checkbox-disabled) .ant-checkbox-inner { background: #fff; border-color: #97b6e0; }
+    .ant-checkbox-checked:not(.ant-checkbox-disabled) .ant-checkbox-inner::after { border-color: #2673ef; }
+    .ant-checkbox-wrapper:not(.ant-checkbox-wrapper-disabled):hover { color: #394657; }
+    .ant-checkbox-wrapper-disabled { color: #a1aab7; }
+  }
+  .workflow-approval-settings__apply {
+    height: 30px; padding: 4px 13px; border: 0; border-radius: 6px; box-shadow: none;
+    font-size: 14px; line-height: 22px;
+    &:not(:disabled) { color: #2673ef; background: #eaf2ff; }
+    &:not(:disabled):hover { color: #2673ef; background: #dceaff; }
   }
 }
 
@@ -5124,13 +5252,6 @@
   background: #2563eb;
 }
 
-@container workflow-panel (max-width: 440px) {
-  .workflow-panel__topbar { grid-template-areas: 'title title' 'actions actions' 'tabs tabs'; }
-  .workflow-panel__header-left, .workflow-panel__header-right { min-height: 36px; }
-  .workflow-panel__header-right { flex-wrap: wrap; justify-content: flex-end; }
-  .workflow-panel__follow-mode { margin-right: auto; }
-}
-
 
 .workflow-slot--paper-document .writer-markdown-editor__content {
   color: #1e293b;
@@ -5157,11 +5278,67 @@
   &--slide.history-preview--thumb { aspect-ratio: 16 / 9; display: grid; align-items: center; }
   &__slide { display: block; width: 100%; height: auto; }
   &__placeholder { display: block; padding: 10px; color: #667085; }
-  &__excerpt { display: grid; gap: 3px; padding: 6px; background: white; color: #344054; }
-  &__excerpt > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &__excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   &__actions { display: flex; gap: 8px; margin: 10px 0; }
   &__actions button { color: #245bc2; background: transparent; border: 0; cursor: pointer; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+.workflow-slot__version-popover--writer {
+  .workflow-slot__version-list {
+    box-sizing: border-box;
+    width: clamp(138px, 25%, 220px);
+    padding: 4px 0;
+    background: #fafbfc;
+  }
+  .workflow-slot__version-item {
+    gap: 3px;
+    padding: 9px 12px;
+    font-weight: 400;
+
+    &:hover { background: #f1f4f8; }
+    &[aria-selected='true'] { background: #ecf3ff; }
+  }
+  .workflow-slot__version-label {
+    gap: 5px;
+    color: #27374e;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .workflow-slot__version-current-tag {
+    padding: 0;
+    background: transparent;
+    color: #3867a6;
+    font-weight: 400;
+  }
+  .workflow-slot__version-time {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+  time.workflow-slot__version-time { margin-inline-start: auto; }
+  .history-preview--thumb {
+    min-height: 18px;
+    color: #566579;
+    font-size: 12px;
+    line-height: 18px;
+  }
+  .history-preview__placeholder { padding: 0; }
+}
+
+.workflow-slot__version-publication {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  color: #246345;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+
+  .anticon { flex: none; color: #228053; }
 }
 
 // Give the opened comparison the full reading area.

@@ -3,6 +3,7 @@ package workflow
 import (
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/graphengine"
+	workflowstore "lazymind/core/workflow/store"
 	"testing"
 )
 
@@ -31,6 +32,12 @@ func TestApprovalPreferencesAreSharedAcrossControllers(t *testing.T) {
 				}
 			}
 			if _, err := saveWorkflowApprovalPreference(db.DB, "owner", "workflow", "review", scope); err != nil {
+				t.Fatal(err)
+			}
+			if err := workflowstore.ApplySavedApprovalMode(db.DB, &external); err != nil {
+				t.Fatal(err)
+			}
+			if err := workflowstore.ApplySavedApprovalMode(db.DB, &native); err != nil {
 				t.Fatal(err)
 			}
 			check(external, false)

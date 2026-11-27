@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { CHAT_ENTRY_DEFAULTS_CHANGED_EVENT } from '@/modules/chat/constants/chat';
 import { useSettingsDraft } from '@/modules/settings/SettingsNavigationGuard';
 import { Alert, Button, Radio, Select, Skeleton, Switch } from 'antd';
 import type { RadioChangeEvent } from 'antd';
 import {
+  CheckOutlined,
+  ExclamationCircleOutlined,
   FileDoneOutlined,
+  LoadingOutlined,
   InfoCircleOutlined,
   MessageOutlined,
   ReloadOutlined,
@@ -11,7 +15,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
-import { buildExecutorCatalog } from '@/modules/chat/components/ChatInput/ChatConfigModal';
+import { buildExecutorCatalog, executorUnavailableReason, useChatExecutors } from '@/modules/chat/hooks/useChatExecutors';
 import { THINKING_DEPTH_VALUES, type ThinkingDepth } from '@/modules/chat/store/chatThink';
 import {
   ConversationSettingsApi,
@@ -20,7 +24,6 @@ import {
   type ChatEntryDefault,
   type ChatEntryDefaults,
   type ChatEntryKind,
-  type ChatExecutorDescriptor,
 } from '@/modules/chat/utils/request';
 
 interface TaskEntryDefaultsProps {
@@ -77,9 +80,9 @@ export default function TaskEntryDefaults({
   );
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [executors, setExecutors] = useState<ChatExecutorDescriptor[]>([]);
-  const [executorLoadFailed, setExecutorLoadFailed] = useState(false);
-  const savedTimerRef = useRef<number | null>(null);
+  const { executors, error: executorLoadFailed, refresh: loadExecutors } = useChatExecutors(true);
+  const profilesRef = useRef(profiles);
+  const savedProfilesRef = useRef(savedProfiles);
   const savingRef = useRef(false);
   const saveControllerRef = useRef<AbortController | null>(null);
 
@@ -89,6 +92,8 @@ export default function TaskEntryDefaults({
       const response = await ConversationSettingsApi().getChatSettings({ signal });
       if (signal?.aborted) return;
       const loadedProfiles = cloneDefaults(parseChatEntryDefaults(response.data));
+      profilesRef.current = loadedProfiles;
+      savedProfilesRef.current = cloneDefaults(loadedProfiles);
       setProfiles(loadedProfiles);
       setSavedProfiles(cloneDefaults(loadedProfiles));
       setSaveState('idle');
@@ -98,30 +103,13 @@ export default function TaskEntryDefaults({
     }
   }, []);
 
-  const loadExecutors = useCallback(async (signal?: AbortSignal) => {
-    setExecutorLoadFailed(false);
-    try {
-      const response = await ConversationSettingsApi().listChatExecutors({ signal });
-      if (signal?.aborted) return;
-      const values = response.data.data.executors;
-      setExecutors(values.filter(
-        (item: ChatExecutorDescriptor) =>
-          item && typeof item.id === 'string' && typeof item.display_name === 'string',
-      ));
-    } catch {
-      if (!signal?.aborted) setExecutorLoadFailed(true);
-    }
-  }, []);
-
   useEffect(() => {
     const controller = new AbortController();
     void loadProfiles(controller.signal);
-    void loadExecutors(controller.signal);
     return () => controller.abort();
-  }, [loadExecutors, loadProfiles]);
+  }, [loadProfiles]);
 
   useEffect(() => () => {
-    if (savedTimerRef.current != null) window.clearTimeout(savedTimerRef.current);
     saveControllerRef.current?.abort();
   }, []);
 
@@ -132,33 +120,33 @@ export default function TaskEntryDefaults({
 
   const persistProfiles = async () => {
     if (savingRef.current) return false;
-    const draft = cloneDefaults(profiles);
-    const changedKinds = ENTRY_KINDS.filter(
-      (kind) => !entryDefaultEquals(draft[kind], savedProfiles[kind]),
+    const nextChangedKind = () => ENTRY_KINDS.find(
+      (kind) => !entryDefaultEquals(profilesRef.current[kind], savedProfilesRef.current[kind]),
     );
-    if (changedKinds.length === 0) return true;
+    if (!nextChangedKind()) {
+      setSaveState('idle');
+      return true;
+    }
 
     savingRef.current = true;
-    if (savedTimerRef.current != null) {
-      window.clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = null;
-    }
     setSaveState('saving');
     const controller = new AbortController();
     saveControllerRef.current = controller;
     try {
-      for (const kind of changedKinds) {
-        await ConversationSettingsApi().patchChatEntryDefault(kind, draft[kind], {
+      // Serialize saves and read the latest draft after each response. Changes made
+      // while a request is pending must not be overwritten or left unsaved.
+      let kind: ChatEntryKind | undefined;
+      while ((kind = nextChangedKind())) {
+        const draft = cloneEntryDefault(profilesRef.current[kind]);
+        await ConversationSettingsApi().patchChatEntryDefault(kind, draft, {
           signal: controller.signal,
         });
         if (controller.signal.aborted) return false;
-        setSavedProfiles((current) => ({
-          ...current,
-          [kind]: cloneEntryDefault(draft[kind]),
-        }));
+        savedProfilesRef.current = { ...savedProfilesRef.current, [kind]: draft };
+        setSavedProfiles(savedProfilesRef.current);
+        window.dispatchEvent(new Event(CHAT_ENTRY_DEFAULTS_CHANGED_EVENT));
       }
       setSaveState('saved');
-      savedTimerRef.current = window.setTimeout(() => setSaveState('idle'), 1600);
       return true;
     } catch {
       if (controller.signal.aborted) return false;
@@ -176,26 +164,26 @@ export default function TaskEntryDefaults({
     dirty: hasUnsavedChanges,
     saving: saveState === 'saving',
     save: persistProfiles,
-    discard: () => setProfiles(cloneDefaults(savedProfiles)),
+    discard: () => {
+      profilesRef.current = cloneDefaults(savedProfilesRef.current);
+      setProfiles(profilesRef.current);
+      setSaveState('idle');
+    },
   });
 
   const updateProfile = (
     kind: ChatEntryKind,
     update: (profile: ChatEntryDefault) => ChatEntryDefault,
   ) => {
-    if (savedTimerRef.current != null) {
-      window.clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = null;
-    }
-    setProfiles((current) => ({
-      ...current,
-      [kind]: update(current[kind]),
-    }));
-    setSaveState('idle');
+    profilesRef.current = {
+      ...profilesRef.current,
+      [kind]: update(profilesRef.current[kind]),
+    };
+    setProfiles(profilesRef.current);
+    void persistProfiles();
   };
 
-  const controlsDisabled = loadState !== 'ready' || saveState === 'saving';
-  const hasUnavailableExecutors = executors.some((executor) => !executor.available);
+  const controlsDisabled = loadState !== 'ready';
 
   const renderFields = (kind: ChatEntryKind) => {
     const profile = profiles[kind];
@@ -206,6 +194,7 @@ export default function TaskEntryDefaults({
       settings.chat_executor,
       t('chat.conversationConfigExecutorUnavailable'),
     );
+    const hasUnavailableExecutors = executorCatalog.some((executor) => !executor.available && executor.unavailable_reason_code !== 'inbound_only');
     const selectedExecutor = executorCatalog.find((executor) => executor.id === settings.chat_executor);
 
     return loadState === 'loading' ? (
@@ -246,9 +235,12 @@ export default function TaskEntryDefaults({
             value: executor.id,
             label: executor.display_name,
             disabled: !executor.available,
-            title: executor.unavailable_reason,
+            title: executorUnavailableReason(executor, t),
           }))}
-          popupRender={(menu) => (
+          optionRender={({ data }: { data: { label?: ReactNode; disabled?: boolean; title?: string } }) => (
+            <>{data.label}{data.disabled && <small className="settings-entry-defaults-option-reason">{data.title}</small>}</>
+          )}
+          popupRender={(menu: ReactNode) => (
             <>
               {menu}
               {hasUnavailableExecutors && onConnectExecutors ? (
@@ -271,7 +263,7 @@ export default function TaskEntryDefaults({
         />
         {selectedExecutor && !selectedExecutor.available ? (
           <button type="button" className="settings-entry-defaults-unavailable" onClick={onConnectExecutors}>
-            <InfoCircleOutlined /> {t('settingsPage.tasks.executorSelectedUnavailable')}
+            <InfoCircleOutlined /> {executorUnavailableReason(selectedExecutor, t)}
           </button>
         ) : null}
         </div>
@@ -291,6 +283,7 @@ export default function TaskEntryDefaults({
           <strong>{t('chat.conversationConfigWorkflowExecution')}</strong>
           <p>{workflowsEnabled ? t('settingsPage.tasks.workflowDefaultDesc') : t('settingsPage.tasks.workflowMasterOff')}</p>
         </div>
+        <div>
         <Radio.Group
           className="settings-entry-defaults-choice"
           optionType="button"
@@ -316,6 +309,12 @@ export default function TaskEntryDefaults({
           <Radio.Button value="dynamic">{t('chat.conversationConfigWorkflowApproval')}</Radio.Button>
           <Radio.Button value="disabled">{t('chat.conversationConfigWorkflowDisabled')}</Radio.Button>
         </Radio.Group>
+        <p className="settings-entry-defaults-mode-description">{t({
+          auto: 'chat.conversationConfigWorkflowAutoDesc',
+          dynamic: 'chat.conversationConfigWorkflowApprovalDesc',
+          disabled: 'chat.conversationConfigWorkflowDisabledDesc',
+        }[workflowValue])}</p>
+        </div>
       </div>
 
       <div className="settings-entry-defaults-row">
@@ -371,7 +370,16 @@ export default function TaskEntryDefaults({
       <div className="settings-entry-defaults-intro">
         <span className="settings-entry-defaults-intro-icon"><SettingOutlined /></span>
         <div><strong>{t('settingsPage.tasks.defaultsTitle')}</strong><p>{t('settingsPage.tasks.defaultsIntro')}</p></div>
-        <span className="settings-entry-defaults-intro-note"><InfoCircleOutlined /> {t('settingsPage.tasks.defaultsScope')}</span>
+        <div className="settings-entry-defaults-intro-note">
+          <span><InfoCircleOutlined /> {t('settingsPage.tasks.defaultsScope')}</span>
+          {loadState === 'ready' && <span className={`settings-entry-defaults-save-state is-${saveState}`} role="status" aria-live="polite">
+            {saveState === 'saving' ? <LoadingOutlined /> : saveState === 'saved' ? <CheckOutlined /> : null}
+            {t(saveState === 'saving' ? 'settingsPage.tasks.defaultsSaving'
+              : saveState === 'saved' ? 'settingsPage.tasks.defaultsSaved'
+                : saveState === 'error' ? 'settingsPage.tasks.defaultsSaveFailed'
+                  : 'settingsPage.tasks.defaultsAutosave')}
+          </span>}
+        </div>
       </div>
       {([
         ['quick_question', 'settingsPage.tasks.quickDefaultsTitle', 'settingsPage.tasks.quickDefaultsDesc', <MessageOutlined />],
@@ -385,36 +393,12 @@ export default function TaskEntryDefaults({
           {renderFields(kind)}
         </article>
       ))}
-      <div className="settings-entry-defaults-actions">
-        <Button
-          disabled={controlsDisabled}
-          onClick={() => {
-            setProfiles(cloneDefaults(FALLBACK_CHAT_ENTRY_DEFAULTS));
-            setSaveState('idle');
-          }}
-        >
-          {t('settingsPage.tasks.defaultsRestoreAction')}
-        </Button>
-        <footer className="settings-entry-defaults-footer">
-          <span className={`settings-entry-defaults-save-state is-${saveState}`} role="status" aria-live="polite">
-            {saveState === 'saving'
-              ? t('settingsPage.tasks.defaultsSaving')
-              : saveState === 'saved'
-                ? t('settingsPage.tasks.defaultsSaved')
-                : hasUnsavedChanges
-                  ? t('settingsPage.tasks.defaultsUnsaved')
-                  : ''}
-          </span>
-          <Button
-            type="primary"
-            loading={saveState === 'saving'}
-            disabled={loadState !== 'ready' || !hasUnsavedChanges || saveState === 'saving'}
-            onClick={() => void persistProfiles()}
-          >
-            {t('settingsPage.tasks.defaultsSaveAction')}
-          </Button>
-        </footer>
-      </div>
+      <aside className="settings-entry-defaults-notice" aria-label={t('settingsPage.tasks.workflowPreferenceNoteTitle')}>
+        <ExclamationCircleOutlined aria-hidden />
+        <div><strong>{t('settingsPage.tasks.workflowPreferenceNoteTitle')}</strong>
+          <p>{t('settingsPage.tasks.workflowPreferenceNote')}</p>
+        </div>
+      </aside>
     </section>
   );
 }

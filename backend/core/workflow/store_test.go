@@ -671,7 +671,7 @@ func TestLoadDisplaySlots_IncludesLatestRevisionPerStep(t *testing.T) {
 }
 
 func TestDismissSessionWaitsForWorkspaceCommitLock(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.SubAgentTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.SubAgentTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowApprovalPreference{})
 	if err := db.Create(&orm.Conversation{ID: "lock-conversation", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
 		t.Fatal(err)
 	}

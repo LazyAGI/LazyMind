@@ -68,8 +68,10 @@ def test_markdown_images_are_copied_and_scoped_without_changing_source(monkeypat
     assert all(Path(asset['local_path']).is_file() for asset in assets.values())
 
 
-@pytest.mark.parametrize('failure', [TimeoutError('timeout'), PermissionError('not authorized'),
-                                   {'content_base64': 'invalid', 'mime_type': 'image/png'}])
+@pytest.mark.parametrize('failure', [
+    TimeoutError('timeout'), PermissionError('not authorized'),
+    {'content_base64': 'invalid', 'mime_type': 'image/png'},
+])
 def test_bad_dependency_does_not_discard_good_images_or_source(monkeypatch, tmp_path, failure):
     text = '![good](good.png)\n\n![missing](missing.png)\n'
     path = markdown_file(tmp_path, text, {'good.png': 'good', 'missing.png': 'bad'})
@@ -185,9 +187,10 @@ def test_real_core_result_envelope_is_copied_into_the_media_library(monkeypatch,
     monkeypatch.setattr(requests.Session, 'get', get_owned_resource)
     body = '# Original\n\n![Local proof](images/local-proof.png)\n'
     path = markdown_file(tmp_path, body, {'images/local-proof.png': 'owned-image'})
-    result = writing.collect_document_media({'task_id': 'contract-test', 'task_type': 'write', 'query': 'Use this source'},
-                                            file_paths=[str(path)], media_store=str(tmp_path / 'media'),
-                                            analyze_source_images=False)
+    result = writing.collect_document_media(
+        {'task_id': 'contract-test', 'task_type': 'write', 'query': 'Use this source'},
+        file_paths=[str(path)], media_store=str(tmp_path / 'media'), analyze_source_images=False,
+    )
     assert len(calls) == 1
     assert not result['warnings']
     assert len(result['media_assets']['assets']) == 1

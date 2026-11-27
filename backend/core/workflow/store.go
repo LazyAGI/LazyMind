@@ -3,6 +3,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -102,6 +103,9 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 		CreateUserID:     in.CreateUserID,
 		CreatedAt:        now,
 		UpdatedAt:        now,
+	}
+	if err := workflowstore.ApplySavedApprovalMode(db.WithContext(ctx), s); err != nil {
+		return nil, err
 	}
 	if err := db.WithContext(ctx).Create(s).Error; err != nil {
 		return nil, err
@@ -395,9 +399,17 @@ func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status str
 				return nil
 			}
 			if session.WorkflowRevisionID != "" {
-				// Yielding execution is not a user pause. Use the same graph facts
-				// as protocol completion to retain preparation and review barriers.
-				return reconcileRunStatus(ctx, tx, &session)
+				// An explicit post-step handoff ends controller preparation. Read
+				// its durable boundary before reconciling an otherwise active run.
+				candidate := session
+				candidate.Status = SessionStatusWaiting
+				display, err := displaystate.Read(tx, candidate)
+				if err != nil {
+					return err
+				}
+				if display.Reason != "next_step_required" {
+					return reconcileRunStatus(ctx, tx, &session)
+				}
 			}
 		}
 		fields := map[string]any{}
@@ -1087,9 +1099,7 @@ func LoadSlotVersions(ctx context.Context, db *gorm.DB,
 	return rows, nil
 }
 
-// RollbackSlotRevision switches the selected flag to the target revision.
-// The target revision becomes selected=TRUE; the previously selected revision becomes selected=FALSE.
-// No new revision row is created.
+// RollbackSlotRevision restores a Writer final as a new version. Other slots select the target revision.
 func RollbackSlotRevision(ctx context.Context, db *gorm.DB,
 	sessionID, slotID string, listIndex *int,
 	targetRevision int, _ string) (*orm.WorkflowSlotRevision, error) {
@@ -1136,6 +1146,47 @@ func selectSlotRevision(ctx context.Context, db *gorm.DB,
 		if target.Selected {
 			return nil
 		}
+		if changeSource == "rollback" && session.WorkflowID == "writer-workflow" && listIndex == nil && isWriterFinalSlot(slotID) {
+			if target.ChangeSource == "human" {
+				return ErrConflict
+			}
+			raw, err := LoadSlotRevisionValue(ctx, tx, target)
+			if err != nil {
+				return err
+			}
+			content, failure := document.ReadContent(raw, "", func() (bool, error) { return true, nil })
+			if failure != nil || content == nil {
+				return documentFailure("DOCUMENT_INVALID", 400)
+			}
+			restored, err := json.Marshal(map[string]any{"schema": content.Schema, "data": content.Value})
+			if err != nil {
+				return err
+			}
+			var current orm.WorkflowSlotRevision
+			if err := itemQuery().Where("selected = ?", true).First(&current).Error; err != nil {
+				return err
+			}
+			if current.RestoredFromRevision != nil && *current.RestoredFromRevision == targetRevision {
+				target = current
+				return nil
+			}
+			var draft int64
+			if current.HumanArtifactID != nil {
+				if err := tx.Model(&orm.WorkflowHumanArtifact{}).Where("id = ?", *current.HumanArtifactID).Pluck("draft_version", &draft).Error; err != nil {
+					return err
+				}
+			}
+			ct := "json"
+			if content.Representation == "markdown" {
+				ct = "text/markdown"
+			}
+			row, err := writeSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, current.Slot, current.StepID, current.Attempt, "single", nil, ct, restored, nil, "writer_restore", &current.Revision, &draft, false, nil, slotWriteOptions{restoredFromRevision: &targetRevision})
+			if err != nil {
+				return err
+			}
+			target = *row
+			return nil
+		}
 		var currentIDs []string
 		if err := itemQuery().Where("selected = ?", true).Pluck("id", &currentIDs).Error; err != nil {
 			return err
@@ -1178,7 +1229,7 @@ func selectSlotRevision(ctx context.Context, db *gorm.DB,
 // Falls back to list_index ASC for slots that have no order row.
 func LoadSelectedSlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.WorkflowSlotRevision, error) {
 	var rows []orm.WorkflowSlotRevision
-	if err := db.WithContext(ctx).
+	if err := workflowstore.WithSelectionVersion(db.WithContext(ctx)).
 		Where("session_id = ? AND selected = ?", sessionID, true).
 		Order("slot_id ASC, list_index ASC").
 		Find(&rows).Error; err != nil {
@@ -1271,7 +1322,7 @@ func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm
 	}
 	if controlstore.Controlled(session) {
 		var rows []orm.WorkflowSlotRevision
-		if err := db.WithContext(ctx).Where("session_id = ? AND selected = ? AND validity = ?", sessionID, true, "effective").Order("slot_id ASC, list_index ASC").Find(&rows).Error; err != nil {
+		if err := workflowstore.WithSelectionVersion(db.WithContext(ctx)).Where("session_id = ? AND selected = ? AND validity = ?", sessionID, true, "effective").Order("slot_id ASC, list_index ASC").Find(&rows).Error; err != nil {
 			return nil, err
 		}
 		rows, err := controlstore.PresentationSlots(db.WithContext(ctx), rows)
@@ -1504,7 +1555,9 @@ func updateSelectedHumanArtifactValue(
 		}
 		draftVersion = *expectedDraftVersion + 1
 		updated = true
-		return appendArtifactUpsertEvent(tx, session, &selected, draftVersion, time.Now().UTC())
+		err = appendArtifactUpsertEvent(tx, session, &selected, draftVersion, time.Now().UTC())
+		selected.SelectionVersion = session.StateVersion
+		return err
 	})
 	if err != nil {
 		return nil, 0, false, err
@@ -1530,9 +1583,11 @@ func WriteSlotRevisionWithHumanArtifact(
 }
 
 type slotWriteOptions struct {
-	outlineScope      bool
-	numberingOnly     bool
-	preserveNotesFile bool
+	writerCheckpoint     bool
+	outlineScope         bool
+	numberingOnly        bool
+	preserveNotesFile    bool
+	restoredFromRevision *int
 }
 
 func writeSlotRevisionWithHumanArtifact(
@@ -1578,6 +1633,9 @@ func writeSlotRevisionWithHumanArtifact(
 		session, err := lockArtifactMutationSession(tx, sessionID)
 		if err != nil {
 			return err
+		}
+		if opts.writerCheckpoint && session.WorkflowID == "writer-workflow" {
+			changeSource = "writer_edit"
 		}
 		if expectedRevision == nil && changeSource != "provider_sync" {
 			value, err = document.PreserveProviderMetadata(nil, value, contentType)
@@ -1632,6 +1690,21 @@ func writeSlotRevisionWithHumanArtifact(
 				}
 				if guard.RowsAffected != 1 {
 					return ErrDraftVersionConflict
+				}
+			}
+			if changeSource == "writer_edit" {
+				previous, err := matchingWriterVersion(ctx, tx, current, contentType, value)
+				if err != nil {
+					return err
+				}
+				if previous != nil {
+					if !previous.Selected {
+						if _, err := selectSlotRevision(ctx, tx, sessionID, slotID, nil, previous.Revision, "writer_edit"); err != nil {
+							return err
+						}
+					}
+					revisionID = previous.ID
+					return nil
 				}
 			}
 		}
@@ -1701,18 +1774,19 @@ func writeSlotRevisionWithHumanArtifact(
 			}
 		}
 		row := &orm.WorkflowSlotRevision{
-			ID:              "psr_" + common.GenerateID(),
-			SessionID:       sessionID,
-			SlotID:          slotID,
-			Revision:        revision,
-			ListIndex:       finalListIndex,
-			Selected:        true,
-			ChangeSource:    changeSource,
-			HumanArtifactID: &artifactID,
-			Slot:            artifactKey,
-			StepID:          stepID,
-			Attempt:         attempt,
-			CreatedAt:       now,
+			ID:                   "psr_" + common.GenerateID(),
+			SessionID:            sessionID,
+			SlotID:               slotID,
+			Revision:             revision,
+			ListIndex:            finalListIndex,
+			Selected:             true,
+			ChangeSource:         changeSource,
+			RestoredFromRevision: opts.restoredFromRevision,
+			HumanArtifactID:      &artifactID,
+			Slot:                 artifactKey,
+			StepID:               stepID,
+			Attempt:              attempt,
+			CreatedAt:            now,
 		}
 		revisionID = row.ID
 		if err := tx.Create(row).Error; err != nil {
@@ -1729,7 +1803,7 @@ func writeSlotRevisionWithHumanArtifact(
 	}
 
 	var result orm.WorkflowSlotRevision
-	err := db.WithContext(ctx).
+	err := workflowstore.WithSelectionVersion(db.WithContext(ctx)).
 		Where("id = ?", revisionID).
 		First(&result).Error
 	return &result, err
@@ -1833,6 +1907,36 @@ func outlineSaveRevisionIDs(tx *gorm.DB, sessionID string, outlineScope bool, cu
 	return ids, nil
 }
 
+// Compare the completed edit group with its last visible version, including an
+// edit followed by undo after the working draft was persisted.
+func matchingWriterVersion(ctx context.Context, tx *gorm.DB, current orm.WorkflowSlotRevision, contentType string, value json.RawMessage) (*orm.WorkflowSlotRevision, error) {
+	previous := current
+	if current.ChangeSource == "human" {
+		previous = orm.WorkflowSlotRevision{}
+		result := tx.Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND validity = ? AND revision < ? AND change_source <> ?", current.SessionID, current.SlotID, "effective", current.Revision, "human").Order("revision DESC").Take(&previous)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		if result.Error != nil {
+			return nil, result.Error
+		}
+	}
+	raw, err := LoadSlotRevisionValue(ctx, tx, previous)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	hint := func() (bool, error) { return true, nil }
+	prior, _ := document.ReadContent(raw, "", hint)
+	next, _ := document.ReadContent(value, contentType, hint)
+	if prior == nil || next == nil || prior.Schema != next.Schema || !bytes.Equal(prior.Value, next.Value) {
+		return nil, nil
+	}
+	return &previous, nil
+}
+
 func saveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 	sessionID, slotID, artifactKey, stepID string, attempt int, cardinality string, listIndex *int,
 	contentType string, value json.RawMessage, caption *string, baseRevision *int, baseDraft *int64, draft, outlineScope, numberingOnly bool,
@@ -1842,8 +1946,9 @@ func saveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 		return nil, 0, false, err
 	}
 	value = frozen
+	reusedSnapshot := false
 	defer func() {
-		if err != nil && directory != "" {
+		if (err != nil || reusedSnapshot) && directory != "" {
 			_ = os.RemoveAll(directory)
 		}
 	}()
@@ -1854,6 +1959,7 @@ func saveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 		revision = nil
 		version = 0
 		inPlace = false
+		reusedSnapshot = false
 		if draft {
 			var err error
 			revision, version, inPlace, err = updateSelectedHumanArtifactValue(ctx, tx, sessionID, slotID, listIndex, contentType, value, caption, baseRevision, baseDraft, outlineScope, numberingOnly)
@@ -1862,9 +1968,17 @@ func saveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 			}
 		}
 		var err error
-		revision, err = writeSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft, false, nil, slotWriteOptions{outlineScope: outlineScope, numberingOnly: numberingOnly})
+		opts := slotWriteOptions{outlineScope: outlineScope, numberingOnly: numberingOnly, writerCheckpoint: !draft && isWriterFinalSlot(slotID) && listIndex == nil}
+		revision, err = writeSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft, false, nil, opts)
 		if err == nil {
 			version = 1
+			if opts.writerCheckpoint && baseRevision != nil && revision.Revision <= *baseRevision {
+				reusedSnapshot = true
+				version = 0
+				if revision.HumanArtifactID != nil {
+					err = tx.Model(&orm.WorkflowHumanArtifact{}).Where("id = ?", *revision.HumanArtifactID).Pluck("draft_version", &version).Error
+				}
+			}
 		}
 		return err
 	})

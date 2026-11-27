@@ -1033,7 +1033,7 @@ func assertGORMModelsMatchDatabase(t *testing.T, db *gorm.DB) {
 			t.Fatalf("database is missing ORM table %s", stmt.Schema.Table)
 		}
 		for _, field := range stmt.Schema.Fields {
-			if field.DBName == "" {
+			if field.DBName == "" || field.IgnoreMigration {
 				continue
 			}
 			if !db.Migrator().HasColumn(model, field.DBName) {

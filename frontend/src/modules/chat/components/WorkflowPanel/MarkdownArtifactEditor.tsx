@@ -1,3 +1,4 @@
+import { useWriterCheckpoint } from './useWriterCheckpoint';
 import { writerOutlineDescription } from './writerOutlineDescription';
 import { WriterImageGroupContext, writerImageGroupPlugin } from './writerImageGroupPlugin';
 import { documentImageGroups, imageGroupMarkdown, stripImageGroupMarkdown } from './writerImageGroups';
@@ -493,6 +494,9 @@ interface MarkdownArtifactEditorProps {
   /** Prompts keep HTML examples literal and do not acquire document navigation metadata. */
   contentKind?: 'document' | 'prompt';
   resolveImageUrl?: MarkdownImageResolver;
+  disableImageSettingsButton?: boolean;
+  writerCheckpoints?: boolean;
+  initialWorkingDraft?: boolean;
   onDownloadImage?: (source: string) => Promise<void>;
   numbering?: WriterNumberingState;
   numberingDocument?: string;
@@ -574,6 +578,9 @@ export function MarkdownArtifactEditor({
   renderContext,
   resolveImageUrl,
   onDownloadImage,
+  disableImageSettingsButton,
+  writerCheckpoints = false,
+  initialWorkingDraft = false,
   numbering,
   numberingDocument,
   sourceRevision,
@@ -657,6 +664,7 @@ export function MarkdownArtifactEditor({
   const richSourceRef = useRef<string>();
   const copySnapshotRef = useRef(markdown);
   const dirtyRef = useRef(false);
+  const workingDraft = useRef(initialWorkingDraft);
   const savingRef = useRef(false);
   const savingDraftRef = useRef<string>();
   const conflictRef = useRef(false);
@@ -1269,9 +1277,11 @@ export function MarkdownArtifactEditor({
         ? sourceBeforeSave.markdown
         : serializedBaselineRef.current === undefined || sourceEditedRef.current ? nextDraft :
           preserveMarkdownSource(richSourceRef.current ?? sourceBeforeSave.markdown, serializedBaselineRef.current, nextDraft);
-      const savedMarkdown = writerMarkdownForSave(numberingOnly ? sourceDraft :
+      const savedMarkdown = writerCheckpoints && !dirtyRef.current && mode === 'checkpoint' && !numberingUpdate
+        ? sourceBeforeSave.markdown : writerMarkdownForSave(numberingOnly ? sourceDraft :
         protectWriterMarkdownAnchors(numberingDocument ?? sourceBeforeSave.markdown, sourceDraft, !literalHtml, true));
       const result = await onSave(savedMarkdown, revisionBeforeSave, mode, numberingUpdate);
+      workingDraft.current = writerCheckpoints && mode === 'draft';
       const savedRevision = typeof result === 'number'
         ? result
         : result?.revision ?? revisionBeforeSave;
@@ -1283,6 +1293,7 @@ export function MarkdownArtifactEditor({
       // its source can discard transient empty paragraphs and move the caret.
       const acceptedDraft = persistedMarkdown === savedMarkdown ? nextDraft : backendMarkdown;
       const hasNewerDraft = draftMarkdownRef.current !== nextDraft;
+      dirtyRef.current = hasNewerDraft;
       setBaseMarkdown(acceptedDraft);
       // Newer edits may have established a different source snapshot while
       // this request was pending. Preserve that editing baseline.
@@ -1301,7 +1312,7 @@ export function MarkdownArtifactEditor({
       setBaseRevision(savedRevision);
       setAnchorSourceMarkdown(persistedMarkdown);
       setRenderErrorSource(undefined);
-      staleSourceEchoRef.current = sourceBeforeSave;
+      staleSourceEchoRef.current = { markdown, revision: sourceRevision };
       latestSourceRef.current = {
         markdown: persistedMarkdown,
         revision: savedRevision,
@@ -1328,7 +1339,7 @@ export function MarkdownArtifactEditor({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [literalHtml, onSave, readOnly, savePaused, replaceMarkdownSilently, numberingDocument, t]);
+  }, [literalHtml, markdown, sourceRevision, onSave, readOnly, savePaused, replaceMarkdownSilently, numberingDocument, t, writerCheckpoints]);
 
   const saveChanges = useCallback(async (mode: MarkdownSaveMode = 'draft'): Promise<boolean> => {
     if (!dirty || savingRef.current || readOnly) return false;
@@ -1438,20 +1449,18 @@ export function MarkdownArtifactEditor({
     return registerSnapshot(editingKey, () => copySnapshotRef.current);
   }, [editingKey, registerSnapshot]);
 
-  useEffect(() => {
-    if (!editingKey) return undefined;
-    return registerFlush(editingKey, async () => {
-      if (readOnly) return true;
-      while (savingRef.current) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 40);
-        });
-      }
-      if (!dirtyRef.current) return true;
-      if (conflictRef.current) return false;
-      return saveChangesRef.current('checkpoint');
-    });
-  }, [editingKey, readOnly, registerFlush]);
+  const flushMarkdown = useCallback(async () => {
+    if (readOnly) return true;
+    while (savingRef.current) await new Promise<void>(resolve => window.setTimeout(resolve, 40));
+    if (conflictRef.current) return false;
+    if (dirtyRef.current) return saveChangesRef.current('checkpoint');
+    if (!workingDraft.current) return true;
+    return persistMarkdown(draftMarkdownRef.current, latestSourceRef.current.revision, 'checkpoint');
+  }, [persistMarkdown, readOnly]);
+  const flushRef = useRef(flushMarkdown);
+  flushRef.current = flushMarkdown;
+  useEffect(() => editingKey ? registerFlush(editingKey, () => flushRef.current()) : undefined, [editingKey, registerFlush]);
+  useWriterCheckpoint(writerCheckpoints && !readOnly, draftMarkdown, dirty || initialWorkingDraft && workingDraft.current, rootRef, flushMarkdown);
 
   useEffect(() => {
     if (!editingKey || !onDownload || !tabActive) return undefined;
@@ -1492,9 +1501,12 @@ export function MarkdownArtifactEditor({
     });
     sourceEditedRef.current = true;
     richSourceRef.current = merged;
-    replaceMarkdownSilently(normalizeMarkdownForMdxEditor(merged, literalHtml), true);
-    draftMarkdownRef.current = normalizeMarkdownForMdxEditor(merged, literalHtml);
-    setDraftMarkdown(draftMarkdownRef.current);
+    const nextDraft = normalizeMarkdownForMdxEditor(merged, literalHtml);
+    replaceMarkdownSilently(nextDraft, true);
+    draftMarkdownRef.current = nextDraft;
+    // The checkpoint starts before React renders the accepted edits.
+    dirtyRef.current = nextDraft !== anchorSourceMarkdown;
+    setDraftMarkdown(nextDraft);
     // The existing save path retains typing that happens while this request runs.
     void persistMarkdown(draftMarkdownRef.current, latestSourceRef.current.revision, 'checkpoint');
   };
@@ -2200,6 +2212,7 @@ export function MarkdownArtifactEditor({
                 }],
               }),
               imagePlugin({
+                disableImageSettingsButton,
                 imagePreviewHandler: resolveImageUrl ?? resolveMarkdownImageUrlAsync,
               }),
               writerImageDownloadPlugin({ onDownload: onDownloadImage }),

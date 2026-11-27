@@ -28,7 +28,7 @@ export interface WorkflowActionIntent {
   stepId?: string;
   completedStepId?: string;
   review?: Pick<WorkflowReview, 'id' | 'version' | 'manifest_hash'>;
-  preferenceScope?: 'step' | 'following';
+  preferenceScope?: 'step' | 'session' | 'following';
   input?: Pick<WorkflowInputRequest, 'artifact_id' | 'revision'>;
   answerText?: string;
 }
@@ -77,7 +77,7 @@ export function externalPanelAction(
 
 export interface WorkflowControlRequest extends Pick<WorkflowControlCommand, 'command_id' | 'expected_state_version' | 'step_id' | 'review_id' | 'review_version' | 'manifest_hash'> {
   kind: Exclude<WorkflowActionKind, 'save'>;
-  preference_scope?: 'step' | 'following';
+  preference_scope?: 'step' | 'session' | 'following';
   input_artifact_id?: string;
   input_revision?: number;
   answer_text?: string;

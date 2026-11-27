@@ -161,6 +161,11 @@ function renderedMarkdown(document: string, media_urls?: Record<string, string>)
   };
 }
 
+function selectedMarkdown(text: string, revision: number, draft: number, clock: number) {
+  const { data } = renderedMarkdown(text, { 'cover.png': `https://example.test/cover-${revision}.png` });
+  return { data: { ...data, data: { ...data.data, revision, draft_version: draft, selection_version: clock } } };
+}
+
 describe('Writer write-back provider choice', () => {
   it('shows the Obsidian logo and falls back when it cannot be loaded', () => {
     const { container } = render(
@@ -414,6 +419,53 @@ describe('SlotWriterDocument render refresh', () => {
 
     expect(screen.getByText('latest document')).toBeInTheDocument();
     expect(document.querySelector('.workflow-slot--error')).not.toBeInTheDocument();
+  });
+
+  it('accepts a newer selection of an earlier revision and ignores obsolete props and saves', async () => {
+    const slot = (revision: number, draft: number, clock: number) => <SlotRenderer
+      slot={{ ...writerSlot(revision), draft_version: draft, selection_version: clock }}
+      widget={{ widgetType: 'writer-document' }} sessionId='writer-session' slotId='draft_document' />;
+    const latestEditor = () => markdownEditorRender.mock.lastCall![0];
+    workflowApi.renderWriterDocument.mockResolvedValueOnce(selectedMarkdown('Draft B', 2, 3, 11))
+      .mockResolvedValueOnce(selectedMarkdown('Original A', 1, 0, 13));
+    const pending = deferred<ReturnType<typeof selectedMarkdown>>();
+    workflowApi.saveWriterDocument.mockReturnValueOnce(pending.promise);
+    const view = render(slot(2, 3, 11));
+    await screen.findByRole('button', { name: 'save markdown draft' });
+    const lateSave = latestEditor().onSave('Late B', 2, 'draft');
+    view.rerender(slot(1, 0, 13));
+    await waitFor(() => expect(latestEditor()).toMatchObject({ markdown: 'Original A', sourceRevision: 1 }));
+    view.rerender(slot(2, 4, 12));
+    await act(async () => {
+      pending.resolve(selectedMarkdown('Late B', 2, 4, 12));
+      await expect(lateSave).rejects.toThrow();
+    });
+    expect(workflowApi.renderWriterDocument).toHaveBeenCalledTimes(2);
+    expect(latestEditor()).toMatchObject({ markdown: 'Original A', sourceRevision: 1 });
+    await expect(latestEditor().resolveImageUrl('cover.png')).resolves.toBe('https://example.test/cover-1.png');
+    workflowApi.saveWriterDocument.mockResolvedValueOnce(selectedMarkdown('New edit', 3, 1, 14));
+    await act(async () => { await latestEditor().onSave('New edit', 1, 'draft'); });
+    expect(workflowApi.saveWriterDocument).toHaveBeenLastCalledWith(
+      'writer-session', 1, 0, 'New edit', 'draft_document', 'draft', undefined, { silentError: true },
+    );
+  });
+
+  it('keeps the checkpoint selection when an older render finishes after the save', async () => {
+    const stale = deferred<ReturnType<typeof selectedMarkdown>>();
+    workflowApi.renderWriterDocument.mockResolvedValueOnce(selectedMarkdown('Draft B', 2, 1, 10))
+      .mockReturnValueOnce(stale.promise);
+    workflowApi.saveWriterDocument.mockResolvedValueOnce(selectedMarkdown('Original A', 1, 0, 12));
+    const slot = (clock: number) => <SlotRenderer slot={{ ...writerSlot(2), draft_version: 1, selection_version: clock }}
+      widget={{ widgetType: 'writer-document' }} sessionId='writer-session' slotId='draft_document' />;
+    const view = render(slot(10));
+    await screen.findByRole('button', { name: 'save markdown draft' });
+    view.rerender(slot(11));
+    expect(workflowApi.renderWriterDocument).toHaveBeenCalledTimes(1);
+    act(() => markdownEditorRender.mock.lastCall![0].onRefresh());
+    await waitFor(() => expect(workflowApi.renderWriterDocument).toHaveBeenCalledTimes(2));
+    await act(async () => { await markdownEditorRender.mock.lastCall![0].onSave('Original A', 2, 'checkpoint'); });
+    await act(async () => { stale.resolve(selectedMarkdown('Draft B', 2, 1, 11)); await stale.promise; });
+    expect(markdownEditorRender.mock.lastCall![0]).toMatchObject({ markdown: 'Original A', sourceRevision: 1 });
   });
 
   it('uses the server-selected source profile for media and draft saves', async () => {

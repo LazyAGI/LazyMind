@@ -38,6 +38,7 @@ export interface SlotEditingContextValue {
   onBrowse?: () => void;
   actionPending?: boolean;
   runFooterAction?: (action: () => void | Promise<void>, flushKey?: string) => Promise<void>;
+  flushPendingEdits?: (key: string) => Promise<boolean>;
   registerSnapshot?: (key: string, read: () => unknown) => () => void;
   getSnapshot?: (key: string) => unknown;
   setEditing: (key: string, editing: boolean) => void;

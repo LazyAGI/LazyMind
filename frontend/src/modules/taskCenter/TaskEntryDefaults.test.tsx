@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatEntryDefault, ChatEntryDefaults, ChatExecutorDescriptor } from '@/modules/chat/utils/request';
@@ -28,11 +28,10 @@ vi.mock('react-i18next', async () => {
     'settingsPage.tasks.quickDefaultsDesc': '快速问答设置',
     'settingsPage.tasks.taskDefaultsTitle': '新建任务默认配置',
     'settingsPage.tasks.taskDefaultsDesc': '新建任务设置',
-    'settingsPage.tasks.defaultsRestoreAction': '恢复默认',
-    'settingsPage.tasks.defaultsSaveAction': '保存',
     'settingsPage.tasks.defaultsSaving': '正在保存',
-    'settingsPage.tasks.defaultsSaved': '已保存',
-    'settingsPage.tasks.defaultsUnsaved': '有未保存的修改',
+    'settingsPage.tasks.defaultsSaved': '已自动保存',
+    'settingsPage.tasks.defaultsAutosave': '修改后自动保存',
+    'settingsPage.tasks.workflowPreferenceNoteTitle': '注意事项',
     'settingsPage.tasks.defaultsLoadFailed': '默认配置加载失败',
     'settingsPage.tasks.defaultsLoadFailedDesc': '请重试',
     'settingsPage.tasks.defaultsSaveFailed': '默认配置保存失败',
@@ -101,20 +100,80 @@ describe('TaskEntryDefaults', () => {
     expect(within(task).getByRole('radio', { name: '高' })).toBeChecked();
     expect(within(quick).getByText('LazyMind')).toBeInTheDocument();
     expect(within(task).getByText('Codex')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /保\s*存|恢复默认/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '注意事项' })).toBeInTheDocument();
+    expect(mocks.patchChatEntryDefault).not.toHaveBeenCalled();
   });
 
-  it('saves edits from both cards in one action', async () => {
+  it('automatically saves both entry profiles without a save button', async () => {
     render(<TaskEntryDefaults subtasksEnabled workflowsEnabled />);
     await screen.findAllByRole('radio', { name: '低' });
     fireEvent.click(within(card('快速问答默认配置')).getByRole('radio', { name: '低' }));
     fireEvent.click(within(card('新建任务默认配置')).getByRole('radio', { name: 'Max' }));
-    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }));
 
     await waitFor(() => expect(mocks.patchChatEntryDefault).toHaveBeenCalledTimes(2));
     expect(mocks.patchChatEntryDefault).toHaveBeenNthCalledWith(1, 'quick_question', entryDefault('low'), expect.anything());
     expect(mocks.patchChatEntryDefault).toHaveBeenNthCalledWith(2, 'new_task', entryDefault('max', {
       chat_executor: 'codex', enable_subagent: false, enable_workflow: true, workflow_mode: 'auto',
     }), expect.anything());
+    await screen.findByText('已自动保存');
+  });
+
+  it('serializes rapid edits and persists the latest full profile after the pending request', async () => {
+    let finish!: () => void;
+    mocks.patchChatEntryDefault.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<TaskEntryDefaults subtasksEnabled workflowsEnabled />);
+    await screen.findAllByRole('radio', { name: '低' });
+    const quick = within(card('快速问答默认配置'));
+    fireEvent.click(quick.getByRole('radio', { name: '低' }));
+    fireEvent.click(quick.getByRole('radio', { name: '自动执行' }));
+    fireEvent.click(quick.getByRole('switch', { name: '允许子任务' }));
+    expect(mocks.patchChatEntryDefault).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('正在保存')).toBeInTheDocument();
+    await act(async () => finish());
+    await screen.findByText('已自动保存');
+    expect(mocks.patchChatEntryDefault).toHaveBeenCalledTimes(2);
+    expect(mocks.patchChatEntryDefault).toHaveBeenLastCalledWith('quick_question', entryDefault('low', {
+      enable_subagent: false, enable_workflow: true, workflow_mode: 'auto',
+    }), expect.anything());
+  });
+
+  it('keeps failed changes for explicit retry and does not claim they were saved', async () => {
+    mocks.patchChatEntryDefault.mockRejectedValueOnce(new Error('offline'));
+    render(<TaskEntryDefaults subtasksEnabled workflowsEnabled />);
+    await screen.findAllByRole('radio', { name: '低' });
+    const quick = within(card('快速问答默认配置'));
+    fireEvent.click(quick.getByRole('switch', { name: '允许子任务' }));
+    await screen.findByRole('button', { name: /重\s*试/ });
+    expect(screen.queryByText('已自动保存')).not.toBeInTheDocument();
+    expect(quick.getByRole('switch', { name: '允许子任务' })).not.toBeChecked();
+    expect(mocks.patchChatEntryDefault).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }));
+    await screen.findByText('已自动保存');
+    expect(mocks.patchChatEntryDefault).toHaveBeenCalledTimes(2);
+    expect(mocks.patchChatEntryDefault).toHaveBeenLastCalledWith('quick_question', entryDefault('medium', { enable_subagent: false }), expect.anything());
+  });
+
+  it('keeps successful entries saved if a later entry fails', async () => {
+    let finish!: () => void;
+    mocks.patchChatEntryDefault.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }))
+      .mockRejectedValueOnce(new Error('offline'));
+    render(<TaskEntryDefaults subtasksEnabled workflowsEnabled />);
+    await screen.findAllByRole('radio', { name: '低' });
+    fireEvent.click(within(card('快速问答默认配置')).getByRole('radio', { name: '低' }));
+    fireEvent.click(within(card('新建任务默认配置')).getByRole('radio', { name: 'Max' }));
+    await act(async () => finish());
+    fireEvent.click(await screen.findByRole('button', { name: /重\s*试/ }));
+    await screen.findByText('已自动保存');
+    expect(mocks.patchChatEntryDefault.mock.calls.map(call => call[0])).toEqual(['quick_question', 'new_task', 'new_task']);
+  });
+
+  it('does not overwrite configuration if the initial load fails', async () => {
+    mocks.getChatSettings.mockRejectedValueOnce(new Error('offline'));
+    render(<TaskEntryDefaults subtasksEnabled workflowsEnabled />);
+    await screen.findByText('默认配置加载失败');
+    expect(screen.getAllByRole('radio').every(radio => (radio as HTMLInputElement).disabled)).toBe(true);
+    expect(mocks.patchChatEntryDefault).not.toHaveBeenCalled();
   });
 
   it('offers a connection action when an external executor is unavailable', async () => {

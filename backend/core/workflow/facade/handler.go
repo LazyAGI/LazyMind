@@ -475,6 +475,7 @@ func (h Handler) PatchArtifact(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "ARTIFACT_PATCH_FAILED", "artifact read failed", false)
 			return
 		}
+		artifact.SelectionVersion = revision.SelectionVersion
 		writeJSON(w, 200, envelope{Data: artifact})
 		return
 	}

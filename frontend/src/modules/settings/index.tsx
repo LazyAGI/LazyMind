@@ -879,7 +879,7 @@ function SettingsPageContent() {
         )}
       </>;
     } else if (section === "assistants") {
-      content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
+      content = integratedSurface(<AgentIntegrationPage agentId={searchParams.get("agent")} />, "is-assistants");
     } else if (section === "notifications") {
       content = <NotificationSettings />;
     } else if (section === "channels") {

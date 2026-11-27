@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { fireEvent, render } from '@testing-library/react';
-import { beforeAll, expect, it } from 'vitest';
+import { beforeAll, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
+import { WriterIRControl } from './WriterIRControl';
 import { WriterIRDocumentEditor } from './WriterIRDocumentEditor';
 import type { WriterDocument } from './writerIR';
 import { irImageCandidates } from './writerImageGroups';
@@ -43,4 +44,41 @@ it('previews and restores structured images while keeping individual records', (
   fireEvent.click(getByRole('button', { name: 'Restore vertical layout' }));
   expect(container.querySelector('.writer-image-group')).toHaveAttribute('data-layout', 'vertical');
   expect(container.querySelectorAll('img')).toHaveLength(3);
+});
+
+it('undoes each structured image drag separately, including a gallery of repeated sources', () => {
+  const paragraph = (node_id: string) => ({ node_id, type: 'paragraph', content: node_id });
+  const image = (node_id: string) => ({ node_id, type: 'image', content: node_id,
+    references: [{ type: 'media_asset', url: 'https://example.com/repeated.png' }] });
+  const initial: WriterDocument = { document_id: 'drag-test', title: 'Drag', stage: 'final',
+    blocks: [paragraph('first'), image('a'), paragraph('between'), paragraph('second'), image('b')] };
+  const { container } = render(<WriterIRControl document={initial} onSave={vi.fn()} />);
+  const block = (id: string) => container.querySelector<HTMLElement>(`[data-writer-block][data-node-id="${id}"]`)!;
+  const order = () => Array.from(container.querySelectorAll<HTMLElement>('[data-writer-block]'), el => el.dataset.nodeId);
+  const hitTest = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  const drag = (source: HTMLElement, target: HTMLElement) => {
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => target });
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 0, 80, 80));
+    fireEvent.mouseDown(source, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(window, { clientX: 160, clientY: 40 });
+    fireEvent.mouseUp(window, { clientX: 160, clientY: 40 });
+  };
+  try {
+    expect(block('a').querySelector('[data-writer-drag-handle]')).toBeNull();
+    drag(block('a').querySelector('img')!, block('between'));
+    const moved = ['first', 'between', 'a', 'second', 'b'];
+    expect(order()).toEqual(moved);
+    drag(block('a').querySelector('img')!, block('b').querySelector('img')!);
+    expect(container.querySelector('.writer-image-group')).toHaveAttribute('data-layout', 'sliding');
+    expect(order()).toEqual(['first', 'between', 'second', 'b', 'a']);
+    fireEvent.keyDown(block('first'), { ctrlKey: true, key: 'z' });
+    expect(order()).toEqual(moved);
+    expect(container.querySelector('.writer-image-group')).toBeNull();
+    fireEvent.keyDown(block('first'), { ctrlKey: true, key: 'z' });
+    expect(order()).toEqual(initial.blocks.map(block => block.node_id));
+  } finally {
+    vi.restoreAllMocks();
+    if (hitTest) Object.defineProperty(document, 'elementFromPoint', hitTest);
+    else Reflect.deleteProperty(document, 'elementFromPoint');
+  }
 });

@@ -771,13 +771,13 @@ def test_rewrite_no_image_request_skips_visual_planning(monkeypatch, tmp_path, r
 
     result = json.loads(
         writer.WriterWritingCapabilities().generate_rewrite_section_instructions(
-        writing_task_json=json.dumps({
-            'task_id': 'task-1',
-            'query': '请重写全文，不要图片',
-            'task_type': 'write',
-        }),
-        source_document_json=source,
-        writing_context_json=json.dumps({'context_id': 'context-1'}),
+            writing_task_json=json.dumps({
+                'task_id': 'task-1',
+                'query': '请重写全文，不要图片',
+                'task_type': 'write',
+            }),
+            source_document_json=source,
+            writing_context_json=json.dumps({'context_id': 'context-1'}),
         )
     )
 
@@ -950,7 +950,7 @@ def test_generated_outline_does_not_run_a_second_completion(monkeypatch):
 @pytest.mark.parametrize('fail', [False, True])
 def test_outline_stream_records_timing_trace_without_changing_preview(monkeypatch, fail):
     from types import SimpleNamespace
-    import lazyllm.tracing as tracing
+    from lazyllm import tracing
     from lazyllm.tools.writer.tools.stream_tools import DraftMarkdownStream
     from lazymind.document_tools.writing import WriterWritingCapabilities
 
@@ -1295,7 +1295,9 @@ def test_prepare_publishes_uploaded_markdown_separately_from_brief_even_when_ima
     from lazymind.chat.engine.subagent import tools as artifact_tools
 
     body = '# Uploaded material\n\n![figure](figure.png)\n'
-    manifest = base64.b64encode(json.dumps({'images': [{'source': 'figure.png', 'resource_id': 'figure'}]}).encode()).decode()
+    manifest = base64.b64encode(json.dumps({
+        'images': [{'source': 'figure.png', 'resource_id': 'figure'}],
+    }).encode()).decode()
     document = tmp_path / 'material.md'
     document.write_text(body + '\n\n<!-- lazymind-markdown-images:v1:' + manifest + ' -->\n')
     tools, _ = _stub_prepare_workspace(
@@ -1307,7 +1309,9 @@ def test_prepare_publishes_uploaded_markdown_separately_from_brief_even_when_ima
         'source_document': str(document), 'source_uri': str(document),
     })
     monkeypatch.setattr(model_config, 'is_model_role_available', lambda _: False)
-    data = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=')
+    data = base64.b64decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+    )
 
     def read(identifier, timeout):
         if not image_available:

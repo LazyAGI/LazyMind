@@ -277,6 +277,9 @@ func testHandler(t *testing.T) (Handler, *gorm.DB) {
 	if err := repo.AutoMigrate(); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.AutoMigrate(&orm.WorkflowApprovalPreference{}); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Exec(`CREATE TABLE plugin_sessions (id TEXT PRIMARY KEY, create_user_id TEXT NOT NULL, conversation_id TEXT NOT NULL DEFAULT '')`).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -608,9 +611,16 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 	if err := db.Model(&orm.ChatHistory{}).Where("id = ?", "trigger-history").Update("conversation_id", "conversation-1").Error; err != nil {
 		t.Fatal(err)
 	}
+	pref := orm.WorkflowApprovalPreference{UserID: "owner", WorkflowID: "writer", StepID: "*", ApprovalRequired: false}
+	if err := db.Create(&pref).Error; err != nil {
+		t.Fatal(err)
+	}
 	first := consume("session-1")
 	if first.Code != http.StatusServiceUnavailable || decodeEnvelope(t, first).Error.Code != "WORKFLOW_SESSION_EVENT_FAILED" {
 		t.Fatalf("first consume: status=%d body=%s", first.Code, first.Body.String())
+	}
+	if err := db.Model(&pref).Update("approval_required", true).Error; err != nil {
+		t.Fatal(err)
 	}
 	second := consume("different-session-id")
 	if second.Code != http.StatusOK {
@@ -619,6 +629,9 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 	var bound orm.WorkflowSession
 	if err := db.First(&bound, "id = ?", "session-1").Error; err != nil || bound.TriggerHistoryID != "trigger-history" {
 		t.Fatalf("initial Chat turn binding lost: %+v %v", bound, err)
+	}
+	if bound.WorkflowMode != "auto" || bound.ApprovalMode != "auto" {
+		t.Fatalf("saved mode was not inherited or changed on replay: %+v", bound)
 	}
 	encodedResponse, _ := json.Marshal(decodeEnvelope(t, second).Data)
 	if !bytes.Contains(encodedResponse, []byte(`"session_id":"session-1"`)) {
@@ -634,7 +647,7 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 		"conversation_id": "conversation-1",
 		"session_id":      "session-1",
 		"workflow_id":     "writer",
-		"workflow_mode":   "dynamic",
+		"workflow_mode":   "auto",
 		"status":          "active",
 		"state_version":   int64(1),
 	}

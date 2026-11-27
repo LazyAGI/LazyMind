@@ -111,7 +111,7 @@ export default function Workbench({ active }: WorkbenchProps) {
   const visibleCategories = CATEGORIES.filter(category => categoryVisible(category) && (data?.groups[category].total ?? 0) > 0);
   const count = (category: WorkbenchCategory) => data?.groups[category].total ?? 0;
   const openConversation = (id: string) => {
-    selectChatConversationFilter('task');
+    selectChatConversationFilter('task', { remember: false });
     navigate(getChatConversationPath(id));
   };
 

@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"time"
 )
@@ -21,9 +22,11 @@ type WorkflowSession struct {
 	WorkflowRevisionNo int64  `gorm:"column:plugin_revision_no;not null;default:0"`
 	WorkflowTreeHash   string `gorm:"column:plugin_tree_hash;type:varchar(64);not null;default:''"`
 	WorkflowRemoteRoot string `gorm:"column:plugin_remote_root;type:varchar(1024);not null;default:''"`
-	// WorkflowMode is selected once when the session is created and is immutable
-	// for the lifetime of that session.
-	WorkflowMode       string `gorm:"column:workflow_mode;type:varchar(16);not null;default:dynamic"`
+	// WorkflowMode is selected at creation; only authenticated user approval settings may change it.
+	WorkflowMode        string                   `gorm:"column:workflow_mode;type:varchar(16);not null;default:dynamic"`
+	ApprovalPreferences WorkflowApprovalSnapshot `gorm:"column:approval_preferences;type:text;not null;default:'{}'" json:"-"`
+	// ApprovalMode is an explicit run policy; empty uses package defaults and the frozen preferences.
+	ApprovalMode       string `gorm:"column:approval_mode;type:varchar(16);not null;default:''"`
 	StateVersion       int64  `gorm:"column:state_version;not null;default:0"`
 	GraphHash          string `gorm:"column:graph_hash;type:varchar(64);not null;default:''"`
 	GraphSchemaVersion string `gorm:"column:graph_schema_version;type:varchar(16);not null;default:''"`
@@ -45,6 +48,31 @@ type WorkflowSession struct {
 }
 
 func (WorkflowSession) TableName() string { return "plugin_sessions" }
+
+// WorkflowApprovalSnapshot is the policy captured when a run is created.
+// Implement SQL scanning so raw queries and ORM reads share the same decoding.
+type WorkflowApprovalSnapshot map[string]bool
+
+func (value *WorkflowApprovalSnapshot) Scan(src any) error {
+	var raw RawJSON
+	if err := raw.Scan(src); err != nil {
+		return err
+	}
+	var decoded WorkflowApprovalSnapshot
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	*value = decoded
+	return nil
+}
+
+func (value WorkflowApprovalSnapshot) Value() (driver.Value, error) {
+	if value == nil {
+		return "{}", nil
+	}
+	raw, err := json.Marshal(value)
+	return string(raw), err
+}
 
 // WorkflowApprovalPreference stores a user's persistent approval policy for a
 // workflow step. Missing rows intentionally inherit the step mode declared by
@@ -116,6 +144,8 @@ type WorkflowSlotRevision struct {
 	SessionID string `gorm:"column:session_id;type:varchar(36);not null"`
 	SlotID    string `gorm:"column:slot_id;type:varchar(64);not null"`
 	Revision  int    `gorm:"column:revision;not null"`
+	// SelectionVersion is the session clock at which this selection was read or saved.
+	SelectionVersion int64 `gorm:"column:selection_version;->;-:migration" json:"-"`
 	// ListIndex is the 0-based position within a cardinality=list slot; NULL for single.
 	ListIndex *int `gorm:"column:list_index"`
 	Selected  bool `gorm:"column:selected;not null;default:true"`
@@ -138,7 +168,8 @@ type WorkflowSlotRevision struct {
 	ProducerAttemptID string    `gorm:"column:producer_attempt_id;type:varchar(36);not null;default:''"`
 	CreatedAt         time.Time `gorm:"column:created_at;not null"`
 	// PPTNotesRevisionID pairs a slide history entry with its speaker notes.
-	PPTNotesRevisionID *string `gorm:"column:ppt_notes_revision_id;type:varchar(36)"`
+	PPTNotesRevisionID   *string `gorm:"column:ppt_notes_revision_id;type:varchar(36)"`
+	RestoredFromRevision *int    `gorm:"column:restored_from_revision"`
 }
 
 func (WorkflowSlotRevision) TableName() string { return "plugin_slot_revisions" }

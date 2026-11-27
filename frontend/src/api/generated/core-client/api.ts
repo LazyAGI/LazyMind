@@ -1964,6 +1964,7 @@ export interface Artifact {
     'producer_attempt_id'?: string;
     'revision': number;
     'selected': boolean;
+    'selection_version'?: number;
     'session_id': string;
     'slot': string;
     'slot_id': string;
@@ -2183,7 +2184,8 @@ export const ChatConversationDefaultsOpenAPIChatExecutorEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy'
+    Workbuddy: 'workbuddy',
+    DeepseekHarness: 'deepseek-harness'
 } as const;
 
 export type ChatConversationDefaultsOpenAPIChatExecutorEnum = typeof ChatConversationDefaultsOpenAPIChatExecutorEnum[keyof typeof ChatConversationDefaultsOpenAPIChatExecutorEnum];
@@ -2205,7 +2207,8 @@ export const ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy'
+    Workbuddy: 'workbuddy',
+    DeepseekHarness: 'deepseek-harness'
 } as const;
 
 export type ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum = typeof ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum[keyof typeof ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum];
@@ -3042,7 +3045,8 @@ export const ConversationDetailItemAssistantEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy'
+    Workbuddy: 'workbuddy',
+    DeepseekHarness: 'deepseek-harness'
 } as const;
 
 export type ConversationDetailItemAssistantEnum = typeof ConversationDetailItemAssistantEnum[keyof typeof ConversationDetailItemAssistantEnum];
@@ -3050,7 +3054,8 @@ export const ConversationDetailItemChatExecutorEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy'
+    Workbuddy: 'workbuddy',
+    DeepseekHarness: 'deepseek-harness'
 } as const;
 
 export type ConversationDetailItemChatExecutorEnum = typeof ConversationDetailItemChatExecutorEnum[keyof typeof ConversationDetailItemChatExecutorEnum];
@@ -3406,7 +3411,8 @@ export const ConversationItemAssistantEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy'
+    Workbuddy: 'workbuddy',
+    DeepseekHarness: 'deepseek-harness'
 } as const;
 
 export type ConversationItemAssistantEnum = typeof ConversationItemAssistantEnum[keyof typeof ConversationItemAssistantEnum];
@@ -3414,7 +3420,8 @@ export const ConversationItemChatExecutorEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy'
+    Workbuddy: 'workbuddy',
+    DeepseekHarness: 'deepseek-harness'
 } as const;
 
 export type ConversationItemChatExecutorEnum = typeof ConversationItemChatExecutorEnum[keyof typeof ConversationItemChatExecutorEnum];
@@ -9542,6 +9549,7 @@ export interface SlotDTO {
     'revision': number;
     'revision_count'?: number;
     'selected': boolean;
+    'selection_version'?: number;
     'slot': string;
     'slot_id': string;
     'sort_order'?: number;
@@ -54035,7 +54043,8 @@ export const ApiCoreConversationsGetAssistantEnum = {
     Lazymind: 'lazymind',
     Codex: 'codex',
     Cursor: 'cursor',
-    Workbuddy: 'workbuddy'
+    Workbuddy: 'workbuddy',
+    DeepseekHarness: 'deepseek-harness'
 } as const;
 export type ApiCoreConversationsGetAssistantEnum = typeof ApiCoreConversationsGetAssistantEnum[keyof typeof ApiCoreConversationsGetAssistantEnum];
 export const ApiCoreConversationsTrashDeleteKindEnum = {

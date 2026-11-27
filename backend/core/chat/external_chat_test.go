@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,8 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 
+	"lazymind/core/agentinvocation"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/externalcontext"
 	"lazymind/core/state"
@@ -35,7 +38,7 @@ func newExternalChatTestApplication(t *testing.T) (*externalChatApplication, *go
 		&orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.MCPServer{},
 		&orm.MultiAnswersChatHistory{}, &orm.SkillV2Skill{}, &orm.SubAgentTask{},
 		&orm.TaskAttemptTiming{}, &orm.TaskCenterTask{}, &orm.TaskExecutionTiming{},
-		&orm.TaskNotification{}, &orm.UserChatSettings{}, &orm.UserDisabledTool{},
+		&orm.TaskNotification{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{}, &orm.UserChatSettings{}, &orm.UserDisabledTool{},
 		&orm.UserEnvironmentVariable{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{},
 		&orm.UserModelProviderGroupModel{}, &orm.UserNotificationPreferences{}, &orm.UserPersonalizationSetting{},
 		&orm.UserSelectedCloudModel{}, &orm.UserSelectedModel{}, &orm.UserSelectedProvider{},
@@ -404,6 +407,191 @@ func TestDirectMCPInvocationDoesNotCreateSyntheticConversationTurn(t *testing.T)
 	}
 	if histories != 0 || runs != 0 {
 		t.Fatalf("synthetic histories=%d runs=%d", histories, runs)
+	}
+}
+
+func TestDSHHistoryOnlyImportsThreadsObservedByMCP(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	const provider = "deepseek-harness"
+	source := externalcontext.Source{Provider: provider, HostID: "host-1", ThreadID: "root-1"}
+	var conversationID string
+	for _, id := range []string{"call-1", "call-2"} {
+		start, err := agentinvocation.New(db).StartLinked(t.Context(), "user-1", agentinvocation.StartInput{
+			ID: id, ClientName: "DSH", ConnectorName: "lazymind", ConnectorInstanceID: "connector-1",
+			ToolName: "workflow.list", RequestHash: strings.Repeat("a", 64), Source: &source,
+		})
+		if err != nil || start.Source == nil || start.Source.ConversationID == "" || (conversationID != "" && start.Source.ConversationID != conversationID) {
+			t.Fatalf("unexpected invocation link %#v, err=%v", start.Source, err)
+		}
+		conversationID = start.Source.ConversationID
+	}
+	checkList := func(query string, turns int) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/conversations?"+query, nil)
+		request.Header.Set("X-User-Id", "user-1")
+		response := httptest.NewRecorder()
+		ListConversations(response, request)
+		var result struct {
+			Conversations []struct {
+				ID        string `json:"conversation_id"`
+				Assistant string `json:"assistant"`
+				Executor  string `json:"chat_executor"`
+				Turns     int    `json:"chat_times"`
+			} `json:"conversations"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &result) != nil {
+			t.Fatalf("list response: %d %s", response.Code, response.Body.String())
+		}
+		if turns == 0 {
+			if len(result.Conversations) != 0 {
+				t.Fatal("DSH thread shown without a transcript")
+			}
+			return
+		}
+		if len(result.Conversations) != 1 {
+			t.Fatalf("unexpected conversation count: %d", len(result.Conversations))
+		}
+		row := result.Conversations[0]
+		if row.ID != conversationID || row.Assistant != provider || row.Executor != ChatExecutorLazyMind || row.Turns != turns {
+			t.Fatalf("unexpected list row %#v", row)
+		}
+	}
+	session := externalcontext.NativeSession{ThreadID: source.ThreadID, ProjectKey: "dsh", ProjectName: "DSH", DisplayName: "真实对话"}
+	if updated, err := externalcontext.New(db).SyncSessionCatalog(t.Context(), "user-1", provider, source.HostID, []externalcontext.NativeSession{session}, false); err != nil || updated != 0 {
+		t.Fatalf("empty transcript updated %d, error=%v", updated, err)
+	}
+	checkList("assistants="+provider, 0)
+	session.Turns = []externalcontext.NativeTurn{{ID: "turn-1", User: "查询工作流", Assistant: "查询完成"}}
+	for range 2 {
+		payload, _ := json.Marshal(map[string]any{"host_id": source.HostID, "sessions": []externalcontext.NativeSession{session}})
+		request := httptest.NewRequest(http.MethodPost, "/external-chat/providers/"+provider+"/sessions:sync", strings.NewReader(string(payload)))
+		request.Header.Set("X-User-Id", "user-1")
+		response := httptest.NewRecorder()
+		SyncExternalAgentSessions(response, mux.SetURLVars(request, map[string]string{"provider": provider}))
+		if response.Code != http.StatusOK {
+			t.Fatalf("sync response: %d %s", response.Code, response.Body.String())
+		}
+	}
+	checkList("assistant="+provider, 1)
+	request := httptest.NewRequest(http.MethodGet, "/conversations/"+conversationID+"/history", nil)
+	request.Header.Set("X-User-Id", "user-1")
+	response := httptest.NewRecorder()
+	GetConversationHistory(response, mux.SetURLVars(request, map[string]string{"name": conversationID}))
+	var page struct {
+		History []struct{ Query, Result string }
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &page) != nil || len(page.History) != 1 ||
+		page.History[0].Query != "查询工作流" || page.History[0].Result != "查询完成" {
+		t.Fatalf("unexpected transcript: %d %s", response.Code, response.Body.String())
+	}
+	for _, identity := range [][3]string{{"user-1", "host-1", "private"}, {"user-1", "other-host", "root-1"}, {"other-user", "host-1", "root-1"}} {
+		session.ThreadID = identity[2]
+		if _, err := externalcontext.New(db).SyncSessionCatalog(t.Context(), identity[0], provider, identity[1], []externalcontext.NativeSession{session}, false); !errors.Is(err, externalcontext.ErrInvalidSource) {
+			t.Fatalf("unobserved identity %v: %v", identity, err)
+		}
+	}
+}
+
+func TestConversationSourcesScopesExternalBindings(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	const owner = "user-1"
+	bindings := []orm.ExternalAgentBinding{
+		{ConversationID: "native-dsh", Provider: ChatExecutorDSH, CreatedByUserID: owner},
+		{ConversationID: "managed-dsh", Provider: ChatExecutorDSH, CreatedByUserID: owner, ManagedByLazyMind: true},
+		{ConversationID: "managed-codex", Provider: ChatExecutorCodex, CreatedByUserID: owner, ManagedByLazyMind: true},
+		{ConversationID: "another-owner", Provider: ChatExecutorDSH, CreatedByUserID: "user-2"},
+		{ConversationID: "not-requested", Provider: ChatExecutorDSH, CreatedByUserID: owner},
+	}
+	for i := range bindings {
+		bindings[i].ID = "binding-" + bindings[i].ConversationID
+		bindings[i].HostID = "host"
+		bindings[i].ProviderThreadID = "thread-" + bindings[i].ConversationID
+	}
+	if err := db.Create(&bindings).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, err := conversationSources(t.Context(), db, owner, []string{"native-dsh", "managed-dsh", "managed-codex", "another-owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]conversationSource{
+		"native-dsh":    {Assistant: ChatExecutorDSH},
+		"managed-dsh":   {Assistant: ChatExecutorLazyMind},
+		"managed-codex": {Assistant: ChatExecutorCodex},
+		"another-owner": {Assistant: ChatExecutorLazyMind},
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("conversation sources = %v, want %v", got, want)
+	}
+}
+
+func TestDSHManagedRunKeepsLazyMindConversationAndTranscript(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	ctx := t.Context()
+	const owner, conversation, host, thread = "user-1", "conversation-1", "dsh-desktop", "native-thread"
+	if err := db.Model(&orm.Conversation{}).Where("id = ?", conversation).Updates(map[string]any{
+		"chat_executor": ChatExecutorDSH, "display_name": "My conversation",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := app.createRun(ctx, &orm.ExternalChatRun{
+		ID: "run", RequestID: "request", HistoryID: "original-history", ConversationID: conversation,
+		Provider: ChatExecutorDSH, ActorUserID: owner, Action: "start", Prompt: "hello", Query: "hello", Sequence: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := app.claim(ctx, owner, ChatExecutorDSH, host)
+	if err != nil || job == nil || job.Action != "start" {
+		t.Fatalf("first claim: %#v, %v", job, err)
+	}
+	event := func(e externalChatEvent) {
+		t.Helper()
+		if _, err := app.appendEvent(ctx, owner, job.RunID, host, job.LeaseToken, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event(externalChatEvent{EventID: "start", Type: "thread_started", ProviderThreadID: thread})
+	source := externalcontext.Source{Provider: ChatExecutorDSH, HostID: host, ThreadID: thread, Message: "Imported title"}
+	link, err := externalcontext.New(db).ResolveInvocation(ctx, owner, "tool-call", source)
+	if err != nil || link.ConversationID != conversation || link.HistoryID != job.HistoryID || link.ExternalRef != job.RunID {
+		t.Fatalf("MCP link: %#v, %v", link, err)
+	}
+	event(externalChatEvent{EventID: "reply", Type: "message", Text: "canonical reply"})
+	event(externalChatEvent{EventID: "end", Type: "completed"})
+	session := externalcontext.NativeSession{
+		ThreadID: thread, ProjectKey: "dsh", ProjectName: "DSH", DisplayName: "Imported title",
+		Turns: []externalcontext.NativeTurn{{ID: "native-turn", User: "hello", Assistant: "incoming copy"}},
+	}
+	if n, err := externalcontext.New(db).SyncSessionCatalog(ctx, owner, ChatExecutorDSH, host, []externalcontext.NativeSession{session}, false); err != nil || n != 0 {
+		t.Fatalf("sync managed transcript: updated=%d error=%v", n, err)
+	}
+	var histories []orm.ChatHistory
+	if err := db.Find(&histories).Error; err != nil || len(histories) != 1 || histories[0].Result != "canonical reply" {
+		t.Fatalf("managed history: %#v, %v", histories, err)
+	}
+	var saved orm.Conversation
+	if err := db.Where("id = ?", conversation).Take(&saved).Error; err != nil || saved.ChatExecutor != ChatExecutorDSH || saved.DisplayName != "My conversation" {
+		t.Fatalf("stored executor=%q, title=%q, error=%v", saved.ChatExecutor, saved.DisplayName, err)
+	}
+	display, err := conversationSourceFor(ctx, db, owner, conversation)
+	if err != nil || display.Assistant != ChatExecutorLazyMind {
+		t.Fatalf("display source=%#v, error=%v", display, err)
+	}
+	for filter, want := range map[string]int{"": 1, ChatExecutorLazyMind: 1, ChatExecutorDSH: 0} {
+		query, err := common.ConversationSourceIDs(db, owner, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		if err := query.Scan(&ids).Error; err != nil || len(ids) != want {
+			t.Fatalf("source %q: ids=%v, error=%v", filter, ids, err)
+		}
+	}
+	id, hostID, resume, err := externalConversationThread(ctx, db, owner, conversation, ChatExecutorDSH)
+	if err != nil || !resume || id != thread || hostID != host {
+		t.Fatalf("resume thread=%q host=%q resume=%v error=%v", id, hostID, resume, err)
 	}
 }
 
@@ -1296,6 +1484,29 @@ func TestExternalChatHostStatusUsesDurableTTLProjection(t *testing.T) {
 	if err != nil || !status.HostOnline || status.Installed || status.Available || !strings.Contains(status.UnavailableReason, "not found") {
 		t.Fatalf("unavailable status=%#v err=%v", status, err)
 	}
+	for _, tc := range []struct {
+		installed bool
+		reason    string
+		code      string
+	}{
+		{false, "Cursor Agent CLI is not installed", "not_installed"},
+		{true, "Disabled in LazyMind settings", "not_activated"},
+		{true, "Cursor Agent CLI is not signed in; run cursor-agent login", "login_required"},
+		{true, "Cursor Agent sign-in has expired; please sign in again", "login_required"},
+		{true, "DSH sign-in required", "login_required"},
+		{true, "DSH default model unavailable", "model_unavailable"},
+		{true, "DSH execution unavailable", "unavailable"},
+		{true, "Could not read login status", "unavailable"},
+	} {
+		clock = clock.Add(time.Millisecond)
+		if err := app.reportHost(ctx, "user-1", ChatExecutorCursor, "checking", tc.installed, false, tc.reason); err != nil {
+			t.Fatal(err)
+		}
+		status, err = app.hostStatus(ctx, "user-1", ChatExecutorCursor)
+		if err != nil || status.Available || status.Installed != tc.installed || status.UnavailableReasonCode != tc.code {
+			t.Fatalf("reason %q: status=%#v, error=%v", tc.reason, status, err)
+		}
+	}
 	if err := app.reportHost(ctx, "user-1", ChatExecutorCursor, "ready", true, true, ""); err != nil {
 		t.Fatalf("report ready Host: %v", err)
 	}
@@ -1305,7 +1516,7 @@ func TestExternalChatHostStatusUsesDurableTTLProjection(t *testing.T) {
 	}
 	clock = clock.Add(app.hostTTL + time.Second)
 	status, err = app.hostStatus(ctx, "user-1", ChatExecutorCursor)
-	if err != nil || status.HostOnline || status.Available {
+	if err != nil || status.HostOnline || status.Available || status.UnavailableReasonCode != "host_offline" {
 		t.Fatalf("expired status=%#v err=%v", status, err)
 	}
 	clock = clock.Add(4*app.hostTTL + time.Second)
@@ -1319,7 +1530,7 @@ func TestExternalChatHostStatusUsesDurableTTLProjection(t *testing.T) {
 }
 
 func TestNormalizeChatExecutorSupportsAllHostedProviders(t *testing.T) {
-	for _, provider := range []string{ChatExecutorLazyMind, ChatExecutorCodex, ChatExecutorCursor, ChatExecutorWorkBuddy} {
+	for _, provider := range []string{ChatExecutorLazyMind, ChatExecutorCodex, ChatExecutorCursor, ChatExecutorWorkBuddy, ChatExecutorDSH} {
 		normalized, valid := normalizeChatExecutor("  " + strings.ToUpper(provider) + " ")
 		if !valid || normalized != provider {
 			t.Fatalf("normalize %q = %q, %v", provider, normalized, valid)
