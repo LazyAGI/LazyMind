@@ -372,7 +372,7 @@ jobs:
     needs: [lint, doc_check]
     name: Test desktop shell (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -381,22 +381,44 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install renderer dependencies for the Desktop upgrade regression
+        run: pnpm --dir frontend install --frozen-lockfile
       - uses: actions/setup-go@v5
-        if: runner.os == 'Windows'
         with:
           go-version: '1.25.11'
           cache-dependency-path: local/lazymind-cli/go.sum
-      - name: Build native Bridge for lifecycle regression
-        if: runner.os == 'Windows'
-        shell: powershell
-        working-directory: local/lazymind-cli
+      - name: Check out upstream v9 for Desktop upgrade regression
+        uses: actions/checkout@v4
+        with:
+          ref: 9461b8e74aa9f0b2d10b42d55a97c1d499fb9de5
+          path: .legacy-bridge-source
+          persist-credentials: false
+      - name: Build native Bridge and upstream v9 for lifecycle regression
+        shell: bash
         run: |
-          go build -o "$env:RUNNER_TEMP\lazymind.exe" ./cmd/lazymind
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          "LAZYMIND_TEST_BRIDGE_EXE=$env:RUNNER_TEMP\lazymind.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          suffix=""
+          if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
+          bundled="$RUNNER_TEMP/lazymind$suffix"
+          legacy="$RUNNER_TEMP/lazymind-v9$suffix"
+          go -C local/lazymind-cli build -o "$bundled" ./cmd/lazymind
+          go -C .legacy-bridge-source/local/lazymind-cli build -o "$legacy" ./cmd/lazymind
+          echo "LAZYMIND_TEST_BRIDGE_EXE=$bundled" >> "$GITHUB_ENV"
+          echo "LAZYMIND_TEST_LEGACY_BRIDGE_EXE=$legacy" >> "$GITHUB_ENV"
+      - name: Test the first Desktop DSH connection after a Bridge upgrade
+        working-directory: local/lazymind-cli
+        shell: bash
+        run: |
+          test -f "$LAZYMIND_TEST_BRIDGE_EXE"
+          test -f "$LAZYMIND_TEST_LEGACY_BRIDGE_EXE"
+          go test ./cmd/lazymind -run '^TestDesktopDSHFirstConnectReplacesLegacyBridge$' -count=1 -v
       - name: Test Desktop shell
         shell: bash
         run: |

@@ -250,7 +250,7 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
-	unlock, err := localfile.Lock(filepath.Join(root, "bridge-start.lock"))
+	unlock, err := localfile.LockContext(ctx, filepath.Join(root, "bridge-start.lock"))
 	if err != nil {
 		return nil, err
 	}
@@ -260,9 +260,11 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 		return nil, err
 	}
 	candidates := []string{}
+	var recordedAddress string
 	if record, err := connectorconfig.ReadBridgeEndpoint(root); err == nil {
 		u, _ := url.Parse(record.Broker)
-		candidates = append(candidates, u.Host)
+		recordedAddress = u.Host
+		candidates = append(candidates, recordedAddress)
 	}
 	// A context endpoint is never used as the shared broker's listening address.
 	if record, err := connectorconfig.ReadBridgeEndpoint(client.Home); err == nil && record.URL == "http://"+address {
@@ -281,75 +283,104 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 			candidates = append(candidates, "127.0.0.1:"+strconv.Itoa(port))
 		}
 	}
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]bool{}
+	var available []string
+	var selected string
+	var status map[string]any
+	launch := false
 	for _, candidate := range candidates {
 		if seen[candidate] {
 			continue
 		}
 		seen[candidate] = true
-		status, healthErr := Health(ctx, candidate)
-		if healthErr == nil && !compatibleBridge(status, root, false) {
-			// Old bridges have no scoped sessions. A second listener sharing their
-			// legacy credential directory would not be safe isolation.
-			executable, _ := status["executable"].(string)
-			version := status["version"]
-			legacy := executable != "" && status["service"] == nil && (version == "v8" || version == "v9")
-			if legacy || (status["service"] == bridgeProduct && status["home"] == root) {
-				return nil, errors.New("an incompatible Assistant Bridge is using this environment; it was preserved. Stop its owning deployment before upgrading the shared bridge, then retry")
-			}
+		current, err := Health(ctx, candidate)
+		if err != nil {
+			available = append(available, candidate)
 			continue
 		}
-		// Provision the current distribution before the deployment uses it.
-		self, err := os.Executable()
+		if compatibleBridge(current, root, false) {
+			selected, status = candidate, current
+			break
+		}
+		// Before scoping, a daemon could only be associated with an explicit
+		// address. Do not make unrelated legacy listeners in the fallback
+		// range block a caller that has no relationship with them.
+		if legacyBridge(current) && candidate != address && candidate != recordedAddress {
+			continue
+		}
+		replace, err := replaceBridge(ctx, candidate, current, self, root, token, client)
 		if err != nil {
 			return nil, err
 		}
-		if err := workflowconnector.Provision(ctx, client.Home, self, true); err != nil {
-			log.Printf("Workflow Connector package: %v", err)
+		if replace {
+			selected, launch = candidate, true
+			break
 		}
-		if healthErr != nil {
-			listener, err := net.Listen("tcp", candidate)
-			if err != nil {
-				continue
-			}
-			_ = listener.Close()
-			executable, err := stageBridgeExecutable(root)
-			if err != nil {
-				return nil, err
-			}
-			status, err = launchBridge(ctx, executable, root, candidate, false)
-			if err != nil {
-				return nil, err
-			}
-		}
-		endpoint := connectorconfig.BridgeEndpoint{URL: "http://" + candidate, Broker: "http://" + candidate}
-		if err := connectorconfig.WriteBridgeEndpoint(root, endpoint); err != nil {
-			return nil, err
-		}
-		var registered struct {
-			URL string `json:"url"`
-		}
-		if err := manageBridge(ctx, candidate, token, "acquire", client, &registered); err != nil {
-			return nil, err
-		}
-		endpoint.URL = registered.URL
-		if err := connectorconfig.WriteBridgeEndpoint(client.Home, endpoint); err != nil {
-			return nil, err
-		}
-		status["bridge_url"] = registered.URL
-		return status, nil
 	}
-	return nil, errors.New("Assistant Bridge unavailable: existing services are incompatible or ports are occupied; existing services were preserved. Close the obsolete bridge or configure a free loopback address and retry")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if selected == "" {
+		for _, candidate := range available {
+			listener, err := net.Listen("tcp", candidate)
+			if err == nil {
+				_ = listener.Close()
+				selected, launch = candidate, true
+				break
+			}
+		}
+	}
+	if selected == "" {
+		return nil, errors.New("Assistant Bridge unavailable: no usable loopback address or verified Assistant Bridge for this environment")
+	}
+	// Provision the current distribution before the deployment uses it.
+	if err := workflowconnector.Provision(ctx, client.Home, self, true); err != nil {
+		log.Printf("Workflow Connector package: %v", err)
+	}
+	if launch {
+		executable, err := stageBridgeExecutable(root)
+		if err != nil {
+			return nil, err
+		}
+		status, err = launchBridge(ctx, executable, root, selected, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	endpoint := connectorconfig.BridgeEndpoint{URL: "http://" + selected, Broker: "http://" + selected}
+	if err := connectorconfig.WriteBridgeEndpoint(root, endpoint); err != nil {
+		return nil, err
+	}
+	var registered struct {
+		URL string `json:"url"`
+	}
+	if err := manageBridge(ctx, selected, token, "acquire", client, &registered); err != nil {
+		return nil, err
+	}
+	endpoint.URL = registered.URL
+	if err := connectorconfig.WriteBridgeEndpoint(client.Home, endpoint); err != nil {
+		return nil, err
+	}
+	status["bridge_url"] = registered.URL
+	return status, nil
 }
 
 func manageBridge(ctx context.Context, address, token, action string, client ClientOptions, output any) error {
+	return manageBridgeHTTP(ctx, &http.Client{Timeout: 15 * time.Second}, address, token, action, client, output)
+}
+
+func manageBridgeHTTP(ctx context.Context, httpClient *http.Client, address, token, action string, client ClientOptions, output any) error {
 	body, _ := json.Marshal(client)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/v1/clients/"+action, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	request.Header.Set(managementHeader, token)
-	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return err
 	}
@@ -359,9 +390,14 @@ func manageBridge(ctx context.Context, address, token, action string, client Cli
 		return fmt.Errorf("Assistant Bridge %s failed: %s", action, strings.TrimSpace(string(body)))
 	}
 	if output != nil {
-		return json.NewDecoder(response.Body).Decode(output)
+		body, err := io.ReadAll(io.LimitReader(response.Body, 8192))
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(body, output)
 	}
-	return nil
+	_, err = io.Copy(io.Discard, io.LimitReader(response.Body, 8192))
+	return err
 }
 
 func ReleaseClient(ctx context.Context, options ClientOptions) error {

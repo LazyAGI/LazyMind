@@ -216,10 +216,11 @@ configuration to release that deployment's host integration.
 
 Unrelated occupied ports are skipped; browser clients discover compatible
 bridges on loopback ports 19091–19100. An explicitly configured bridge URL is
-preserved. An incompatible legacy bridge that uses the same credential directory
-is not stopped or silently replaced: stop its owning deployment before updating
-that bridge, then retry. Connection errors report the affected service instead
-of switching databases or terminating another deployment.
+preserved. Startup reuses a bridge on the current protocol. When the previous
+bridge belongs to this environment and other deployments have no active leases,
+startup waits for it to exit, then launches and verifies the bundled bridge.
+If ownership cannot be verified or another deployment still uses the bridge,
+startup reports the conflict and leaves the running service in place.
 
 Desktop stages the PPT export scripts into a content-addressed directory under
 the user runtime's `deps/editable-ppt/export-runtime` before linking Node

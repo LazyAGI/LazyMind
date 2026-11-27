@@ -3,10 +3,11 @@ import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
+import { createAgentConnector } from '../electron/src/agent-connector.js';
 
 const source = readFileSync(new URL('../electron/src/main.js', import.meta.url), 'utf8');
 const declarations = source.match(/^const agent(?:Connector\w+TimeoutMs|Logins) = .+;$/gm).join('\n');
-const functions = source.slice(source.indexOf('function runAgentConnector('), source.indexOf('\nfunction readAgentBindings('));
+const functions = source.slice(source.indexOf('function startAgentLogin('), source.indexOf('\nfunction readAgentBindings('));
 
 function harness(platform = 'darwin', agent = 'codex') {
   const children = [];
@@ -43,6 +44,11 @@ function harness(platform = 'darwin', agent = 'codex') {
     },
   });
   vm.runInContext(`${declarations}\n${functions}`, context);
+  context.runAgentConnector = createAgentConnector({
+    runConnectorJSON: context.runConnectorJSON,
+    startAgentLogin: context.startAgentLogin,
+    withAgentLoginStatus: context.withAgentLoginStatus,
+  });
   return {
     children, timers, treeKills, get restarts() { return restarts; },
     start: () => context.runAgentConnector(agent, 'login'),

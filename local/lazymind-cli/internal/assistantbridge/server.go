@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -95,13 +96,17 @@ func Stop(ctx context.Context, address string) error {
 }
 
 func Health(ctx context.Context, address string) (map[string]any, error) {
+	return bridgeHealth(ctx, http.DefaultClient, address)
+}
+
+func bridgeHealth(ctx context.Context, client *http.Client, address string) (map[string]any, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, "http://"+address+"/v1/health", nil)
 	if err != nil {
 		return nil, err
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +115,11 @@ func Health(ctx context.Context, address string) (map[string]any, error) {
 		return nil, fmt.Errorf("Assistant Bridge health returned HTTP %d", response.StatusCode)
 	}
 	var status map[string]any
-	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+	body, err := io.ReadAll(io.LimitReader(response.Body, 8192))
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(body, &status); err != nil {
 		return nil, err
 	}
 	if status == nil {

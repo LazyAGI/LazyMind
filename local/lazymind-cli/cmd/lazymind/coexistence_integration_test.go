@@ -29,7 +29,15 @@ import (
 // The subprocess executes the real CLI/HTTP server, including detached launch,
 // environment routing and shutdown. No Docker or user runtime is required.
 func TestMain(m *testing.M) {
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == dshNativeInstallFixture {
+	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	if name == desktopDSHInstaller || name == "DeepSeek Harness" {
+		if err := runDesktopDSHFixture(name, os.Args[1:]); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if name == dshNativeInstallFixture {
 		if err := runDSHNativeInstallFixture(os.Args[1:]); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -267,14 +275,14 @@ func TestAssistantColdStartWithDamagedConnectorPackage(t *testing.T) {
 				t.Fatal(err)
 			}
 			binary := filepath.Join(distribution, filepath.Base(self))
-			if err := os.Link(self, binary); err != nil {
-				body, err := os.ReadFile(self)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(binary, body, 0700); err != nil {
-					t.Fatal(err)
-				}
+			// Windows cannot remove a hard link to the test image while this
+			// process is still running. Give the distribution its own file.
+			body, err := os.ReadFile(self)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(binary, body, 0700); err != nil {
+				t.Fatal(err)
 			}
 			connectortest.WriteMinimalPackage(t, binary, tc.damaged)
 			healthy := connectortest.WritePackage(t, binary, tc.healthy, "0.2.0", map[string]string{

@@ -1,33 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import vm from 'node:vm';
-
-const source = readFileSync(new URL('../electron/src/main.js', import.meta.url), 'utf8');
-const start = source.indexOf('function runAgentConnector(');
-const end = source.indexOf('\nasync function runExecutorConnector(', start);
-// Execute the production timeout declarations with the extracted function so
-// the harness cannot hide a changed budget behind its own stale constants.
-const timeoutDeclarations = [
-  'agentConnectorActionTimeoutMs',
-  'agentConnectorStatusTimeoutMs',
-  'agentConnectorDisconnectTimeoutMs',
-  'agentConnectorInstallTimeoutMs',
-  'agentConnectorWorkBuddyInstallTimeoutMs',
-  'agentConnectorCodexInstallTimeoutMs',
-].map((name) => {
-  const declaration = source.match(new RegExp(`^const ${name} = .+;$`, 'm'));
-  assert.ok(declaration, `missing Desktop timeout declaration: ${name}`);
-  return declaration[0];
-}).join('\n');
+import { createAgentConnector } from '../electron/src/agent-connector.js';
 
 for (const platform of ['darwin', 'win32']) {
   test(`desktop ${platform} uses production budgets for installation, status and disconnection`, async () => {
     const commands = [];
-    const run = vm.runInNewContext(`${timeoutDeclarations}\n${source.slice(start, end)}\nrunAgentConnector`, {
-      agentLogins: new Map(),
+    const run = createAgentConnector({
+      withAgentLoginStatus: (_agent, result) => result,
       agentRecovery: { start() {} },
-      URL, process: { platform, env: { LAZYMIND_ASSISTANT_BRIDGE_URL: 'file:///stale-invalid' } },
       runConnectorJSON: async (args, timeout) => {
         commands.push([Array.from(args), timeout]);
         return { state: 'enabled' };
@@ -61,9 +41,8 @@ for (const platform of ['darwin', 'win32']) {
   test(`desktop ${platform} cancels recovery before disconnecting Codex`, async () => {
     const operations = [];
     let finishStop;
-    const run = vm.runInNewContext(`${timeoutDeclarations}\n${source.slice(start, end)}\nrunAgentConnector`, {
-      agentLogins: new Map(),
-      URL, process: { platform, env: {} },
+    const run = createAgentConnector({
+      withAgentLoginStatus: (_agent, result) => result,
       agentRecovery: {
         start: () => operations.push('listen'),
         stop: () => new Promise(resolve => { operations.push('stop'); finishStop = resolve; }),
