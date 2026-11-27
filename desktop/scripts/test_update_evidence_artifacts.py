@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import runpy
+import shutil
 import stat
 import tempfile
 import unittest
@@ -50,6 +52,35 @@ class EvidenceArtifactTests(unittest.TestCase):
             self.fixture('package.zip', b'Package staged by the build')
             with self.assertRaisesRegex(ValueError, 'package.zip SHA-256'):
                 PROBE['release_inputs'](self.root, False)
+
+    def test_windows_pair_uses_default_directory_and_uninstalls_between_packages(self):
+        local = self.root / 'User With Spaces'
+        installed = local / 'Programs/LazyMind'
+        uninstall = installed / 'Uninstall LazyMind.exe'
+        release = {'platform': 'windows', 'signingIdentity': 'fixture'}
+        order = []
+        def run(exe, flags, *, timeout):
+            order.append((exe.name, flags))
+            if exe == uninstall:
+                shutil.rmtree(installed)
+                return
+            self.assertEqual(flags, '/S --full-install')
+            (installed / 'resources').mkdir(parents=True)
+            (installed / 'LazyMind.exe').touch()
+            uninstall.touch()
+        with patch.dict(os.environ, LOCALAPPDATA=str(local), GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted'), \
+                patch.dict(PROBE['materialized_app'].__wrapped__.__globals__, run_windows_installer=run, verify_windows_signature=lambda *_: None):
+            for role in ('source', 'target'):
+                with PROBE['materialized_app'](Path(role + '.exe'), release, self.root / (role + '-app'), False) as resources:
+                    self.assertEqual(resources, installed / 'resources')
+                    order.append((role, 'verify'))
+                self.assertFalse(installed.exists())
+            installed.mkdir()
+            with self.assertRaisesRegex(ValueError, 'existing Windows installation'), \
+                    PROBE['materialized_app'](Path('target.exe'), release, self.root / 'target-app', False):
+                self.fail('unexpected install')
+        self.assertEqual(order, [(name, action) for role in ('source', 'target')
+                                for name, action in [(role + '.exe', '/S --full-install'), (role, 'verify'), (uninstall.name, '/S')]])
 
     def test_app_zip_requires_paths_and_links_inside_the_bundle(self):
         package = self.root / 'package.zip'

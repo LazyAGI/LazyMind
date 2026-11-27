@@ -145,10 +145,8 @@ def run(args):
                     package, a['release'], Path(temp) / 'source', ca['mode'] == 'unsigned-test') as resources:
                 subprocess.run(['/usr/bin/ditto', str(resources.parent.parent), str(app)], check=True, timeout=900)
         else:
-            require(not app.parent.exists(), 'Refusing to install into an existing Windows application directory')
             probe['verify_windows_signature'](package, args.signer)
-            require(not any(c.isspace() for c in str(app.parent)), 'NSIS scratch installation path must have no whitespace')
-            probe['run_windows_installer'](package, '/S --full-install /D=' + str(app.parent), timeout=1950)
+            probe['install_windows_default'](package)
         return
     require(app.exists(), 'Provision A before starting the upgrade smoke')
     exe = app / 'Contents/MacOS/LazyMind' if sys.platform == 'darwin' else app

@@ -324,6 +324,13 @@ def run_windows_installer(executable, arguments, *, timeout):
                    {'LM_EVIDENCE_EXECUTABLE': str(executable), 'LM_EVIDENCE_ARGUMENTS': arguments}, timeout=timeout)
 
 
+def install_windows_default(package):
+    install_dir = Path(os.environ['LOCALAPPDATA']) / 'Programs/LazyMind'
+    require(not os.path.lexists(install_dir), 'Refusing to reuse an existing Windows installation')
+    run_windows_installer(package, '/S --full-install', timeout=1950)
+    return install_dir
+
+
 @contextmanager
 def materialized_app(package, release, directory, unsigned_test):
     if release['platform'] == 'darwin':
@@ -339,21 +346,17 @@ def materialized_app(package, release, directory, unsigned_test):
     # disposable Windows runners because NSIS owns per-user install registration.
     require(os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted' and os.environ.get('GITHUB_ACTIONS') == 'true',
             'Windows evidence requires a disposable GitHub-hosted runner')
-    require(not (Path(os.environ['LOCALAPPDATA']) / 'Programs/LazyMind').exists() and not directory.exists(),
-            'Refusing to reuse an existing Windows installation')
-    require(not any(character.isspace() for character in str(directory)),
-            'Windows evidence scratch path must not contain whitespace')
     role = 'source' if directory.name == 'source-app' else 'target'
     probe(role + '.verify-installer-signature', verify_windows_signature, package, release['signingIdentity'])
-    # In NSIS the /D argument is last and takes the complete destination path.
-    probe(role + '.install', run_windows_installer, package, f'/S --full-install /D={directory}', timeout=1950)
-    app = read_plain_file(directory, 'LazyMind.exe')
-    uninstall = read_plain_file(directory, 'Uninstall LazyMind.exe')
+    install_dir = probe(role + '.install', install_windows_default, package)
+    uninstall = read_plain_file(install_dir, 'Uninstall LazyMind.exe')
     try:
+        app = read_plain_file(install_dir, 'LazyMind.exe')
         probe(role + '.verify-app-signature', verify_windows_signature, app, release['signingIdentity'])
-        yield directory / 'resources'
+        yield install_dir / 'resources'
     finally:
         probe(role + '.uninstall', run_windows_installer, uninstall, '/S', timeout=300)
+        require(not os.path.lexists(install_dir), 'Windows default install directory remains after uninstall')
 
 
 def format_profile(runtime):
