@@ -876,8 +876,9 @@ export function WorkflowSessionApi() {
     },
     renderWriterDocument(
       sessionId: string,
-      slot: WriterDocumentSlot,
+      slot: WriterDocumentSlot | 'source_materials',
       options?: RawAxiosRequestConfig,
+      listIndex?: number,
     ) {
       return axiosInstance.post<{
         code: number;
@@ -885,7 +886,7 @@ export function WorkflowSessionApi() {
         data: RenderWriterDocumentResult;
       }>(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/writer-document:render`,
-        { slot },
+        { slot, ...(listIndex !== undefined ? { list_index: listIndex } : {}) },
         options,
       );
     },

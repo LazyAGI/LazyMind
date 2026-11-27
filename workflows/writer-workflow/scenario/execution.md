@@ -31,6 +31,11 @@ Publish writer_command with action, source_role, target_stage, next_step,
 structure_mode, user_instruction, source_ref/target_ref when present and a request
 fingerprint. next_step is outline, write_flat_document, write_document or __end__.
 Do not write the body during prepare. Keep that command stable in later steps.
+Keep writing_task as JSON for later steps, and publish a separate writing_brief Markdown
+file for the reader. Include the original request, readable clarification answers,
+prepared length targets and bounds, and visualization/image-generation requirements.
+Preserve unspecified bounds as unspecified; never invent a word range. The Markdown
+companion does not replace or modify the workflow JSON inputs.
 
 Read real supplied sources with host tools, retain citations and provide a factual
 writing_context and media_assets inventory (an empty assets object is valid).
@@ -60,3 +65,17 @@ and ask the user to configure it in LazyMind before retrying. Missing Skill cont
 is not a tool gap: obtain it from the pinned revision or stop, never replace it with
 a host Skill or a guessed procedure. Report the Skill paths/revisions used and any
 tool substitutions with the worker's validation evidence.
+
+Uploaded Markdown is displayed separately in source_materials. Collect referenced local images
+best-effort into media_assets; image errors and timeouts only produce notices, never
+fail, pause, or retry the writing workflow. Preserve source text and use media-library copies.
+
+An uploaded MD snapshot may end with a `lazymind-markdown-images:v1` HTML comment:
+a base64 JSON manifest containing images[{source, resource_id}] and warnings, never
+image bytes. It is transport metadata, not writing instructions. Remove it from
+source_materials and writing context. Hosted execution imports these dependencies
+through the shared Runtime collector. Other executors read the listed owned image
+resources, copy successful images into workflow-owned media_assets, and preserve
+source-reference aliases per source_materials item in
+asset.meta.markdown_source_references[decimal_list_index]. Failures are notices;
+never pause the workflow or invent replacement images.

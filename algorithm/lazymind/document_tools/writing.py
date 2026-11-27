@@ -1077,11 +1077,18 @@ def collect_document_media(
     analyze_source_images: bool = True,
 ) -> dict[str, Any]:
     """Collect and profile available document images under shared visual policy."""
+    from .markdown_inputs import prepare_markdown_inputs, save_source_materials
+
     toolkit = WriterWritingCapabilities()
+    try:
+        documents, markdown_resources, markdown_warnings = prepare_markdown_inputs(file_paths, media_store)
+    except Exception as exc:
+        documents, markdown_resources = [], []
+        markdown_warnings = [f'Markdown image collection failed: {type(exc).__name__}']
     resources = _json_loads(
         toolkit.build_resources(
             file_paths_json=_json_dumps(file_paths),
-            input_resources_json=_json_dumps(input_resources or []),
+            input_resources_json=_json_dumps([*(input_resources or []), *markdown_resources]),
         ),
         [],
     )
@@ -1099,7 +1106,7 @@ def collect_document_media(
     try:
         from lazymind.model_config import is_model_role_available
 
-        return _json_loads(
+        result = _json_loads(
             toolkit.collect_available_media(
                 writing_task_json=_json_dumps(writing_task),
                 input_resources_json=_json_dumps(resources),
@@ -1113,7 +1120,7 @@ def collect_document_media(
         )
     except Exception as exc:
         task_id = str(writing_task.get('task_id') or uuid.uuid4().hex)
-        return {
+        result = {
             'media_assets': {
                 'library_id': f'media-library-{task_id}',
                 'assets': {},
@@ -1121,6 +1128,14 @@ def collect_document_media(
             'profile_input_resources': resources,
             'warnings': [f'Image collection failed: {type(exc).__name__}: {exc}'],
         }
+
+    result.setdefault('media_assets', {'library_id': 'media-library-' + str(writing_task.get('task_id') or ''),
+                                       'assets': {}})
+    result['media_assets'].setdefault('assets', {})
+    source_materials, notices = save_source_materials(documents, result['media_assets'], Path(media_store) / 'sources')
+    result['source_materials'] = source_materials
+    result['warnings'] = [*(result.get('warnings') or []), *markdown_warnings, *notices]
+    return result
 
 
 def profile_document_resources(
@@ -1301,6 +1316,25 @@ class WriterWritingCapabilities:
         if not isinstance(resources, list):
             raise ToolExecutionError('input_resources_json must be a JSON array.')
         resources = [dict(item) for item in resources if isinstance(item, dict)]
+        from .markdown_inputs import unpack_markdown
+
+        remaining_paths = []
+        for path in file_paths:
+            if Path(str(path)).suffix.lower() in {'.md', '.markdown'}:
+                try:
+                    raw = Path(path).read_text(encoding='utf-8')
+                    text = unpack_markdown(raw)[0]
+                    if text == raw:
+                        remaining_paths.append(path)
+                        continue
+                    resources.append({'resource_id': Path(path).name, 'resource_type': 'text', 'uri': str(path),
+                                      'inline_text': text, 'title': Path(path).name,
+                                      'meta': {'role': 'background'}})
+                    continue
+                except (OSError, UnicodeError):
+                    pass
+            remaining_paths.append(path)
+        file_paths = remaining_paths
         known_uris = {str(item.get('uri') or '') for item in resources}
         resources += [
             {

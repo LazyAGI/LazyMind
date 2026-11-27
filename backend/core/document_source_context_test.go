@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"lazymind/core/common/orm"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -65,5 +67,38 @@ func TestDocumentSourceContextUsesImportedWriterTarget(t *testing.T) {
 	calls := spy.calls()
 	if len(calls) != 1 || !strings.Contains(string(calls[0]["artifact"]), "writer_source") {
 		t.Fatalf("imported source lacks display context: %v", calls)
+	}
+}
+
+func TestWriterSourceSnapshotsExposeMatchingContentIdentities(t *testing.T) {
+	descriptorAlgorithm(t, 200, descriptorMarkdown)
+	f := newDescriptorFixture(t)
+	if err := f.db.Model(&orm.WorkflowSession{}).Where("id = ?", "descriptor-session").Updates(&orm.WorkflowSession{WorkflowID: "writer-workflow"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	source := "# Source\n\n![image](images/local.png)\n"
+	sum := sha256.Sum256([]byte(source))
+	for _, slot := range []string{"source_document", "source_materials"} {
+		path := filepath.Join(root, slot+".md")
+		if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+		value, _ := json.Marshal(map[string]any{"path": path, "filename": slot + ".md"})
+		f.seed(t, slot, slot, "file", string(value))
+	}
+	for _, record := range descriptorRecords(t, f.read(context.Background(), descriptorRoutes[0], "descriptor-owner")) {
+		descriptor, ok := record["document"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing document: %v", record)
+		}
+		context, ok := descriptor["render_context"].(map[string]any)
+		if !ok || context["source_hash"] != hex.EncodeToString(sum[:]) {
+			t.Fatalf("missing content identity: %v", descriptor)
+		}
+		if context["images"] == nil || context["code_fences"] == nil {
+			t.Fatal("empty hints must remain arrays")
+		}
 	}
 }

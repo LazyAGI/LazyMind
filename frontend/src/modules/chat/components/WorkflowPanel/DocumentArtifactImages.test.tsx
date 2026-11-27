@@ -72,6 +72,22 @@ beforeEach(() => {
 afterEach(() => { cleanup(); useWorkflowStore.setState({ sessionByConversation: {} }); vi.unstubAllGlobals(); });
 
 describe('document artifact image previews', () => {
+  it('renders an uploaded Markdown list item with its own scoped image map', async () => {
+    api.renderWriterDocument.mockResolvedValue(response('https://example.test/material-2.png'));
+    const material = { ...slot, slot_id: 'source_materials', list_index: 1, artifact_id: 'material-2' } as SlotRevision;
+    render(<DocumentArtifactEditor sessionId='session' slot={material} readOnly />);
+    await waitFor(() => expect(screen.getByAltText('Document illustration')).toHaveAttribute('src', 'https://example.test/material-2.png'));
+    expect(api.renderWriterDocument).toHaveBeenCalledWith('session', 'source_materials', expect.any(Object), 1);
+    expect(screen.getByRole('article').textContent).toBe(markdown);
+  });
+
+  it('keeps the uploaded Markdown body and shows a placeholder when its image map fails', async () => {
+    api.renderWriterDocument.mockRejectedValue(new Error('offline'));
+    render(<DocumentArtifactEditor sessionId='session' slot={{ ...slot, slot_id: 'source_materials', list_index: 0 } as SlotRevision} readOnly />);
+    await waitFor(() => expect(screen.getByAltText('Document illustration').getAttribute('src')).toContain('data:image/svg+xml,'));
+    expect(screen.getByRole('article').textContent).toBe(markdown);
+  });
+
   it('opens the clicked image directly without starting an export', async () => {
     const url = 'https://example.test/illustration.png';
     api.renderWriterDocument.mockResolvedValue(response(url));
@@ -190,4 +206,18 @@ describe('document artifact image previews', () => {
     await screen.findByRole('article');
     expect(api.renderWriterDocument).not.toHaveBeenCalled();
   });
+});
+
+
+it('retains the original resource document and uses its matching uploaded snapshot image scope', async () => {
+  api.renderWriterDocument.mockResolvedValue(response('https://example.test/original-material.png'));
+  const sourceSlot = { ...slot, step_id: 'prepare' };
+  const original = session();
+  original.slots!.push(sourceSlot, { ...sourceSlot, slot_id: 'source_materials', artifact_id: 'material-copy', list_index: 2 });
+  useWorkflowStore.setState({ sessionByConversation: { conversation: original } });
+  render(<DocumentArtifactEditor slot={sourceSlot} sessionId='session' readOnly />);
+  await waitFor(() => expect(screen.getByAltText('Document illustration')).toHaveAttribute('src', 'https://example.test/original-material.png'));
+  expect(api.renderWriterDocument).toHaveBeenCalledWith('session', 'source_materials', expect.any(Object), 2);
+  expect(screen.getByRole('article').textContent).toBe(markdown);
+  expect(api.saveDocumentArtifact).not.toHaveBeenCalled();
 });

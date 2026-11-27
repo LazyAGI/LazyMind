@@ -19,6 +19,9 @@ declare global {
   interface Window {
     BASENAME?: string;
     lazymindDesktop?: {
+      collectMarkdownImages?: (file: File, references: string[]) => Promise<{
+        images: import('./modules/chat/utils/markdownImages').LocalMarkdownImage[]; warnings: string[];
+      }>;
       appVersion?: () => Promise<string>;
       recordingNativeStart?: () => Promise<{ session_id: string; startedAt: number }>;
       recordingNativeStop?: (id: string) => Promise<import("./modules/chat/components/SkillRecording/nativeCapture").NativeRecordingResult>;

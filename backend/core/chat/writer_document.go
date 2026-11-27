@@ -61,7 +61,8 @@ type writerDocumentSaveBody struct {
 }
 
 type writerDocumentRenderBody struct {
-	Slot string `json:"slot"`
+	Slot      string `json:"slot"`
+	ListIndex *int   `json:"list_index,omitempty"`
 }
 
 type selectedWriterArtifact struct {
@@ -130,7 +131,7 @@ func writerDocumentSlot(slot string) (string, bool) {
 }
 
 func writerDocumentRenderSlot(slot string) (string, bool) {
-	if slot == "source_document" {
+	if slot == "source_document" || slot == "source_materials" {
 		return slot, true
 	}
 	return writerDocumentSlot(slot)
@@ -235,8 +236,8 @@ func RenderWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slot, ok := writerDocumentRenderSlot(body.Slot)
-	if !ok {
-		common.ReplyErr(w, "slot must be source_document, outline_document, flat_draft_document, or draft_document", http.StatusBadRequest)
+	if !ok || (slot == "source_materials" && (body.ListIndex == nil || *body.ListIndex < 0)) || (slot != "source_materials" && body.ListIndex != nil) {
+		common.ReplyErr(w, "invalid document slot or list_index", http.StatusBadRequest)
 		return
 	}
 	db := store.DB()
@@ -256,7 +257,7 @@ func RenderWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "writer session not found", http.StatusNotFound)
 		return
 	}
-	draft, err := loadSelectedWriterArtifact(ctx, db, sessionID, slot)
+	draft, err := loadSelectedWriterArtifact(ctx, db, sessionID, slot, body.ListIndex)
 	if err != nil {
 		common.ReplyErr(w, "active "+slot+" not found", http.StatusNotFound)
 		return
@@ -293,7 +294,7 @@ func RenderWriterDocument(w http.ResponseWriter, r *http.Request) {
 		}
 		result["document"] = document
 	}
-	attachWriterMediaURLs(ctx, db, sessionID, slot, result)
+	attachWriterMediaURLs(ctx, db, sessionID, slot, result, body.ListIndex)
 	common.ReplyOK(w, result)
 }
 
@@ -573,12 +574,16 @@ func loadSelectedWriterArtifact(
 	db *gorm.DB,
 	sessionID string,
 	slotID string,
+	indices ...*int,
 ) (*selectedWriterArtifact, error) {
 	var revision orm.WorkflowSlotRevision
-	if err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND selected = ? AND list_index IS NULL",
-			sessionID, slotID, true).
-		First(&revision).Error; err != nil {
+	query := db.WithContext(ctx).Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
+	if len(indices) > 0 && indices[0] != nil {
+		query = query.Where("list_index = ?", *indices[0])
+	} else {
+		query = query.Where("list_index IS NULL")
+	}
+	if err := query.First(&revision).Error; err != nil {
 		return nil, err
 	}
 	return loadWriterArtifactRevision(ctx, db, revision)
@@ -589,8 +594,9 @@ type writerMediaAsset struct {
 	URI          string `json:"uri"`
 	LocalPath    string `json:"local_path"`
 	Meta         struct {
-		SourceReference string `json:"source_reference"`
-		SHA256          string `json:"sha256"`
+		SourceReference          string              `json:"source_reference"`
+		MarkdownSourceReferences map[string][]string `json:"markdown_source_references"`
+		SHA256                   string              `json:"sha256"`
 	} `json:"meta"`
 }
 
@@ -607,12 +613,13 @@ func attachWriterMediaURLs(
 	sessionID string,
 	documentSlot string,
 	result map[string]any,
+	indices ...*int,
 ) {
 	representation, _ := result["representation"].(string)
 	if representation != "markdown" && representation != "ir" {
 		return
 	}
-	urls := writerDocumentMediaURLs(ctx, db, sessionID, documentSlot)
+	urls := writerDocumentMediaURLs(ctx, db, sessionID, documentSlot, indices...)
 	if len(urls) == 0 {
 		return
 	}
@@ -677,10 +684,11 @@ func writerDocumentMediaURLs(
 	db *gorm.DB,
 	sessionID string,
 	documentSlot string,
+	indices ...*int,
 ) map[string]string {
 	mediaSlots := []string{"resolved_media_assets", "media_assets"}
 	switch documentSlot {
-	case "source_document", "outline_document":
+	case "source_document", "source_materials", "outline_document":
 		mediaSlots = []string{"media_assets"}
 	case "flat_draft_document":
 		mediaSlots = []string{"flat_resolved_media_assets", "media_assets"}
@@ -726,6 +734,12 @@ func writerDocumentMediaURLs(
 				strings.TrimSpace(asset.Meta.SourceReference),
 				strings.TrimSpace(asset.LocalPath),
 				strings.TrimSpace(asset.URI),
+			}
+			if documentSlot == "source_materials" {
+				references = nil
+				if len(indices) > 0 && indices[0] != nil {
+					references = append(references, asset.Meta.MarkdownSourceReferences[strconv.Itoa(*indices[0])]...)
+				}
 			}
 			if assetID != "" {
 				references = append(references, "asset://"+assetID)

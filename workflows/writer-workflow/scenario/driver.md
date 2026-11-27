@@ -7,7 +7,10 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## prepare
 
-- PASS when writing_task, media_assets, and writing_context exist.
+- PASS when writing_task, writing_brief, media_assets, and writing_context exist.
+- writing_task remains a JSON workflow input. writing_brief must be a readable `.md`
+  companion describing the user request, clarification answers, prepared length
+  targets/bounds, and visualization/image-generation requirements without invented limits.
   media_assets may contain an empty assets mapping when no image was uploaded.
 - If the request required a Feishu/Lark, Notion, or WeChat source, source_document and
   target_document must exist.
@@ -63,3 +66,7 @@ value is merely a local path string does not satisfy an output and must be RETRY
 Use exactly:
 
 <verdict>VERDICT</verdict><reason>brief explanation</reason>
+
+Uploaded Markdown is displayed separately in source_materials. Collect referenced local images
+best-effort into media_assets; image errors and timeouts only produce notices, never
+fail, pause, or retry the writing workflow. Preserve source text and use media-library copies.

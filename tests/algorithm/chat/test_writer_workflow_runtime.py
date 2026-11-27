@@ -107,7 +107,7 @@ def test_yaml_tools_keep_only_private_orchestration_and_shared_execution_adapter
     assert declared_tools <= {adapter.name for adapter in adapters}
     assert workflow["artifact_actions"] == {
         "rewrite_selection": {
-            "slots": ["outline_document", "flat_draft_document", "draft_document"],
+            "slots": ["writing_brief", "outline_document", "flat_draft_document", "draft_document"],
             "preview_tool": "builtin:document.rewrite_selection.v1",
             "execute_tool": "builtin:document.rewrite_selection.v1",
         },
@@ -116,7 +116,7 @@ def test_yaml_tools_keep_only_private_orchestration_and_shared_execution_adapter
             "execute_tool": "builtin:document.sync_document.v1",
         },
         "convert_document": {
-            "slots": ["source_document", "outline_document", "flat_draft_document", "draft_document"],
+            "slots": ["source_document", "writing_brief", "outline_document", "flat_draft_document", "draft_document"],
             "preview_tool": "builtin:document.convert_document.v1",
             "execute_tool": "builtin:document.convert_document.v1",
         },
@@ -125,15 +125,29 @@ def test_yaml_tools_keep_only_private_orchestration_and_shared_execution_adapter
             "execute_tool": "builtin:document.write_document.v1",
         },
         "render_document": {
-            "slots": ["source_document", "outline_document", "flat_draft_document", "draft_document"],
+            "slots": ["source_document", "writing_brief", "outline_document", "flat_draft_document", "draft_document"],
             "preview_tool": "builtin:document.render_document.v1",
             "execute_tool": "builtin:document.render_document.v1",
         },
         "save_document": {
-            "slots": ["outline_document", "flat_draft_document", "draft_document"],
+            "slots": ["writing_brief", "outline_document", "flat_draft_document", "draft_document"],
             "execute_tool": "builtin:document.save_document.v1",
         },
     }
+
+    state = yaml.safe_load((_SCRIPTS_PATH.parent / "scenario/state.yml").read_text())
+    definitions = {slot["id"]: slot for slot in workflow["slots"]}
+    assert definitions["writing_task"]["user_visible"] is False
+    assert definitions["writing_brief"]["user_visible"] is True
+    assert workflow["ui"]["slots"]["writing_brief"]["widgetType"] == "writer-document"
+    prepare_tab = next(tab for tab in workflow["ui"]["tabs"] if tab["id"] == "prepare")
+    assert [slot["id"] for slot in prepare_tab["slots"]] == ["writing_brief", "source_materials", "source_document"]
+    assert {"writing_task", "writing_brief"} <= {
+        output["material"] for output in state["steps"]["prepare"]["outputs"]
+    }
+    for step in ("outline", "write_document", "write_flat_document"):
+        inputs = {item["material"] for item in state["steps"][step]["inputs"]}
+        assert "writing_task" in inputs and "writing_brief" not in inputs
 
     assert not (_SCRIPTS_PATH / "runtime.py").exists()
     assert not (_SCRIPTS_PATH / "orchestration.py").exists()

@@ -365,7 +365,8 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
         return;
       }
 
-      const rawFile = toRawFile(file);
+      // Ant Design clones info.file when beforeUpload returns false, losing the native disk path.
+      const rawFile = info.fileList.find(item => item.uid === file.uid)?.originFileObj ?? toRawFile(file);
 
       if (!validateFileType(rawFile, types)) return Upload.LIST_IGNORE;
       if (!validateFileSize(rawFile)) return Upload.LIST_IGNORE;

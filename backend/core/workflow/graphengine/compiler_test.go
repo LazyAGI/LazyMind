@@ -1231,3 +1231,30 @@ func TestUIMaterialReuseAcrossTabs(t *testing.T) {
 		})
 	}
 }
+
+func TestWriterBoundSourcesReachPrepareWithoutRequiringAttachments(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..", "workflows", "writer-workflow")
+	workflow, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.ReadFile(filepath.Join(root, "scenario", "state.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled := Compile(string(workflow), string(state), "", ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("invalid Writer: %+v", compiled.Diagnostics)
+	}
+	producer := compiled.Graph.MaterialProducers["source_files"]
+	if producer.Kind != "external" || !producer.Optional {
+		t.Fatalf("source files must be optional external inputs: %+v", producer)
+	}
+	prepare := compiled.Graph.Nodes["prepare"]
+	if prepare.InputTransports["source_files"] != "path" || len(prepare.OptionalInputs) != 1 || prepare.OptionalInputs[0].Material != "source_files" {
+		t.Fatalf("prepare cannot consume bound attachments: %+v", prepare)
+	}
+	if compiled.Graph.MaterialCardinalities["source_files"] != "list" {
+		t.Fatal("source order lost")
+	}
+}

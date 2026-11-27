@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 
 	"gopkg.in/yaml.v3"
+	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
@@ -32,6 +35,18 @@ func (r *Repository) DescribeArtifact(ctx context.Context, owner string, artifac
 	artifact.Document, artifact.DocumentError = document.Project(ctx, artifact.Value, artifact.ContentType, writable, func() (bool, error) {
 		return r.PinnedMarkdownHint(ctx, &session, artifact.SlotID)
 	}, r.writerDisplayTarget(ctx, &session, artifact))
+	// Source snapshots keep file carriers; expose a content identity for duplicate-free preparation views.
+	if artifact.Document != nil && artifact.Document.Representation == "markdown" && artifact.Document.RenderContext == nil &&
+		session.WorkflowID == "writer-workflow" && (artifact.SlotID == "source_document" || artifact.SlotID == "source_materials") {
+		content, _ := document.ReadContent(artifact.Value, artifact.ContentType, func() (bool, error) { return true, nil })
+		if content != nil {
+			var text string
+			if json.Unmarshal(content.Value, &text) == nil {
+				sum := sha256.Sum256([]byte(text))
+				artifact.Document.RenderContext = &algo.DocumentRenderContext{SourceHash: hex.EncodeToString(sum[:]), CodeFences: []algo.DocumentCodeFenceDisplay{}, Images: []algo.DocumentImageDisplay{}}
+			}
+		}
+	}
 	if artifact.Document != nil && writable {
 		err := artifactgraph.CheckConsumers(ctx, r.db, session.ID, artifact.ID)
 		if errors.Is(err, artifactgraph.ErrArtifactInUse) {

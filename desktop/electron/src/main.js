@@ -26,6 +26,7 @@ const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
 const { localFileAction, openChatExternal } = require("./chat-link-actions");
+const { collectMarkdownImages } = require('./markdown-images');
 const { revealDirectoryFile } = require("./directory-file");
 const {
   desktopRuntimeReady,
@@ -2575,6 +2576,19 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
   }
   startupMetricsRecorder.mark("rendererReady");
   rendererReadyWait.notify();
+});
+
+ipcMain.handle('lazymind:collectMarkdownImages', async (event, payload) => {
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  if (isQuitting || !isTrustedNotificationSender(event, owner, notificationFrontendOrigin())
+    || typeof payload?.filename !== 'string' || payload.filename.length > 4096
+    || !Array.isArray(payload.references) || payload.references.length > 32) {
+    return { images: [], warnings: ['无法读取引用图片。'] };
+  }
+  try {
+    const access = loadAccessState(localFolderAccessStatePath);
+    return await collectMarkdownImages(payload.filename, payload.references, access.allowedRoots);
+  } catch { return { images: [], warnings: ['引用图片读取失败，正文仍可使用。'] }; }
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
