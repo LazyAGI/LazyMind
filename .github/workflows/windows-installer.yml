@@ -100,6 +100,9 @@ jobs:
       use_current_run: true
       platform: windows
       test_signed_updates: true
+    secrets:
+      WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY: ${{ secrets.WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY }}
+      MODELSCOPE_UPDATE_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}
 
   build-windows-installer:
     name: Build Windows x64 installer

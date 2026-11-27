@@ -372,7 +372,12 @@ test("the Windows test release is bound to its channel before signing or uploadi
   const dispatch = context("windows", "workflow_dispatch");
   Object.assign(dispatch.inputs, { enable_updates: false, enable_test_signed_updates: true });
   const ctx = context("windows", "workflow_dispatch");
-  ctx.inputs = calledInputs(spec, calls(installer).find(([, j]) => enabled(j, dispatch))[1], dispatch);
+  const caller = calls(installer).find(([, job]) => enabled(job, dispatch))[1];
+  assert.deepEqual(caller.secrets, {
+    WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY: "${{ secrets.WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY }}",
+    MODELSCOPE_UPDATE_TOKEN: "${{ secrets.MODELSCOPE_UPDATE_TOKEN }}",
+  });
+  ctx.inputs = calledInputs(spec, caller, dispatch);
   const publish = spec.jobs.publish.steps.filter(s => enabled(s, ctx));
   const check = publish.findIndex(s => s.run?.includes("windows-test-channel.mjs check-release"));
   const sign = publish.findIndex(s => s.run?.includes('update-publisher" sign'));
@@ -382,6 +387,7 @@ test("the Windows test release is bound to its channel before signing or uploadi
   assert.equal(value(spec.jobs.publish.environment, ctx), "desktop_updates_test");
   ctx.secrets = { LAZYMIND_UPDATE_POLICY_PRIVATE_KEY: "other-private", WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY: "test-private",
     MODELSCOPE_UPDATE_TOKEN: "test-upload" };
+  assert.match(publish[sign].env.UPDATE_PRIVATE_KEY, /secrets\.WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY\b/);
   assert.equal(value(publish[sign].env.UPDATE_PRIVATE_KEY, ctx), "test-private");
   for (const step of [publish[components], publish[policy]]) assert.equal(value(step.env.MODELSCOPE_API_TOKEN, ctx), "test-upload");
   ctx.secrets.WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY = ctx.secrets.MODELSCOPE_UPDATE_TOKEN = "";

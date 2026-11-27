@@ -235,6 +235,8 @@ class PublicBaselineTests(unittest.TestCase):
             # selection as Actions when the call-only test signing input is absent.
             header = re.sub(r"(vars|secrets)\[inputs\.test_signed_updates && '[A-Za-z0-9_]+' \|\| '([A-Za-z0-9_]+)'\]",
                             r'\1.\2', header)
+            header = re.sub(r"\(inputs\.test_signed_updates && secrets\.\w+\) \|\| \(!inputs\.test_signed_updates && (secrets\.\w+)\) \|\| ''",
+                            r'\1', header)
             bindings = re.findall(r'^          (\w+): \$\{\{\s*([\w.]+)\s*\}\}$', header, re.M)
             scripts.append((bindings, '\n'.join(line.removeprefix('          ') for line in shell.splitlines())))
 

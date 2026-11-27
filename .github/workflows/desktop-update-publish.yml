@@ -269,13 +269,13 @@ jobs:
           done
       - name: Assemble and sign explicit update policy
         env:
-          UPDATE_PRIVATE_KEY: ${{ secrets[inputs.test_signed_updates && 'WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY' || 'LAZYMIND_UPDATE_POLICY_PRIVATE_KEY'] }}
+          UPDATE_PRIVATE_KEY: ${{ (inputs.test_signed_updates && secrets.WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY) || (!inputs.test_signed_updates && secrets.LAZYMIND_UPDATE_POLICY_PRIVATE_KEY) || '' }}
           UPDATE_KEY_ID: ${{ vars[inputs.test_signed_updates && 'LAZYMIND_WINDOWS_TEST_UPDATE_POLICY_KEY_ID' || 'LAZYMIND_UPDATE_POLICY_KEY_ID'] }}
           USE_CURRENT_RUN: ${{ inputs.use_current_run }}
         run: |
           set -euo pipefail
-          test -n "${UPDATE_PRIVATE_KEY}"
-          test -n "${UPDATE_KEY_ID}"
+          : "${UPDATE_PRIVATE_KEY:?Missing policy signing key in the selected publication environment}"
+          : "${UPDATE_KEY_ID:?Missing public policy key ID in the selected publication environment}"
           umask 077
           key_path="${RUNNER_TEMP}/desktop-update-private.pem"
           trap 'rm -f "${key_path}"' EXIT

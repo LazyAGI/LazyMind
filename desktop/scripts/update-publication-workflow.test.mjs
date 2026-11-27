@@ -40,19 +40,20 @@ test("update build inputs are opt-in, public and injected only into packaging", 
     assert.match(source, /LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: \$\{\{ env.LAZYMIND_UPDATE_BUILD_CONFIG_JSON \}\}/);
     assert.match(source, /name: Prepare immutable update artifacts\s*\n\s*if: inputs.enable_updates/);
     assert.match(source, /name: Upload immutable update artifacts\s*\n\s*if: inputs.enable_updates/);
-    let buildSource = source;
+    const jobName = platform === "macos" ? "publish_unsigned_update_test" : "publish_windows_test_update";
+    const key = platform === "macos" ? "LAZYMIND_UPDATE_POLICY_PRIVATE_KEY" : "WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY";
+    const publishJob = source.match(new RegExp(`^  ${jobName}:\\n[\\s\\S]*?(?=^  [a-z][a-z_-]*:|$(?![\\s\\S]))`, "m"))?.[0];
+    const wiring = publishJob?.match(/^    secrets:\n(?: {6}[^\n]+\n)+/m)?.[0];
+    assert.equal(wiring, [
+      "    secrets:",
+      "      " + key + ": ${{ secrets." + key + " }}",
+      "      MODELSCOPE_UPDATE_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}",
+      "",
+    ].join("\n"), "the test publisher must receive only its two environment secrets by name");
+    let buildSource = source.replace(publishJob, publishJob.replace(wiring, ""));
     if (platform === "macos") {
-      const publishJob = source.match(/^  publish_unsigned_update_test:\n[\s\S]*?(?=^  [a-z][a-z_-]*:|$(?![\s\S]))/m)?.[0];
-      const wiring = publishJob?.match(/^    secrets:\n(?: {6}[^\n]+\n)+/m)?.[0];
-      assert.equal(wiring, [
-        "    secrets:",
-        "      LAZYMIND_UPDATE_POLICY_PRIVATE_KEY: ${{ secrets.LAZYMIND_UPDATE_POLICY_PRIVATE_KEY }}",
-        "      MODELSCOPE_UPDATE_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}",
-        "",
-      ].join("\n"), "the test publisher must receive only its two environment secrets by name");
       const callable = source.slice(0, source.indexOf("  workflow_dispatch:"));
-      buildSource = source.replace(publishJob, publishJob.replace(wiring, ""))
-        .replace(callable, callable.replace("\n      LAZYMIND_UPDATE_POLICY_PRIVATE_KEY:\n        required: false\n", "\n"));
+      buildSource = buildSource.replace(callable, callable.replace("\n      LAZYMIND_UPDATE_POLICY_PRIVATE_KEY:\n        required: false\n", "\n"));
     }
     assert.doesNotMatch(buildSource, /UPDATE_POLICY_PRIVATE_KEY|sunjh2222/);
   }
