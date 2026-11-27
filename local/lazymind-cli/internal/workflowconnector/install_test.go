@@ -310,28 +310,31 @@ func TestInstalledHeartbeatCanUseCanonicalPath(t *testing.T) {
 		}
 	})
 	if err := workflowconnector.Ensure(t.Context(), alias, executable, "codex"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("install through %s %q: %v", aliasKind, alias, err)
 	}
 	installed, err := workflowconnector.Resolve(alias, "codex")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolve through %s %q: %v", aliasKind, alias, err)
 	}
-	canonical, err := filepath.EvalSymlinks(installed.EntryPath())
+	direct, err := workflowconnector.Resolve(realHome, "codex")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolve junction or symlink target %q directly: %v", realHome, err)
 	}
-	if filepath.Clean(canonical) == filepath.Clean(installed.EntryPath()) {
-		t.Fatalf("canonical entry did not resolve through the %s: %q", aliasKind, canonical)
+	if filepath.Clean(direct.EntryPath()) == filepath.Clean(installed.EntryPath()) {
+		t.Fatalf("expected different entry paths through %s %q and its target %q, got %q",
+			aliasKind, alias, realHome, installed.EntryPath())
 	}
 	heartbeat := workflowconnector.Runtime{
-		ConnectorEntry: canonical, ConnectorVersion: installed.Version, ConnectorRevision: installed.Release,
+		ConnectorEntry: direct.EntryPath(), ConnectorVersion: installed.Version, ConnectorRevision: installed.Release,
 	}
 	if !installed.Matches(heartbeat) {
-		t.Fatal("canonical heartbeat was rejected")
+		t.Fatalf("%s entry %q rejected heartbeat reporting the same file via %q",
+			aliasKind, installed.EntryPath(), heartbeat.ConnectorEntry)
 	}
-	heartbeat.ConnectorEntry = installed.ControlPath()
+	heartbeat.ConnectorEntry = direct.ControlPath()
 	if installed.Matches(heartbeat) {
-		t.Fatal("heartbeat reported a different file")
+		t.Fatalf("%s entry %q accepted heartbeat reporting different module %q",
+			aliasKind, installed.EntryPath(), heartbeat.ConnectorEntry)
 	}
 	t.Logf("accepted the selected entry through a %s and rejected a different module", aliasKind)
 }
