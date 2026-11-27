@@ -14,11 +14,14 @@ from .analysis.schema import DataBundle, DataTable
 from .contracts import MissingMaterials
 from .experiment.schema import StrictModel
 from .review.schema import text_digest
+from .source_preparation import Bibliography, prepare_sources
 
 
 class EvidenceSelection(StrictModel):
     blocks: list[int]
     review_role: Literal['paper', 'background'] | None = None
+    bibliography: Bibliography | None = None
+    source_evidence: list[str] = []
 
 
 def typed_table(columns, rows):
@@ -121,7 +124,10 @@ def extract_paper(paper, request):
             'methods, existing findings (including numeric results in prose), sample sizes, units, source labels, '
             'study conditions and limitations needed to interpret the tables. Exclude repetitive explanations and '
             'unrelated background. This is evidence extraction, not a request to reproduce the whole attachment. '
-            'Tables are preserved separately and exactly by the host. Do not invent missing evidence.\n'
+            'Tables are preserved separately and exactly by the host. Do not invent missing evidence. '
+            'For prior academic papers, also extract bibliography from the document header (not its references) '
+            'and exact original excerpts in source_evidence grounding every bibliographic field. '
+            'Omit unknown authors, dates and identifiers. Background or uncertain materials have no bibliography.\n'
             + json.dumps({'request': request, 'title': paper['title'], 'document_outline': outline, 'blocks': blocks,
                           'tables': [{'id': t['id'], 'description': t['description'],
                                       'columns': t['table']['columns']} for t in tables]}, ensure_ascii=False)
@@ -137,6 +143,11 @@ def extract_paper(paper, request):
         selection = EvidenceSelection.model_validate(writer._parse_structured_response(response, EvidenceSelection))
         if review_role != 'background' and selection.review_role is not None:
             review_role = selection.review_role
+        if selection.bibliography is not None:
+            annotation = {'paper_id': paper['id'], 'role': review_role or 'unknown',
+                          'evidence': selection.source_evidence,
+                          'bibliography': selection.bibliography.model_dump(exclude_unset=True)}
+            paper = prepare_sources([paper], [annotation])[0]
         invalid = any(i < 0 or i >= len(blocks) for i in selection.blocks)
         if len(set(selection.blocks)) != len(selection.blocks) or invalid:
             raise ValueError('附件提取返回了无效的原文段落编号。')
@@ -211,7 +222,7 @@ def sync_bound_materials(pool, paths, request):
         # Attempt workspaces change on retry; source identity follows the source content.
         key = f'bound:{digest}:{name}'
         papers[key] = {'id': f'upload-{digest}', 'title': Path(name).stem, 'filename': name,
-                       'text': text, 'attachment_key': text_digest(key), 'review_role': 'background'}
+                       'text': text, 'attachment_key': text_digest(key)}
     return sync_attachments(pool, {'0': list(papers)}, request,
                             read_papers=lambda history: [papers[key] for keys in history.values() for key in keys])
 

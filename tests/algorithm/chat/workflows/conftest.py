@@ -38,7 +38,8 @@ def paper_simulation(monkeypatch, request):
     def select_source(prompt):
         payload = json.loads(prompt[prompt.index('\n{') + 1:])
         if 'blocks' in payload:
-            return json.dumps({'blocks': [block['id'] for block in payload['blocks']]})
+            return json.dumps({'blocks': [block['id'] for block in payload['blocks']],
+                               'review_role': 'background'})
         return json.dumps({'action': 'use_existing' if payload['tables'] else 'missing',
                            'table_ids': list(payload['tables']), 'reason': '沿用提供的测试数据'})
 

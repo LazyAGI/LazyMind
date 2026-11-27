@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import contracts
 from .host_sources import HostSource
+from .source_preparation import SourcePreparation, pending_sources, prepare_sources
 from .workflow import (STEP_NODE, add_material, business_input, material,
                        paper_source_ids, pool_from_business, pool_from_inputs,
                        render_material, validate_pool, with_source_notice)
@@ -224,8 +225,13 @@ def base_pool(ctx):
         if identifier in known:
             continue
         name = source.get('filename', 'research-material') if isinstance(source, dict) else 'research-material'
-        paper = {'id': identifier, 'title': name, 'text': text, 'source': 'input',
-                 'source_version': digest(source), 'reading': {'content_type': 'provided_text', 'truncated': False}}
+        paper = {'id': identifier, 'title': name, 'filename': name, 'text': text, 'source': 'input',
+                 'source_version': digest(source), 'reading': {'content_type': 'provided_text', 'truncated': False},
+                 'citation_preparation': {'role': 'pending'}}
+        if isinstance(source, dict):
+            for key in ('title', 'authors', 'year', 'venue', 'doi', 'url', 'citation', 'review_role'):
+                if key in source:
+                    paper[key] = copy.deepcopy(source[key])
         papers.append(paper)
         known.add(identifier)
         if Path(name).suffix.lower() in {'.csv', '.tsv'}:
@@ -375,6 +381,25 @@ def _prepared_inputs(ctx, pool=None, value=None) -> dict:
     from .submission import submission_contract
     registration = 'paper_import_sources' in (ctx.available_tools or [])
     result['submission_contract'] = submission_contract(ctx.step_id, registration)
+    pending = pending_sources(value.get('papers', []))
+    if pending:
+        from pydantic import TypeAdapter
+        result['source_preparation_schema'] = TypeAdapter(list[SourcePreparation]).json_schema()
+        result['submission_contract']['output']['source_preparation'] = (
+            'array matching source_preparation_schema; classify uploaded materials before citing them')
+        result['source_preparation'] = {
+            'pending': pending,
+            'instruction': ('Before writing, read these actual material IDs and classify each document as prior '
+                            'academic paper, background about the current study, or unknown. An uploaded draft '
+                            'being edited is not prior literature. For papers extract bibliography from the '
+                            'document itself, not its reference list. Supply exact original excerpts as evidence. '
+                            'Return output.source_preparation with the business output, including on a repair. '
+                            'For revision, pass the same annotations to paper_preview_revision(source_preparation=...) '
+                            'and keep them unchanged at submission. '
+                            'Only confirmed papers with usable bibliography may be cited as [文献:ID]. '
+                            'Unknown materials remain non-citable; ask for missing identity if needed. '
+                            'No model knowledge, filename-only citations, invented authors/dates, or new searches.')
+        }
     if ctx.step_id in {'research_topic', 'refine_topic', 'literature_review', 'reading_reflection'}:
         result['source_registration'] = {'tool': 'paper_import_sources', 'available': registration}
     if ctx.step_id == 'literature_review':
@@ -1280,13 +1305,28 @@ def normalized_revision(inputs, plan, replacements):
     return manuscript
 
 
+def _prepare_source_pool(pool, annotations):
+    if annotations is None:
+        return []
+    if pool is None:
+        raise ValueError('结束步骤不接受新的材料识别结果')
+    previous = material(pool, 'papers')
+    papers = prepare_sources(previous['content'] if previous else [], annotations)
+    if previous is not None and papers != previous['content']:
+        return [add_material(pool, 'papers', papers,
+                             [copy.deepcopy(pool['current']['papers'])], paper_source_ids(papers))]
+    return []
+
+
 @json_arguments
-def paper_preview_revision(modify_plan: dict, replacements: dict) -> dict:
-    """Apply exact scoped patches and return the final bytes for the Agent's fresh review; no model or save."""
+def paper_preview_revision(modify_plan: dict, replacements: dict, source_preparation: list[dict] | None = None) -> dict:
+    """Apply scoped patches without saving. Reuse source_preparation unchanged in candidate submission."""
     ctx = context()
     if ctx.step_id != 'revise_document':
         raise ValueError('修订预览仅用于修订步骤')
-    manuscript = normalized_revision(step_inputs(ctx, base_pool(ctx)), modify_plan, replacements)
+    pool = base_pool(ctx)
+    _prepare_source_pool(pool, source_preparation)
+    manuscript = normalized_revision(step_inputs(ctx, pool), modify_plan, replacements)
     return {'manuscript': manuscript, 'sha256': hashlib.sha256(manuscript.encode()).hexdigest(),
             'persisted': False, 'next': 'Review this exact manuscript and supply a fresh review_result.'}
 
@@ -1303,7 +1343,7 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
     output = copy.deepcopy(output)
     quality_warnings = []
     selected_ids = output.pop('selected_paper_ids', [])
-    source_imports = []
+    source_imports = _prepare_source_pool(pool, output.pop('source_preparation', None))
     if selected_ids:
         if ctx.step_id == 'finish':
             raise ValueError('结束步骤不导入新的论文来源')
@@ -1387,7 +1427,8 @@ def paper_prepare_candidate(output: dict, receipts: list[dict]) -> dict:
                 if original is None:
                     raise ValueError('引用论文必须来自绑定材料或真实检索回执')
                 for key in ('title', 'text', 'abstract', 'doi', 'url', 'authors', 'year', 'venue',
-                            'source', 'source_version', 'reading', 'provenance'):
+                            'source', 'source_version', 'reading', 'provenance',
+                            'citation_preparation'):
                     if paper.get(key) != original.get(key):
                         raise ValueError(f'不能修改来源事实 paper.{key}')
                 if original.get('review_role') == 'background' and paper.get('review_role') != 'background':
