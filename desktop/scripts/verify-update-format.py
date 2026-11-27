@@ -223,6 +223,60 @@ def validate_app_zip(package, app_name, unpacked_bytes):
             parent = posixpath.dirname(parent)
 
 
+def failure_summary(error):
+    # Emit only known diagnostics. argv, paths, environment and free-form output may contain credentials.
+    fields = [type(error).__name__]
+    if isinstance(error, subprocess.CalledProcessError):
+        fields.append(f'exit={error.returncode}')
+    elif isinstance(error, subprocess.TimeoutExpired):
+        fields.append(f'timeout={error.timeout}s')
+    elif isinstance(error, OSError):
+        fields.append(f'errno={error.errno}')
+        if getattr(error, 'winerror', None) is not None:
+            fields.append(f'winerror={error.winerror}')
+    raw = getattr(error, 'stderr', None) or getattr(error, 'stdout', None) or ''
+    if isinstance(raw, bytes):
+        raw = raw.decode('utf-8', errors='replace')
+    if not raw and not isinstance(error, subprocess.SubprocessError):
+        raw = str(error)
+    text = raw[-16384:]
+    for match in re.finditer(r'\b(?:ModuleNotFoundError|ImportError|FileNotFoundError|PermissionError|'
+                             r'OSError|RuntimeError|ValueError|BadZipFile|DLL load failed|Access is denied|'
+                             r'publisher mismatch|Authenticode: (?:NotSigned|HashMismatch|NotTrusted|UnknownError|NotSupportedFileFormat)|'
+                             r'(?:WinError|Errno|NSIS exit code:) -?\d{1,10})\b', text):
+        if match[0] not in fields:
+            fields.append(match[0])
+    missing = re.findall(r"""No module named ['"]([^'"]+)['"]|\bmissing=([\w.]+)""", text)
+    for original, relayed in missing:
+        module = original or relayed
+        if module in ('numpy', 'pyarrow', 'pandas', 'faiss', 'milvus_lite', 'pymilvus', 'umap', 'numba', 'sklearn'):
+            fields.append('missing=' + module)
+    for filename, lineno in re.findall(r'[/\\](verify-(?:update-format|python-components)\.py)", line (\d{1,5})', text)[-3:]:
+        fields.append(f'{filename}:{lineno}')
+    for func, line in re.findall(r'\bat=([a-z_]+):(\d{1,5})\b', text)[-1:]:
+        code = getattr(globals().get(func), '__code__', None)
+        if code is not None and code.co_filename == __file__:
+            fields.append(f'worker={func}:{line}')
+    location = None
+    tb = error.__traceback__
+    while tb:
+        if tb.tb_frame.f_code.co_filename == __file__ and tb.tb_frame.f_code.co_name not in ('require', 'require_index'):
+            location = f'{tb.tb_frame.f_code.co_name}:{tb.tb_lineno}'
+        tb = tb.tb_next
+    if location:
+        fields.append('at=' + location)
+    return ' '.join(fields)
+
+
+def probe(stage, action, *args, **kwargs):
+    print(f'[update-evidence] start {stage}', file=sys.stderr, flush=True)
+    try:
+        return action(*args, **kwargs)
+    except Exception as error:
+        print(f'[update-evidence] failed {stage}: {failure_summary(error)}', file=sys.stderr, flush=True)
+        raise
+
+
 def output(command, *, timeout=90, env=None, include_stderr=False):
     result = subprocess.run(command, capture_output=True, check=True, timeout=timeout, env=env,
                             encoding='utf-8', errors='replace')
@@ -233,7 +287,7 @@ def verify_macos_app(app, signing_identity, unsigned_test):
     with read_plain_file(app, 'Contents/Info.plist').open('rb') as stream:
         bundle_id = plistlib.load(stream)['CFBundleIdentifier']
     require(bundle_id == 'ai.lazymind.desktop', 'Unexpected macOS App identity')
-    output(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)])
+    probe('mac.verify-app-signature', output, ['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)])
     signature = output(['/usr/bin/codesign', '-dv', '--verbose=4', str(app)], include_stderr=True).splitlines()
     if unsigned_test:
         require('Signature=adhoc' in signature and 'TeamIdentifier=not set' in signature,
@@ -255,8 +309,9 @@ def verify_windows_signature(executable, signing_identity):
     run_powershell(
         '$signature = Get-AuthenticodeSignature -LiteralPath $env:LM_EVIDENCE_EXECUTABLE; '
         '$type = [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName; '
-        'if ($signature.Status -ne "Valid" -or '
-        '$signature.SignerCertificate.GetNameInfo($type, $false) -cne $env:LM_EVIDENCE_SIGNER) { exit 1 }',
+        'if ($signature.Status -ne "Valid") { [Console]::Error.WriteLine("Authenticode: " + $signature.Status); exit 1 }; '
+        'if ($signature.SignerCertificate.GetNameInfo($type, $false) -cne $env:LM_EVIDENCE_SIGNER) '
+        '{ [Console]::Error.WriteLine("publisher mismatch"); exit 1 }',
         {'LM_EVIDENCE_EXECUTABLE': str(executable), 'LM_EVIDENCE_SIGNER': signing_identity})
 
 
@@ -265,7 +320,7 @@ def run_windows_installer(executable, arguments, *, timeout):
     # uninstaller's re-execution from a temporary location.
     run_powershell('$process = Start-Process -FilePath $env:LM_EVIDENCE_EXECUTABLE '
                    '-ArgumentList $env:LM_EVIDENCE_ARGUMENTS -Wait -PassThru; '
-                   'if ($process.ExitCode -ne 0) { exit 1 }',
+                   'if ($process.ExitCode -ne 0) { [Console]::Error.WriteLine("NSIS exit code: " + $process.ExitCode); exit 1 }',
                    {'LM_EVIDENCE_EXECUTABLE': str(executable), 'LM_EVIDENCE_ARGUMENTS': arguments}, timeout=timeout)
 
 
@@ -273,8 +328,8 @@ def run_windows_installer(executable, arguments, *, timeout):
 def materialized_app(package, release, directory, unsigned_test):
     if release['platform'] == 'darwin':
         name = 'LazyMind.app'
-        validate_app_zip(package, name, release['package']['unpackedBytes'])
-        output(['/usr/bin/ditto', '-x', '-k', str(package), str(directory)], timeout=600)
+        probe('mac.validate-zip', validate_app_zip, package, name, release['package']['unpackedBytes'])
+        probe('mac.extract-app', output, ['/usr/bin/ditto', '-x', '-k', str(package), str(directory)], timeout=600)
         app = directory / name
         verify_macos_app(app, release['signingIdentity'], unsigned_test)
         yield app / 'Contents/Resources'
@@ -288,16 +343,17 @@ def materialized_app(package, release, directory, unsigned_test):
             'Refusing to reuse an existing Windows installation')
     require(not any(character.isspace() for character in str(directory)),
             'Windows evidence scratch path must not contain whitespace')
-    verify_windows_signature(package, release['signingIdentity'])
+    role = 'source' if directory.name == 'source-app' else 'target'
+    probe(role + '.verify-installer-signature', verify_windows_signature, package, release['signingIdentity'])
     # In NSIS the /D argument is last and takes the complete destination path.
-    run_windows_installer(package, f'/S --full-install /D={directory}', timeout=1950)
+    probe(role + '.install', run_windows_installer, package, f'/S --full-install /D={directory}', timeout=1950)
     app = read_plain_file(directory, 'LazyMind.exe')
     uninstall = read_plain_file(directory, 'Uninstall LazyMind.exe')
     try:
-        verify_windows_signature(app, release['signingIdentity'])
+        probe(role + '.verify-app-signature', verify_windows_signature, app, release['signingIdentity'])
         yield directory / 'resources'
     finally:
-        run_windows_installer(uninstall, '/S', timeout=300)
+        probe(role + '.uninstall', run_windows_installer, uninstall, '/S', timeout=300)
 
 
 def format_profile(runtime):
@@ -331,8 +387,8 @@ def inspect_runtime(resources, release, catalog_file, descriptor, expected=None)
     windows = release['platform'] == 'windows'
     helper = read_plain_file(runtime, 'bin/lazymind-update-helper.exe' if windows else 'bin/lazymind-update-helper')
     if windows:
-        verify_windows_signature(helper, release['signingIdentity'])
-    response = json.loads(output([str(helper), 'config']))
+        probe('runtime.verify-helper-signature', verify_windows_signature, helper, release['signingIdentity'])
+    response = json.loads(probe('runtime.read-helper-config', output, [str(helper), 'config']))
     require(set(response) == {'status', 'config'} and response['status'] == 'enabled',
             'Packaged helper update configuration is disabled or invalid')
     config = response['config']
@@ -448,7 +504,7 @@ def generate_evidence(args):
     if args.source_record_output:
         require(not args.source_record_output.exists() and args.source_record_output.resolve() != args.output.resolve(),
                 'Source record output must be a new, separate file')
-    target, new_package, new_catalog, new_components = release_inputs(args.target, args.unsigned_test)
+    target, new_package, new_catalog, new_components = probe('target.validate-artifacts', release_inputs, args.target, args.unsigned_test)
     tools = load_script('verify-python-components.py')
     scratch = os.environ.get('RUNNER_TEMP') if sys.platform == 'win32' else None
     with tempfile.TemporaryDirectory(prefix='lm-update-evidence-', dir=scratch) as temp:
@@ -457,37 +513,37 @@ def generate_evidence(args):
         before = None
         with ExitStack() as old_app:
             if args.source:
-                source, old_package, old_catalog, old_components = release_inputs(args.source, args.unsigned_test)
+                source, old_package, old_catalog, old_components = probe('source.validate-artifacts', release_inputs, args.source, args.unsigned_test)
             else:
                 release = load_json(args.published_source)
-                old_package, old_catalog = download_source(release, target, staging)
+                old_package, old_catalog = probe('source.download', download_source, release, target, staging)
                 old_components, descriptor = release_catalog(old_catalog, release)
                 resources = old_app.enter_context(materialized_app(old_package, release, staging / 'source-app', args.unsigned_test))
-                source, runtime, python = inspect_runtime(resources, release, old_catalog, descriptor)
+                source, runtime, python = probe('source.inspect-runtime', inspect_runtime, resources, release, old_catalog, descriptor)
             reason = check_pair(source, target, old_components, new_components)
             if not reason:
                 if args.source:
                     resources = old_app.enter_context(materialized_app(old_package, source['release'], staging / 'source-app', args.unsigned_test))
-                    runtime, python = verify_runtime(resources, source, old_catalog)
+                    runtime, python = probe('source.inspect-runtime', verify_runtime, resources, source, old_catalog)
                 entry = old_components['rag']
-                overlay = extract_overlay(entry, staging / 'source-rag', args.source_components_dir, python, source['config'], tools)
-                require(index_worker(python, 'create-index', fixture, overlay, runtime, entry['pythonAbi']),
+                overlay = probe('source.extract-rag', extract_overlay, entry, staging / 'source-rag', args.source_components_dir, python, source['config'], tools)
+                require(probe('source.create-index', index_worker, python, 'create-index', fixture, overlay, runtime, entry['pythonAbi']),
                         'Source runtime did not retrieve its own fixture ID')
                 before = fixture_fingerprint(fixture)
         # Source and target installs must never overlap on Windows. Even for a
         # negative historical result, verify the new package's recorded format.
         if not args.source or not reason:
             with materialized_app(new_package, target['release'], staging / 'target-app', args.unsigned_test) as resources:
-                runtime, python = verify_runtime(resources, target, new_catalog)
+                runtime, python = probe('target.inspect-runtime', verify_runtime, resources, target, new_catalog)
                 if not reason:
                     entry = new_components['rag']
-                    overlay = extract_overlay(entry, staging / 'target-rag', args.target_components_dir, python, target['config'], tools)
-                    if not index_worker(python, 'read-index', fixture, overlay, runtime, entry['pythonAbi']):
+                    overlay = probe('target.extract-rag', extract_overlay, entry, staging / 'target-rag', args.target_components_dir, python, target['config'], tools)
+                    if not probe('target.read-index', index_worker, python, 'read-index', fixture, overlay, runtime, entry['pythonAbi']):
                         reason = 'index_incompatible'
                     if 'cluster' in new_components:
-                        cluster = extract_overlay(new_components['cluster'], staging / 'target-cluster', args.target_components_dir,
+                        cluster = probe('target.extract-cluster', extract_overlay, new_components['cluster'], staging / 'target-cluster', args.target_components_dir,
                                                   python, target['config'], tools)
-                        output([str(python), '-I', '-B', '-X', 'utf8', str(Path(__file__).with_name('verify-python-components.py')),
+                        probe('target.cluster-worker', output, [str(python), '-I', '-B', '-X', 'utf8', str(Path(__file__).with_name('verify-python-components.py')),
                                 '--worker', 'cluster', '--overlay', str(cluster), '--runtime', str(runtime)], timeout=180)
         if before is not None and fixture_fingerprint(fixture) != before:
             reason = 'index_incompatible'
@@ -556,8 +612,6 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (subprocess.SubprocessError, zipfile.BadZipFile):
-        raise SystemExit('Native update evidence process or archive failed') from None
-    except (OSError, RuntimeError, ValueError, KeyError, TypeError, IndexError) as error:
-        print(f'Native update evidence failed: {error}', file=sys.stderr)
+    except Exception as error:
+        print('Native update evidence failed: ' + failure_summary(error), file=sys.stderr)
         raise SystemExit(1) from None

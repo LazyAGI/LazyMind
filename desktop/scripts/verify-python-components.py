@@ -308,11 +308,11 @@ def acquire_bundle(entry, directory, bundle_dir):
                             window_bytes = size
             check_archive(archive, entry)
             return archive
-        except (OSError, RuntimeError, ValueError) as exc:
+        except (OSError, RuntimeError, ValueError):
             archive.unlink(missing_ok=True)
             if index == len(addresses) - 1:
                 raise
-            print(f'Primary component source failed; using fallback: {exc}', flush=True)
+            print('Primary component source failed; using fallback', flush=True)
 
 
 def extract_bundle(archive, directory, entry):

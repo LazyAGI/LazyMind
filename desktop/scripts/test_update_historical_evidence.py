@@ -1,5 +1,7 @@
 """Exercise compatibility outcomes and integrity checks for historical sources."""
 
+from contextlib import redirect_stderr, redirect_stdout
+from http.client import BadStatusLine
 import hashlib
 import io
 import json
@@ -171,6 +173,18 @@ class HistoricalEvidenceTests(unittest.TestCase):
             with self.assertRaises(subprocess.TimeoutExpired):
                 PROBE['generate_evidence'](args)
         materialize.assert_called_once()
+        self.assertFalse(args.output.exists())
+
+    def test_malformed_http_response_fails_at_download_without_leaking_response_text(self):
+        args = self.pair()
+        log = io.StringIO()
+        with patch.object(sys, 'argv', self.historical_cli(args)), \
+                patch.object(OpenerDirector, 'open', side_effect=BadStatusLine('sensitive-response')), \
+                redirect_stdout(log), redirect_stderr(log), self.assertRaises(SystemExit) as stopped:
+            runpy.run_path(str(Path(__file__).with_name('verify-update-format.py')), run_name='__main__')
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertIn('failed source.download: BadStatusLine', log.getvalue())
+        self.assertNotIn('sensitive-response', log.getvalue())
         self.assertFalse(args.output.exists())
 
     def test_damaged_historical_download_never_reaches_the_native_probe(self):
