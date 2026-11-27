@@ -56,6 +56,15 @@ def require_index(condition, message):
         raise IncompatibleIndex(message)
 
 
+def fixture_data_file(fixture, prefix, relative):
+    require_index(isinstance(relative, str), 'Unexpected fixture data file')
+    # Milvus persists os.path.join("data", filename) using the writer's native separator.
+    relative = relative.replace('\\', '/')
+    require_index(relative.startswith('data/') and relative.endswith('.parquet'), 'Unexpected fixture data file')
+    require(all(not part.endswith((' ', '.')) for part in relative.split('/')), 'Unsafe fixture path segment')
+    return read_plain_file(fixture, prefix + '/' + relative)
+
+
 def read_index(fixture):
     import numpy as np
     from milvus_lite.index.factory import load_index_from_spec
@@ -82,9 +91,7 @@ def read_index(fixture):
     require_index((spec.field_name, spec.index_type, spec.metric_type) == ('vector', 'FLAT', 'COSINE'),
                   'Expected a persisted FLAT/COSINE vector index')
     prefix = 'partitions/' + PARTITION
-    require_index(isinstance(relative, str) and relative.startswith('data/') and relative.endswith('.parquet'),
-                  'Unexpected fixture data file')
-    data = read_plain_file(fixture, prefix + '/' + relative)
+    data = fixture_data_file(fixture, prefix, relative)
     segment = Segment.load(str(data), PARTITION, 'id', spec.field_name)
     index_file = read_plain_file(fixture, f'{prefix}/indexes/{data.stem}.vector.flat.idx')
     try:
@@ -331,6 +338,18 @@ def install_windows_default(package):
     return install_dir
 
 
+def remove_empty_install_tree(directory):
+    try:
+        info = directory.lstat()
+    except FileNotFoundError:
+        return
+    require(stat.S_ISDIR(info.st_mode) and not (getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT),
+            'Windows uninstall left a file or a reparse point')
+    for child in directory.iterdir():
+        remove_empty_install_tree(child)
+    directory.rmdir()  # Never unlink files, even if one appears during the check.
+
+
 @contextmanager
 def materialized_app(package, release, directory, unsigned_test):
     if release['platform'] == 'darwin':
@@ -356,7 +375,7 @@ def materialized_app(package, release, directory, unsigned_test):
         yield install_dir / 'resources'
     finally:
         probe(role + '.uninstall', run_windows_installer, uninstall, '/S', timeout=300)
-        require(not os.path.lexists(install_dir), 'Windows default install directory remains after uninstall')
+        probe(role + '.cleanup-empty-directories', remove_empty_install_tree, install_dir)
 
 
 def format_profile(runtime):

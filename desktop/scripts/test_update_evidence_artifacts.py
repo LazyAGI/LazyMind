@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import runpy
-import shutil
 import stat
 import tempfile
 import unittest
@@ -62,7 +61,8 @@ class EvidenceArtifactTests(unittest.TestCase):
         def run(exe, flags, *, timeout):
             order.append((exe.name, flags))
             if exe == uninstall:
-                shutil.rmtree(installed)
+                (installed / 'LazyMind.exe').unlink()
+                uninstall.unlink()  # NSIS can leave an empty resources directory.
                 return
             self.assertEqual(flags, '/S --full-install')
             (installed / 'resources').mkdir(parents=True)
@@ -81,6 +81,38 @@ class EvidenceArtifactTests(unittest.TestCase):
                 self.fail('unexpected install')
         self.assertEqual(order, [(name, action) for role in ('source', 'target')
                                 for name, action in [(role + '.exe', '/S --full-install'), (role, 'verify'), (uninstall.name, '/S')]])
+
+    def test_fixture_data_accepts_native_windows_and_posix_paths(self):
+        prefix = 'partitions/_default'
+        data = self.root / prefix / 'data' / 'segment.parquet'
+        data.parent.mkdir(parents=True)
+        data.write_bytes(b'fixture')
+        for relative in ('data/segment.parquet', r'data\segment.parquet'):
+            self.assertEqual(PROBE['fixture_data_file'](self.root, prefix, relative), data)
+        for relative in ('/data/segment.parquet', r'C:\data\segment.parquet', r'data\..\segment.parquet',
+                         r'data\C:\segment.parquet', r'\\host\data\segment.parquet', 'data//segment.parquet', None):
+            with self.subTest(relative=relative), self.assertRaises(ValueError):
+                PROBE['fixture_data_file'](self.root, prefix, relative)
+
+    def test_uninstall_cleanup_leaves_files_and_links_untouched(self):
+        directory = self.root / 'LazyMind'
+        directory.mkdir()
+        file = directory / 'leftover.exe'
+        file.write_bytes(b'retain')
+        with self.assertRaises((ValueError, OSError)):
+            PROBE['remove_empty_install_tree'](directory)
+        self.assertEqual(file.read_bytes(), b'retain')
+        file.unlink()
+        outside = self.root / 'outside'
+        outside.mkdir()
+        link = directory / 'redirect'
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f'cannot create directory symlink: {error}')
+        with self.assertRaises((ValueError, OSError)):
+            PROBE['remove_empty_install_tree'](directory)
+        self.assertTrue(link.is_symlink() and outside.is_dir())
 
     def test_app_zip_requires_paths_and_links_inside_the_bundle(self):
         package = self.root / 'package.zip'
