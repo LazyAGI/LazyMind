@@ -42,6 +42,16 @@ function Invoke-Bridge([string]$Path, [string[]]$Arguments) {
     return ($output -join [Environment]::NewLine)
 }
 
+function Get-TextDigest([string]$Text) {
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))
+        return [BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $hasher.Dispose()
+    }
+}
+
 # WSL environment paths are not valid Windows runtime roots. The native
 # process must resolve its home and data paths from the active Windows user.
 Remove-Item Env:LAZYMIND_HOME -ErrorAction SilentlyContinue
@@ -71,6 +81,7 @@ $sidecar = Join-Path (Split-Path -Parent $SourcePath) 'workflow-connectors'
 $hasSidecar = Test-Path -LiteralPath $sidecar -PathType Container
 $sidecarHosts = @()
 if ($hasSidecar) {
+    $identity = @($digest)
     $desktopSidecars = (Test-Path -LiteralPath (Join-Path $sidecar 'codex')) -or (Test-Path -LiteralPath (Join-Path $sidecar 'workbuddy'))
     $dshSidecar = Test-Path -LiteralPath (Join-Path $sidecar 'dsh')
     foreach ($connectorHost in @('codex', 'workbuddy', 'dsh')) {
@@ -90,20 +101,17 @@ if ($hasSidecar) {
                 $fileDigest = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
                 "$relative=$fileDigest"
             }
-            $hasher = [Security.Cryptography.SHA256]::Create()
-            try {
-                $hash = $hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($fingerprint -join "`n"))
-                $hostDigest = [BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
-            } finally {
-                $hasher.Dispose()
-            }
-            $digest += "-$connectorHost-$($hostDigest.Substring(0, 16))"
+            $hostDigest = Get-TextDigest ($fingerprint -join "`n")
+            $identity += "$connectorHost=$hostDigest"
             $sidecarHosts += $connectorHost
         } catch {
             [Console]::Error.WriteLine("Workflow Connector source package ($connectorHost) ${hostPath}: $($_.Exception.Message)")
         }
     }
-    if ($sidecarHosts.Count -eq 0) { $digest += '-invalid-connectors' }
+    if ($sidecarHosts.Count -eq 0) { $identity += 'invalid-connectors' }
+    # A fixed-length staging key keeps additional connectors from growing the
+    # launcher path past the legacy Windows PowerShell path limit.
+    $digest = Get-TextDigest ($identity -join "`n")
 }
 $versionDirectory = Join-Path $installDir $digest
 $installedBinary = Join-Path $versionDirectory 'lazymind.exe'

@@ -95,6 +95,7 @@ test('Windows PowerShell preserves literal paths and normalizes native failures'
     success(f.run('start'), 'start');
     const fullExecutable = f.calls().at(-1).executable;
     assert.notEqual(fullExecutable, partialExecutable);
+    assert.match(path.basename(path.dirname(fullExecutable)), /^[a-f0-9]{64}$/, 'staging key stays fixed with all sidecars');
     const fullSidecars = path.join(path.dirname(fullExecutable), 'workflow-connectors');
     assert.equal(readFileSync(path.join(fullSidecars, 'workbuddy', 'main.mjs'), 'utf8'), 'workbuddy-module');
     success(f.run('start'), 'start');
