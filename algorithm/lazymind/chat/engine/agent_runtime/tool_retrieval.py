@@ -36,7 +36,7 @@ BASE_TOOLS = {
     'run_skill_script', 'run_script', 'set_session_env', 'calculator', 'intentwrite', 'shell',
     'read_file_resource', 'search_file_resource', 'grep',
     'read', 'write', 'edit', 'ls', 'glob', 'mkdir', 'move', 'remove', 'stat',
-    'save_chat_artifact',
+    'save_chat_artifact', 'render_resume',
     'get_artifact', 'list_artifacts', 'find_artifact', 'save_artifacts', 'patch_artifact', 'discard_draft',
 }
 

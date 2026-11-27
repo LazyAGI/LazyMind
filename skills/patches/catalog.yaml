@@ -3,3 +3,4 @@ patches:
   - diagram-design/publish-chat-output-v1/patch.yaml
   - interview-simulator/add-required-frontmatter-v1/patch.yaml
   - landscape-art-postcard/adapt-lazymind-image-tools-v1/patch.yaml
+  - tailored-resume-generator/render-deliverable-v1/patch.yaml

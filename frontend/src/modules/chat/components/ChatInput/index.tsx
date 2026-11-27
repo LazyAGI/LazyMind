@@ -64,6 +64,8 @@ import MentionEditor, {
   type MentionEditorRef,
 } from "./MentionEditor";
 import FeaturedCapabilityMenu from "./FeaturedCapabilityMenu";
+import ResumePresentationControl from './ResumePresentationControl';
+import { RESUME_CASE_ID, normalizeResumePresentation, prepareResumeSubmission, type ResumePresentation } from '../../utils/resumePresentation';
 import { buildComposerReferences, type ComposerFileCandidate } from "./composerReferences";
 import { useFeaturedSelectionStore } from "@/modules/chat/store/featuredSelection";
 import ContextUsageButton from "./ContextUsageButton";
@@ -730,6 +732,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       }
       return [...merged.values()];
     }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions, ragReady]);
+    const featuredSelection = useFeaturedSelectionStore(state => state.selections[sessionId || 'new']);
+    const isResumeCapability = composerVariant !== 'paper' && allowMentions
+      && (featuredSelection?.caseId === RESUME_CASE_ID || showcaseSelection?.skill.value === RESUME_CASE_ID);
+    const resumePresentation = normalizeResumePresentation(featuredSelection?.resumePresentation);
+    const updateResumePresentation = (next: ResumePresentation) => useFeaturedSelectionStore.getState().setSelection(sessionId || 'new', {
+      ...useFeaturedSelectionStore.getState().selections[sessionId || 'new'], caseId: RESUME_CASE_ID, resumePresentation: next,
+    });
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const handleRuntimeSettingsChange = useCallback((settings: ConversationRuntimeSettings) => {
       setContextRuntimeSettings(settings);
@@ -1319,9 +1328,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if (isSendDisabled || resolvingSkillWorkflow || featuredBusy || selectingWorkflow) {
         return;
       }
-      const normalizedText = value.trim();
+      let normalizedText = value.trim();
       const references = prepareReferences();
       if (references.unavailable) { message.warning(t('chat.mentionFileUnavailable')); return; }
+      if (isResumeCapability) {
+        const resumeFiles = [...composerFiles, ...transferredUploads];
+        const prepared = prepareResumeSubmission(normalizedText, resumePresentation, resumeFiles, references.inputs);
+        if (prepared.unavailablePhoto) { message.warning(t('chat.resumePresentation.photoUnavailableHint')); return; }
+        normalizedText = prepared.text;
+        references.inputs = prepared.inputs;
+      }
       setResolvingSkillWorkflow(true);
       let resolvedMentions = references.mentions;
       try {
@@ -1611,6 +1627,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         {followUpQueue}
         <div className="input-container">
           <div className={`chat-input-surface${showWorkspaceEnvironment ? " has-environment" : ""}`}>
+          {isResumeCapability && <ResumePresentationControl value={resumePresentation} onChange={updateResumePresentation}
+            files={[...composerFiles, ...transferredUploads]} disabled={disabled || isStreaming || isUploading}
+            onUploadPhoto={() => fileListRef.current?.openFileDialog()} />}
           <div className="input-top">
             <div className="input-field">
               <ShowChatFileList fileList={displayedFiles} onRemove={uid => uid.startsWith("upload:") ? removeTransferredFiles([uid]) : removeImage(uid)} />

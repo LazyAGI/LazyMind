@@ -3595,6 +3595,22 @@ const enUS = {
 
   // Chat
   chat: {
+    resumePresentation: {
+      template: 'Resume style', photo: 'Photo', noPhoto: 'No photo',
+      photoFit: 'Photo placement', contain: 'Show full photo', cover: 'Center crop',
+      uploadPhoto: 'Upload photo', unavailablePhoto: 'Photo unavailable',
+      photoUnavailableHint: 'The selected photo is no longer attached. Choose it again or select “No photo”.',
+      chooseTemplate: 'Choose a resume template', done: 'Use this template', formats: 'PDF for applying · Word for editing',
+      templateHint: 'Choose a layout. Every template supports a photo and adapts to the length of your content.',
+      templates: {
+        business: { name: 'Business blue', description: 'Clear sections and dates for technical, product and operations roles' },
+        modern: { name: 'Modern banner', description: 'A prominent header that highlights your name and target role' },
+        sidebar: { name: 'Professional sidebar', description: 'Contact details and skills alongside your experience' },
+        editorial: { name: 'Editorial', description: 'Bold type and numbered sections for design and content roles' },
+        campus: { name: 'Fresh graduate', description: 'Light colors and an education focus for internships and graduate jobs' },
+        minimal: { name: 'Monochrome ATS', description: 'A simple column and standard headings for readable, parseable text' },
+      },
+    },
     taskConversation: "Task conversations",
     normalConversation: "Conversations",
     preview: {

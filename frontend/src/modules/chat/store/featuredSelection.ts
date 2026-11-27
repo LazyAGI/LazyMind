@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { ResumePresentation } from '../utils/resumePresentation';
 
-export interface FeaturedSelection { caseId: string; taskId?: string }
+export interface FeaturedSelection { caseId: string; taskId?: string; resumePresentation?: ResumePresentation }
 
 export const useFeaturedSelectionStore = create<{
   selections: Record<string, FeaturedSelection>;
@@ -11,7 +12,11 @@ export const useFeaturedSelectionStore = create<{
   selections: {},
   setSelection: (key, selection) => set(state => {
     const selections = { ...state.selections };
-    if (selection) selections[key] = selection; else delete selections[key];
+    if (selection) {
+      const previous = state.selections[key];
+      selections[key] = selection.resumePresentation || previous?.caseId !== selection.caseId || !previous.resumePresentation
+        ? selection : { ...selection, resumePresentation: previous.resumePresentation };
+    } else delete selections[key];
     return { selections };
   }),
   moveSelection: (from, to) => set(state => {
