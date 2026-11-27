@@ -31,6 +31,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('definition-based task step progress', () => {
+  it('keeps next-step handoffs on existing node statuses', async () => {
+    const { projection, session } = mockWorkflow();
+    session.steps[0].status = 'succeeded';
+    projection.projection.nodes.analysis.execution = 'succeeded';
+    Object.assign(projection, { display: { status: 'waiting', reason: 'next_step_required', approval_step_id: '' } });
+    const view = renderHook(() => useTaskSteps({ ...task, status: 'pending' }));
+    await waitFor(() => expect(view.result.current.steps).toHaveLength(5));
+    expect(view.result.current.steps.map(step => step.status)).toEqual(['succeeded', 'pending', 'pending', 'pending', 'pending']);
+  });
+
   it('carries the input checkpoint display through to the shared detail steps', async () => {
     const { projection, session } = mockWorkflow();
     session.steps[0].status = 'succeeded';

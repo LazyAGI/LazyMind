@@ -784,6 +784,13 @@ class ToolExecutionMiddleware:
         for result, record in executed:
             if record.index in decision.blocked_results or record.index in decision.duplicate_sources:
                 continue
+            # ToolsManager wraps a returned image error as a successful invocation.
+            # Expose the image tool's failure to retry policy and workflow completion.
+            if (record.tool_name in {'image_generator', 'image_editor'}
+                    and isinstance(result, dict) and result.get('ok') is True
+                    and isinstance(result.get('value'), dict) and result['value'].get('ok') is False):
+                result = result['value']
+                record = replace(record, result=result)
             if (record.disposition is ToolExecutionDisposition.EXECUTED
                     and record.tool_name in {'run_script', 'run_skill_script'}
                     and self._opaque_tool_is_trusted(record.tool_name)):

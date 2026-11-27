@@ -102,6 +102,8 @@ from .db import MemorySubAgentStore
 from .extensions import resolve_runtime_extension
 
 WORKFLOW_TOOL_FAILURE_LIMITS = {
+    'image_generator': 2,
+    'image_editor': 2,
     'get_artifact': 2,
     'save_artifacts': 2,
     'validate_and_allocate_outline': 1,
@@ -1207,6 +1209,32 @@ def _workflow_control_from_tool_results(
     return selected
 
 
+class WorkflowToolFailure(RuntimeError):
+    code = 'WORKFLOW_TOOL_NON_RETRYABLE'
+
+
+def _record_workflow_tool_failures(event: Dict[str, Any], failures: Dict[str, str]) -> None:
+    for result in event.get('tool_results') or []:
+        if not isinstance(result, dict):
+            continue
+        name = str(result.get('name') or '')
+        payload = result.get('result', result.get('content'))
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError:
+                continue
+        if not isinstance(payload, dict):
+            continue
+        if payload.get('ok') is False and not payload.get('needs_configuration'):
+            reason = str(payload.get('value') or payload.get('message') or 'unknown error')
+            failures[name] = f'{name}: {reason}'
+            if payload.get('retryable') is False:
+                raise WorkflowToolFailure(failures[name])
+        elif payload.get('ok') is True:
+            failures.pop(name, None)
+
+
 def _terminal_tool_failure(
     event: Dict[str, Any], terminal_tool_names: set[str], *, include_reported_errors: bool = False,
 ) -> str:
@@ -1638,6 +1666,7 @@ async def run_subagent_stream(
         terminal_workflow_tools = set(_coerce_str_list(ctx.params.get('terminal_tools')))
         workflow_terminal_completed = False
         workflow_terminal_error = ''
+        workflow_tool_failures: Dict[str, str] = {}
         extension_state = {}
         if resume and extension.on_tool_step is not None:
             for step in db.load_steps(task_id):
@@ -1738,6 +1767,12 @@ async def run_subagent_stream(
                         if tag == 'tool_results' and extension.on_tool_results is not None:
                             extension.on_tool_results(item, extension_state)
                         if effective_agent_type == 'workflow_step' and tag == 'tool_results':
+                            try:
+                                _record_workflow_tool_failures(item, workflow_tool_failures)
+                            except WorkflowToolFailure:
+                                if _signal_task_cancel(task_id):
+                                    clear_cancel_queue = False
+                                raise
                             terminal_error = _terminal_tool_failure(
                                 item, terminal_workflow_tools,
                             )
@@ -1933,7 +1968,7 @@ async def run_subagent_stream(
                 if effective_agent_type == 'workflow_step' else
                 f'Required output artifacts are missing or have the wrong type: {", ".join(missing)}'
             )
-            message = workflow_terminal_error or message
+            message = workflow_terminal_error or '\n'.join(workflow_tool_failures.values()) or message
             yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
                         'current_phase': 'missing_required_artifacts' if missing else 'terminal_tool_failed',
                         'summary': message, 'message': message,
@@ -2006,7 +2041,7 @@ async def run_subagent_stream(
         if source_event is not None:
             yield _sse(source_event)
         exc_summary = str(exc)
-        if db is not None:
+        if db is not None and not isinstance(exc, WorkflowToolFailure):
             try:
                 steps = db.load_steps(task_id)
                 trace = _steps_to_trace(steps)
@@ -2016,7 +2051,8 @@ async def run_subagent_stream(
         failure_phase = translator.run.fallback_code if translator is not None else ''
         yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
                     'summary': exc_summary, 'message': exc_summary,
-                    **({'error_code': exc.code} if isinstance(exc, ToolArgumentRetryExhausted) else {}),
+                    **({'error_code': exc.code}
+                       if isinstance(exc, (ToolArgumentRetryExhausted, WorkflowToolFailure)) else {}),
                     **({'current_phase': failure_phase} if failure_phase in {
                         'model_fallback_exhausted', 'model_context_not_fit',
                     } else {})})

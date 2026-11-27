@@ -56,8 +56,3 @@ export function pptStageRetryKind(session: WorkflowSession, stepId: string) {
   const status = workflowTabStatus({ id: stepId }, session);
   if ((display === 'failed' || display === 'paused') && ['failed', 'interrupted', 'cancelled', 'canceled'].includes(status)) return 'retry';
 }
-
-/** The execution graph uses producer IDs while the panel presents localized tabs. */
-export function workflowStageLabels(tabs: TabDef[] = []): Record<string, string> {
-  return Object.fromEntries(tabs.map(tab => [tab.step_id ?? tab.id, tab.label]));
-}

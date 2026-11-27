@@ -289,8 +289,10 @@ export interface WorkflowSession {
   state_version?: number;
   conversation_id: string;
   workflow_id: string;
-  /** Execution mode selected when this immutable session was created. */
+  /** Current execution mode; changed only by explicit workflow approval settings. */
   workflow_mode: 'auto' | 'dynamic';
+  approval_mode?: 'auto' | 'dynamic';
+  saved_approval_mode?: 'auto' | 'dynamic';
   controller_host?: string;
   /** Immutable package revision selected when this session was created. */
   pinned_revision_id?: string;
@@ -641,6 +643,14 @@ export interface WorkflowUI {
   hide_unstarted_steps?: boolean;
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;
+}
+
+export function workflowStageLabels(ui: WorkflowUI): Record<string, string> {
+  const labels = { ...ui.stepLabels };
+  for (const tab of ui.tabs ?? []) {
+    if (tab.label) labels[tab.step_id ?? tab.id] = tab.label;
+  }
+  return labels;
 }
 
 function restoreLegacyPptMaterialImages(ui: WorkflowUI, slotDefs: Map<string, SlotDef>): WorkflowUI {

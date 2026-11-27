@@ -68,8 +68,7 @@ func TestControllerAdvanceParity(t *testing.T) {
 					}
 				}
 				if scenario == "skip-approval" {
-					_, err := saveWorkflowApprovalPreference(db.DB, session.CreateUserID, session.WorkflowID, "draft", "step")
-					must(err)
+					must(db.Model(&session).Update("approval_preferences", `{"draft":false}`).Error)
 				}
 				if scenario == "retry-with-sibling" {
 					must(db.Create(&orm.WorkflowSessionStep{ID: "sibling", TaskID: "sibling-task", SessionID: session.ID, StepID: "sibling", Status: "running", Validity: "effective"}).Error)

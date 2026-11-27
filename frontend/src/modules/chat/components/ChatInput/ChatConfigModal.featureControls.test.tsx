@@ -1,7 +1,10 @@
+import { message } from 'antd';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatConfigPopover from './ChatConfigModal';
+import { useWorkflowStore } from '../../store/workflowPanel';
+import type { WorkflowSession } from '../../store/workflowPanel';
 
 const mocks = vi.hoisted(() => ({
   fetchUserUiPreferences: vi.fn(),
@@ -9,6 +12,14 @@ const mocks = vi.hoisted(() => ({
   listChatExecutors: vi.fn(),
   patchConversationSettings: vi.fn(),
   onSave: vi.fn(),
+  getSession: vi.fn(),
+  applyApproval: vi.fn(),
+  refresh: vi.fn(),
+}));
+
+vi.mock('../../utils/workflowApprovalSettings', async () => ({
+  ...await vi.importActual<typeof import('../../utils/workflowApprovalSettings')>('../../utils/workflowApprovalSettings'),
+  applyWorkflowApprovalSettings: mocks.applyApproval,
 }));
 
 vi.mock('antd', async () => {
@@ -19,7 +30,8 @@ vi.mock('antd', async () => {
   };
 });
 
-vi.mock('react-i18next', () => ({
+vi.mock('react-i18next', async () => ({
+  ...await vi.importActual<typeof import('react-i18next')>('react-i18next'),
   useTranslation: () => ({
     t: (key: string) => ({
       'chat.conversationConfig': '对话配置',
@@ -29,7 +41,9 @@ vi.mock('react-i18next', () => ({
       'chat.conversationConfigExecutorUnavailable': '执行者不可用',
       'chat.conversationConfigWorkflowExecution': '工作流执行方式',
       'chat.conversationConfigWorkflowExecutionTooltip': '工作流说明',
-      'chat.conversationConfigWorkflowExecutionDesc': '工作流执行说明',
+      'chat.conversationConfigWorkflowAutoDesc': 'AI 可直接使用工作流连续完成任务。',
+      'chat.conversationConfigWorkflowApprovalDesc': '仅在敏感或关键操作前请你确认。',
+      'chat.conversationConfigWorkflowDisabledDesc': 'AI 不会使用工作流。',
       'chat.conversationConfigWorkflowAuto': '自动执行',
       'chat.conversationConfigWorkflowApproval': '按需审批',
       'chat.conversationConfigWorkflowDisabled': '禁用',
@@ -44,6 +58,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../../utils/request', () => ({
+  WorkflowSessionApi: () => ({ getSession: mocks.getSession }),
   ChatServiceApi: () => ({
     conversationServiceGetConversationDetail: vi.fn(),
   }),
@@ -62,6 +77,7 @@ vi.mock('@/modules/user/uiPreferencesApi', () => ({
 
 describe('ChatConfigPopover feature control independence', () => {
   beforeEach(() => {
+    vi.mocked(message.error).mockClear();
     mocks.fetchUserUiPreferences.mockReset();
     mocks.fetchUserUiPreferences.mockResolvedValue({
       task_center_enabled: false,
@@ -73,6 +89,10 @@ describe('ChatConfigPopover feature control independence', () => {
     mocks.listChatExecutors.mockResolvedValue({ data: { data: { executors: [] } } });
     mocks.patchConversationSettings.mockReset();
     mocks.onSave.mockReset();
+    mocks.getSession.mockReset().mockResolvedValue({ data: { data: { session: { saved_approval_mode: 'dynamic' } } } });
+    mocks.applyApproval.mockReset().mockResolvedValue(undefined);
+    mocks.refresh.mockReset().mockResolvedValue(undefined);
+    useWorkflowStore.setState({ sessionByConversation: {}, loadActiveSession: mocks.refresh });
   });
 
   it('stays closed after being disabled while open', async () => {
@@ -340,12 +360,15 @@ describe('ChatConfigPopover feature control independence', () => {
     expect(disabledMode).toBeChecked();
   });
 
-  it('locks the execution mode to the active workflow session', async () => {
+  it.each([false, true])('updates active settings without changing defaults; conflict=%s', async conflict => {
+    if (conflict) mocks.applyApproval.mockRejectedValue({ response: { status: 409, data: { error: { code: 'STATE_VERSION_CONFLICT' } } } });
     mocks.fetchUserUiPreferences.mockResolvedValue({
       task_center_enabled: true,
       workflows_enabled: true,
     });
 
+    const active = { session_id: 'run', workflow_mode: 'dynamic', approval_mode: 'dynamic', state_version: 3 } as WorkflowSession;
+    useWorkflowStore.setState({ sessionByConversation: { 'conversation-1': active } });
     render(
       <ChatConfigPopover
         conversationId="conversation-1"
@@ -361,12 +384,21 @@ describe('ChatConfigPopover feature control independence', () => {
 
     fireEvent.click(screen.getByText('对话配置'));
     const workflowControl = await screen.findByLabelText('工作流执行方式');
-    const radios = within(workflowControl).getAllByRole('radio');
     await waitFor(() => {
       expect(within(workflowControl).getByRole('radio', { name: '按需审批' })).toBeChecked();
-      expect(radios.every((radio) => radio.hasAttribute('disabled'))).toBe(true);
+      expect(within(workflowControl).getByRole('radio', { name: '自动执行' })).toBeEnabled();
+      expect(within(workflowControl).getByRole('radio', { name: '禁用' })).toBeDisabled();
     });
     fireEvent.click(within(workflowControl).getByRole('radio', { name: '自动执行' }));
+    await waitFor(() => expect(mocks.applyApproval).toHaveBeenCalledWith(active, 'auto', true, undefined));
+    if (conflict) {
+      await waitFor(() => expect(message.error).toHaveBeenCalledOnce());
+      expect(mocks.refresh).toHaveBeenCalledWith('conversation-1', { silentError: true });
+      expect(within(workflowControl).getByRole('radio', { name: '按需审批' })).toBeChecked();
+      expect(mocks.applyApproval).toHaveBeenCalledOnce();
+    } else {
+      expect(mocks.refresh).toHaveBeenCalledWith('conversation-1');
+    }
     expect(mocks.patchConversationSettings).not.toHaveBeenCalled();
   });
 });

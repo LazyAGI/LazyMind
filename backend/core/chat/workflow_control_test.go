@@ -16,6 +16,9 @@ import (
 
 func TestChatPauseStillSignalsTurnWhenWorkflowCancellationFails(t *testing.T) {
 	db := newSidechatTestDB(t)
+	if err := db.AutoMigrate(&orm.WorkflowApprovalPreference{}); err != nil {
+		t.Fatal(err)
+	}
 	ctx := t.Context()
 	sidechatTestConversation(t, db, "pause-chat", "owner", "pause")
 	if _, err := workflow.CreateSession(ctx, db, workflow.CreateSessionInput{SessionID: "pause-workflow",

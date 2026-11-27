@@ -38,7 +38,7 @@ type descriptorFixture struct {
 func newDescriptorFixture(t *testing.T) descriptorFixture {
 	t.Helper()
 	db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{},
-		&orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.SubAgentTask{},
+		&orm.WorkflowApprovalPreference{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.SubAgentTask{},
 		&orm.SubAgentArtifact{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowStepIntent{},
 		&orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowResource{}, &orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{})
 	corestore.Init(db.DB, nil, nil)

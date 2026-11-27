@@ -12,6 +12,7 @@ import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { Button, Tooltip, message } from "antd";
 import {
   CHAT_HOME_PATH,
+  CHAT_ENTRY_DEFAULTS_CHANGED_EVENT,
   readChatConversationFilters,
   CHAT_SELECT_CONVERSATION_EVENT,
   selectChatConversationFilter,
@@ -255,7 +256,9 @@ const NewChatPage = () => {
   useEffect(() => {
     const controller = new AbortController();
     void loadEntryDefaults(controller.signal);
-    return () => controller.abort();
+    const refreshDefaults = () => { void loadEntryDefaults(controller.signal); };
+    window.addEventListener(CHAT_ENTRY_DEFAULTS_CHANGED_EVENT, refreshDefaults);
+    return () => { controller.abort(); window.removeEventListener(CHAT_ENTRY_DEFAULTS_CHANGED_EVENT, refreshDefaults); };
   }, [loadEntryDefaults]);
 
   useEffect(() => {

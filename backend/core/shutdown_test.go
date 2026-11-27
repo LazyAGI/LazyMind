@@ -70,8 +70,10 @@ func TestCoordinateShutdownDrainsInFlightRequest(t *testing.T) {
 	// shutdown must let this in-flight request complete with 200 rather than
 	// closing the connection.
 	shutdownBegin := make(chan struct{})
+	handlerStarted := make(chan struct{})
 	handlerDone := make(chan struct{})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(handlerStarted)
 		<-shutdownBegin
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "drained")
@@ -103,8 +105,12 @@ func TestCoordinateShutdownDrainsInFlightRequest(t *testing.T) {
 		respCh <- resp
 	}()
 
-	// Ensure the request has reached the server before cancelling.
-	time.Sleep(40 * time.Millisecond)
+	// Wait for the handler itself; a delay does not prove the request is in flight.
+	select {
+	case <-handlerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("request did not reach the handler before shutdown")
+	}
 
 	// Trigger shutdown and unblock the handler so it can finish during drain.
 	cancel()

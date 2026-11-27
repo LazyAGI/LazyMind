@@ -15,6 +15,9 @@ import {
   USER_UI_PREFERENCES_CHANGED_EVENT,
 } from '@/modules/user/uiPreferencesApi';
 import './ChatConfigModal.scss';
+import { useWorkflowStore } from '../../store/workflowPanel';
+import { WorkflowSessionApi } from '../../utils/request';
+import { applyWorkflowApprovalSettings, workflowApprovalErrorMessage, type SendWorkflowMessage } from '../../utils/workflowApprovalSettings';
 
 interface ChatConfigPopoverProps {
   menuHeight?: number;
@@ -30,7 +33,8 @@ interface ChatConfigPopoverProps {
   onSave?: (settings: ConversationRuntimeSettings) => void;
   /** When true, workflows cannot be disabled because a workflow session is active. */
   hasWorkflowSession?: boolean;
-  /** Immutable execution mode saved on the active Workflow Session. */
+  onSendWorkflowMessage?: SendWorkflowMessage;
+  /** Current execution mode of the active Workflow Session. */
   lockedWorkflowMode?: 'auto' | 'dynamic';
 }
 
@@ -91,8 +95,11 @@ export default function ChatConfigPopover({
   onSave,
   hasWorkflowSession = false,
   lockedWorkflowMode,
+  onSendWorkflowMessage,
 }: ChatConfigPopoverProps) {
   const { t } = useTranslation();
+  const workflowSession = useWorkflowStore(state => conversationId ? state.sessionByConversation[conversationId] : null);
+  const [savingWorkflowMode, setSavingWorkflowMode] = useState(false);
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = (next: boolean) => { setInternalOpen(next); onOpenChange?.(next); };
@@ -301,7 +308,7 @@ export default function ChatConfigPopover({
   const taskControlsAvailable = featureControlsLoaded && featureControls.taskCenterEnabled;
   const workflowControlsAvailable = featureControlsLoaded && featureControls.workflowsEnabled;
   const executionMode = hasWorkflowSession && lockedWorkflowMode
-    ? lockedWorkflowMode
+    ? (workflowSession?.approval_mode ?? workflowSession?.workflow_mode ?? lockedWorkflowMode)
     : resolveWorkflowExecutionMode(settings, hasWorkflowSession, workflowControlsAvailable);
   const sharedFeatureControlsMessage = !featureControls.loaded
     ? t('chat.conversationConfigFeatureControlsLoading')
@@ -328,14 +335,30 @@ export default function ChatConfigPopover({
       ? 'chat-config-workflow-controls-message'
       : undefined;
 
-  function handleExecutionModeChange(mode: string | number) {
-    if (hasWorkflowSession) return;
+  async function handleExecutionModeChange(mode: string | number) {
     const nextMode = mode as WorkflowExecutionMode;
-    if (nextMode === 'disabled') {
-      void handleChange({ enable_workflow: false });
+    if (hasWorkflowSession) {
+      if (!workflowSession || nextMode === 'disabled' || savingWorkflowMode) return;
+      setSavingWorkflowMode(true);
+      try {
+        const result = await WorkflowSessionApi().getSession(workflowSession.session_id, { silentError: true } as never);
+        const remember = Boolean(result.data.data.session.saved_approval_mode);
+        await applyWorkflowApprovalSettings(workflowSession, nextMode, remember, onSendWorkflowMessage);
+        await useWorkflowStore.getState().loadActiveSession(conversationId!);
+        message.success(t(remember ? 'chat.workflowApprovalSavedRemembered' : 'chat.workflowApprovalSaved', {
+          mode: t(nextMode === 'auto' ? 'chat.workflowApprovalAutomatic' : 'chat.workflowApprovalOnDemand'),
+        }));
+      } catch (error) {
+        message.error(await workflowApprovalErrorMessage(error, () =>
+          useWorkflowStore.getState().loadActiveSession(conversationId!, { silentError: true })));
+      } finally { setSavingWorkflowMode(false); }
       return;
     }
-    void handleChange({ enable_workflow: true, workflow_mode: nextMode });
+    if (nextMode === 'disabled') {
+      await handleChange({ enable_workflow: false });
+      return;
+    }
+    await handleChange({ enable_workflow: true, workflow_mode: nextMode });
   }
 
   const content = (
@@ -408,7 +431,7 @@ export default function ChatConfigPopover({
           block
           className="chat-config-workflow-mode"
           value={executionMode}
-          disabled={!workflowControlsAvailable || hasWorkflowSession}
+          disabled={!workflowControlsAvailable || savingWorkflowMode || (hasWorkflowSession && !workflowSession)}
           aria-label={t('chat.conversationConfigWorkflowExecution')}
           aria-describedby={workflowControlsMessageId}
           onChange={handleExecutionModeChange}
@@ -423,7 +446,11 @@ export default function ChatConfigPopover({
           ]}
         />
         <p className="chat-config-workflow-description">
-          {t('chat.conversationConfigWorkflowExecutionDesc')}
+          {t({
+            auto: 'chat.conversationConfigWorkflowAutoDesc',
+            dynamic: 'chat.conversationConfigWorkflowApprovalDesc',
+            disabled: 'chat.conversationConfigWorkflowDisabledDesc',
+          }[executionMode])}
         </p>
       </div>
 

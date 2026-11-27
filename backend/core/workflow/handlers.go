@@ -51,12 +51,14 @@ func enrichArtifactValue(raw json.RawMessage, contentType string) json.RawMessag
 
 // sessionDTO is the frontend shape for a WorkflowSession.
 type sessionDTO struct {
-	StateVersion   int64  `json:"state_version"`
-	SessionID      string `json:"session_id"`
-	ConversationID string `json:"conversation_id"`
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowMode   string `json:"workflow_mode"`
-	ControllerHost string `json:"controller_host"`
+	StateVersion      int64  `json:"state_version"`
+	SessionID         string `json:"session_id"`
+	ConversationID    string `json:"conversation_id"`
+	WorkflowID        string `json:"workflow_id"`
+	WorkflowMode      string `json:"workflow_mode"`
+	ApprovalMode      string `json:"approval_mode,omitempty"`
+	SavedApprovalMode string `json:"saved_approval_mode,omitempty"`
+	ControllerHost    string `json:"controller_host"`
 	// PinnedRevisionID is retained for immutable runtime identity; version numbers
 	// are intentionally not exposed because they are not a reliable UI run label.
 	PinnedRevisionID string    `json:"pinned_revision_id,omitempty"`
@@ -132,6 +134,7 @@ func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 		ConversationID:   s.ConversationID,
 		WorkflowID:       s.WorkflowID,
 		WorkflowMode:     normalizeSessionWorkflowMode(s.WorkflowMode),
+		ApprovalMode:     s.ApprovalMode,
 		ControllerHost:   s.ControllerHost,
 		PinnedRevisionID: s.WorkflowRevisionID,
 		Status:           s.Status,
@@ -140,6 +143,21 @@ func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+// Saved preferences are user/workflow metadata, independent of this run's frozen policy.
+func enrichApprovalPreference(db *gorm.DB, session *orm.WorkflowSession, dto *sessionDTO) error {
+	var prefs []orm.WorkflowApprovalPreference
+	if err := db.Where("user_id = ? AND workflow_id = ? AND step_id = ?", session.CreateUserID, session.WorkflowID, "*").Find(&prefs).Error; err != nil {
+		return err
+	}
+	if len(prefs) > 0 {
+		dto.SavedApprovalMode = "auto"
+		if prefs[0].ApprovalRequired {
+			dto.SavedApprovalMode = "dynamic"
+		}
+	}
+	return nil
 }
 
 func toStepDTO(r *orm.WorkflowSessionStep) stepDTO {
@@ -441,6 +459,10 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := toSessionDTO(s)
+	if err := enrichApprovalPreference(db.WithContext(r.Context()), s, &dto); err != nil {
+		common.ReplyErr(w, "query approval preference failed", http.StatusInternalServerError)
+		return
+	}
 	// Load slots inline.
 	revisions, _ := LoadDisplaySlots(ctx, db, sessionID)
 	for i := range revisions {
@@ -658,6 +680,10 @@ func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
 		healStaleActiveSession(r.Context(), db, s)
 	}
 	dto := toSessionDTO(s)
+	if err := enrichApprovalPreference(db.WithContext(r.Context()), s, &dto); err != nil {
+		common.ReplyErr(w, "query approval preference failed", http.StatusInternalServerError)
+		return
+	}
 	revisions, _ := LoadDisplaySlots(r.Context(), db, s.ID)
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
@@ -698,6 +724,10 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := toSessionDTO(s)
+	if err := enrichApprovalPreference(db.WithContext(r.Context()), s, &dto); err != nil {
+		common.ReplyErr(w, "query approval preference failed", http.StatusInternalServerError)
+		return
+	}
 	revisions, _ := LoadDisplaySlots(r.Context(), db, s.ID)
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))

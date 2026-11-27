@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
-export type WorkflowApprovalScope = 'step' | 'following';
+export type WorkflowApprovalScope = 'step' | 'session' | 'following';
 
 // Hosts share approval choices; each adapter owns persistence and continuation.
 export function WorkflowApprovalActions({ disabled, onContinue }: {
@@ -25,7 +25,7 @@ export function WorkflowApprovalActions({ disabled, onContinue }: {
           className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
           disabled={disabled}
           aria-disabled={disabled}
-          onClick={() => onContinue('step')}
+          onClick={() => onContinue('session')}
           title={t('chat.workflowSkipThisApprovalHint')}
         >
           {t('chat.workflowSkipThisApproval')}

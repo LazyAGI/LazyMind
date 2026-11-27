@@ -50,7 +50,13 @@ func (view View) ApprovalRequired() bool {
 // Read uses durable execution facts so a reload and a live event agree. Callers
 // must propagate read errors; unavailable data is not an execution failure.
 func Read(db *gorm.DB, session orm.WorkflowSession) (View, error) {
-	view, err := readState(db, session)
+	return ReadProjected(db, session, session.Status == "completed")
+}
+
+// ReadProjected consumes proven graph completion. Completion removes an implicit
+// handoff, never an explicit review checkpoint or a request for user input.
+func ReadProjected(db *gorm.DB, session orm.WorkflowSession, completed bool) (View, error) {
+	view, err := readState(db, session, completed)
 	if err != nil {
 		return View{}, err
 	}
@@ -60,7 +66,7 @@ func Read(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	return view, err
 }
 
-func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
+func readState(db *gorm.DB, session orm.WorkflowSession, completed bool) (View, error) {
 	var steps []orm.WorkflowSessionStep
 	if err := db.Where("session_id = ?", session.ID).
 		Order("created_at DESC, attempt DESC, id DESC").Find(&steps).Error; err != nil {
@@ -109,7 +115,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 		}
 	}
 	// Pausing suspends a checkpoint; it never accepts or discards its review.
-	approval, err := pendingApproval(db, session, current)
+	approval, err := pendingApproval(db, session, current, completed)
 	if err != nil {
 		return View{}, err
 	}
@@ -128,7 +134,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 			return View{Status: "waiting_input", Reason: "user_input_required", InputStepID: pending}, nil
 		}
 	}
-	if session.Status == "completed" {
+	if completed {
 		return View{Status: "completed", Reason: "completed"}, nil
 	}
 	// Only an admitted driver or explicit user resume can enter active. Historical
@@ -153,7 +159,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	if step.Status != "succeeded" {
 		return View{Status: "failed", Reason: step.Status}, nil
 	}
-	if session.Status == "waiting" && session.WorkflowMode == "dynamic" && session.ControllerHost == "lazymind" && session.ControlProtocol == "" {
+	if session.Status == "waiting" && session.ControllerHost == "lazymind" && session.ControlProtocol == "" {
 		for _, step := range current {
 			if step.Status != "succeeded" {
 				return View{Status: "failed", Reason: step.Status}, nil
@@ -167,6 +173,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 		if err == nil {
 			var request struct {
 				HandOff      bool   `json:"hand_off"`
+				WaitForUser  bool   `json:"wait_for_user"`
 				WorkflowMode string `json:"workflow_mode"`
 				SessionID    string `json:"session_id"`
 				StepID       string `json:"step_id"`
@@ -174,7 +181,7 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 			if err := json.Unmarshal(task.Params, &request); err != nil {
 				return View{}, err
 			}
-			if request.HandOff && request.WorkflowMode == "dynamic" && request.SessionID == session.ID && request.StepID == step.StepID {
+			if request.HandOff && (request.WaitForUser || (session.WorkflowMode == "dynamic" && request.WorkflowMode == "dynamic")) && request.SessionID == session.ID && request.StepID == step.StepID {
 				return View{Status: "waiting", Reason: "next_step_required"}, nil
 			}
 		}
@@ -315,7 +322,7 @@ func pendingInput(db *gorm.DB, session orm.WorkflowSession) (string, error) {
 	return request.StepID, nil
 }
 
-func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep) (string, error) {
+func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep, completed bool) (string, error) {
 	hasSuccess := false
 	for _, step := range current {
 		hasSuccess = hasSuccess || step.Status == "succeeded"
@@ -323,7 +330,7 @@ func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.Wor
 	if !hasSuccess {
 		return "", nil
 	}
-	if session.ControllerHost == "external-agent" && session.ControlProtocol == "workflow.control.v1" {
+	if (session.ControllerHost == "external-agent" && session.ControlProtocol == "workflow.control.v1") || session.ApprovalMode != "" {
 		var reviews []orm.WorkflowReviewCheckpoint
 		if err := db.Where("session_id = ? AND status = ?", session.ID, "pending").Find(&reviews).Error; err != nil {
 			return "", err
@@ -335,7 +342,11 @@ func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.Wor
 				}
 			}
 		}
-	} else if session.WorkflowRevisionID != "" {
+	}
+	if completed || (session.ControllerHost == "external-agent" && session.ControlProtocol == "workflow.control.v1") {
+		return "", nil
+	}
+	if session.WorkflowRevisionID != "" {
 		var revision orm.WorkflowRevision
 		if err := db.Where("id = ?", session.WorkflowRevisionID).First(&revision).Error; err != nil {
 			return "", err
@@ -344,12 +355,14 @@ func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.Wor
 		if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
 			return "", err
 		}
-		var preferences []orm.WorkflowApprovalPreference
-		if err := db.Where("user_id = ? AND workflow_id = ?", session.CreateUserID, session.WorkflowID).Find(&preferences).Error; err != nil {
-			return "", err
-		}
 		for _, step := range current {
-			if step.Status != "succeeded" || !ApprovalRequired(graph.Nodes[step.StepID].Mode == "human", step.StepID, preferences) {
+			required := SessionApprovalRequired(session, graph.Nodes[step.StepID].Mode == "human", step.StepID)
+			if session.ApprovalMode != "" {
+				// Successful attempts retain the policy they executed under. Restoring
+				// approvals applies to unfinished work, never retroactive reviews.
+				required = step.ReviewRequired
+			}
+			if step.Status != "succeeded" || !required {
 				continue
 			}
 			var acceptedCount int64
@@ -375,6 +388,20 @@ func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.Wor
 		}
 	}
 	return "", nil
+}
+
+// SessionApprovalRequired restores package checkpoints without turning automatic nodes into reviews.
+func SessionApprovalRequired(session orm.WorkflowSession, required bool, stepID string) bool {
+	if session.ApprovalMode != "" {
+		required = session.ApprovalMode == "dynamic" && required
+	}
+	if approval, ok := session.ApprovalPreferences["*"]; ok && !approval {
+		required = false
+	}
+	if approval, ok := session.ApprovalPreferences[stepID]; ok {
+		required = approval
+	}
+	return required
 }
 
 // ApprovalRequired is shared by the graph projection and display projection.

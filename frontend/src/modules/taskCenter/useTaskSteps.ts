@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { axiosInstance, BASE_URL } from '@/components/request';
-import { loadWorkflowUI, workflowSnapshotSteps, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
+import { loadWorkflowUI, workflowSnapshotSteps, workflowStageLabels, type WorkflowSession, type WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { workflowTabsForAudience } from '@/modules/chat/components/WorkflowPanel/workflowAudience';
-import { workflowNodeStatus, workflowStageLabels, workflowTabStatus } from '@/modules/chat/components/WorkflowPanel/workflowStepStatus';
+import { workflowNodeStatus, workflowTabStatus } from '@/modules/chat/components/WorkflowPanel/workflowStepStatus';
 import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developerMode';
 import type { Task } from './api';
 
@@ -107,7 +107,7 @@ export function useTaskSteps(task: Task | null, refreshVersion = 0) {
             status: workflowNodeStatus(node, payload.display, id) };
         });
       }
-      const stepLabels = session?.workflow_id === 'ppt-workflow' && ui ? workflowStageLabels(ui.tabs) : undefined;
+      const stepLabels = session?.workflow_id === 'ppt-workflow' && ui ? workflowStageLabels(ui) : undefined;
       if (active) setSnapshot({ sessionID, steps, stepLabels, failed: false });
     }).catch(() => { if (active) setSnapshot(previous => ({ sessionID, steps: previous?.sessionID === sessionID ? previous.steps : null, failed: true })); });
     return () => {

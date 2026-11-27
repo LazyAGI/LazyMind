@@ -1073,3 +1073,61 @@ func TestStoppedStepKeepsItsFirstStopTimeOnRepeatedEvents(t *testing.T) {
 		t.Fatalf("stop changed after repeated events: %s %s", got.Status, got.UpdatedAt)
 	}
 }
+
+func TestOnSubAgentDoneAutomaticExplicitHandoffWaitsForUser(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.Conversation{ID: "boundary-conv", BaseModel: orm.BaseModel{CreateUserID: "user"}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	hash, schema := seedEventLoopRevision(t, db, "user-boundary-revision")
+	if _, err := CreateSession(t.Context(), db.DB, CreateSessionInput{
+		SessionID: "user-boundary", ConversationID: "boundary-conv", WorkflowID: "image-workflow", WorkflowMode: "auto",
+		WorkflowRevisionID: "user-boundary-revision", GraphHash: hash, GraphSchemaVersion: schema,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "user-boundary").Update("controller_host", "lazymind").Error; err != nil {
+		t.Fatal(err)
+	}
+	handoff := true
+	_, taskID, _, err := launchWorkflowAttempt(t.Context(), db.DB, nil, "boundary-conv", "", "user", "boundary-task", "analysis", "analysis", WorkflowStepParams{
+		WorkflowID: "image-workflow", SessionID: "user-boundary", StepID: "analyze_subject", RevisionID: "user-boundary-revision", HandOff: &handoff, WorkflowMode: "auto",
+	}, nil, nil, nil, nil, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var task orm.SubAgentTask
+	if err := db.Where("id = ?", taskID).First(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	var params struct {
+		WaitForUser bool `json:"wait_for_user"`
+	}
+	if err := json.Unmarshal(task.Params, &params); err != nil || !params.WaitForUser {
+		t.Fatalf("dispatch lost user boundary: %s err=%v", task.Params, err)
+	}
+	var waitReason string
+	OnSubAgentDone(t.Context(), db.DB, nil, taskID, subagent.StatusSucceeded, "analysis done", func(kind string, payload map[string]any) {
+		if kind == "step_waiting" {
+			waitReason, _ = payload["reason"].(string)
+		}
+	}, &WorkflowChatContext{SessionID: "user-boundary", WorkflowID: "image-workflow", StepID: "analyze_subject", ConvID: "boundary-conv", WorkflowMode: "auto", HandOff: &handoff})
+	session, err := GetSession(t.Context(), db.DB, "user-boundary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := displaystate.Read(db.DB, *session)
+	if err != nil || session.Status != SessionStatusWaiting || view.Reason != "next_step_required" || waitReason != "next_step_required" {
+		t.Fatalf("session=%s view=%+v reason=%s err=%v", session.Status, view, waitReason, err)
+	}
+	if err := failIdleSession(t.Context(), db.DB, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, err := GetSession(t.Context(), db.DB, session.ID)
+	if err != nil || after.Status != SessionStatusWaiting {
+		t.Fatalf("user wait treated as idle failure: session=%+v err=%v", after, err)
+	}
+}

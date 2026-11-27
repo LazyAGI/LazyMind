@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -11,6 +12,7 @@ import requests
 from lazyllm import AutoModel
 from lazyllm.components.formatter import decode_query_with_filepaths
 from lazyllm.tools.agent import ToolExecutionError
+from lazymind.model_config import get_model_role_runtime_identity
 from lazymind.chat.engine.tools.host_file_resolution import stage_input_file
 
 from lazymind.chat.service.utils import register_image_url, resolve_local_image_path
@@ -167,14 +169,61 @@ def run_image_model(
     image_size: str = _DEFAULT_IMAGE_SIZE,
     batch_size: int = _DEFAULT_BATCH_SIZE,
 ) -> Dict[str, Any]:
+    identity = get_model_role_runtime_identity(role)
+    if role == 'image_generator' and identity['source'] == 'openai':
+        name = identity['model']
+        if name in {'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'} and image_size != 'auto':
+            dimensions = re.fullmatch(r'([0-9]+)x([0-9]+)', str(image_size))
+            width, height = map(int, dimensions.groups()) if dimensions else (0, 0)
+            if (not width or not height or width % 16 or height % 16 or max(width, height) > 3840
+                    or max(width, height) > 3 * min(width, height)
+                    or not 655360 <= width * height <= 8294400):
+                return _image_failure(
+                    f'{name}: invalid size={image_size}. Width and height must be multiples of 16, '
+                    'at most 3840, aspect ratio at most 3:1, and total pixels 655360–8294400. '
+                    'Use 1024x1024 for a square image; resize the generated image separately if needed.',
+                    retryable=False,
+                )
     model = AutoModel(model=role)
-    return run_image_model_instance(
-        model,
-        prompt,
-        files=files,
-        image_size=image_size,
-        batch_size=batch_size,
-    )
+    try:
+        return run_image_model_instance(
+            model, prompt, files=files, image_size=image_size, batch_size=batch_size,
+        )
+    except Exception as exc:
+        # ModuleBase wraps supplier exceptions; the HTTP response remains on the
+        # original exception. Preserve its diagnosis instead of the generic wrapper.
+        cause, seen = exc, set()
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            if isinstance(cause, requests.HTTPError) and cause.response is not None:
+                response = cause.response
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = {}
+                error = payload.get('error') if isinstance(payload, dict) else None
+                fields = []
+                if isinstance(error, dict):
+                    fields = [f'{key}={error[key]}' for key in ('code', 'type', 'param', 'message')
+                              if isinstance(error.get(key), (str, int)) and error[key] != '']
+                detail = '; '.join(fields) or response.reason or 'Request rejected'
+                # A provider can echo a credential in an error message.
+                if response.request is not None:
+                    for key, value in response.request.headers.items():
+                        if key.lower() in {'authorization', 'x-api-key', 'api-key'} and value:
+                            detail = detail.replace(value, '[redacted]')
+                            detail = detail.replace(value.removeprefix('Bearer '), '[redacted]')
+                detail = re.sub(r'\bsk-[A-Za-z0-9_-]+', '[redacted]', detail)
+                return _image_failure(
+                    f'{role} failed (HTTP {response.status_code}): {detail[:2000]}',
+                    retryable=not (400 <= response.status_code < 500 and response.status_code not in {408, 409, 429}),
+                )
+            cause = cause.__cause__ or cause.__context__
+        raise
+
+
+def _image_failure(message: str, *, retryable: bool) -> Dict[str, Any]:
+    return {'ok': False, 'value': message, 'retryable': retryable}
 
 
 def run_image_model_instance(

@@ -103,6 +103,9 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
+	if err := workflowstore.ApplySavedApprovalMode(db.WithContext(ctx), s); err != nil {
+		return nil, err
+	}
 	if err := db.WithContext(ctx).Create(s).Error; err != nil {
 		return nil, err
 	}
@@ -395,9 +398,17 @@ func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status str
 				return nil
 			}
 			if session.WorkflowRevisionID != "" {
-				// Yielding execution is not a user pause. Use the same graph facts
-				// as protocol completion to retain preparation and review barriers.
-				return reconcileRunStatus(ctx, tx, &session)
+				// An explicit post-step handoff ends controller preparation. Read
+				// its durable boundary before reconciling an otherwise active run.
+				candidate := session
+				candidate.Status = SessionStatusWaiting
+				display, err := displaystate.Read(tx, candidate)
+				if err != nil {
+					return err
+				}
+				if display.Reason != "next_step_required" {
+					return reconcileRunStatus(ctx, tx, &session)
+				}
 			}
 		}
 		fields := map[string]any{}

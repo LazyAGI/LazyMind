@@ -7,7 +7,7 @@
  * - Dagre layout is cached; only node statuses are replaced on refresh.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Spin } from 'antd';
+import { Alert, Modal, Spin } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { axiosInstance, BASE_URL } from '@/components/request';
@@ -15,6 +15,7 @@ import { localizeErrorCode } from '@/components/request';
 import StateGraphView, { type StateGraphData } from './StateGraphView';
 import { workflowTaskDisplayStatus } from '@/modules/chat/utils/workflowTaskStatus';
 import { workflowNodeStatus } from '@/modules/chat/components/WorkflowPanel/workflowStepStatus';
+import { loadWorkflowUI, workflowStageLabels } from '@/modules/chat/store/workflowPanel';
 import './index.scss';
 
 export const WORKFLOW_GRAPH_REFRESH_EVENT = 'workflow:graph:refresh';
@@ -28,10 +29,11 @@ export function dispatchGraphRefresh(conversationId: string) {
 
 export interface StateGraphModalProps {
   open: boolean;
+  inline?: boolean;
+  stepLabels?: Record<string, string>;
   onClose: () => void;
   sessionId: string;
   workflowId: string;
-  stepLabels?: Record<string, string>;
   liveRefresh?: boolean;
   conversationId?: string;
   fallbackSteps?: { step_id: string; status: string }[];
@@ -140,17 +142,19 @@ function fallbackStepsToGraph(steps: { step_id: string; status: string }[], step
 
 export default function StateGraphModal({
   open,
+  inline = false,
+  stepLabels,
   onClose,
   sessionId,
   liveRefresh = false,
   conversationId,
   fallbackSteps = EMPTY_FALLBACK_STEPS,
-  stepLabels,
 }: StateGraphModalProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [data, setData] = useState<StateGraphData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [labelError, setLabelError] = useState(false);
   // Keep a cached layout anchor so dagre only re-runs when topology changes.
   const cachedDataRef = useRef<StateGraphData | null>(null);
 
@@ -163,7 +167,20 @@ export default function StateGraphModal({
         { silentError: true } as never,
       );
       // ReplyOK wraps the payload as { code, message, data: {...} }.
-      const incoming = projectionToGraph(resp.data?.data ?? resp.data, t, stepLabels);
+      let labels = stepLabels;
+      setLabelError(false);
+      if (!labels) {
+        try {
+          const detail = await axiosInstance.get(`${coreApiBase}/workflow-sessions/${encodeURIComponent(sessionId)}`, { silentError: true } as never);
+          const session = (detail.data?.data ?? detail.data).session;
+          const ui = await loadWorkflowUI(session.workflow_id, session.pinned_revision_id, { language: i18n.language, silentError: true });
+          labels = workflowStageLabels(ui);
+        } catch {
+          // Names enrich the authoritative graph; their failure must not replace it.
+          setLabelError(true);
+        }
+      }
+      const incoming = projectionToGraph(resp.data?.data ?? resp.data, t, labels);
       // Merge: preserve topology reference if node/edge IDs haven't changed,
       // so StateGraphView's useMemo layout cache stays valid.
       if (cachedDataRef.current) {
@@ -203,7 +220,7 @@ export default function StateGraphModal({
     } finally {
       setLoading(false);
     }
-  }, [fallbackSteps, sessionId, stepLabels, t]);
+  }, [fallbackSteps, sessionId, t, stepLabels, i18n.language]);
 
   // Fetch on open.
   useEffect(() => {
@@ -214,6 +231,7 @@ export default function StateGraphModal({
       setData(null);
       cachedDataRef.current = null;
       setError(null);
+      setLabelError(false);
     }
   }, [open, sessionId, fetchGraph]);
 
@@ -238,18 +256,8 @@ export default function StateGraphModal({
     return Math.min(1200, Math.max(700, estimated));
   })();
 
-  return (
-    <Modal
-      open={open}
-      onCancel={onClose}
-      footer={null}
-      title={t('chat.workflowGraph.title')}
-      width={modalWidth}
-      style={{ top: 40 }}
-      className='state-graph-modal'
-      destroyOnClose
-    >
-      <div className='state-graph-modal__content'>
+  const content = (
+    <div className='state-graph-modal__content'>
         {loading && !data && (
           <div className='state-graph-modal__loading'>
             <Spin tip={t('common.loading')} />
@@ -258,8 +266,15 @@ export default function StateGraphModal({
         {error && !data && (
           <div className='state-graph-modal__error'>{error}</div>
         )}
+        {data && labelError && <Alert type='warning' showIcon message={t('chat.workflowGraph.labelsUnavailable')} />}
         {data && <StateGraphView data={data} />}
       </div>
+  );
+  if (inline) return open ? content : null;
+  return (
+    <Modal open={open} onCancel={onClose} footer={null} title={t('chat.workflowGraph.title')}
+      width={modalWidth} style={{ top: 40 }} className='state-graph-modal' destroyOnClose>
+      {content}
     </Modal>
   );
 }

@@ -83,6 +83,24 @@ func TestHistoricalBackgroundTaskResolvesWorkflowStepsAndStatus(t *testing.T) {
 	}
 }
 
+func TestNextStepHandoffBelongsToAttentionWithoutApproval(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.SubAgentTask{})
+	now := time.Now().UTC()
+	session := orm.WorkflowSession{ID: "handoff", ConversationID: "chat", CreateUserID: "owner", ControllerHost: "lazymind", WorkflowMode: "dynamic", Status: "waiting", CreatedAt: now, UpdatedAt: now}
+	step := orm.WorkflowSessionStep{ID: "done", SessionID: session.ID, StepID: "analysis", TaskID: "step-task", Status: "succeeded", Validity: "effective", CreatedAt: now}
+	worker := orm.SubAgentTask{ID: "step-task", ConversationID: "chat", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), Params: json.RawMessage(`{"hand_off":true,"workflow_mode":"dynamic","session_id":"handoff","step_id":"analysis"}`)}
+	for _, value := range []any{&session, &step, &worker} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	task := orm.TaskCenterTask{ID: "task", UserID: "owner", ConversationID: "chat", WorkflowSessionID: &session.ID, TaskType: "workflow_run", Status: "waiting", CreatedAt: now}
+	got, err := resolveTaskForResponse(t.Context(), db.DB, task)
+	if err != nil || got.Status != "pending" || workbenchCategory(got, now) != "attention" || !taskMatchesStatusFilter(got.Status, "attention") {
+		t.Fatalf("ordinary handoff mislabeled: %+v %v", got, err)
+	}
+}
+
 func TestHistoricalWorkflowMatchingDoesNotStealOtherRuns(t *testing.T) {
 	for _, scenario := range []string{"before", "after", "other_owner", "next_task", "already_linked", "ambiguous", "canceled"} {
 		t.Run(scenario, func(t *testing.T) {

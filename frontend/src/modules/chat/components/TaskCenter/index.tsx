@@ -5,8 +5,7 @@ import { mergeRun } from "../../utils/ordinaryTaskState";
 import i18n from "i18next";
 import { formatTaskDuration, useRunTiming } from "./runTiming";
 import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
-import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
-import { workflowStageLabels } from "../WorkflowPanel/workflowStepStatus";
+import { useWorkflowStore, workflowStageLabels } from "@/modules/chat/store/workflowPanel";
 import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import { reconcileWorkflowTasks, workflowTaskDisplayStatus, taskBelongsToWorkflow } from "@/modules/chat/utils/workflowTaskStatus";
 import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
@@ -1192,7 +1191,7 @@ const TaskCenter = (props: Props) => {
   const workflowUI = useWorkflowStore(s => workflowSession ? s.workflowUIByWorkflow[workflowUICacheKey(workflowSession.workflow_id, workflowSession.pinned_revision_id, i18n.language || "")] : undefined);
   const taskPresentation = workflowUI?.task_presentation;
   const stageLabels = useMemo(() => workflowSession?.workflow_id === 'ppt-workflow' && workflowUI
-    ? workflowStageLabels(workflowUI.tabs) : undefined, [workflowSession?.workflow_id, workflowUI]);
+    ? workflowStageLabels(workflowUI) : undefined, [workflowSession?.workflow_id, workflowUI]);
   const tasks = useMemo(() => reconcileWorkflowTasks(storedTasks, workflowSession?.steps), [storedTasks, workflowSession?.steps]);
   const loading = useTaskCenterStore((s) =>
     sessionId ? Boolean(s._loadingTasks[sessionId]) : false,
