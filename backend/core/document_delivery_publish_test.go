@@ -45,6 +45,7 @@ type deliveryServer struct {
 	emptyCredentials bool
 	authStatus       int
 	writeStatus      int
+	remoteRevision   string
 	afterConvert     func()
 	afterWrite       func()
 }
@@ -165,7 +166,14 @@ func newDeliveryFixture(t *testing.T, representation string) (descriptorFixture,
 				if call.Reference == "builtin:document.write_document.v1" {
 					var converted any
 					_ = json.Unmarshal(call.Arguments["converted_document"], &converted)
-					if !reflect.DeepEqual(converted, deliveryConverted(s.provider)) {
+					expected := deliveryConverted(s.provider)
+					if s.remoteRevision != "" {
+						expected["source_document"].(map[string]any)["revision"] = s.remoteRevision
+						if !reflect.DeepEqual(converted, expected) {
+							http.Error(w, "remote revision mismatch", http.StatusConflict)
+							return
+						}
+					} else if !reflect.DeepEqual(converted, expected) {
 						t.Error("Convert output was not passed intact into Write")
 					}
 				}
@@ -567,6 +575,77 @@ func TestDocumentDeliveryLegacyWriteBackUsesGenericBoundary(t *testing.T) {
 			var count int64
 			if err := f.db.Model(&orm.DocumentPublicationBinding{}).Where("session_id = ? AND slot_id = ?", "descriptor-session", slot).Count(&count).Error; err != nil || count != 1 {
 				t.Fatalf("per-item binding missing count=%d err=%v", count, err)
+			}
+		})
+	}
+}
+
+func TestFeishuWriteBackKeepsLocalSnapshotAndUpdatesRemoteRevision(t *testing.T) {
+	for _, representation := range []string{"ir", "markdown"} {
+		t.Run(representation, func(t *testing.T) {
+			f, s := newDeliveryFixture(t, representation)
+			s.provider = "feishu"
+			s.target["adapter"] = s.provider
+			s.result["provider"], s.result["representation"] = s.provider, "ir"
+			binding := map[string]any{"provider": s.provider, "document_id": s.target["doc_id"], "uri": s.target["uri"]}
+			remote := map[string]any{"document_id": "local-ir", "blocks": []any{}, "provider_binding": binding, "revision": "2"}
+			s.result["persisted_document"] = remote
+			schema, slot := "text/markdown", "flat_draft_document"
+			content := func(title string) any {
+				if representation == "markdown" {
+					return "# " + title
+				}
+				return map[string]any{"document_id": "local-ir", "title": title, "blocks": []any{}, "provider_binding": binding, "revision": "1"}
+			}
+			if representation == "ir" {
+				schema, slot = descriptorIRSchema, "draft_document"
+			}
+			artifact := func(title string) string {
+				return mustJSONRewrite(map[string]any{"schema": schema, "data": content(title)})
+			}
+			f.seed(t, "writer-source", slot, "json", artifact("First"))
+			if err := f.db.Model(&orm.WorkflowSession{}).Where("id = ?", "descriptor-session").Update("plugin_id", "writer-workflow").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := f.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", "writer-source").Update("change_source", "host").Error; err != nil {
+				t.Fatal(err)
+			}
+			revision, draft := 3, int64(7)
+			publish := func() *httptest.ResponseRecorder {
+				return deliveryRequest(t.Context(), f, http.MethodPost, "/workflow-sessions/descriptor-session/writer-document:write-back", "descriptor-owner",
+					map[string]any{"slot": slot, "provider": s.provider, "base_revision": revision, "base_draft_version": draft})
+			}
+			edit := func(title string) {
+				t.Helper()
+				row, nextDraft, _, err := workflow.SaveHumanArtifactValue(t.Context(), f.db.DB, "descriptor-session", slot, slot, "source", 1, "single", nil,
+					"json", json.RawMessage(artifact(title)), nil, &revision, &draft, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				revision, draft = row.Revision, nextDraft
+			}
+			for _, title := range []string{"First", "Second"} {
+				if title == "Second" {
+					edit(title)
+					s.remoteRevision = "2"
+					remote["revision"] = "3"
+				}
+				result := rewriteData(t, publish())
+				if result["representation"] != representation || !reflect.DeepEqual(result["document"], content(title)) || result["artifact_saved"] != false {
+					t.Fatalf("write-back changed the local checkpoint or its representation: %#v", result)
+				}
+			}
+			edit("Third")
+			s.remoteRevision = "4" // Another Feishu client edited the document after the last receipt.
+			rewriteError(t, publish(), 502, "PUBLICATION_OUTCOME_UNKNOWN")
+			writes := s.writes()
+			var converted struct {
+				Source struct {
+					Revision string `json:"revision"`
+				} `json:"source_document"`
+			}
+			if len(writes) != 3 || json.Unmarshal(writes[2].Arguments["converted_document"], &converted) != nil || converted.Source.Revision != "3" {
+				t.Fatalf("write did not enforce the last confirmed remote revision: %#v", writes)
 			}
 		})
 	}

@@ -70,6 +70,33 @@ it('reconciles a completed native turn with the same receipts after losing the b
   expect(f.controller.prompt).toHaveBeenCalledTimes(1)
 })
 
+it.each([
+  { reviewCall: 'call-1', resultCall: 'call-1', isError: false, completed: true },
+  { reviewCall: 'nested-root', resultCall: 'nested-root', isError: true, completed: false },
+  { reviewCall: 'other-call', resultCall: 'call-1', isError: false, completed: false },
+  { reviewCall: '', resultCall: 'call-1', isError: false, completed: false },
+])('settles a textless turn only for its successful review call (%j)', async ({ reviewCall, resultCall, isError, completed }) => {
+  const f = fixture()
+  f.controller.prompt.mockImplementationOnce(async req => {
+    f.events.push(event('turn/start', {}), user(req.requestId, req.content[0].text), event('step/start', {}))
+    if (reviewCall) f.events.push(event('lazymind/workflow-awaiting-user', { rootCallId: reviewCall }))
+    f.events.push(event('tool/result', { message: { content: [{ type: 'tool-result', toolCallId: resultCall, isError, content: [] }] } }), end())
+  })
+  await executeChat(f.ctx, f.bridge, pair, run, f.lifetime.signal)
+  const receipts = f.bridge.publishChat.mock.calls.map(call => call[2])
+  if (!completed) {
+    expect(receipts.at(-1)?.type).toBe('failed')
+    return
+  }
+  expect(receipts.slice(1)).toEqual([
+    { type: 'message', text: '工作流已暂停，等待你确认后继续。' }, { type: 'turn_completed' }, { type: 'completed' },
+  ])
+  f.bridge.publishChat.mockClear()
+  await executeChat(f.ctx, f.bridge, pair, { ...run, action: 'recover', provider_thread_id: f.session.id }, f.lifetime.signal)
+  expect(f.bridge.publishChat.mock.calls.map(call => call[2])).toEqual(receipts)
+  expect(f.controller.prompt).toHaveBeenCalledTimes(1)
+})
+
 it('does not replay an unverified prompt or resume another connection’s session', async () => {
   const f = fixture()
   for (const thread of [f.session.id, managedThreadId('foreign-run', { ...pair, token: 'other-pairing' })]) {

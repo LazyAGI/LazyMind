@@ -233,6 +233,7 @@ export const draftStore = {
 };
 
 export interface SlotRevision {
+  selection_version?: number;
   producer_attempt_id?: string;
   attempt?: number;
   artifact_id?: string;

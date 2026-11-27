@@ -1964,6 +1964,7 @@ export interface Artifact {
     'producer_attempt_id'?: string;
     'revision': number;
     'selected': boolean;
+    'selection_version'?: number;
     'session_id': string;
     'slot': string;
     'slot_id': string;
@@ -9548,6 +9549,7 @@ export interface SlotDTO {
     'revision': number;
     'revision_count'?: number;
     'selected': boolean;
+    'selection_version'?: number;
     'slot': string;
     'slot_id': string;
     'sort_order'?: number;

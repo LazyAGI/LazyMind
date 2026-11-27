@@ -30,6 +30,7 @@ const show = (path = '/chat/external') => render(<MemoryRouter initialEntries={[
 </MemoryRouter>);
 beforeEach(() => {
   vi.clearAllMocks();
+  fixture.history.mockResolvedValue({ data: { history: [] } });
   fixture.latest.mockResolvedValue({ data: { data: { session: null } } });
 });
 afterEach(cleanup);
@@ -68,6 +69,62 @@ it('keeps the DSH transcript readable on lookup failure and can retry without mo
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
   expect(screen.getByText('My original question')).toBeInTheDocument();
   expect(fixture.native).not.toHaveBeenCalled();
+});
+
+it('refreshes the mounted DSH conversation and discovers a newly started workflow on return', async () => {
+  fixture.detail.mockResolvedValue({ data: { conversation: { assistant: 'deepseek-harness' } } });
+  fixture.history.mockResolvedValueOnce({ data: { history: [{ id: 'first', query: 'First question' }] } });
+  show();
+  await screen.findByText('First question');
+  fixture.latest.mockResolvedValue({ data: { data: { session: {
+    session_id: 'new-run', conversation_id: 'external', controller_host: 'external-agent',
+  } } } });
+  fixture.history.mockResolvedValue({ data: { history: [
+    { id: 'new', query: 'Next question', result: 'New reply' },
+    { id: 'first', query: 'First question', result: 'Updated reply' },
+  ] } });
+  fireEvent(document, new Event('visibilitychange'));
+  fireEvent.focus(window);
+  await screen.findByText('New reply');
+  expect(screen.getByText('Updated reply')).toBeInTheDocument();
+  expect(screen.getAllByText('First question')).toHaveLength(1);
+  expect(fixture.workflow).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'new-run' }));
+  expect(fixture.history).toHaveBeenCalledTimes(2);
+  expect(fixture.native).not.toHaveBeenCalled();
+});
+
+it('refreshes previously loaded earlier pages from the newest cursor', async () => {
+  fixture.detail.mockResolvedValue({ data: { conversation: { assistant: 'deepseek-harness' } } });
+  fixture.history.mockResolvedValueOnce({ data: { history: [{ id: 'second', query: 'Second' }], next_page_token: 'old-token' } })
+    .mockResolvedValueOnce({ data: { history: [{ id: 'first', query: 'First' }] } });
+  show();
+  fireEvent.click(await screen.findByRole('button', { name: 'chat.fork.older' }));
+  await screen.findByText('First');
+  fixture.history.mockResolvedValueOnce({ data: { history: [{ id: 'third', query: 'Third' }, { id: 'second', query: 'Second' }], next_page_token: 'new-token' } })
+    .mockResolvedValueOnce({ data: { history: [{ id: 'first', query: 'First' }] } });
+  fireEvent.focus(window);
+  await screen.findByText('Third');
+  expect(fixture.history).toHaveBeenLastCalledWith({ name: 'external', pageToken: 'new-token' }, expect.anything());
+  expect(screen.getAllByRole('article').map(item => item.textContent)).toEqual(['First', 'Second', 'Third']);
+});
+
+it('ignores a foreground history response after switching DSH conversations', async () => {
+  let finish!: (value: unknown) => void;
+  fixture.detail.mockResolvedValue({ data: { conversation: { assistant: 'deepseek-harness' } } });
+  fixture.history.mockResolvedValueOnce({ data: { history: [{ id: 'q1', query: 'Previous thread' }] } })
+    .mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValueOnce({ data: { history: [{ id: 'q2', query: 'Current thread' }] } });
+  show('/chat/previous');
+  await screen.findByText('Previous thread');
+  fireEvent.focus(window);
+  await waitFor(() => expect(fixture.history).toHaveBeenCalledTimes(2));
+  const signal = fixture.history.mock.calls[1][1].signal;
+  fireEvent.click(screen.getByRole('button', { name: 'Switch conversation' }));
+  await screen.findByText('Current thread');
+  expect(signal.aborted).toBe(true);
+  await act(async () => finish({ data: { history: [{ id: 'stale', query: 'Stale response' }] } }));
+  expect(screen.queryByText('Stale response')).toBeNull();
+  expect(screen.getByText('Current thread')).toBeVisible();
 });
 
 it('ignores a late DSH workflow lookup when a different conversation was opened', async () => {

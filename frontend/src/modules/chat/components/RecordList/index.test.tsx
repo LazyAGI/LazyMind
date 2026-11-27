@@ -1536,6 +1536,28 @@ describe("RecordList conversation pinning", () => {
     ));
   });
 
+  it("discovers a newly connected source when the filter reopens without changing the selection", async () => {
+    mocks.listChatExecutors.mockRejectedValueOnce(new Error("offline"));
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter>
+      <RecordList compact showBatchActions currentSessionId="" onSelected={vi.fn()} onRemove={vi.fn()} />
+    </MemoryRouter></ConfigProvider>);
+    await screen.findByText(newerConversation.display_name);
+    const trigger = screen.getByRole("button", { name: "chat.filterConversationType" });
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("checkbox", { name: "chat.lazyMindConversation" })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Codex CLI" })).toBeNull();
+    fireEvent.click(trigger);
+    mocks.listChatExecutors.mockResolvedValue({ data: { data: { executors: [
+      { id: "codex", display_name: "Codex CLI", connected: true },
+    ] } } });
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("checkbox", { name: "Codex CLI" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "chat.lazyMindConversation" })).toBeChecked();
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(expect.anything(), {
+      params: { is_task_conv: "false", assistants: "lazymind" },
+    });
+  });
+
   it("keeps task scope when restoring a provider-only filter", async () => {
     sessionStorage.setItem("chat_new_run_in_background", "1");
     sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify(["agent:codex"]));

@@ -23,6 +23,7 @@ import (
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 	"lazymind/core/workflow"
+	workflowstore "lazymind/core/workflow/store"
 
 	"gorm.io/gorm"
 )
@@ -65,8 +66,9 @@ type writerDocumentRenderBody struct {
 }
 
 type selectedWriterArtifact struct {
-	Revision orm.WorkflowSlotRevision
-	Value    json.RawMessage
+	DraftVersion int64
+	Revision     orm.WorkflowSlotRevision
+	Value        json.RawMessage
 }
 
 type writerWriteBackArtifact struct {
@@ -293,6 +295,9 @@ func RenderWriterDocument(w http.ResponseWriter, r *http.Request) {
 		}
 		result["document"] = document
 	}
+	result["selection_version"] = draft.Revision.SelectionVersion
+	result["revision"] = draft.Revision.Revision
+	result["draft_version"] = draft.DraftVersion
 	attachWriterMediaURLs(ctx, db, sessionID, slot, result)
 	common.ReplyOK(w, result)
 }
@@ -470,12 +475,13 @@ func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	reply := map[string]any{
-		"revision":       revision.Revision,
-		"draft_version":  draftVersion,
-		"title":          result["title"],
-		"representation": representation,
-		"document":       renderedDocument,
-		"numbering":      numbering,
+		"revision":          revision.Revision,
+		"selection_version": revision.SelectionVersion,
+		"draft_version":     draftVersion,
+		"title":             result["title"],
+		"representation":    representation,
+		"document":          renderedDocument,
+		"numbering":         numbering,
 	}
 	if exportDocument, exists := result["export_document"]; exists {
 		reply["export_document"] = exportDocument
@@ -575,7 +581,7 @@ func loadSelectedWriterArtifact(
 	slotID string,
 ) (*selectedWriterArtifact, error) {
 	var revision orm.WorkflowSlotRevision
-	if err := db.WithContext(ctx).
+	if err := workflowstore.WithSelectionVersion(db.WithContext(ctx)).
 		Where("session_id = ? AND slot_id = ? AND selected = ? AND list_index IS NULL",
 			sessionID, slotID, true).
 		First(&revision).Error; err != nil {
@@ -808,6 +814,13 @@ func loadWriterArtifactRevision(
 	db *gorm.DB,
 	revision orm.WorkflowSlotRevision,
 ) (*selectedWriterArtifact, error) {
+	if revision.HumanArtifactID != nil {
+		var human orm.WorkflowHumanArtifact
+		if err := db.WithContext(ctx).Select("value", "draft_version").First(&human, "id = ?", *revision.HumanArtifactID).Error; err != nil {
+			return nil, err
+		}
+		return &selectedWriterArtifact{Revision: revision, Value: human.Value, DraftVersion: human.DraftVersion}, nil
+	}
 	value, err := workflow.LoadSlotRevisionValue(ctx, db, revision)
 	if err != nil {
 		return nil, err

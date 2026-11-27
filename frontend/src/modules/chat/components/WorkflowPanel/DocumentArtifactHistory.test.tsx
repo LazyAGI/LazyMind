@@ -33,7 +33,8 @@ function TestEditor({ markdown, sourceRevision, onContentChange, onSave, toolbar
   }), [draft, editingKey, markdown, onSave, registerFlush, sourceRevision]);
   return <><div className='writer-document-toolbar'>{toolbarActions}</div><textarea aria-label='Document draft' value={draft} readOnly={readOnly}
     onChange={event => { setDraft(event.target.value); onContentChange(event.target.value); }} />
-    <button disabled={readOnly} onClick={() => void onSave(draft, sourceRevision, 'draft')}>Save test draft</button></>;
+    <button disabled={readOnly} onClick={() => void onSave(draft, sourceRevision, 'draft')}>Save test draft</button>
+    <button disabled={readOnly} onClick={() => void onSave(draft, sourceRevision, 'checkpoint')}>Checkpoint</button></>;
 }
 
 const ir = (title: string) => ({ document_id: 'fixture-document', stage: 'draft', title, blocks: [] });
@@ -58,6 +59,54 @@ beforeEach(async () => {
 afterEach(cleanup);
 const show = (slot: SlotRevision, readOnly = false) => render(<SlotRenderer slot={slot} sessionId='history-fixture'
   slotId='flat_draft_document' revisionCount={3} readOnly={readOnly} />);
+it.each(['markdown', 'ir'] as const)('adopts an older %s revision selected by a newer server update', async mode => {
+  const editor = (revision: number, clock?: number) => <DocumentArtifactEditor
+    slot={{ ...slotFor(mode, revision), selection_version: clock }} sessionId='other-window' />;
+  const view = render(editor(2, 10));
+  const draft = await screen.findByLabelText('Document draft');
+  expect(draft).toHaveValue('Version 2');
+  view.rerender(editor(1, 11));
+  expect(draft).toHaveValue('Version 1');
+  view.rerender(editor(2, 10));
+  expect(draft).toHaveValue('Version 1');
+  view.rerender(editor(2));
+  expect(draft).toHaveValue('Version 1');
+  api.saveDocumentArtifact.mockImplementationOnce(async (_id, body) => ({ data: { ok: true, result: {
+    artifact_id: 'new-edit', revision: 3, draft_version: 1, selection_version: 12, value: body.value,
+  } } }));
+  fireEvent.change(draft, { target: { value: 'New text' } });
+  await act(async () => { fireEvent.click(screen.getByText('Save test draft')); });
+  expect(api.saveDocumentArtifact).toHaveBeenLastCalledWith('artifact-1', expect.objectContaining({
+    base_revision: 1, base_draft_version: 2,
+  }), expect.anything());
+});
+
+it('keeps a reused checkpoint when the preceding autosave refresh arrives late', async () => {
+  const editor = (revision: number, clock: number) => <DocumentArtifactEditor
+    slot={{ ...slotFor('markdown', revision), selection_version: clock }} sessionId='undo' />;
+  const view = render(editor(1, 10));
+  const draft = await screen.findByLabelText('Document draft');
+  const result = (revision: number, clock: number) => ({ data: { ok: true, result: {
+    artifact_id: `artifact-${revision}`, revision, selection_version: clock, draft_version: revision + 1,
+    value: { text: `Version ${revision}` },
+  } } });
+  api.saveDocumentArtifact.mockResolvedValueOnce(result(2, 11)).mockResolvedValueOnce(result(1, 12)).mockResolvedValueOnce(result(3, 13));
+  fireEvent.change(draft, { target: { value: 'Version 2' } });
+  await act(async () => { fireEvent.click(screen.getByText('Save test draft')); });
+  fireEvent.change(draft, { target: { value: 'Version 1' } });
+  await act(async () => { fireEvent.click(screen.getByText('Checkpoint')); });
+  expect(api.saveDocumentArtifact).toHaveBeenLastCalledWith('artifact-2', expect.objectContaining({
+    mode: 'checkpoint', base_revision: 2, base_draft_version: 3,
+  }), expect.anything());
+  view.rerender(editor(2, 11));
+  expect(draft).toHaveValue('Version 1');
+  fireEvent.change(draft, { target: { value: 'Edit after undo' } });
+  await act(async () => { fireEvent.click(screen.getByText('Save test draft')); });
+  expect(api.saveDocumentArtifact).toHaveBeenLastCalledWith('artifact-1', expect.objectContaining({
+    base_revision: 1, base_draft_version: 2,
+  }), expect.anything());
+});
+
 async function openHistory() {
   fireEvent.click(await screen.findByRole('button', { name: '版本历史', exact: true }));
   return screen.findByRole('dialog');

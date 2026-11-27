@@ -412,14 +412,7 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 			}
 			op.TargetDocument = target
 		}
-		if op.PublicationID != "" {
-			// Reuse the adapter's existing revision precondition without storing a historical body.
-			var destination struct {
-				Meta struct {
-					Revision string `json:"publication_revision"`
-				} `json:"meta"`
-			}
-			_ = json.Unmarshal(target, &destination)
+		if revision, override := publicationReplaceRevision(op, target); override {
 			var convertedObject map[string]any
 			if json.Unmarshal(converted.Result, &convertedObject) != nil {
 				return failBefore(documentFailure("DOCUMENT_CONVERSION_FAILED", 502))
@@ -429,8 +422,8 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 				return failBefore(documentFailure("DOCUMENT_CONVERSION_FAILED", 502))
 			}
 			delete(sourceObject, "revision")
-			if destination.Meta.Revision != "" {
-				sourceObject["revision"] = destination.Meta.Revision
+			if revision != "" {
+				sourceObject["revision"] = revision
 			}
 			converted.Result, _ = json.Marshal(convertedObject)
 		}
@@ -626,10 +619,6 @@ func publicationSavedResult(ctx context.Context, db *gorm.DB, op *DocumentPublic
 	if json.Unmarshal(receipt.Value, &value) != nil {
 		return nil, publicationError("DOCUMENT_ACTION_RESULT_INVALID")
 	}
-	representation := "markdown"
-	if value.Schema == document.IRSchema {
-		representation = "ir"
-	}
 	draft := int64(0)
 	if revision.HumanArtifactID != nil {
 		var human orm.WorkflowHumanArtifact
@@ -640,7 +629,11 @@ func publicationSavedResult(ctx context.Context, db *gorm.DB, op *DocumentPublic
 	}
 	if revision.ID == op.SourceRevisionID && !receipt.NoLocalChange {
 		// The provider may have normalized its copy; the local editor keeps its submitted snapshot.
-		value.Data = op.SourceValue
+		value.Data, value.Schema = op.SourceValue, op.SourceSchema
+	}
+	representation := "markdown"
+	if value.Schema == document.IRSchema {
+		representation = "ir"
 	}
 	status := "synced"
 	if receipt.NoLocalChange {
@@ -735,6 +728,37 @@ func RetryDocumentPublicationLocal(w http.ResponseWriter, r *http.Request) {
 // success and partial-success contract as the Artifact endpoint.
 func ReplyDocumentPublication(w http.ResponseWriter, result *DocumentPublishResult, op *DocumentPublicationOperation, err error) {
 	replyPublicationResult(w, result, op, err)
+}
+
+// A replacement must use the last known revision of its destination. The content
+// being published can be an older checkpoint, or have no provider revision at all.
+func publicationReplaceRevision(op *DocumentPublicationOperation, target json.RawMessage) (string, bool) {
+	if op.PublicationID != "" {
+		var destination struct {
+			Meta struct {
+				Revision string `json:"publication_revision"`
+			} `json:"meta"`
+		}
+		_ = json.Unmarshal(target, &destination)
+		return destination.Meta.Revision, true
+	}
+	if op.Provider == "feishu" && targetProvider(target) == op.Provider {
+		// Single-target bindings retain the complete provider-confirmed receipt.
+		var receipt struct {
+			Data struct {
+				Revision string `json:"revision"`
+			} `json:"data"`
+			Meta struct {
+				Sync struct {
+					Confirmed bool `json:"confirmed"`
+				} `json:"lazymind_provider_sync"`
+			} `json:"meta"`
+		}
+		if json.Unmarshal(op.RemoteValue, &receipt) == nil && receipt.Meta.Sync.Confirmed && receipt.Data.Revision != "" {
+			return receipt.Data.Revision, true
+		}
+	}
+	return "", false
 }
 
 // Sync requires these exact WriterDocument identity fields; historical revisions

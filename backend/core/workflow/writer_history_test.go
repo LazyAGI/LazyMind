@@ -42,7 +42,16 @@ func TestWriterFinalVersionTimeline(t *testing.T) {
 				version = v
 			}
 			save(edited, true)
+			draftClock := selected.SelectionVersion
 			save(original, false)
+			if draftClock == 0 || selected.SelectionVersion <= draftClock {
+				t.Fatalf("undo did not advance the selection clock: %d -> %d", draftClock, selected.SelectionVersion)
+			}
+			display, err := LoadDisplaySlots(t.Context(), db.DB, selected.SessionID)
+			ok(err)
+			if len(display) == 0 || display[0].ID != selected.ID || display[0].SelectionVersion != selected.SelectionVersion {
+				t.Fatalf("display does not reflect the checkpoint: %+v", display)
+			}
 			if selected.ID != "revision-draft" {
 				t.Fatal("undo created another version")
 			}

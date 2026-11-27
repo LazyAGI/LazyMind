@@ -1,9 +1,13 @@
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { Session, type SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { type ToolDefinition, type ToolResult, type ToolExecutionInput } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { interaction, presentationRun, workflowOperation } from '../src/protocol'
 import { workflowTool } from '../src/tool'
+import { managedThreadId } from '../src/conversation'
+import { observeChatReviews } from '../src/outbound-chat'
 
 type ToolCallId = ToolExecutionInput['callId']
 const cleanup: Array<() => Promise<void>> = []
@@ -43,8 +47,15 @@ describe('released DSH tool contract', () => {
     const finalize = vi.fn(() => [{ type: 'text' as const, text: 'original rich content' }])
     original.finalizeContent = finalize
     ctx.tools.register(workflowTool(original, {}))
+    const pairing = { connector_id: 'dsh', token: 'local-pair' }
+    const session = Session.create(managedThreadId('run', pairing) as SessionId)
+    const stop = observeChatReviews(ctx, pairing, 'lazymind')
     const result = await ctx.tools.execute({ callId: 'call-1' as ToolCallId,
-      name: original.name, arguments: {}, signal: new AbortController().signal })
+      name: original.name, arguments: {}, agent: { session, ctx } as Agent, signal: new AbortController().signal })
+    stop()
+    expect(session.ownEvents()).toContainEqual(expect.objectContaining({
+      type: 'lazymind/workflow-awaiting-user', data: { rootCallId: 'call-1' },
+    }))
     expect(result.isError).toBe(false)
     expect(result).toMatchObject({ concludesTurn: true, content: [{ type: 'text', text: 'original rich content' }] })
     expect(finalize).toHaveBeenCalledOnce()

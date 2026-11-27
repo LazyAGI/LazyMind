@@ -6,7 +6,7 @@ import { dispatcherLock } from './runtime-lock'
 import { installPresentationConfig, type PresentationConfig } from './presentation-config'
 import { resolveConnection, watchConnection, type ConnectionConfig } from './connection'
 import { mcpReadiness } from './mcp-readiness'
-import { pollChat } from './outbound-chat'
+import { observeChatReviews, pollChat } from './outbound-chat'
 
 export type Config = ConnectionConfig
 export const inject = ['tools', 'agents', 'sessionController']
@@ -28,12 +28,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         'X-LazyMind-MCP-Ready': await mcpReady(signal) ? '1' : '0',
       }))
       const dispose = installHost(ctx, bridge, current, instance, { pairing, sync: (snapshot, signal) => bridge.syncConversation(snapshot, signal) })
+      const stopReviewObserver = observeChatReviews(ctx, pairing, current.serverName)
       const chat = new AbortController()
       const polling = pollChat(ctx, bridge, pairing, chat.signal)
       presentation = current
       lastError = ""
       return async () => {
         chat.abort()
+        stopReviewObserver()
         try { await Promise.all([dispose(), polling]) } finally { await release() }
       }
     } catch (error) { await release(); throw error }

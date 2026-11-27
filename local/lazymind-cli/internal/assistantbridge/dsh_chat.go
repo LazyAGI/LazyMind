@@ -85,7 +85,7 @@ func (s *Server) handleDSHChatClaim(w http.ResponseWriter, r *http.Request) {
 // a queued recovery that silently replays the prompt on the next activation.
 func revokeDSHRun(r *http.Request, api *coreapi.Client, id, host, lease string) error {
 	return api.DoJSON(r.Context(), http.MethodPost, "/external-chat/runs/"+url.PathEscape(id)+":event", map[string]string{
-		"host_id": host, "lease_token": lease, "event_id": "execution-revoked", "type": "failed", "error": dshExecutionDisabled,
+		"host_id": host, "lease_token": lease, "event_id": id + ":execution-revoked", "type": "failed", "error": dshExecutionDisabled,
 	}, nil)
 }
 

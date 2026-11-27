@@ -144,6 +144,8 @@ type WorkflowSlotRevision struct {
 	SessionID string `gorm:"column:session_id;type:varchar(36);not null"`
 	SlotID    string `gorm:"column:slot_id;type:varchar(64);not null"`
 	Revision  int    `gorm:"column:revision;not null"`
+	// SelectionVersion is the session clock at which this selection was read or saved.
+	SelectionVersion int64 `gorm:"column:selection_version;->;-:migration" json:"-"`
 	// ListIndex is the 0-based position within a cardinality=list slot; NULL for single.
 	ListIndex *int `gorm:"column:list_index"`
 	Selected  bool `gorm:"column:selected;not null;default:true"`

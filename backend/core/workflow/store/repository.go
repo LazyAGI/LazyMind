@@ -332,9 +332,17 @@ func (r *Repository) resolveArtifact(ctx context.Context, revision orm.WorkflowS
 	return append(json.RawMessage(nil), revision.ContentSnapshot...), "json", nil, 0, nil
 }
 
+// WithSelectionVersion reads the row and its selection clock in the same snapshot.
+// A historical row must not inherit the clock of the currently selected revision.
+func WithSelectionVersion(db *gorm.DB) *gorm.DB {
+	return db.Select(`*, CASE WHEN selected THEN
+		(SELECT state_version FROM plugin_sessions WHERE id = plugin_slot_revisions.session_id)
+		ELSE 0 END AS selection_version`)
+}
+
 func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string) (Artifact, error) {
 	var revision orm.WorkflowSlotRevision
-	if err := r.db.WithContext(ctx).Where("id = ?", artifactID).First(&revision).Error; err != nil {
+	if err := WithSelectionVersion(r.db.WithContext(ctx)).Where("id = ?", artifactID).First(&revision).Error; err != nil {
 		return Artifact{}, ErrNotFound
 	}
 	if err := r.AuthorizeSession(ctx, revision.SessionID, owner); err != nil {
@@ -346,7 +354,7 @@ func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string)
 	}
 	return Artifact{ID: revision.ID, SessionID: revision.SessionID, SlotID: revision.SlotID,
 		Slot: revision.Slot, StepID: revision.StepID, Attempt: revision.Attempt,
-		ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
+		ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision, SelectionVersion: revision.SelectionVersion,
 		ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
 		ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value, DraftVersion: draftVersion,
 		Caption: caption, Deleted: revision.Validity == "deleted", CreatedAt: revision.CreatedAt}, nil

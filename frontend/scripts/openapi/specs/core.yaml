@@ -2200,6 +2200,9 @@ components:
                     type: integer
                 selected:
                     type: boolean
+                selection_version:
+                    format: int64
+                    type: integer
                 session_id:
                     type: string
                 slot:
@@ -19267,6 +19270,9 @@ components:
                     type: integer
                 selected:
                     type: boolean
+                selection_version:
+                    format: int64
+                    type: integer
                 slot:
                     type: string
                 slot_id:

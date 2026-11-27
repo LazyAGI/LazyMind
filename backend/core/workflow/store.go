@@ -1229,7 +1229,7 @@ func selectSlotRevision(ctx context.Context, db *gorm.DB,
 // Falls back to list_index ASC for slots that have no order row.
 func LoadSelectedSlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.WorkflowSlotRevision, error) {
 	var rows []orm.WorkflowSlotRevision
-	if err := db.WithContext(ctx).
+	if err := workflowstore.WithSelectionVersion(db.WithContext(ctx)).
 		Where("session_id = ? AND selected = ?", sessionID, true).
 		Order("slot_id ASC, list_index ASC").
 		Find(&rows).Error; err != nil {
@@ -1322,7 +1322,7 @@ func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm
 	}
 	if controlstore.Controlled(session) {
 		var rows []orm.WorkflowSlotRevision
-		if err := db.WithContext(ctx).Where("session_id = ? AND selected = ? AND validity = ?", sessionID, true, "effective").Order("slot_id ASC, list_index ASC").Find(&rows).Error; err != nil {
+		if err := workflowstore.WithSelectionVersion(db.WithContext(ctx)).Where("session_id = ? AND selected = ? AND validity = ?", sessionID, true, "effective").Order("slot_id ASC, list_index ASC").Find(&rows).Error; err != nil {
 			return nil, err
 		}
 		rows, err := controlstore.PresentationSlots(db.WithContext(ctx), rows)
@@ -1555,7 +1555,9 @@ func updateSelectedHumanArtifactValue(
 		}
 		draftVersion = *expectedDraftVersion + 1
 		updated = true
-		return appendArtifactUpsertEvent(tx, session, &selected, draftVersion, time.Now().UTC())
+		err = appendArtifactUpsertEvent(tx, session, &selected, draftVersion, time.Now().UTC())
+		selected.SelectionVersion = session.StateVersion
+		return err
 	})
 	if err != nil {
 		return nil, 0, false, err
@@ -1801,7 +1803,7 @@ func writeSlotRevisionWithHumanArtifact(
 	}
 
 	var result orm.WorkflowSlotRevision
-	err := db.WithContext(ctx).
+	err := workflowstore.WithSelectionVersion(db.WithContext(ctx)).
 		Where("id = ?", revisionID).
 		First(&result).Error
 	return &result, err

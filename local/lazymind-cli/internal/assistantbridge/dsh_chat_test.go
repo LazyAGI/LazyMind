@@ -18,6 +18,8 @@ func TestDSHExecutionRequiresIndependentPermissionAndVerifiedProfile(t *testing.
 	var claimReady bool
 	var disableDuringClaim bool
 	var reason, event string
+	runID := "run"
+	var revocations []string
 	var calls int
 	home := t.TempDir()
 	server := newTestServer(t, home)
@@ -40,13 +42,17 @@ func TestDSHExecutionRequiresIndependentPermissionAndVerifiedProfile(t *testing.
 					}
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"run": map[string]string{
-					"host_id": pair.ConnectorID, "run_id": "run", "provider": pair.Provider, "lease_token": "lease", "prompt": "test prompt",
+					"host_id": pair.ConnectorID, "run_id": runID, "provider": pair.Provider, "lease_token": "lease", "prompt": "test prompt",
 				}})
 			} else {
 				_, _ = w.Write([]byte(`{"run":null}`))
 			}
-		case "/api/core/external-chat/runs/run:event":
+		case "/api/core/external-chat/runs/" + runID + ":event":
 			event, _ = body["type"].(string)
+			if event == "failed" {
+				id, _ := body["event_id"].(string)
+				revocations = append(revocations, id)
+			}
 			_, _ = w.Write([]byte(`{"sequence":1}`))
 		default:
 			t.Errorf("unexpected relay %s", r.URL.Path)
@@ -101,12 +107,22 @@ func TestDSHExecutionRequiresIndependentPermissionAndVerifiedProfile(t *testing.
 	if got := post("run/heartbeat", `{"lease_token":"lease"}`, pair.Token); got.Code != 200 || !strings.Contains(got.Body.String(), `"stop_requested":true`) || event != "failed" {
 		t.Fatal("disabled active execution was not stopped")
 	}
+	if got := post("run/heartbeat", `{"lease_token":"lease"}`, pair.Token); got.Code != http.StatusOK {
+		t.Fatal("could not retry revocation")
+	}
 	if _, err := server.policy.SetEnabled(pair.Provider, true); err != nil {
 		t.Fatal(err)
 	}
 	disableDuringClaim = true
+	runID = "another-run"
 	event = ""
 	if got := post("claim", ready, pair.Token); got.Code != 200 || !strings.Contains(got.Body.String(), `"run":null`) || event != "failed" {
 		t.Fatal("prompt escaped after permission was withdrawn during the long poll")
+	}
+	if len(revocations) != 3 || revocations[0] == "" || revocations[0] != revocations[1] {
+		t.Fatalf("expected an idempotent first revocation: %v", revocations)
+	}
+	if revocations[2] == "" || revocations[2] == revocations[0] {
+		t.Fatalf("second run reused a revocation ID: %v", revocations)
 	}
 }

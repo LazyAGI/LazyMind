@@ -325,9 +325,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const { setNewMessage } = useChatNewMessageStore();
 
     useEffect(() => {
-      let active = true;
-      ConversationSettingsApi().listChatExecutors().then((response) => {
-        if (!active) return;
+      if (!filterPopoverOpen) return;
+      const controller = new AbortController();
+      ConversationSettingsApi().listChatExecutors({ signal: controller.signal, silentError: true }).then((response) => {
+        if (controller.signal.aborted) return;
         setKnownSources(rememberConversationSources([
           ...response.data.data.executors.filter((executor) => executor.connected).map((executor) => executor.id),
           ...(conversationFiltersRef.current.sources ?? []),
@@ -335,8 +336,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       }).catch(() => {
         // Persisted and listed sources remain usable if host discovery is unavailable.
       });
-      return () => { active = false; };
-    }, []);
+      return () => controller.abort();
+    }, [filterPopoverOpen]);
 
     useEffect(() => {
       const handleFilterChange = (event: Event) => {

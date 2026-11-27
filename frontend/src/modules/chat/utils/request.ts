@@ -452,6 +452,9 @@ export type WriterNumberingUpdate =
   };
 
 export interface RenderWriterDocumentResult {
+  revision?: number;
+  draft_version?: number;
+  selection_version?: number;
   title: string;
   representation: WriterDocumentRepresentation;
   document: RenderedWriterDocument;

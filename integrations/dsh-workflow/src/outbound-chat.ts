@@ -5,16 +5,33 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { BridgeError, type ChatEvent, type ChatRun, type DshBridge, type Pairing } from './bridge'
 import { isManagedThread, managedThreadId, visibleText } from './conversation'
-import { object } from './protocol'
+import { object, readControl, workflowOperation } from './protocol'
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'lazymind/workflow-awaiting-user': { rootCallId: string }
+  }
+}
 
 type ChatTransport = Pick<DshBridge, 'claimChat' | 'heartbeatChat' | 'publishChat'>
 type RequestId = Parameters<Context['sessionController']['prompt']>[0]['requestId']
 const digest = (input: string) => createHash('sha256').update(input).digest('hex')
 
+// DSH omits concludesTurn from its durable tool result. Keep only the receipt
+// needed to recognize a deliberate review stop, including on lease recovery.
+export function observeChatReviews(ctx: Context, pairing: Pairing, serverName: string) {
+  return ctx.on('tools/result', (exec, result) => {
+    if (result.isError || !result.concludesTurn || !exec.agent || !isManagedThread(exec.agent.session.id, pairing)
+      || !workflowOperation(exec.name, serverName) || readControl(result.value)?.continuation !== 'awaiting_user') return
+    exec.agent.session.append('lazymind/workflow-awaiting-user', { rootCallId: exec.rootCallId })
+  })
+}
+
 // Only return the turn containing our exact SDK prompt receipt. Ignore
-// private reasoning, tool results and other users' turns in the same thread.
+// private reasoning, raw tool output and other users' turns in the same thread.
 function readTurn(agent: Agent, requestId: RequestId) {
-  let matched = false, otherUser = false
+  let matched = false, otherUser = false, awaitingUser = false
+  const reviewCalls = new Set<string>()
   let text: string[] = []
   for (const event of agent.session.ownEvents()) {
     if (event.type === 'turn/start') { matched = otherUser = false; text = [] }
@@ -26,13 +43,19 @@ function readTurn(agent: Agent, requestId: RequestId) {
       }
     }
     if (!matched) continue
+    if (event.type === 'step/start') { reviewCalls.clear(); awaitingUser = false }
+    if (event.type === 'lazymind/workflow-awaiting-user') reviewCalls.add(event.data.rootCallId)
+    if (event.type === 'tool/result' && reviewCalls.size) {
+      const [block] = event.data.message.content
+      if (reviewCalls.has(block.toolCallId) && !block.isError) awaitingUser = true
+    }
     if (event.type === 'assistant/message') {
       const content = visibleText(event.data.message)
       if (content) text.push(content)
     }
-    if (event.type === 'turn/end') return { matched, otherUser, reason: event.data.reason.kind, text }
+    if (event.type === 'turn/end') return { matched, otherUser, reason: event.data.reason.kind, text, awaitingUser }
   }
-  return { matched, otherUser, reason: undefined, text }
+  return { matched, otherUser, reason: undefined, text, awaitingUser }
 }
 
 function queued(agent: Agent, requestId: RequestId) {
@@ -114,10 +137,11 @@ export async function executeChat(ctx: Context, bridge: ChatTransport, pairing: 
         await untilAborted(agent.whenIdle(), signal)
         turn = readTurn(agent, requestId)
       }
-      if (turn.otherUser || turn.reason !== 'completed' || !turn.text.length) throw new ChatFailure('DSH did not complete this prompt with a separate text response')
+      if (turn.otherUser || turn.reason !== 'completed' || (!turn.text.length && !turn.awaitingUser)) throw new ChatFailure('DSH did not complete this prompt with a separate text response')
+      const response = turn.text.length ? turn.text.join('\n\n') : '工作流已暂停，等待你确认后继续。'
       // Bound each UTF-8 event below Core's 1 MiB limit without splitting a code point.
       let part = 0
-      for (const chunk of turn.text.join('\n\n').matchAll(/[\s\S]{1,65536}/gu)) await emit({ type: 'message', text: chunk[0] }, part++)
+      for (const chunk of response.matchAll(/[\s\S]{1,65536}/gu)) await emit({ type: 'message', text: chunk[0] }, part++)
       await emit({ type: 'turn_completed' })
     }
     await emit({ type: 'completed' })

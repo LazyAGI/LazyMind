@@ -1387,8 +1387,15 @@ function mcpReadiness(ctx, serverName) {
 //#endregion
 //#region src/outbound-chat.ts
 const digest = (input) => createHash("sha256").update(input).digest("hex");
+function observeChatReviews(ctx, pairing, serverName) {
+	return ctx.on("tools/result", (exec, result) => {
+		if (result.isError || !result.concludesTurn || !exec.agent || !isManagedThread(exec.agent.session.id, pairing) || !workflowOperation(exec.name, serverName) || readControl(result.value)?.continuation !== "awaiting_user") return;
+		exec.agent.session.append("lazymind/workflow-awaiting-user", { rootCallId: exec.rootCallId });
+	});
+}
 function readTurn(agent, requestId) {
-	let matched = false, otherUser = false;
+	let matched = false, otherUser = false, awaitingUser = false;
+	const reviewCalls = /* @__PURE__ */ new Set();
 	let text = [];
 	for (const event of agent.session.ownEvents()) {
 		if (event.type === "turn/start") {
@@ -1401,6 +1408,15 @@ function readTurn(agent, requestId) {
 			else otherUser = true;
 		}
 		if (!matched) continue;
+		if (event.type === "step/start") {
+			reviewCalls.clear();
+			awaitingUser = false;
+		}
+		if (event.type === "lazymind/workflow-awaiting-user") reviewCalls.add(event.data.rootCallId);
+		if (event.type === "tool/result" && reviewCalls.size) {
+			const [block] = event.data.message.content;
+			if (reviewCalls.has(block.toolCallId) && !block.isError) awaitingUser = true;
+		}
 		if (event.type === "assistant/message") {
 			const content = visibleText(event.data.message);
 			if (content) text.push(content);
@@ -1409,14 +1425,16 @@ function readTurn(agent, requestId) {
 			matched,
 			otherUser,
 			reason: event.data.reason.kind,
-			text
+			text,
+			awaitingUser
 		};
 	}
 	return {
 		matched,
 		otherUser,
 		reason: void 0,
-		text
+		text,
+		awaitingUser
 	};
 }
 function queued(agent, requestId) {
@@ -1518,9 +1536,10 @@ async function executeChat(ctx, bridge, pairing, run, lifetime) {
 				await untilAborted(agent.whenIdle(), signal);
 				turn = readTurn(agent, requestId);
 			}
-			if (turn.otherUser || turn.reason !== "completed" || !turn.text.length) throw new ChatFailure("DSH did not complete this prompt with a separate text response");
+			if (turn.otherUser || turn.reason !== "completed" || !turn.text.length && !turn.awaitingUser) throw new ChatFailure("DSH did not complete this prompt with a separate text response");
+			const response = turn.text.length ? turn.text.join("\n\n") : "工作流已暂停，等待你确认后继续。";
 			let part = 0;
-			for (const chunk of turn.text.join("\n\n").matchAll(/[\s\S]{1,65536}/gu)) await emit({
+			for (const chunk of response.matchAll(/[\s\S]{1,65536}/gu)) await emit({
 				type: "message",
 				text: chunk[0]
 			}, part++);
@@ -1595,12 +1614,14 @@ async function apply(ctx, config) {
 				pairing,
 				sync: (snapshot, signal) => bridge.syncConversation(snapshot, signal)
 			});
+			const stopReviewObserver = observeChatReviews(ctx, pairing, current.serverName);
 			const chat = new AbortController();
 			const polling = pollChat(ctx, bridge, pairing, chat.signal);
 			presentation = current;
 			lastError = "";
 			return async () => {
 				chat.abort();
+				stopReviewObserver();
 				try {
 					await Promise.all([dispose(), polling]);
 				} finally {

@@ -65,7 +65,9 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   parentSignatureRef.current = parentSignature;
   const [restoredSelection, setRestoredSelection] = useState<{ superseded: string[]; slot: SlotRevision }>();
   const rollbackPrevious = useRef<string[]>([]);
-  const slot = restoredSelection?.superseded.includes(parentSignature) ? restoredSelection.slot : incomingSlot;
+  const slot = restoredSelection?.superseded.includes(parentSignature)
+    && (incomingSlot.selection_version ?? 0) <= (restoredSelection.slot.selection_version ?? 0)
+    ? restoredSelection.slot : incomingSlot;
   useEffect(() => {
     const selected = restoredSelection?.slot;
     if (selected && parentSignature === JSON.stringify([selected.artifact_id, selected.revision, selected.draft_version])) {
@@ -97,6 +99,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const dirty = useRef(false);
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const seen = useRef('');
+  const selectionVersion = useRef(slot.selection_version ?? 0);
   const retainedPublicationSource = useRef<unknown>();
   const incomingValue = useRef(initial.value);
   incomingValue.current = initial.value;
@@ -192,7 +195,12 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
 
   useEffect(() => {
     const signature = JSON.stringify([slot.artifact_id, slot.revision, slot.draft_version]);
-    if (seen.current === signature) return;
+    const clock = slot.selection_version;
+    if ((clock ?? 0) < selectionVersion.current) return;
+    if (seen.current === signature) {
+      selectionVersion.current = clock ?? selectionVersion.current;
+      return;
+    }
     let canceled = false;
     async function load() {
       let content = incomingValue.current;
@@ -201,10 +209,13 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       }
       if (canceled) return;
       content = paperValue(content);
-      seen.current = signature;
       const next = { id: slot.artifact_id!, revision: slot.revision, draft: slot.draft_version, value: content };
-      // A delayed parent refresh must not undo a save or publication we accepted.
-      if (next.revision < latest.current.revision || (next.revision === latest.current.revision && (next.draft ?? 0) < (latest.current.draft ?? 0))) return;
+      // Undo may select an older content revision at a newer session clock.
+      const previous = external.current;
+      if ((clock ?? 0) < selectionVersion.current || (clock === undefined && next.revision < previous.revision)) return;
+      if (next.id === previous.id && (next.draft ?? 0) < (previous.draft ?? 0)) return;
+      selectionVersion.current = clock ?? selectionVersion.current;
+      seen.current = signature;
       external.current = next;
       if (!dirty.current) { latest.current = next; draftContent.current = content; setCurrentSignature(signature); }
       // A publication refresh must not replace the editor holding newer local edits.
@@ -214,7 +225,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     }
     void load().catch(() => { if (!canceled) setError(String(i18n.t('chat.writerIR.saveFailed'))); });
     return () => { canceled = true; };
-  }, [slot.artifact_id, slot.revision, slot.draft_version, sourceUrl, descriptor.representation]);
+  }, [slot.artifact_id, slot.revision, slot.draft_version, slot.selection_version, sourceUrl, descriptor.representation]);
 
   useEffect(() => {
     if (!descriptor.capabilities.includes('publish_document') || !writable) return;
@@ -225,11 +236,15 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     return () => { canceled = true; };
   }, [descriptor.capabilities, writable, providerRefresh]);
 
-  const accept = useCallback((id: string, revision: number, draft: number | undefined, content: unknown, submitted: unknown = draftContent.current) => {
+  const accept = useCallback((id: string, revision: number, draft: number | undefined, content: unknown, clock?: number, submitted: unknown = draftContent.current) => {
+    const signature = JSON.stringify([id, revision, draft]);
+    if ((clock ?? 0) < selectionVersion.current && seen.current !== signature) throw rewriteConflict('DRAFT_VERSION_CONFLICT');
+    selectionVersion.current = Math.max(clock ?? 0, selectionVersion.current);
+    seen.current = signature;
     const newerEdits = JSON.stringify(draftContent.current) !== JSON.stringify(submitted);
     const next = { id, revision, draft, value: content };
     latest.current = next; external.current = next;
-    setCurrentSignature(JSON.stringify([id, revision, draft]));
+    setCurrentSignature(signature);
     if (!newerEdits) { dirty.current = false; draftContent.current = content; }
     setHasLocalChanges(dirty.current);
     retainedPublicationSource.current = newerEdits && typeof submitted !== typeof content ? submitted : undefined;
@@ -261,11 +276,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       if (!selected?.artifact_id || !selected.document) throw new Error('selected document unavailable');
       const content = paperValue(await readDocumentValue(selected.artifact_value, selected.document.representation));
       // Replace the save baseline as well as the visible text, before editing resumes.
-      dirty.current = false;
-      draftContent.current = content;
-      retainedPublicationSource.current = undefined;
-      accept(selected.artifact_id, selected.revision, selected.draft_version, content);
-      seen.current = JSON.stringify([selected.artifact_id, selected.revision, selected.draft_version]);
+      accept(selected.artifact_id, selected.revision, selected.draft_version, content, selected.selection_version);
       setRestoredSelection({ superseded: [...rollbackPrevious.current, parentSignatureRef.current], slot: selected });
       setPreview(null); setSelection(null); setError(''); setErrorAction(null);
       setRestoring(false);
@@ -308,7 +319,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     const result = response.data.result;
     if (!response.data.ok || !result?.artifact_id || typeof result.revision !== 'number' || (result.draft_version === undefined && result.revision > base)) throw new Error('invalid save response');
     const savedContent = await readDocumentValue(result.value ?? artifact, ir ? 'ir' : 'markdown');
-    accept(result.artifact_id, result.revision, result.draft_version, savedContent, content);
+    accept(result.artifact_id, result.revision, result.draft_version, savedContent, result.selection_version, content);
     onRefresh?.();
     return latest.current;
   }, [accept, onRefresh]);
@@ -376,7 +387,11 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     const result = response.data.data;
     const fetched = await WorkflowSessionApi().getDocumentArtifact(result.artifact_id);
     const artifact = fetched.data.result;
-    accept(artifact.artifact_id, artifact.revision, artifact.draft_version, unwrap(artifact.value));
+    if (artifact.selected === false) {
+      onRefresh?.();
+      throw rewriteConflict('SELECTION_STALE');
+    }
+    accept(artifact.artifact_id, artifact.revision, artifact.draft_version, unwrap(artifact.value), artifact.selection_version);
     setPreview(null); onRefresh?.(); return artifact.revision;
   };
   const canRewrite = writable && descriptor.capabilities.includes('rewrite_selection') && !selection && !preview;
