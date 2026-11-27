@@ -35,8 +35,6 @@ on:
     secrets:
       WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY:
         required: false
-      WINDOWS_TEST_MODELSCOPE_TOKEN:
-        required: false
       LAZYMIND_UPDATE_POLICY_PRIVATE_KEY:
         required: false
       MODELSCOPE_UPDATE_TOKEN:
@@ -325,7 +323,7 @@ jobs:
       - name: Publish components inside the Windows test round
         if: inputs.test_signed_updates
         env:
-          MODELSCOPE_API_TOKEN: ${{ secrets.WINDOWS_TEST_MODELSCOPE_TOKEN }}
+          MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}
           UPDATE_REPO: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_REPO }}
           LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON: ${{ vars.LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON }}
         run: |
@@ -337,7 +335,7 @@ jobs:
             --signing-mode windows-test --prefix "${component_prefix}"
       - name: Publish and verify files before policy
         env:
-          MODELSCOPE_API_TOKEN: ${{ secrets[inputs.test_signed_updates && 'WINDOWS_TEST_MODELSCOPE_TOKEN' || 'MODELSCOPE_UPDATE_TOKEN'] }}
+          MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_UPDATE_TOKEN }}
           UPDATE_REPO: ${{ vars[inputs.test_signed_updates && 'LAZYMIND_WINDOWS_TEST_UPDATE_REPO' || 'LAZYMIND_UPDATE_MODELSCOPE_REPO'] }}
           USE_CURRENT_RUN: ${{ inputs.use_current_run }}
         run: |

@@ -379,11 +379,12 @@ test("the Windows test release is bound to its channel before signing or uploadi
   const components = publish.findIndex(s => s.run?.includes("publish-python-components.py"));
   const policy = publish.findIndex(s => s.run?.includes("publish-desktop-update.py"));
   assert.ok(check >= 0 && check < sign && sign < components && components < policy);
-  ctx.secrets = { LAZYMIND_UPDATE_POLICY_PRIVATE_KEY: "official-private", WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY: "test-private",
-    MODELSCOPE_UPDATE_TOKEN: "official-upload", WINDOWS_TEST_MODELSCOPE_TOKEN: "test-upload" };
+  assert.equal(value(spec.jobs.publish.environment, ctx), "desktop_updates_test");
+  ctx.secrets = { LAZYMIND_UPDATE_POLICY_PRIVATE_KEY: "other-private", WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY: "test-private",
+    MODELSCOPE_UPDATE_TOKEN: "test-upload" };
   assert.equal(value(publish[sign].env.UPDATE_PRIVATE_KEY, ctx), "test-private");
   for (const step of [publish[components], publish[policy]]) assert.equal(value(step.env.MODELSCOPE_API_TOKEN, ctx), "test-upload");
-  ctx.secrets.WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY = ctx.secrets.WINDOWS_TEST_MODELSCOPE_TOKEN = "";
+  ctx.secrets.WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY = ctx.secrets.MODELSCOPE_UPDATE_TOKEN = "";
   assert.equal(value(publish[sign].env.UPDATE_PRIVATE_KEY, ctx), "");
   for (const step of [publish[components], publish[policy]]) assert.equal(value(step.env.MODELSCOPE_API_TOKEN, ctx), "");
 

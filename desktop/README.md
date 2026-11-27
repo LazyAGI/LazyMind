@@ -231,7 +231,7 @@ Configure the fork under **Settings → Secrets and variables → Actions**:
 | Variable `LAZYMIND_WINDOWS_TEST_UPDATE_CONFIG_JSON` | Public v2 configuration below |
 | Variable `LAZYMIND_WINDOWS_UPDATE_MINIMUM_SYSTEM_VERSION` | Lowest supported Windows version, e.g. `10.0.19045` |
 
-In the **desktop_updates_test** environment store secrets `WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY` (PKCS#8 Ed25519 PEM) and `WINDOWS_TEST_MODELSCOPE_TOKEN` (dataset write access), and variable `LAZYMIND_WINDOWS_TEST_UPDATE_POLICY_KEY_ID` matching the public key ID. These settings are separate from both the production publisher and the macOS ad-hoc publisher. Only the signing job receives the PFX.
+In the **desktop_updates_test** environment store secrets `WINDOWS_TEST_UPDATE_POLICY_PRIVATE_KEY` (PKCS#8 Ed25519 PEM) and `MODELSCOPE_UPDATE_TOKEN` (dataset write access), and variable `LAZYMIND_WINDOWS_TEST_UPDATE_POLICY_KEY_ID` matching the public key ID. Windows and macOS test publications reuse the upload token from this environment. Windows keeps its own certificate, policy signing key and publication prefix. Only the signing job receives the PFX.
 
 Example public JSON for a fresh round; replace the dataset, public key and signer before use:
 
