@@ -375,7 +375,7 @@ func TestAttachWriterMediaURLs(t *testing.T) {
 	}
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
 
-	db := orm.MigrateTestDB(t, &orm.DocumentPublicationOperation{}, &orm.DocumentPublicationBinding{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowSlotRevision{})
+	db := newWriterRevisionTestDB(t)
 	digest := strings.Repeat("a", 64)
 	sourceURI := "https://example.test/diagram.png"
 	mediaArtifact, err := json.Marshal(map[string]any{
@@ -1622,7 +1622,7 @@ func TestWriterGitHubSyncedMarkdownUnchanged(t *testing.T) {
 }
 
 func TestLoadWriterWriteBackBaseline_UsesSourceDocumentForInitialSync(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.DocumentPublicationOperation{}, &orm.DocumentPublicationBinding{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowSlotRevision{})
+	db := newWriterRevisionTestDB(t)
 	source := json.RawMessage(`{"data":{"document_id":"feishu-doc","provider_binding":{"provider":"feishu","document_id":"feishu-doc"}}}`)
 	seedWriterRevision(t, db, "source", "source_document", 1, true, "ai", source)
 	seedWriterRevision(t, db, "draft-1", "draft_document", 1, false, "ai", source)
@@ -1641,7 +1641,7 @@ func TestLoadWriterWriteBackBaseline_UsesSourceDocumentForInitialSync(t *testing
 }
 
 func TestLoadWriterWriteBackBaseline_PrefersLatestSyncedDraft(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.DocumentPublicationOperation{}, &orm.DocumentPublicationBinding{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowSlotRevision{})
+	db := newWriterRevisionTestDB(t)
 	source := json.RawMessage(`{"data":{"document_id":"source-doc","provider_binding":{"provider":"feishu","document_id":"source-doc"}}}`)
 	syncedDraft := json.RawMessage(`{"data":{"document_id":"synced-doc","provider_binding":{"provider":"feishu","document_id":"synced-doc"}},"meta":{"lazymind_provider_sync":{"confirmed":true}}}`)
 	seedWriterRevision(t, db, "source", "source_document", 1, true, "ai", source)
@@ -1656,6 +1656,17 @@ func TestLoadWriterWriteBackBaseline_PrefersLatestSyncedDraft(t *testing.T) {
 	if baseline.Revision.ID != "draft-1" {
 		t.Fatalf("baseline id = %q, want draft-1", baseline.Revision.ID)
 	}
+}
+
+func newWriterRevisionTestDB(t *testing.T) *orm.DB {
+	t.Helper()
+	db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{})
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session", ConversationID: "conversation", WorkflowID: "writer-workflow",
+	}).Error; err != nil {
+		t.Fatalf("seed writer session: %v", err)
+	}
+	return db
 }
 
 func seedWriterRevision(
