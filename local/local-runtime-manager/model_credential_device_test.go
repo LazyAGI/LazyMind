@@ -34,7 +34,7 @@ const start = source.indexOf('function loadOrCreateDesktopCredentialIdentity()')
 const marker = 'const desktopCredentialIdentity = loadOrCreateDesktopCredentialIdentity();';
 const end = source.indexOf(marker, start) + marker.length;
 if (start < 0 || end < marker.length) throw Error('Desktop identity implementation is missing');
-const context = vm.createContext({ fs, path, Buffer, ...crypto, desktopCredentialIdentityPath: process.argv[1] });
+const context = vm.createContext({ fs, path, Buffer, ...crypto, desktopCredentialIdentityPath: process.argv[1], isWindows: false });
 vm.runInContext(source.slice(start, end), context);
 process.stdout.write(vm.runInContext("deriveDesktopCredentialKey(desktopCredentialIdentity, 'model-provider')", context));
 `

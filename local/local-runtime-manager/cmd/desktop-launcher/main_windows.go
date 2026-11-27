@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/storagepath"
 	"golang.org/x/sys/windows"
 )
 
@@ -15,13 +16,32 @@ import (
 // LazyMind intentionally reuses it as Node for managed export workers.
 const electronExecutableName = "LazyMindApp.exe"
 
+var launcherLogDir string
+
 func main() {
 	launcherPath, err := os.Executable()
 	if err != nil {
 		failLaunch("resolve the LazyMind launcher path", err)
 	}
 	electronPath := electronExecutablePath(launcherPath, electronExecutableName)
+	root, installed, err := storagepath.Resolve(filepath.Dir(launcherPath))
+	if err != nil {
+		failLaunch("resolve the installed data location", err)
+	}
+	if installed {
+		launcherLogDir = filepath.Join(root, "Logs", "desktop")
+	} else if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		launcherLogDir = filepath.Join(localAppData, "LazyMind", "Logs", "desktop")
+	}
 	environment, removedRunAsNode := sanitizedEnvironment(os.Environ())
+	if installed {
+		tempDir := filepath.Join(root, "tmp")
+		if err := os.MkdirAll(tempDir, 0o700); err != nil {
+			failLaunch("prepare application temporary files", err)
+		}
+		environment = append(environment, desktopDataRootVariable+"="+root,
+			"TEMP="+tempDir, "TMP="+tempDir, "TMPDIR="+tempDir)
+	}
 	if removedRunAsNode {
 		logLaunch("removed inherited %s before starting %s", runAsNodeVariable, electronExecutableName)
 	}
@@ -49,11 +69,11 @@ func failLaunch(operation string, err error) {
 }
 
 func logLaunch(format string, args ...any) {
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		return
+	directory := launcherLogDir
+	if directory == "" {
+		directory = filepath.Join(os.TempDir(), "LazyMind-bootstrap")
 	}
-	logPath := filepath.Join(localAppData, "LazyMind", "Logs", "desktop", "desktop-launcher.log")
+	logPath := filepath.Join(directory, "desktop-launcher.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return
 	}

@@ -6,10 +6,22 @@
 !insertmacro GetParameters
 !insertmacro GetOptions
 !include "${BUILD_RESOURCES_DIR}\lazymind-installer-metadata.nsh"
+!define MUI_DIRECTORYPAGE_TEXT_TOP "$(LMStorageRootHelp)"
 
 !macro customHeader
   Var InstallerHelper
+  Var LMDataRoot
+  Var LMStageRoot
+  Var LMLayoutFile
   !ifndef BUILD_UNINSTALLER
+    Var LMLayoutMode
+    Var LMStorageRoot
+    Var LMLockedApp
+    Var LMRegistered
+    Var LMPrepared
+    Var LMCommitted
+    Var LMRequestedDirectory
+    Var LMPayloadManifest
     Var InstallDataChoice
     Var InstallTypeChoice
     Var InstallSimpleRadio
@@ -21,6 +33,7 @@
     Var LegacyUninstallString
     Var UpgradeUninstaller
   !else
+    Var LMOriginalUninstallDir
     Var UninstallDataChoice
     Var UninstallKeepRadio
     Var UninstallPurgeRadio
@@ -28,30 +41,32 @@
 
   LangString LMDataPageTitle ${LANG_ENGLISH} "Existing LazyMind data"
   LangString LMDataPageTitle ${LANG_SIMPCHINESE} "现有 LazyMind 数据"
-  LangString LMDataPageText ${LANG_ENGLISH} "LazyMind found local application data at $LOCALAPPDATA\LazyMind. Choose how setup should handle it. Documents\LazyMind is never changed."
-  LangString LMDataPageText ${LANG_SIMPCHINESE} "检测到 $LOCALAPPDATA\LazyMind。请选择安装程序如何处理这些本地数据。Documents\LazyMind 永远不会被更改。"
+  LangString LMStorageRootHelp ${LANG_ENGLISH} "Choose a LazyMind storage folder. The program uses its App subfolder and application data uses its Data subfolder."
+  LangString LMStorageRootHelp ${LANG_SIMPCHINESE} "请选择 LazyMind 存储目录。程序安装在其 App 子目录，应用数据保存在 Data 子目录。"
+  LangString LMDataPageText ${LANG_ENGLISH} "LazyMind found existing data at $LMDataRoot. Choose how setup should handle it. Your external documents are never changed."
+  LangString LMDataPageText ${LANG_SIMPCHINESE} "检测到 $LMDataRoot。请选择安装程序如何处理这些本地数据。用户外部资料永远不会被更改。"
   LangString LMKeepData ${LANG_ENGLISH} "Keep existing data (recommended; schemas may be upgraded)"
   LangString LMKeepData ${LANG_SIMPCHINESE} "保留现有数据（推荐；数据库结构可能升级）"
-  LangString LMPurgeData ${LANG_ENGLISH} "Delete all Local AppData, then install"
-  LangString LMPurgeData ${LANG_SIMPCHINESE} "清除全部 Local AppData 后安装"
-  LangString LMUninstallText ${LANG_ENGLISH} "Choose whether to remove only the program or also all data under $LOCALAPPDATA\LazyMind. Documents\LazyMind is never changed."
-  LangString LMUninstallText ${LANG_SIMPCHINESE} "请选择只卸载程序，还是同时清除 $LOCALAPPDATA\LazyMind 下的全部数据。Documents\LazyMind 永远不会被更改。"
+  LangString LMPurgeData ${LANG_ENGLISH} "Delete the existing LazyMind application data, then install"
+  LangString LMPurgeData ${LANG_SIMPCHINESE} "清除现有 LazyMind 应用数据后安装"
+  LangString LMUninstallText ${LANG_ENGLISH} "Choose whether to remove only the program or also the LazyMind data at $LMDataRoot. Your external documents are never changed."
+  LangString LMUninstallText ${LANG_SIMPCHINESE} "请选择只卸载程序，还是同时清除 $LMDataRoot 下的 LazyMind 数据。用户外部资料永远不会被更改。"
   LangString LMProgramOnly ${LANG_ENGLISH} "Uninstall the program only (recommended)"
   LangString LMProgramOnly ${LANG_SIMPCHINESE} "只卸载程序（推荐）"
-  LangString LMProgramAndData ${LANG_ENGLISH} "Uninstall the program and delete Local AppData"
-  LangString LMProgramAndData ${LANG_SIMPCHINESE} "卸载程序并清除 Local AppData"
+  LangString LMProgramAndData ${LANG_ENGLISH} "Uninstall the program and delete LazyMind application data"
+  LangString LMProgramAndData ${LANG_SIMPCHINESE} "卸载程序并清除 LazyMind 应用数据"
   LangString LMProcessScanFailed ${LANG_ENGLISH} "LazyMind process detection failed. Setup cannot safely continue."
   LangString LMProcessScanFailed ${LANG_SIMPCHINESE} "LazyMind 进程检测失败，安装程序无法安全继续。"
   LangString LMForceStopFailed ${LANG_ENGLISH} "Some LazyMind processes could not be force-closed. Setup cannot safely continue."
   LangString LMForceStopFailed ${LANG_SIMPCHINESE} "部分 LazyMind 进程无法强制关闭，安装程序无法安全继续。"
   LangString LMUpgradeRepairFailed ${LANG_ENGLISH} "The previous LazyMind uninstaller could not be updated for a safe upgrade. Setup cannot continue."
   LangString LMUpgradeRepairFailed ${LANG_SIMPCHINESE} "无法更新旧版 LazyMind 卸载程序以安全升级，安装程序无法继续。"
-  LangString LMPurgeFailed ${LANG_ENGLISH} "Local AppData could not be safely removed. No path outside LocalAppData\LazyMind was touched."
-  LangString LMPurgeFailed ${LANG_SIMPCHINESE} "无法安全清除 Local AppData。未操作 LocalAppData\LazyMind 之外的任何路径。"
+  LangString LMPurgeFailed ${LANG_ENGLISH} "LazyMind could not safely complete removal. Inspect the details before retrying; external documents are never selected for deletion."
+  LangString LMPurgeFailed ${LANG_SIMPCHINESE} "无法安全完成 LazyMind 清理。请先检查详情再重试；不会选择用户外部资料作为删除目标。"
   LangString LMWarmupFailed ${LANG_ENGLISH} "LazyMind warmup failed or timed out. Installation will finish normally; the first launch may take longer."
   LangString LMWarmupFailed ${LANG_SIMPCHINESE} "LazyMind 预热失败或超时。安装将正常完成；首次启动可能需要更长时间。"
-  LangString LMPreflightFailed ${LANG_ENGLISH} "LazyMind cannot be installed safely with the current temporary or installation path. Check that TEMP is on a writable local disk, at least ${LAZYMIND_MIN_FREE_SPACE_MB} MB is free, and the path is not too long."
-  LangString LMPreflightFailed ${LANG_SIMPCHINESE} "当前临时目录或安装目录无法可靠安装 LazyMind。请确认 TEMP 位于可写的本地磁盘、至少有 ${LAZYMIND_MIN_FREE_SPACE_MB} MB 可用空间，并且路径不过长。"
+  LangString LMPreflightFailed ${LANG_ENGLISH} "LazyMind cannot use the selected installation or temporary directory. Check the permissions, free space and path described below."
+  LangString LMPreflightFailed ${LANG_SIMPCHINESE} "无法使用当前安装目录或临时目录。请检查下方详情中的权限、可用空间与路径问题。"
   LangString LMDowngradeBlocked ${LANG_ENGLISH} "A newer LazyMind version is already installed. Downgrade is blocked to protect local data."
   LangString LMDowngradeBlocked ${LANG_SIMPCHINESE} "已安装更高版本的 LazyMind。为保护本地数据，禁止降级安装。"
   LangString LMUpgradePurgeBlocked ${LANG_ENGLISH} "Upgrades always keep Local AppData. Remove --purge-lazymind-local-data and retry."
@@ -70,6 +85,68 @@
   LangString LMFullInstallHelp ${LANG_SIMPCHINESE} "安装时展开 Python 文件，并在安装结束前预热全部本地服务。"
 
   !ifndef BUILD_UNINSTALLER
+  Function LMReadLayout
+    ReadINIStr $LMLayoutMode "$LMLayoutFile" "layout" "mode"
+    ReadINIStr $LMLockedApp "$LMLayoutFile" "layout" "app"
+    ReadINIStr $LMDataRoot "$LMLayoutFile" "layout" "data"
+    ReadINIStr $LMStorageRoot "$LMLayoutFile" "layout" "storage"
+    ReadINIStr $LMStageRoot "$LMLayoutFile" "layout" "stage"
+    ReadINIStr $LMRegistered "$LMLayoutFile" "layout" "registered"
+  FunctionEnd
+
+  Function LMDirectoryPagePre
+    ${If} $LMLayoutMode != "new"
+      StrCpy $INSTDIR $LMLockedApp
+      Abort
+    ${EndIf}
+    ; MUI keeps the user's current directory in INSTDIR, including Back.
+  FunctionEnd
+
+  Function LMPrepareInstall
+    ${If} $LMPrepared == "1"
+      Return
+    ${EndIf}
+    ${If} $LMLayoutMode == "new"
+      StrCpy $LMStorageRoot $INSTDIR
+      StrCpy $INSTDIR "$LMStorageRoot\App"
+    ${Else}
+      StrCpy $INSTDIR $LMLockedApp
+    ${EndIf}
+    System::Call 'kernel32::GetCurrentProcessId() i.r8'
+    StrCpy $7 '"$InstallerHelper" prepare-install --install-dir "$INSTDIR" --temp-dir "$TEMP" --minimum-free-space-mb ${LAZYMIND_MIN_FREE_SPACE_MB} --maximum-relative-path-length ${LAZYMIND_MAX_RELATIVE_PATH_LENGTH} --shipped-app-bytes ${LAZYMIND_SHIPPED_APP_BYTES} --expanded-python-bytes ${LAZYMIND_EXPANDED_PYTHON_BYTES} --manifest "$LMPayloadManifest" --output "$LMLayoutFile" --installer-pid $8 --expected-uninstaller "$UpgradeUninstaller" --install-version "${VERSION}" --shortcut-name "${SHORTCUT_NAME}"'
+    !ifdef ESTIMATED_SIZE
+      StrCpy $7 '$7 --estimated-size ${ESTIMATED_SIZE}'
+    !endif
+    !ifdef MENU_FILENAME
+      StrCpy $7 '$7 --menu-directory "${MENU_FILENAME}"'
+    !endif
+    !ifdef COMPANY_NAME
+      StrCpy $7 '$7 --publisher "${COMPANY_NAME}"'
+    !endif
+    nsExec::ExecToStack $7
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+      MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
+      SetErrorLevel 9
+      Quit
+    ${EndIf}
+    Call LMReadLayout
+    StrCpy $INSTDIR $LMLockedApp
+    StrCpy $LMPrepared "1"
+    System::Call 'kernel32::SetEnvironmentVariableW(w "LAZYMIND_INSTALL_STAGE", w "$LMStageRoot") i.r0'
+    ${If} $0 == 0
+      !insertmacro LMRollbackFreshInstall
+      MessageBox MB_OK|MB_ICONSTOP "Could not pass the private installer context to the upgrade uninstaller." /SD IDOK
+      SetErrorLevel 9
+      Quit
+    ${EndIf}
+  FunctionEnd
+
+  Function .onInstFailed
+    !insertmacro LMRollbackInstall
+  FunctionEnd
+
   Function LMInstallTypePageCreate
     !insertmacro MUI_HEADER_TEXT "$(LMInstallTypePageTitle)" "$(LMInstallTypePageText)"
     nsDialogs::Create 1018
@@ -103,6 +180,8 @@
 
   Function LMInstallDataPageCreate
     ${If} $IsManualUpgrade == "1"
+    ${OrIf} $LMRegistered == "true"
+    ${OrIf} $LMLayoutMode != "legacy"
       Abort
     ${EndIf}
     ${IfNot} ${FileExists} "$LOCALAPPDATA\LazyMind\*.*"
@@ -164,6 +243,9 @@
 
 !macro customInit
   InitPluginsDir
+  StrCpy $LMPrepared "0"
+  StrCpy $LMCommitted "0"
+  StrCpy $LMLayoutFile "$PLUGINSDIR\lazymind-layout.ini"
   StrCpy $InstallDataChoice "keep"
   StrCpy $InstallTypeChoice "simple"
   StrCpy $IsManualUpgrade "0"
@@ -171,15 +253,23 @@
   File /oname=$PLUGINSDIR\lazymind-installer-maintenance.exe "${BUILD_RESOURCES_DIR}\lazymind-installer-maintenance.exe"
   StrCpy $UpgradeUninstaller "$PLUGINSDIR\lazymind-upgrade-uninstaller.exe"
   File /oname=$PLUGINSDIR\lazymind-upgrade-uninstaller.exe "${UNINSTALLER_OUT_FILE}"
+  StrCpy $LMPayloadManifest "$PLUGINSDIR\lazymind-payload.json"
+  File /oname=$PLUGINSDIR\lazymind-payload.json "${BUILD_RESOURCES_DIR}\lazymind-payload.json"
 
-  nsExec::ExecToStack '"$InstallerHelper" preflight --install-dir "$INSTDIR" --temp-dir "$TEMP" --minimum-free-space-mb ${LAZYMIND_MIN_FREE_SPACE_MB} --maximum-relative-path-length ${LAZYMIND_MAX_RELATIVE_PATH_LENGTH}'
+  ; Recovery may remove a partial InstallLocation read by initMultiUser.
+  StrCpy $9 $OUTDIR
+  SetOutPath "$PLUGINSDIR"
+  nsExec::ExecToStack '"$InstallerHelper" recover-install'
   Pop $0
   Pop $1
   ${If} $0 != 0
-    DetailPrint "LazyMind installer preflight failed: $1"
     MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
     SetErrorLevel 9
     Quit
+  ${ElseIf} $1 != ""
+    !insertmacro setInstallModePerUser
+  ${Else}
+    SetOutPath "$9"
   ${EndIf}
 
   ReadRegStr $InstalledVersion HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
@@ -216,6 +306,42 @@
     ${EndIf}
     StrCpy $InstallDataChoice "purge"
   ${EndIf}
+
+  ${StdUtils.GetParameter} $LMRequestedDirectory "D" ""
+  StrCpy $7 '"$InstallerHelper" plan-install --install-dir "$INSTDIR" --output "$LMLayoutFile"'
+  ${If} $LMRequestedDirectory != ""
+    StrCpy $7 '$7 --requested-dir "$LMRequestedDirectory"'
+  ${EndIf}
+  nsExec::ExecToStack $7
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
+    SetErrorLevel 9
+    Quit
+  ${EndIf}
+  Call LMReadLayout
+  ${If} $InstallDataChoice == "purge"
+    ${If} $LMRegistered == "true"
+    ${OrIf} $LMLayoutMode != "legacy"
+      MessageBox MB_OK|MB_ICONSTOP "$(LMUpgradePurgeBlocked)" /SD IDOK
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+  ${EndIf}
+  ${If} $LMLayoutMode != "new"
+    StrCpy $INSTDIR $LMLockedApp
+    ; Existing layouts have a final, locked location already. Fresh installs
+    ; defer this check until the user has selected and normalized the root.
+    nsExec::ExecToStack '"$InstallerHelper" preflight --install-dir "$INSTDIR" --temp-dir "$TEMP" --minimum-free-space-mb ${LAZYMIND_MIN_FREE_SPACE_MB} --maximum-relative-path-length ${LAZYMIND_MAX_RELATIVE_PATH_LENGTH} --manifest "$LMPayloadManifest"'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+      MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
+      SetErrorLevel 9
+      Quit
+    ${EndIf}
+  ${EndIf}
 !macroend
 
 !macro customPageAfterChangeDir
@@ -228,15 +354,39 @@
 !macroend
 
 !macro customCheckAppRunning
+    !ifdef BUILD_UNINSTALLER
+      ${IfNot} ${isUpdated}
+        ; Standalone removal runs the process check after authenticating its
+        ; original App or pending receipt, including after data is isolated.
+        Return
+      ${EndIf}
+    !endif
     ; Silent upgrade uninstallers call this macro before customUnInit. Always
     ; initialize the helper here so the check does not depend on hook order.
     InitPluginsDir
+    ; Upstream onInit selected INSTDIR as cwd. Release that directory in both
+    ; installer and uninstaller before any helper may move the whole App.
+    SetOutPath "$PLUGINSDIR"
     StrCpy $InstallerHelper "$PLUGINSDIR\lazymind-installer-maintenance.exe"
     File /oname=$PLUGINSDIR\lazymind-installer-maintenance.exe "${BUILD_RESOURCES_DIR}\lazymind-installer-maintenance.exe"
+    !ifndef BUILD_UNINSTALLER
+      ; Silent installation resolves the App directory after installSection sets $appExe.
+      Call LMPrepareInstall
+      StrCpy $appExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+    !endif
 
     StrCpy $2 0
   LMCheckStopped:
-    nsExec::ExecToStack '"$InstallerHelper" check-stopped --install-dir "$INSTDIR"'
+    !ifndef BUILD_UNINSTALLER
+      ${If} $LMLayoutMode == "new"
+      ${OrIf} $LMLayoutMode == "restore"
+        nsExec::ExecToStack '"$InstallerHelper" check-stopped'
+      ${Else}
+        nsExec::ExecToStack '"$InstallerHelper" check-stopped --install-dir "$INSTDIR"'
+      ${EndIf}
+    !else
+      nsExec::ExecToStack '"$InstallerHelper" check-stopped --install-dir "$INSTDIR"'
+    !endif
     Pop $0
     Pop $1
     ${If} $0 == 10
@@ -245,6 +395,7 @@
       ${If} $2 > 3
         DetailPrint "LazyMind processes restarted repeatedly after force-stop: $1"
         MessageBox MB_OK|MB_ICONSTOP "$(LMForceStopFailed)$\r$\n$1" /SD IDOK
+        !insertmacro LMRollbackFreshInstall
         SetErrorLevel 7
         Quit
       ${EndIf}
@@ -252,6 +403,7 @@
     ${ElseIf} $0 != 0
       DetailPrint "LazyMind process detection failed: $1"
       MessageBox MB_OK|MB_ICONSTOP "$(LMProcessScanFailed)$\r$\n$1" /SD IDOK
+      !insertmacro LMRollbackFreshInstall
       SetErrorLevel 6
       Quit
     ${EndIf}
@@ -259,12 +411,22 @@
 
   LMForceStop:
     DetailPrint "Force-closing running LazyMind processes..."
-    nsExec::ExecToStack '"$InstallerHelper" force-stop --install-dir "$INSTDIR"'
+    !ifndef BUILD_UNINSTALLER
+      ${If} $LMLayoutMode == "new"
+      ${OrIf} $LMLayoutMode == "restore"
+        nsExec::ExecToStack '"$InstallerHelper" force-stop'
+      ${Else}
+        nsExec::ExecToStack '"$InstallerHelper" force-stop --install-dir "$INSTDIR"'
+      ${EndIf}
+    !else
+      nsExec::ExecToStack '"$InstallerHelper" force-stop --install-dir "$INSTDIR"'
+    !endif
     Pop $0
     Pop $1
     ${If} $0 != 0
       DetailPrint "LazyMind force-stop failed: $1"
       MessageBox MB_OK|MB_ICONSTOP "$(LMForceStopFailed)$\r$\n$1" /SD IDOK
+      !insertmacro LMRollbackFreshInstall
       SetErrorLevel 7
       Quit
     ${EndIf}
@@ -279,6 +441,7 @@
     !ifndef BUILD_UNINSTALLER
       ${If} $LegacyUninstallString != ""
       ${OrIf} $InstalledVersion != ""
+      ${OrIf} $LMRegistered == "true"
         DetailPrint "Updating the previous LazyMind uninstaller for upgrade compatibility..."
         CreateDirectory "$INSTDIR"
         ClearErrors
@@ -325,13 +488,17 @@
     ${EndIf}
   ${EndIf}
 
+  ${If} $LMCommitted != "1"
+    !insertmacro LMCommitInstall
+  ${EndIf}
+
   ${If} $InstallTypeChoice == "full"
-    CreateDirectory "$LOCALAPPDATA\LazyMind\logs"
-    StrCpy $5 "$LOCALAPPDATA\LazyMind\logs\installer-nsis.log"
+    CreateDirectory "$LMDataRoot\Logs\desktop"
+    StrCpy $5 "$LMDataRoot\Logs\desktop\installer-nsis.log"
     FileOpen $6 "$5" a
     FileWrite $6 "Starting Electron installer warmup (timeout=1800s).$\r$\n"
     FileClose $6
-    DetailPrint "Starting Electron installer warmup; log: $LOCALAPPDATA\LazyMind\logs\installer-warmup.log"
+    DetailPrint "Starting Electron installer warmup; log: $LMDataRoot\Logs\desktop\installer-warmup.log"
     ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 1800' $3
     FileOpen $6 "$5" a
     FileWrite $6 "Electron installer warmup returned exit code $3.$\r$\n"
@@ -390,10 +557,34 @@
 
 !macro customUnInit
   InitPluginsDir
+  StrCpy $LMLayoutFile "$PLUGINSDIR\lazymind-layout.ini"
   StrCpy $UninstallDataChoice "keep"
   StrCpy $InstallerHelper "$PLUGINSDIR\lazymind-installer-maintenance.exe"
   File /oname=$PLUGINSDIR\lazymind-installer-maintenance.exe "${BUILD_RESOURCES_DIR}\lazymind-installer-maintenance.exe"
+  StrCpy $7 '"$InstallerHelper" plan-uninstall --install-dir "$LMOriginalUninstallDir" --output "$LMLayoutFile"'
+  ${If} ${isUpdated}
+    StrCpy $7 '$7 --upgrade'
+  ${EndIf}
+  nsExec::ExecToStack $7
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
+    SetErrorLevel 9
+    Quit
+  ${EndIf}
+  ReadINIStr $INSTDIR "$LMLayoutFile" "layout" "app"
+  ReadINIStr $LMDataRoot "$LMLayoutFile" "layout" "data"
   ${GetParameters} $0
+  ${IfNot} ${isUpdated}
+    ClearErrors
+    ${GetOptions} $0 "--delete-app-data" $1
+    ${IfNot} ${Errors}
+      MessageBox MB_OK|MB_ICONSTOP "$(LMPurgeFailed)" /SD IDOK
+      SetErrorLevel 3
+      Quit
+    ${EndIf}
+  ${EndIf}
   ClearErrors
   ${GetOptions} $0 "--purge-lazymind-local-data" $1
   ${IfNot} ${Errors}
@@ -409,13 +600,144 @@
 !macroend
 
 !macro customUnInstall
-  ${If} $UninstallDataChoice == "purge"
-    nsExec::ExecToStack '"$InstallerHelper" purge-local-data --install-dir "$INSTDIR"'
+  SetOutPath "$PLUGINSDIR"
+  nsExec::ExecToStack '"$InstallerHelper" verify-uninstalled'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPurgeFailed)$\r$\n$1" /SD IDOK
+    SetErrorLevel 3
+    Abort
+  ${EndIf}
+!macroend
+
+!macro LMRecordUninstallLocation
+  ; NSIS passes the original directory to its temporary uninstaller. Save
+  ; it before initMultiUser falls back to a default if InstallLocation is gone.
+  StrCpy $LMOriginalUninstallDir $INSTDIR
+!macroend
+
+!macro LMUnregisterStandaloneUninstall
+  nsExec::ExecToStack '"$InstallerHelper" unregister-uninstall --install-dir "$INSTDIR" --stage-dir "$LMStageRoot"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPurgeFailed)$\r$\n$1" /SD IDOK
+    SetErrorLevel 3
+    Abort
+  ${EndIf}
+!macroend
+
+!macro customRemoveFiles
+  SetOutPath "$PLUGINSDIR"
+  StrCpy $7 '"$InstallerHelper" remove-program --install-dir "$INSTDIR" --output "$LMLayoutFile"'
+  ${If} ${isUpdated}
+    ReadEnvStr $LMStageRoot "LAZYMIND_INSTALL_STAGE"
+    ${If} $LMStageRoot == ""
+      MessageBox MB_OK|MB_ICONSTOP "Missing verified upgrade staging context." /SD IDOK
+      SetErrorLevel 3
+      Abort
+    ${EndIf}
+    StrCpy $7 '$7 --upgrade --stage-dir "$LMStageRoot"'
+  ${ElseIf} $UninstallDataChoice == "purge"
+    StrCpy $7 '$7 --purge'
+  ${EndIf}
+  nsExec::ExecToStack $7
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPurgeFailed)$\r$\n$1" /SD IDOK
+    SetErrorLevel 3
+    Abort
+  ${EndIf}
+  ${IfNot} ${isUpdated}
+    ReadINIStr $LMStageRoot "$LMLayoutFile" "layout" "stage"
+  ${EndIf}
+!macroend
+
+!macro LMPrepareExtract
+  Call LMPrepareInstall
+  SetOutPath "$PLUGINSDIR"
+  nsExec::ExecToStack '"$InstallerHelper" mark-install --install-dir "$INSTDIR" --stage-dir "$LMStageRoot"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
+    !insertmacro LMRollbackInstall
+    SetErrorLevel 9
+    Quit
+  ${EndIf}
+  SetOutPath "$INSTDIR"
+!macroend
+
+!macro LMVerifyExtract ROOT
+  nsExec::ExecToStack '"$InstallerHelper" verify-payload --payload-dir "${ROOT}" --manifest "$LMPayloadManifest" --install-dir "$INSTDIR" --stage-dir "$LMStageRoot"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    SetOutPath "$PLUGINSDIR"
+    MessageBox MB_OK|MB_ICONSTOP "Installer payload verification failed.$\r$\n$1" /SD IDOK
+    !insertmacro LMRollbackInstall
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+!macroend
+
+!macro LMPublishFreshFiles
+  SetOutPath "$PLUGINSDIR"
+  nsExec::ExecToStack '"$InstallerHelper" publish-install-payload --install-dir "$INSTDIR" --stage-dir "$LMStageRoot" --expected-uninstaller "$UpgradeUninstaller"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
+    !insertmacro LMRollbackInstall
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+  SetOutPath "$INSTDIR"
+!macroend
+
+!macro LMRollbackFreshInstall
+  !ifndef BUILD_UNINSTALLER
+    ${If} $LMLayoutMode == "new"
+      !insertmacro LMRollbackInstall
+    ${EndIf}
+  !endif
+!macroend
+
+!macro LMCommitFreshInstall
+  ${If} $LMLayoutMode == "new"
+    !insertmacro LMCommitInstall
+    SetOutPath "$INSTDIR"
+  ${EndIf}
+!macroend
+
+!macro LMRollbackInstall
+  ${If} $LMPrepared == "1"
+  ${AndIf} $LMCommitted != "1"
+    SetOutPath "$PLUGINSDIR"
+    nsExec::ExecToStack '"$InstallerHelper" rollback-install --install-dir "$INSTDIR" --stage-dir "$LMStageRoot"'
     Pop $0
     Pop $1
     ${If} $0 != 0
-      MessageBox MB_OK|MB_ICONSTOP "$(LMPurgeFailed)$\r$\n$1" /SD IDOK
-      SetErrorLevel 3
+      DetailPrint "Program restore needs inspection; retained staging: $LMStageRoot; $1"
+    ${Else}
+      StrCpy $LMPrepared "0"
     ${EndIf}
   ${EndIf}
+!macroend
+
+!macro LMCommitInstall
+  SetOutPath "$PLUGINSDIR"
+  nsExec::ExecToStack '"$InstallerHelper" commit-install --install-dir "$INSTDIR" --stage-dir "$LMStageRoot"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
+    !insertmacro LMRollbackInstall
+    SetErrorLevel 9
+    Quit
+  ${EndIf}
+  StrCpy $LMCommitted "1"
+  System::Call 'kernel32::SetEnvironmentVariableW(w "LAZYMIND_INSTALL_STAGE", p 0)'
 !macroend

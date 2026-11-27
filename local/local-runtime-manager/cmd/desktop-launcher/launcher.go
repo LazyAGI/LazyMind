@@ -2,11 +2,13 @@ package main
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 const (
-	runAsNodeVariable = "ELECTRON_RUN_AS_NODE"
+	runAsNodeVariable       = "ELECTRON_RUN_AS_NODE"
+	desktopDataRootVariable = "LAZYMIND_DESKTOP_DATA_ROOT"
 )
 
 func electronExecutablePath(launcherPath string, executableName string) string {
@@ -20,6 +22,9 @@ func sanitizedEnvironment(environment []string) ([]string, bool) {
 		name, _, found := strings.Cut(entry, "=")
 		if found && strings.EqualFold(strings.TrimSpace(name), runAsNodeVariable) {
 			removed = true
+			continue
+		}
+		if found && runtime.GOOS == "windows" && strings.EqualFold(strings.TrimSpace(name), desktopDataRootVariable) {
 			continue
 		}
 		result = append(result, entry)

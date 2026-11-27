@@ -20,11 +20,16 @@
   },
   "devDependencies": {
     "electron": "^37.10.3",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "24.13.3"
   },
   "dependencies": {
     "uiohook-napi": "1.5.5",
     "ws": "^8.21.3",
     "node-gyp-build": "4.8.4"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "app-builder-lib@24.13.3": "patches/app-builder-lib@24.13.3.patch"
+    }
   }
 }

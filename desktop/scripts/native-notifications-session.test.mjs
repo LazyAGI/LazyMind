@@ -38,6 +38,46 @@ function fixture() {
   return { handlers, calls, context, finish };
 }
 
+test("desktop session handoff uses the running Windows runtime root", async (t) => {
+  const runtimeRootStart = source.indexOf("function currentRuntimeRoot(");
+  const runtimeRootEnd = source.indexOf("function currentDataDir(", runtimeRootStart);
+  const connectorStart = source.indexOf("function runConnectorJSON(");
+  const connectorEnd = source.indexOf("const agentRecovery =", connectorStart);
+  const legacyRoot = "C:\\Users\\tester\\AppData\\Local\\LazyMind";
+  const activeRoot = "D:\\LazyMind\\Data";
+  const explicitRoot = "E:\\OtherRuntime";
+  for (const [name, isWindows, isExternalRuntimeDev, reportedRoot, configuredRoot, expected] of [
+    ["reported root takes priority over the configured root", true, false, activeRoot, explicitRoot, activeRoot],
+    ["self-managed portable runtime falls back to the Windows default", true, false, undefined, "", legacyRoot],
+    ["external development does not assume a Windows default", true, true, undefined, "", undefined],
+    ["external development retains its explicitly configured root", true, true, undefined, explicitRoot, explicitRoot],
+    ["non-Windows platforms keep existing root selection", false, false, "/runtime", "", undefined],
+  ]) {
+    await t.test(name, async () => {
+      const h = fixture();
+      const connectorCalls = [];
+      Object.assign(h.context, {
+        isWindows, isExternalRuntimeDev, explicitRuntimeRoot: configuredRoot,
+        currentStatus: { runtimeRoot: reportedRoot }, windowsDesktopPaths: { runtimeRoot: legacyRoot },
+        agentConnectorPath: "synthetic-connector",
+        sidecarEnv: () => configuredRoot ? { LAZYMIND_RUNTIME_ROOT: configuredRoot } : {},
+        execFile: (_executable, args, options, callback) => {
+          connectorCalls.push({ action: args[2], runtimeRoot: options.env.LAZYMIND_RUNTIME_ROOT });
+          callback(null, '{"ok":true}', "");
+          return {};
+        },
+      });
+      vm.runInNewContext(`${source.slice(runtimeRootStart, runtimeRootEnd)}\n${source.slice(connectorStart, connectorEnd)}`, h.context);
+      await h.handlers.get("lazymind:assistantSessionSet")({ trusted: true }, { access_token: "synthetic" });
+      await h.context.runConnectorJSON(["internal", "session", "snapshot"], 3000);
+      assert.deepEqual(connectorCalls, [
+        { action: "set", runtimeRoot: expected },
+        { action: "snapshot", runtimeRoot: configuredRoot || undefined },
+      ]);
+    });
+  }
+});
+
 test("packaged renderer origin passes actual session IPC while other origins and frames remain rejected", async () => {
   const originFunctions = source.slice(source.indexOf("function desktopFrontendOrigin("),
     source.indexOf("function loadEditablePptDependencyConfig("));

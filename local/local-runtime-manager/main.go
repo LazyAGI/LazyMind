@@ -199,6 +199,17 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	if err != nil {
 		return err
 	}
+	if sub == "ensure-credential-identity" || sub == "preflight-identity" {
+		cfg, paths, err := newRuntimeConfigWithOptions(opts, true)
+		if err != nil {
+			return err
+		}
+		if sub == "ensure-credential-identity" {
+			return ensureWindowsDesktopCredentialIdentity(cfg, paths)
+		}
+		_, err = checkedCredentialIdentityPath(paths)
+		return err
+	}
 	cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 	if err != nil {
 		return err

@@ -33,6 +33,8 @@ const (
 
 var ErrAuthenticationRequired = errors.New("not logged in to LazyMind; open the local LazyMind desktop so local-proxy can write credentials.json via /_local/admin-session (Kong does not serve that path), then retry")
 
+var errDesktopRuntimeUnavailable = errors.New("LazyMind desktop is not running or its state is unavailable")
+
 func IsAuthenticationRequired(err error) bool {
 	if errors.Is(err, ErrAuthenticationRequired) {
 		return true
@@ -236,11 +238,24 @@ func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials,
 }
 
 func (s *Store) bootstrapLocalSessionForServerUnlocked(ctx context.Context, preferredServer string, force bool) (Credentials, error) {
-	servers := runtimeServerCandidates()
-	if preferredServer = normalizeServerURL(preferredServer); preferredServer != "" {
+	preferredServer = normalizeServerURL(preferredServer)
+	if preferredServer == "" {
+		preferredServer = s.serverOverride
+	}
+	if preferredServer == "" {
+		preferredServer = normalizeServerURL(connectorconfig.Value("LAZYMIND_SERVER_URL"))
+	}
+	var servers []string
+	var discovery runtimeDiscovery
+	if preferredServer != "" {
 		// Session recovery must stay on the account's configured server.
 		// Another local installation is not a fallback for an expired login.
 		servers = []string{preferredServer}
+	} else {
+		servers = runtimeServerCandidates(&discovery)
+		if discovery.err != nil {
+			return Credentials{}, discovery.err
+		}
 	}
 	seen := make(map[string]struct{}, len(servers))
 	for _, server := range servers {
@@ -281,6 +296,9 @@ func (s *Store) bootstrapLocalSessionForServerUnlocked(ctx context.Context, pref
 			return Credentials{}, fmt.Errorf("save local LazyMind session: %w", err)
 		}
 		return value, nil
+	}
+	if discovery.installed {
+		return Credentials{}, errDesktopRuntimeUnavailable
 	}
 	return Credentials{}, ErrAuthenticationRequired
 }
@@ -329,7 +347,11 @@ func (s *Store) ServerURL(ctx context.Context) (string, error) {
 	if configured := normalizeServerURL(connectorconfig.Value("LAZYMIND_SERVER_URL")); configured != "" {
 		return configured, nil
 	}
-	candidates := runtimeServerCandidates()
+	var discovery runtimeDiscovery
+	candidates := runtimeServerCandidates(&discovery)
+	if discovery.err != nil {
+		return "", discovery.err
+	}
 	for _, candidate := range candidates {
 		probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 		request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, candidate+authPath+"/health", nil)
@@ -344,6 +366,9 @@ func (s *Store) ServerURL(ctx context.Context) (string, error) {
 			}
 		}
 		cancel()
+	}
+	if discovery.installed {
+		return "", errDesktopRuntimeUnavailable
 	}
 	return "http://localhost:8000", nil
 }
@@ -581,7 +606,27 @@ func normalizeServerURL(value string) string {
 	return strings.TrimRight(strings.TrimSpace(value), "/")
 }
 
-func runtimeServerCandidates() []string {
+type runtimeDiscovery struct {
+	installed bool
+	err       error
+}
+
+// Endpoint discovery collects both the location error and whether fixed-port
+// legacy fallbacks are permitted. Existing candidate-list callers may omit it.
+func runtimeServerCandidates(status ...*runtimeDiscovery) []string {
+	var discovery runtimeDiscovery
+	defer func() {
+		if len(status) > 0 && status[0] != nil {
+			*status[0] = discovery
+		}
+	}()
+	if configured := normalizeServerURL(connectorconfig.Value("LAZYMIND_SERVER_URL")); configured != "" {
+		return []string{configured}
+	}
+	paths := runtimeStatePaths(&discovery)
+	if discovery.err != nil {
+		return nil
+	}
 	seen := map[string]struct{}{}
 	result := make([]string, 0, 4)
 	appendURL := func(value string) {
@@ -595,10 +640,13 @@ func runtimeServerCandidates() []string {
 		seen[value] = struct{}{}
 		result = append(result, value)
 	}
-	appendURL(connectorconfig.Value("LAZYMIND_SERVER_URL"))
-	for _, path := range runtimeStatePaths() {
+	for _, path := range paths {
 		body, err := os.ReadFile(path)
 		if err != nil {
+			if discovery.installed {
+				discovery.err = fmt.Errorf("%w: read runtime state: %v", errDesktopRuntimeUnavailable, err)
+				return nil
+			}
 			continue
 		}
 		var state struct {
@@ -609,15 +657,25 @@ func runtimeServerCandidates() []string {
 				} `json:"localProxy"`
 			} `json:"config"`
 		}
-		if json.Unmarshal(body, &state) != nil {
+		if err := json.Unmarshal(body, &state); err != nil {
+			if discovery.installed {
+				discovery.err = fmt.Errorf("%w: decode runtime state: %v", errDesktopRuntimeUnavailable, err)
+				return nil
+			}
 			continue
 		}
-		if state.Config.FrontendPort > 0 {
+		if state.Config.FrontendPort > 0 && (!discovery.installed || state.Config.FrontendPort <= 65535) {
 			appendURL("http://127.0.0.1:" + strconv.Itoa(state.Config.FrontendPort))
 		}
-		if state.Config.LocalProxy.Port > 0 {
+		if state.Config.LocalProxy.Port > 0 && (!discovery.installed || state.Config.LocalProxy.Port <= 65535) {
 			appendURL("http://127.0.0.1:" + strconv.Itoa(state.Config.LocalProxy.Port))
 		}
+	}
+	if discovery.installed {
+		if len(result) == 0 {
+			discovery.err = errDesktopRuntimeUnavailable
+		}
+		return result
 	}
 	appendURL("http://127.0.0.1:8090")
 	appendURL("http://127.0.0.1:5024")
@@ -625,9 +683,24 @@ func runtimeServerCandidates() []string {
 	return result
 }
 
-func runtimeStatePaths() []string {
+func runtimeStatePaths(status ...*runtimeDiscovery) []string {
+	var discovery runtimeDiscovery
+	defer func() {
+		if len(status) > 0 && status[0] != nil {
+			*status[0] = discovery
+		}
+	}()
 	if configured := strings.TrimSpace(connectorconfig.Value("LAZYMIND_RUNTIME_STATE_FILE")); configured != "" {
 		return []string{configured}
+	}
+	installedRoot, err := installedDesktopDataRoot()
+	if err != nil {
+		discovery.err = err
+		return nil
+	}
+	if installedRoot != "" {
+		discovery.installed = true
+		return []string{filepath.Join(installedRoot, "state", "runtime-state.json")}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

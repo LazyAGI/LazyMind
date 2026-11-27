@@ -12,7 +12,7 @@ const githubHostConfigEnvVar = "LAZYMIND_GITHUB_HOST_CONFIG_DIR"
 const hostXDGConfigEnvVar = "LAZYMIND_HOST_XDG_CONFIG_HOME"
 
 func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
-	return []string{
+	return append([]string{
 		runtimeProcessOwnerEnvVar + "=" + paths.RuntimeRoot,
 		"HOME=" + home,
 		"XDG_CONFIG_HOME=" + paths.ConfigDir,
@@ -23,7 +23,14 @@ func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 		hostXDGConfigEnvVar + "=" + hostXDGConfigDir(),
 		"PYTHONDONTWRITEBYTECODE=1",
 		"NUMBA_CACHE_DIR=" + filepath.Join(paths.XDGCacheDir, "numba"),
+	}, managedTempEnv(paths)...)
+}
+
+func managedTempEnv(paths RuntimePaths) []string {
+	if paths.TempDir == "" {
+		return nil
 	}
+	return []string{"TEMP=" + paths.TempDir, "TMP=" + paths.TempDir, "TMPDIR=" + paths.TempDir}
 }
 
 func processComposeRuntimeEnv(paths RuntimePaths) []string {

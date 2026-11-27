@@ -432,6 +432,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
+	if err := prepareScopedWindowsCredentials(paths); err != nil {
+		return err
+	}
 	if err := prepareDesktopPythonComponents(ctx, cfg, paths); err != nil {
 		return err
 	}
@@ -480,14 +483,16 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 	m.startupEvent("phase.completed", "python-payload", pythonPreparationStartedAt, nil)
 	m.progressf("bundled Python runtime check completed in %s", m.now().Sub(pythonPreparationStartedAt).Round(time.Millisecond))
-	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
-		Profile:         cfg.Profile,
-		MaintenanceMode: cfg.MaintenanceMode,
-		OwnerToken:      cfg.OwnerToken,
-		RepoRoot:        paths.RepoRoot,
-		RuntimeRoot:     cfg.RuntimeRoot,
-		ResourcesRoot:   cfg.ResourcesRoot,
-	})
+	startupOptions := RuntimeConfigOptions{
+		Profile:                cfg.Profile,
+		MaintenanceMode:        cfg.MaintenanceMode,
+		OwnerToken:             cfg.OwnerToken,
+		RepoRoot:               paths.RepoRoot,
+		RuntimeRoot:            cfg.RuntimeRoot,
+		ResourcesRoot:          cfg.ResourcesRoot,
+		installedLocalDataRoot: paths.installedLocalDataRoot,
+	}
+	freshCfg, paths, err = NewRuntimeConfigWithOptions(startupOptions)
 	if err != nil {
 		return err
 	}
@@ -521,14 +526,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	for attempt := 1; attempt <= maxAutomaticPortStartupAttempts; attempt++ {
-		attemptCfg, attemptPaths, configErr := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
-			Profile:         cfg.Profile,
-			MaintenanceMode: cfg.MaintenanceMode,
-			OwnerToken:      cfg.OwnerToken,
-			RepoRoot:        paths.RepoRoot,
-			RuntimeRoot:     cfg.RuntimeRoot,
-			ResourcesRoot:   cfg.ResourcesRoot,
-		})
+		attemptCfg, attemptPaths, configErr := NewRuntimeConfigWithOptions(startupOptions)
 		if configErr != nil {
 			return configErr
 		}

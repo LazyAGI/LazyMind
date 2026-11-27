@@ -277,6 +277,9 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		"LAZYMIND_EDITABLE_PPT_LINUX_X64_URL="+envText("LAZYMIND_EDITABLE_PPT_LINUX_X64_URL", ""),
 		"LAZYMIND_EDITABLE_PPT_LINUX_X64_SHA256="+envText("LAZYMIND_EDITABLE_PPT_LINUX_X64_SHA256", ""),
 	)
+	if runtime.GOOS == "windows" && cfg.Profile == "local" {
+		env = append(env, installedLocalDataRootEnvVar+"="+paths.installedLocalDataRoot)
+	}
 	if binDir := loadFFmpegBinDirForRuntime(paths); binDir != "" {
 		env = prependPathEnv(env, binDir)
 	}

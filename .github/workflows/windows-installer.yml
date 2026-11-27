@@ -511,6 +511,17 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Checkout volume helper for this workflow
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: installer-volume-workflow
+          sparse-checkout: |
+            desktop/scripts/windows-installer-volume.ps1
+            desktop/scripts/windows-installer-image-file.ps1
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Download the exact installer built above
         uses: actions/download-artifact@v8
         with:
@@ -545,7 +556,16 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           "Installer arguments: $env:INSTALL_ARGUMENTS"
+          . (Join-Path $env:GITHUB_WORKSPACE 'installer-volume-workflow/desktop/scripts/windows-installer-image-file.ps1')
+          . (Join-Path $env:GITHUB_WORKSPACE 'installer-volume-workflow/desktop/scripts/windows-installer-volume.ps1')
+          $runDirectory = "D:\lm-volume-$([guid]::NewGuid().ToString('N'))"
+          "LAZYMIND_TEST_VOLUME_RUN_DIRECTORY=$runDirectory" | Add-Content -LiteralPath $env:GITHUB_ENV
+          $volume = Initialize-WindowsInstallerSmokeVolume -RunDirectory $runDirectory
+          $storageRoot = $volume.StorageRoot
+          "LAZYMIND_TEST_STORAGE_ROOT=$storageRoot" | Add-Content -LiteralPath $env:GITHUB_ENV
+          $env:INSTALL_ARGUMENTS = "$env:INSTALL_ARGUMENTS /D=$storageRoot"
           $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList $env:INSTALL_ARGUMENTS -Wait -PassThru
+          "Installer test storage: $storageRoot"
           "Installer exit code: $($install.ExitCode)"
           if ($install.ExitCode -ne 0) {
             $unsignedExitCode = [uint32]$install.ExitCode
@@ -561,13 +581,23 @@ jobs:
           EXPECTED_VERSION: ${{ needs.build-windows-installer.outputs.package_version }}
         run: |
           $ErrorActionPreference = "Stop"
-          $installDir = Join-Path $env:LOCALAPPDATA "Programs\LazyMind"
+          $installDir = Join-Path $env:LAZYMIND_TEST_STORAGE_ROOT "App"
           $app = Join-Path $installDir "LazyMind.exe"
           $uninstaller = Join-Path $installDir "Uninstall LazyMind.exe"
           foreach ($requiredFile in @($app, $uninstaller)) {
             if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
               throw "Installed file is missing: $requiredFile"
             }
+          }
+          $actualData = (Get-ItemProperty -LiteralPath 'HKCU:\Software\LazyMind\DesktopStorage').DataRoot
+          if ([IO.Path]::GetFullPath($actualData) -ne (Join-Path $env:LAZYMIND_TEST_STORAGE_ROOT 'Data')) {
+            throw 'The actual DataRoot does not match the selected storage volume.'
+          }
+          if ((Get-Item -LiteralPath (Join-Path $installDir '.lazymind-installed')).Length -ne 0) {
+            throw 'The installer-managed App flag is missing or invalid.'
+          }
+          if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'lazymind-desktop-updater\installer.exe')) {
+            throw 'An unnecessary full installer was cached on the system volume.'
           }
 
           $uninstallEntries = @()
@@ -632,7 +662,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $metricsPath = Join-Path $env:LOCALAPPDATA "LazyMind\Logs\desktop\startup-metrics-latest.json"
+          $metricsPath = Join-Path $env:LAZYMIND_TEST_STORAGE_ROOT "Data\Logs\desktop\startup-metrics-latest.json"
           if (-not (Test-Path -LiteralPath $metricsPath -PathType Leaf)) {
             throw "Installer warmup metrics are missing: $metricsPath"
           }
@@ -652,14 +682,14 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $app = Join-Path $env:LOCALAPPDATA "Programs\LazyMind\LazyMind.exe"
+          $app = Join-Path $env:LAZYMIND_TEST_STORAGE_ROOT "App\LazyMind.exe"
           # Reproduce shells launched by another Electron application. Without
           # the native launcher this makes the packaged app run as Node and
           # exit before its main process can create logs or a window.
           $env:ELECTRON_RUN_AS_NODE = "1"
           node desktop/scripts/packaged-app-smoke.mjs `
             --app $app `
-            --runtime-root (Join-Path $env:LOCALAPPDATA "LazyMind") `
+            --runtime-root (Join-Path $env:LAZYMIND_TEST_STORAGE_ROOT "Data") `
             --platform win32 `
             --timeout-ms ${{ matrix.smoke_timeout_ms }}
 
@@ -670,7 +700,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $installDir = Join-Path $env:LOCALAPPDATA "Programs\LazyMind"
+          $installDir = Join-Path $env:LAZYMIND_TEST_STORAGE_ROOT "App"
           $app = Join-Path $installDir "LazyMind.exe"
           $uninstaller = Join-Path $installDir "Uninstall LazyMind.exe"
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
@@ -679,6 +709,10 @@ jobs:
           }
           if (Test-Path -LiteralPath $app) {
             throw "LazyMind.exe remains after uninstall: $app"
+          }
+          $retainedData = (Get-ItemProperty -LiteralPath 'HKCU:\Software\LazyMind\DesktopStorage').DataRoot
+          if ($retainedData -ne (Join-Path $env:LAZYMIND_TEST_STORAGE_ROOT 'Data') -or -not (Test-Path -LiteralPath $retainedData)) {
+            throw 'Default uninstall failed to preserve the selected application data.'
           }
 
       - name: Collect installer diagnostics
@@ -689,10 +723,10 @@ jobs:
           $diagnostics = Join-Path $PWD "installer-diagnostics"
           New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
           $roots = @(
-            (Join-Path $env:LOCALAPPDATA "LazyMind"),
-            (Join-Path $env:APPDATA "LazyMind"),
+            (Join-Path $env:LOCALAPPDATA "LazyMind\Logs"),
             (Join-Path $env:TEMP "LazyMind")
           )
+          if ($env:LAZYMIND_TEST_STORAGE_ROOT) { $roots += Join-Path $env:LAZYMIND_TEST_STORAGE_ROOT 'Data\Logs' }
           foreach ($root in $roots) {
             if (-not (Test-Path -LiteralPath $root)) { continue }
             "Diagnostic root: $root"
@@ -700,7 +734,12 @@ jobs:
               Select-Object FullName, Length, LastWriteTime |
               Format-Table -AutoSize
             $safeName = ($root -replace '[:\\/ ]', '_').Trim('_')
-            Copy-Item -LiteralPath $root -Destination (Join-Path $diagnostics $safeName) -Recurse -Force -ErrorAction Continue
+            foreach ($file in @(Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction Continue | Where-Object { $_.Extension -eq '.log' -or $_.Name -like 'startup-metrics*.json' })) {
+              $relative = $file.FullName.Substring($root.Length).TrimStart('\')
+              $destination = Join-Path (Join-Path $diagnostics $safeName) $relative
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+              Copy-Item -LiteralPath $file.FullName -Destination $destination -Force -ErrorAction Continue
+            }
           }
           Get-Process | Where-Object { $_.ProcessName -match 'LazyMind|electron|python|node' } |
             Select-Object ProcessName, Id, Path, StartTime |
@@ -717,6 +756,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Clean installer test volume
+        id: volume_cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:LAZYMIND_TEST_VOLUME_RUN_DIRECTORY) {
+            . (Join-Path $env:GITHUB_WORKSPACE 'installer-volume-workflow/desktop/scripts/windows-installer-image-file.ps1')
+            . (Join-Path $env:GITHUB_WORKSPACE 'installer-volume-workflow/desktop/scripts/windows-installer-volume.ps1')
+            Clear-WindowsInstallerSmokeVolume -RunDirectory $env:LAZYMIND_TEST_VOLUME_RUN_DIRECTORY
+          }
+
       - name: Report installer test result
         if: always()
         shell: pwsh
@@ -727,12 +778,14 @@ jobs:
           REQUIRE_INSTALLER_WARMUP: ${{ matrix.verify_installer_warmup }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
           UNINSTALL_OUTCOME: ${{ steps.uninstall.outcome }}
+          VOLUME_CLEANUP_OUTCOME: ${{ steps.volume_cleanup.outcome }}
         run: |
           $outcomes = [ordered]@{
             install = $env:INSTALL_OUTCOME
             verify = $env:VERIFY_OUTCOME
             smoke = $env:SMOKE_OUTCOME
             uninstall = $env:UNINSTALL_OUTCOME
+            volume_cleanup = $env:VOLUME_CLEANUP_OUTCOME
           }
           if ($env:REQUIRE_INSTALLER_WARMUP -eq "true") {
             $outcomes["installer_warmup"] = $env:INSTALLER_WARMUP_OUTCOME

@@ -195,7 +195,8 @@ func (m *CoreServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 }
 
 func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
-	modelKey, err := modelCredentialKey()
+	paths.authCredentialDatabaseURL = firstNonEmpty(cfg.AuthService.DatabaseURL, paths.authCredentialDatabaseURL)
+	modelKey, err := modelCredentialKeyForPaths(paths)
 	if err != nil {
 		return nil, fmt.Errorf("load model credential key: %w", err)
 	}
@@ -275,6 +276,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
 	}
 	environment = append(environment, pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled)...)
+	environment = append(environment, managedTempEnv(paths)...)
 	return append(environment, feishuCLIRuntimeEnv(paths)...), nil
 }
 
