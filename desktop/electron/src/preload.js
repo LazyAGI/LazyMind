@@ -1,6 +1,11 @@
-function createDesktopBridge(ipcRenderer) {
+function createDesktopBridge(ipcRenderer, webUtils) {
   return {
     platform: process.platform,
+    collectMarkdownImages: (file, references) => {
+      const filename = webUtils?.getPathForFile(file);
+      if (!filename) return Promise.resolve({ images: [], warnings: ['无法确定原始 Markdown 文件位置。'] });
+      return ipcRenderer.invoke('lazymind:collectMarkdownImages', { filename, references });
+    },
     openExternal: (url) => ipcRenderer.invoke("lazymind:openExternal", url),
     ...(process.platform === "darwin" ? {
       recordingNativeStart: () => ipcRenderer.invoke("lazymind:recordingNativeStart"),
@@ -79,8 +84,8 @@ function createDesktopBridge(ipcRenderer) {
   };
 }
 
-function installDesktopBridge(contextBridge, ipcRenderer) {
-  const bridge = createDesktopBridge(ipcRenderer);
+function installDesktopBridge(contextBridge, ipcRenderer, webUtils) {
+  const bridge = createDesktopBridge(ipcRenderer, webUtils);
   contextBridge.exposeInMainWorld("lazymindDesktop", bridge);
   return bridge;
 }
@@ -146,9 +151,9 @@ function restoreNotificationSession(target, ipcRenderer) {
 }
 
 if (process.type === "renderer") {
-  const { contextBridge, ipcRenderer } = require("electron");
+  const { contextBridge, ipcRenderer, webUtils } = require("electron");
   restoreNotificationSession(window, ipcRenderer);
-  const bridge = installDesktopBridge(contextBridge, ipcRenderer);
+  const bridge = installDesktopBridge(contextBridge, ipcRenderer, webUtils);
   installNotificationSessionSync(window, bridge);
 }
 

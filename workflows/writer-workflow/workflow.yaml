@@ -24,12 +24,23 @@ when_to_use: >
   or revise, trigger this workflow before reading or editing that file with generic
   attachment tools. Preserve its exact basename in request_context and let the
   prepare step load it; do not substitute the file contents for its identity.
+  For external-agent launches, bind supplied files through workflow.start inputs.source_files
+  using local_path or resource_id. A path in request_context or workflow.input.import alone
+  does not attach a resource to the run.
   When triggering after clarification or a cloud-file read, request_context must
   likewise preserve every user-supplied source and destination URL verbatim,
   including URLs supplied through ask_user; a content summary never replaces
   its locator.
 
 runtime:
+  trigger_inputs: [source_files]
+  input_contracts:
+    source_files:
+      description: >
+        Uploaded source and reference files, in user order. Bind local Markdown, text, LMD,
+        and supporting attachments through workflow.start inputs.source_files using absolute
+        local_path or immutable resource_id. Markdown image dependencies are collected on import.
+        Optional for writing without attachments or from a cloud document URL.
   execution:
     version: '1'
     model_executor: external-agent
@@ -150,25 +161,25 @@ tool_scripts:
 
 artifact_actions:
   rewrite_selection:
-    slots: [outline_document, flat_draft_document, draft_document]
+    slots: [writing_brief, outline_document, flat_draft_document, draft_document]
     preview_tool: builtin:document.rewrite_selection.v1
     execute_tool: builtin:document.rewrite_selection.v1
   sync_document:
     slots: [draft_document]
     execute_tool: builtin:document.sync_document.v1
   convert_document:
-    slots: [source_document, outline_document, flat_draft_document, draft_document]
+    slots: [source_document, writing_brief, outline_document, flat_draft_document, draft_document]
     preview_tool: builtin:document.convert_document.v1
     execute_tool: builtin:document.convert_document.v1
   write_document:
     slots: [flat_draft_document, draft_document]
     execute_tool: builtin:document.write_document.v1
   render_document:
-    slots: [source_document, outline_document, flat_draft_document, draft_document]
+    slots: [source_document, writing_brief, outline_document, flat_draft_document, draft_document]
     preview_tool: builtin:document.render_document.v1
     execute_tool: builtin:document.render_document.v1
   save_document:
-    slots: [outline_document, flat_draft_document, draft_document]
+    slots: [writing_brief, outline_document, flat_draft_document, draft_document]
     execute_tool: builtin:document.save_document.v1
 
 steps:
@@ -178,16 +189,28 @@ steps:
   - id: write_document
 
 slots:
+  - {id: source_files, label: Source Files, type: file, cardinality: list, external: true, required: false, exposed: false}
   - id: writer_command
     user_visible: false
     label: Writer Command
     type: file
     cardinality: single
   - id: writing_task
-    user_visible: true
+    user_visible: false
     label: Writing Task
     type: file
     cardinality: single
+  - id: writing_brief
+    user_visible: true
+    label: Writing Preparation
+    type: file
+    cardinality: single
+  - id: source_materials
+    user_visible: true
+    label: Source Documents
+    type: file
+    cardinality: list
+    ordered: true
   - id: media_assets
     user_visible: false
     label: Available Media
@@ -327,6 +350,11 @@ ui:
     default: following
   hide_skipped_steps: true
   slots:
+    source_materials:
+      widgetType: writer-document
+      readOnly: true
+    writing_brief:
+      widgetType: writer-document
     outline_document:
       widgetType: writer-document
     draft_document:
@@ -339,7 +367,8 @@ ui:
       label: Preparation
       layout: list
       slots:
-        - id: writing_task
+        - id: writing_brief
+        - id: source_materials
         - id: source_document
 
     - id: outline
@@ -382,6 +411,8 @@ i18n:
       write_flat_document: {label: 短文成稿}
     slots:
       writing_task: {label: 写作任务}
+      writing_brief: {label: 写作准备}
+      source_materials: {label: 资源文档}
       writer_command: {label: 写作控制命令}
       media_assets: {label: 可用图片素材}
       resolved_media_assets: {label: 已解析图片素材}

@@ -9,6 +9,8 @@ import {
   UploadPartResponse,
 } from "@/api/generated/core-client";
 
+import { prepareMarkdownUpload } from './markdownImages';
+
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024;
 
 export interface ChunkUploadProgress {
@@ -37,6 +39,7 @@ export async function uploadFileInChunks(
   } = options;
 
   try {
+    file = await prepareMarkdownUpload(file);
     const initRequest: InitUploadRequest = {
       filename: file.name,
       file_size: file.size,

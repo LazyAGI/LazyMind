@@ -2420,3 +2420,35 @@ it('places the analysis empty state outside the narrow timeline marker column', 
   expect(empty.tagName).toBe('P');
   expect(empty.closest('li')).toBeNull();
 });
+
+
+it.each(['same', 'different', 'no-source', 'other-step'])(
+  'shows Writer resources once while retaining distinct material (%s)', async kind => {
+    fixture.session.workflow_id = 'writer-workflow';
+    fixture.session.current_step_id = 'prepare';
+    fixture.ui.tabs = [{ id: 'prepare', step_id: 'prepare', label: '写作准备', layout: 'list', slots: [
+      { id: 'writing_brief', label: '写作准备', type: 'file', widget: { widgetType: 'writer-document' } },
+      { id: 'source_materials', label: '上传材料', type: 'file', cardinality: 'list', widget: { widgetType: 'writer-document', readOnly: true } },
+      { id: 'source_document', label: '资源文档', type: 'file' },
+    ] }];
+    const document = (hash: string) => ({ representation: 'markdown', schema: 'text/markdown', editable: false,
+      capabilities: [], render_context: { source_hash: hash, code_fences: [], images: [] } });
+    const revision = (id: string, hash: string, index?: number): SlotRevision => ({
+      slot_id: id, slot: id, artifact_id: `${id}-${index ?? -1}`, step_id: 'prepare', revision: 1, selected: true,
+      created_at: '', artifact_value: { path: `/snapshot/${id}-${index ?? -1}.md` }, document: document(hash),
+      ...(index === undefined ? {} : { list_index: index, sort_order: index + 1 }),
+    });
+    const source = revision('source_document', kind === 'different' ? 'different' : 'same');
+    if (kind === 'other-step') source.step_id = 'write_document';
+    fixture.session.slots = [revision('writing_brief', 'brief'), revision('source_materials', 'same', 0),
+      revision('source_materials', 'additional', 1), ...(kind === 'no-source' ? [] : [source])];
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const panel = await screen.findByRole('tabpanel', { name: '写作准备' });
+    const articles = within(panel).getAllByRole('article');
+    expect(articles.filter(item => item.textContent?.includes('source_materials'))).toHaveLength(kind === 'same' ? 1 : 2);
+    expect(articles.filter(item => item.textContent?.includes('source_document'))).toHaveLength(
+      kind === 'no-source' || kind === 'other-step' ? 0 : 1);
+    expect(panel).not.toHaveTextContent('上传材料');
+    expect(panel).toHaveTextContent('资源文档');
+  },
+);

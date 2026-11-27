@@ -217,7 +217,7 @@ def _state_save_workspace_artifacts(context: Any, result: Mapping[str, Any]) -> 
     for key, value in dict(result).items():
         if allowed and key not in allowed:
             continue
-        if key == 'draft_blocks' and isinstance(value, list):
+        if key in {'draft_blocks', 'source_materials'} and isinstance(value, list):
             for path in value:
                 if isinstance(path, str) and Path(path).is_file():
                     entries.append({'key': key, 'value': path, 'content_type': 'file'})
@@ -506,6 +506,55 @@ def writer_create_writing_context(
     )
 
 
+def _save_writing_brief(writing_task_path: str, user_input: str) -> str:
+    """Render the prepared task for readers without changing workflow inputs."""
+    task = _read_json_file(writing_task_path)
+    constraints = task.get('constraints') or {}
+    request, marker, answers_text = user_input.partition('\n\nWorkflow clarification answers:\n')
+    lines = ['# 写作准备', '', '## 用户需求', '', request]
+    if marker:
+        try:
+            answers = json.loads(answers_text)
+        except json.JSONDecodeError:
+            answers = None
+        lines.extend(['', '## 补充需求', ''])
+        if isinstance(answers, dict):
+            labels = {
+                'writing_goal': '写作目标', 'writing_action': '写作动作',
+                'document_structure': '文档结构', 'word_target': '目标篇幅',
+                'visual_policy': '可视化与配图要求', 'output_format': '产物格式',
+            }
+            lines.extend(f'- {labels.get(key, key)}：{value}' for key, value in answers.items()
+                         if value is not None and str(value).strip())
+        else:
+            lines.append(answers_text)
+
+    lines.extend(['', '## 预期字数与范围', ''])
+    length_lines = []
+    for suffix, unit in [('chars', '字'), ('words', '词')]:
+        for prefix, label in [('target', '目标篇幅'), ('min', '篇幅下限'), ('max', '篇幅上限')]:
+            value = constraints.get(f'{prefix}_{suffix}')
+            if value is not None:
+                length_lines.append(f'- {label}：{value} {unit}')
+    lines.extend(length_lines or ['未设置明确的字数约束；以用户需求中的篇幅说明为准。'])
+
+    lines.extend(['', '## 可视化与生图要求', ''])
+    policy = constraints.get('visual_policy') or {}
+    for key, label, enabled, disabled in [
+        ('allow_visuals', '图片及其他可视化', '允许使用', '不使用'),
+        ('require_visuals', '配图要求', '必须配图', '不强制配图'),
+        ('require_input_image_reuse', '已有图片', '必须复用用户提供的图片', '不强制复用'),
+        ('allow_image_generation', 'AI 生图', '允许生成新图片', '禁止生成新图片'),
+    ]:
+        value = policy.get(key)
+        description = enabled if value is True else disabled if value is False else '未单独指定'
+        lines.append(f'- {label}：{description}')
+
+    path = _workspace_root() / 'writing_brief.md'
+    path.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
+    return str(path)
+
+
 def writer_prepare_workspace(
     operation: Literal[
         'create',
@@ -544,11 +593,9 @@ def writer_prepare_workspace(
             'revise_document, or prepare_only.',
         )
     ctx = require_context()
-    files_by_turn = ctx.params.get('history_files_per_turn') or {}
     local_candidates = [
         Path(path)
-        for paths in files_by_turn.values()
-        for path in paths or []
+        for path in _DOCUMENT_EXECUTION.writer_input_files(ctx.params)
         if Path(path).suffix.lower() in _LOCAL_WRITER_DOCUMENT_SUFFIXES
     ]
     source_filename = str(source_filename or '').strip()
@@ -688,7 +735,9 @@ def writer_prepare_workspace(
     result = {
         'writer_command': writer_command,
         'writing_task': writing_task,
+        'writing_brief': _save_writing_brief(writing_task, user_input),
         'media_assets': media_result['media_assets'],
+        'source_materials': media_result.get('source_materials') or [],
         'writing_context': writing_context,
         'representation': representation,
         'structure_mode': command.structure_mode,
@@ -696,6 +745,13 @@ def writer_prepare_workspace(
         'control': {'next_step': command.next_step},
         'warnings': [*provider_warnings, *(media_result.get('warnings') or [])],
     }
+    if result['warnings']:
+        try:
+            brief = Path(result['writing_brief'])
+            with brief.open('a', encoding='utf-8') as stream:
+                stream.write('\n## 材料图片提示\n\n' + '\n'.join('- ' + item for item in result['warnings']) + '\n')
+        except OSError:
+            pass
     if source_document:
         result['source_document'] = source_document
     if target_document:

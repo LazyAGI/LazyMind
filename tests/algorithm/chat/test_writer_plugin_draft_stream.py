@@ -222,7 +222,13 @@ def _stub_prepare_workspace(monkeypatch, tmp_path, *, user_input, history_files_
         }
 
     monkeypatch.setattr(tools, 'writer_load_document', load_document)
-    monkeypatch.setattr(tools, 'writer_build_writing_task', lambda **_kwargs: 'task.json')
+    task_path = tmp_path / 'task.json'
+    from lazymind.document_tools.writing import parse_writer_request_constraints
+
+    task_path.write_text(json.dumps({
+        'query': user_input, 'constraints': parse_writer_request_constraints(user_input),
+    }))
+    monkeypatch.setattr(tools, 'writer_build_writing_task', lambda **_kwargs: str(task_path))
     monkeypatch.setattr(
         tools,
         'writer_collect_available_media',
@@ -765,13 +771,13 @@ def test_rewrite_no_image_request_skips_visual_planning(monkeypatch, tmp_path, r
 
     result = json.loads(
         writer.WriterWritingCapabilities().generate_rewrite_section_instructions(
-        writing_task_json=json.dumps({
-            'task_id': 'task-1',
-            'query': '请重写全文，不要图片',
-            'task_type': 'write',
-        }),
-        source_document_json=source,
-        writing_context_json=json.dumps({'context_id': 'context-1'}),
+            writing_task_json=json.dumps({
+                'task_id': 'task-1',
+                'query': '请重写全文，不要图片',
+                'task_type': 'write',
+            }),
+            source_document_json=source,
+            writing_context_json=json.dumps({'context_id': 'context-1'}),
         )
     )
 
@@ -944,7 +950,7 @@ def test_generated_outline_does_not_run_a_second_completion(monkeypatch):
 @pytest.mark.parametrize('fail', [False, True])
 def test_outline_stream_records_timing_trace_without_changing_preview(monkeypatch, fail):
     from types import SimpleNamespace
-    import lazyllm.tracing as tracing
+    from lazyllm import tracing
     from lazyllm.tools.writer.tools.stream_tools import DraftMarkdownStream
     from lazymind.document_tools.writing import WriterWritingCapabilities
 
@@ -1185,3 +1191,215 @@ def test_quality_adapter_keeps_requirements_without_persisting_context_query(tmp
     saved = json.loads((tmp_path / 'writing_context.json').read_text())['data']
     assert 'query' not in saved
     assert saved['document_summary'] is None
+
+
+@pytest.mark.parametrize(
+    ('user_request', 'expected', 'absent'),
+    [
+        (
+            '写一篇 3000 字左右的克苏鲁小说，配一张图',
+            ['目标篇幅：3000 字', '篇幅上限：3300 字', '必须配图', '允许生成新图片'],
+            ['篇幅下限', '2700'],
+        ),
+        (
+            '写一篇不超过500字的摘要，不要配图，不要生图',
+            ['篇幅上限：500 字', '图片及其他可视化：不使用', 'AI 生图：禁止生成新图片'],
+            ['篇幅下限', '必须配图'],
+        ),
+        (
+            '写一篇文章，必须复用我上传的图片',
+            ['必须复用用户提供的图片', '禁止生成新图片'],
+            ['目标篇幅：', '篇幅上限：', '篇幅下限：'],
+        ),
+        (
+            '写一篇短文',
+            ['未设置明确的字数约束', 'AI 生图：未单独指定'],
+            ['目标篇幅：', '篇幅上限：', '篇幅下限：', '禁止生成新图片'],
+        ),
+    ],
+)
+def test_prepare_publishes_readable_brief_alongside_unchanged_task_json(
+    monkeypatch, tmp_path, user_request, expected, absent,
+):
+    from lazymind.chat.engine.subagent import tools as artifact_tools
+
+    tools, _ = _stub_prepare_workspace(
+        monkeypatch, tmp_path, user_input=user_request, history_files_per_turn={},
+    )
+    context = tools.require_context()
+    context.output_slots = ['writing_task', 'writing_brief']
+    published = []
+
+    def save_artifacts(entries):
+        published.extend(entries)
+        return {'status': 'ok'}
+
+    monkeypatch.setattr(artifact_tools, 'save_artifacts', save_artifacts)
+    monkeypatch.setattr(tools, '_save_draft_workspace_artifacts',
+                        lambda result: tools._state_save_workspace_artifacts(context, result))
+    original_json = (tmp_path / 'task.json').read_bytes()
+    result = tools.writer_prepare_workspace(operation='revise_document')
+
+    assert result['saved_artifact_keys'] == ['writing_task', 'writing_brief']
+    assert {item['key'] for item in published} == {'writing_task', 'writing_brief'}
+    assert all(item['content_type'] == 'file' and Path(item['value']).is_file() for item in published)
+    assert Path(result['writing_task']).read_bytes() == original_json
+    assert Path(result['writing_brief']).suffix == '.md'
+    brief = Path(result['writing_brief']).read_text(encoding='utf-8')
+    assert user_request in brief
+    assert all(value in brief for value in expected)
+    assert all(value not in brief for value in absent)
+
+
+def test_writing_brief_preserves_readable_clarifications_and_explicit_bounds(monkeypatch, tmp_path):
+    request = 'Write a short story.'
+    answers = {'writing_goal': '克苏鲁小说', 'word_target': '3000',
+               'visual_policy': '配一张契合小说内容与氛围的插图'}
+    query = request + '\n\nWorkflow clarification answers:\n' + json.dumps(answers, ensure_ascii=False)
+    tools, _ = _stub_prepare_workspace(
+        monkeypatch, tmp_path, user_input=query, history_files_per_turn={},
+    )
+    task_path = tmp_path / 'task.json'
+    task_path.write_text(json.dumps({'constraints': {'target_chars': 3000, 'min_chars': 2800, 'max_chars': 3200}}))
+
+    result = tools.writer_prepare_workspace(operation='revise_document')
+    brief = Path(result['writing_brief']).read_text(encoding='utf-8')
+
+    assert request in brief
+    assert '写作目标：克苏鲁小说' in brief
+    assert '可视化与配图要求：配一张契合小说内容与氛围的插图' in brief
+    assert '篇幅下限：2800 字' in brief and '篇幅上限：3200 字' in brief
+    assert 'Workflow clarification answers' not in brief
+    assert json.dumps(answers, ensure_ascii=False) not in brief
+
+
+def test_writing_brief_keeps_unparseable_clarification_text(monkeypatch, tmp_path):
+    query = '写一篇短文\n\nWorkflow clarification answers:\n补充：使用中文，配一张图'
+    tools, _ = _stub_prepare_workspace(
+        monkeypatch, tmp_path, user_input=query, history_files_per_turn={},
+    )
+
+    result = tools.writer_prepare_workspace(operation='revise_document')
+
+    assert '补充：使用中文，配一张图' in Path(result['writing_brief']).read_text(encoding='utf-8')
+
+
+@pytest.mark.parametrize('image_available', [True, False])
+def test_prepare_publishes_uploaded_markdown_separately_from_brief_even_when_images_fail(
+    monkeypatch, tmp_path, image_available,
+):
+    import base64
+    import hashlib
+    from lazymind import model_config
+    from lazymind.document_tools import markdown_inputs
+    from lazymind.chat.engine.subagent import tools as artifact_tools
+
+    body = '# Uploaded material\n\n![figure](figure.png)\n'
+    manifest = base64.b64encode(json.dumps({
+        'images': [{'source': 'figure.png', 'resource_id': 'figure'}],
+    }).encode()).decode()
+    document = tmp_path / 'material.md'
+    document.write_text(body + '\n\n<!-- lazymind-markdown-images:v1:' + manifest + ' -->\n')
+    tools, _ = _stub_prepare_workspace(
+        monkeypatch, tmp_path, user_input='根据材料写一篇文章', history_files_per_turn={'1': [str(document)]},
+    )
+    task = tmp_path / 'task.json'
+    task.write_text(json.dumps({'task_type': 'write', 'task_id': 'test', 'query': 'Write from the material'}))
+    monkeypatch.setattr(tools, 'writer_load_local_document', lambda *_: {
+        'source_document': str(document), 'source_uri': str(document),
+    })
+    monkeypatch.setattr(model_config, 'is_model_role_available', lambda _: False)
+    data = base64.b64decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+    )
+
+    def read(identifier, timeout):
+        if not image_available:
+            raise TimeoutError('image unavailable')
+        return {'name': 'figure.png', 'mime_type': 'image/png', 'content_base64': base64.b64encode(data).decode(),
+                'content_hash': 'sha256:' + hashlib.sha256(data).hexdigest()}
+
+    monkeypatch.setattr(markdown_inputs, 'read_image_resource', read)
+    # Restore the real Runtime media adapter; only HTTP and final Core publication are faked.
+    monkeypatch.setattr(tools, 'writer_collect_available_media', lambda **kwargs: tools._DOCUMENT_EXECUTION.invoke(
+        vars(tools), '_writer_collect_available_media', {'analyze_source_images': False, **kwargs}))
+    context = tools.require_context()
+    context.output_slots = ['writing_task', 'writing_brief', 'source_materials', 'media_assets', 'writing_context']
+    published = []
+    monkeypatch.setattr(artifact_tools, 'save_artifacts', lambda entries: published.extend(entries) or {'status': 'ok'})
+    monkeypatch.setattr(tools, '_save_draft_workspace_artifacts',
+                        lambda result: tools._state_save_workspace_artifacts(context, result))
+
+    result = tools.writer_prepare_workspace(operation='revise_document')
+
+    assert result['artifacts_saved'] is True
+    keys = [item['key'] for item in published]
+    assert keys.index('media_assets') < keys.index('source_materials')
+    assert {'writing_brief', 'source_materials', 'media_assets'} <= set(result['saved_artifact_keys'])
+    assert Path(result['source_materials'][0]).read_text() == body
+    assert Path(result['writing_brief']).read_text().startswith('# 写作准备')
+    library = tools._read_json_file(result['media_assets'])
+    assert bool(library['assets']) is image_available
+    assert all(item['content_type'] == 'file' for item in published)
+    if not image_available:
+        assert result['warnings']
+
+
+@pytest.mark.parametrize('filename', ['', 'material.md', '0001_material.md'])
+def test_bound_codex_material_reaches_prepare_and_media_library(monkeypatch, tmp_path, filename):
+    import asyncio
+    import base64
+    from unittest.mock import AsyncMock
+    from lazymind import model_config
+    from lazymind.chat.workflow.remote_executor import RemoteWorkflowExecutor
+    from lazymind.document_tools import execution, markdown_inputs
+    from test_markdown_input_images import image_resource, markdown_file
+
+    body = '# Original\n\n![Image](images/proof.png)\n'
+    original = markdown_file(tmp_path / 'upload', body, {'images/proof.png': 'owned-image'})
+    worker = RemoteWorkflowExecutor()
+    worker.runtime = SimpleNamespace(input=AsyncMock(return_value={'items': [
+        {'name': original.name, 'content_base64': base64.b64encode(original.read_bytes()).decode()},
+    ]}))
+    inputs = asyncio.run(worker._resolve_inputs(None, 'attempt', 'lease', {
+        'inputs': {'source_files': [{'resource_id': 'owned-md', 'revision': 1}]},
+        'declared_input_types': {'source_files': 'file'},
+        'declared_input_transports': {'source_files': 'path'},
+    }, str(tmp_path / 'attempt')))
+    tools, captured = _stub_prepare_workspace(
+        monkeypatch, tmp_path, user_input='基于附件扩写小说，保留原图',
+        history_files_per_turn={'old': ['/unrelated/old.md']})
+    ctx = tools.require_context()
+    ctx.params.update(remote_inputs=inputs, remote_input_transports={'source_files': 'path'})
+    monkeypatch.setattr(model_config, 'is_model_role_available', lambda _: False)
+    resource = image_resource('red')
+    monkeypatch.setattr(markdown_inputs, 'read_image_resource', lambda *_: resource)
+    monkeypatch.setattr(tools, 'writer_collect_available_media', lambda **kwargs: execution.invoke(
+        vars(tools), '_writer_collect_available_media', kwargs))
+    (tmp_path / 'task.json').write_text(json.dumps({
+        'task_id': 'writer', 'task_type': 'write', 'query': '基于附件扩写小说，保留原图',
+    }))
+    result = tools.writer_prepare_workspace(operation='revise_document', source_filename=filename)
+    assert 'provider_load' not in captured
+    assert Path(result['source_document']).read_text().strip() == body.strip()
+    assert Path(result['source_materials'][0]).read_text() == body
+    assert Path(result['writing_brief']).is_file()
+    assets = tools._read_json_file(result['media_assets'])['assets']
+    assert len(assets) == 1
+    copy = Path(next(iter(assets.values()))['local_path'])
+    assert copy.read_bytes() == base64.b64decode(resource['content_base64'])
+    assert copy != original
+    assert not result['warnings']
+
+
+def test_writer_bindings_reject_non_path_transport_and_keep_ambiguous_sources(monkeypatch, tmp_path):
+    from lazymind.document_tools.execution import writer_input_files
+    with pytest.raises(ValueError, match='path transport'):
+        writer_input_files({'remote_inputs': {'source_files': ['/untrusted.md']}})
+    tools = _load_tools_module()
+    paths = [str(tmp_path / f'{index:04d}_material.md') for index in [1, 2]]
+    monkeypatch.setattr(tools, 'require_context', lambda: SimpleNamespace(params={
+        'remote_inputs': {'source_files': paths}, 'remote_input_transports': {'source_files': 'path'},
+    }))
+    with pytest.raises(ValueError, match='Exactly one'):
+        tools.writer_load_local_document('material.md')

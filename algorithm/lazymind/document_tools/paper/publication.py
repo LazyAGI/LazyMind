@@ -10,6 +10,7 @@ import tempfile
 from lazyllm.tools.writer.numbering import build_numbering_view_from_markdown, compute_numbering
 
 from ..artifacts import validate_paper_svg, markdown_prose
+from .source_preparation import is_citable
 
 
 def figure_catalog(charts, media_assets=None):
@@ -186,7 +187,7 @@ def _catalog(papers):
         identifier = paper['id']
         if identifier in result:
             raise ValueError(f'重复 Paper.id: {identifier}')
-        result[identifier] = paper.get('citation')
+        result[identifier] = paper.get('citation') if is_citable(paper) else None
     return result
 
 

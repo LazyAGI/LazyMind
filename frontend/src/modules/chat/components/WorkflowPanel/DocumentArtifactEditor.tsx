@@ -5,7 +5,7 @@ import { ExclamationCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-
 import type { DocumentProvider, DocumentNumberingResult, DocumentConvertResult } from '@/api/generated/core-client';
 import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { WorkflowSessionApi, type RewriteSelectionPreview, type WriterNumberingState, type WriterNumberingUpdate } from '@/modules/chat/utils/request';
-import { resolveCoreAssetUrl, resolveMarkdownImageUrlFromMap } from '@/modules/knowledge/utils/imageUrl';
+import { resolveCoreAssetUrl, resolveMarkdownImageSourceFromMap, resolveMarkdownImageUrlFromMap } from '@/modules/knowledge/utils/imageUrl';
 import { CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH, getCloudDocumentsUrl } from '@/modules/modelProvider/utils/cloudDocumentUrls';
 import i18n from '@/i18n';
 import { normalizePaperHeadingNumbers } from './writerMarkdownAnchors';
@@ -26,6 +26,7 @@ import { WriterProviderIcon } from './DocumentProviderChoice';
 import { pendingImageGroups, keepVerticalImageGroups, imageGroupKey } from './writerImageGroups';
 import type { SlotVersionPopover } from './SlotComponents';
 import { documentImages } from './documentImages';
+import { matchingWriterSourceMaterial } from './writerSourceMaterials';
 import { useDocumentImageDownloads } from './useDocumentImageDownloads';
 
 function unwrap(value: unknown): unknown {
@@ -154,7 +155,14 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const previewSource = useRef<Baseline>();
 
   const writerCheckpoints = !paperDocument && ['draft_document', 'flat_draft_document'].includes(slot.slot_id);
-  const writerSlot = (['source_document', 'outline_document', 'flat_draft_document', 'draft_document'] as const).find(id => id === slot.slot_id);
+  const writerSlot = (['source_document', 'source_materials', 'outline_document', 'flat_draft_document', 'draft_document'] as const).find(id => id === slot.slot_id);
+  const sourceMaterial = useWorkflowStore(state => {
+    const session = Object.values(state.sessionByConversation).find(item => item?.session_id === sessionId);
+    return session?.workflow_id === 'writer-workflow'
+      ? matchingWriterSourceMaterial(slot, session.slots ?? []) : undefined;
+  });
+  const mediaSlot = sourceMaterial ? 'source_materials' : writerSlot;
+  const mediaIndex = sourceMaterial?.list_index ?? slot.list_index;
   const mediaRevision = useWorkflowStore(state => {
     const session = Object.values(state.sessionByConversation).find(item => item?.session_id === sessionId);
     if (session?.workflow_id !== 'writer-workflow') return undefined;
@@ -162,16 +170,23 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       .filter(item => item.selected && ['media_assets', 'resolved_media_assets', 'flat_resolved_media_assets', 'target_document'].includes(item.slot_id))
       .map(item => [item.slot_id, item.artifact_id, item.revision, item.draft_version]));
   });
-  // Core resolves these URLs from the selected media slots, independently of the document draft.
+  // Keep draft previews stable, but never reuse aliases from another source snapshot.
+  const mediaKey = JSON.stringify([editingKey, mediaSlot, mediaIndex,
+    mediaSlot === 'source_materials' ? sourceMaterial?.artifact_id ?? slot.artifact_id : undefined,
+    mediaSlot === 'source_materials' ? sourceMaterial?.revision ?? slot.revision : undefined]);
   const [media, setMedia] = useState<{ key: string; urls?: Record<string, string> }>();
-  const mediaUrls = boundMediaUrls ?? (media?.key === editingKey && mediaRevision !== undefined ? media?.urls : undefined);
+  const mediaUrls = boundMediaUrls ?? (media?.key === mediaKey && mediaRevision !== undefined ? media?.urls : undefined);
   const latestMediaUrls = useRef(mediaUrls);
   latestMediaUrls.current = mediaUrls;
   const resolveImageUrl = useCallback(async (url: string) => {
+    if (mediaSlot === 'source_materials' && !/^https?:|^data:/i.test(url)
+      && resolveMarkdownImageSourceFromMap(url, mediaUrls) === url) {
+      return 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="64"><rect width="100%" height="100%" fill="#f5f5f5"/><text x="16" y="38" fill="#666">图片未导入</text></svg>');
+    }
     const resolved = await resolveMarkdownImageUrlFromMap(url, mediaUrls);
     // MDXEditor does not cancel older preview lookups when its handler changes.
     return latestMediaUrls.current === mediaUrls ? resolved : resolveMarkdownImageUrlFromMap(url, latestMediaUrls.current);
-  }, [mediaUrls]);
+  }, [mediaUrls, mediaSlot]);
   const [previewImage, setPreviewImage] = useState<{ key: string; src: string; alt: string }>();
   const imageDownloads = useDocumentImageDownloads({ scopeKey: editingKey, resolveImage: resolveImageUrl,
     readSource: () => ({ artifactId: latest.current.id, revision: latest.current.revision, draft: latest.current.draft,
@@ -180,16 +195,18 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const imageDownloadsRef = useRef(imageDownloads); imageDownloadsRef.current = imageDownloads;
 
   useEffect(() => {
-    if (descriptor.representation !== 'markdown' || !writerSlot || mediaRevision === undefined || (slot.list_index ?? -1) >= 0) return;
+    if (descriptor.representation !== 'markdown' || !mediaSlot || mediaRevision === undefined || (mediaSlot !== 'source_materials' && (mediaIndex ?? -1) >= 0)) return;
     const controller = new AbortController();
     // Resolve preview resources only; the editable source keeps its original image references.
-    void WorkflowSessionApi().renderWriterDocument(sessionId, writerSlot, {
-      signal: controller.signal, silentError: true,
-    } as never).then(response => {
-      if (!controller.signal.aborted && response.data.code === 0) setMedia({ key: editingKey, urls: response.data.data.media_urls });
+    const options = { signal: controller.signal, silentError: true } as never;
+    const request = mediaSlot === 'source_materials'
+      ? WorkflowSessionApi().renderWriterDocument(sessionId, mediaSlot, options, mediaIndex ?? 0)
+      : WorkflowSessionApi().renderWriterDocument(sessionId, mediaSlot, options);
+    void request.then(response => {
+      if (!controller.signal.aborted && response.data.code === 0) setMedia({ key: mediaKey, urls: response.data.data.media_urls });
     }).catch(() => { /* Keep the current preview if a media refresh fails. */ });
     return () => controller.abort();
-  }, [descriptor.representation, writerSlot, mediaRevision, slot.list_index, sessionId, editingKey]);
+  }, [descriptor.representation, mediaSlot, mediaRevision, mediaIndex, sessionId, mediaKey]);
 
   useEffect(() => { setPublicationUrl(documentPublicationTargetUrl({ uri: slot.write_back_url, doc_id: slot.provider_document_id }, slot.provider)); }, [slot.write_back_url, slot.provider, slot.provider_document_id]);
 

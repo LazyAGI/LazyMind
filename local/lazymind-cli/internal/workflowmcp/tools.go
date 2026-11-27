@@ -141,6 +141,7 @@ func Register(server *mcp.Server, client *Client) {
 			if err != nil {
 				return nil, InputImportResult{}, err
 			}
+			file = client.prepareMarkdownInput(ctx, input.LocalPath, file)
 			value, err := client.ImportInput(ctx, file.Name, file.MIMEType, file.Hash, file.Base64, int64(file.Size))
 			return nil, value, err
 		})

@@ -135,17 +135,31 @@ def _writer_build_writing_task(query: str, representation: str = 'markdown') -> 
     return _save_json_artifact('writing_task', content, writer_schema('task.WritingTask'))
 
 
+def writer_input_files(params: dict) -> list[str]:
+    """Prefer explicitly bound Writer materials over unrelated chat history."""
+    remote = params.get('remote_inputs') or {}
+    if 'source_files' in remote:
+        if (params.get('remote_input_transports') or {}).get('source_files') != 'path':
+            raise ValueError('Writer source_files requires path transport.')
+        paths = remote['source_files']
+        if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+            raise ValueError('Writer source_files requires a list of materialized file paths.')
+        return paths
+    return [path for paths in (params.get('history_files_per_turn') or {}).values() for path in paths or []]
+
+
 def _writer_load_local_document(filename: str = '') -> dict:
     """Load one supplied Markdown, text, or Writer IR file as the working document."""
-    files_by_turn = require_context().params.get('history_files_per_turn') or {}
+    params = require_context().params
+    bound = 'source_files' in (params.get('remote_inputs') or {})
     candidates = [
         Path(path)
-        for paths in files_by_turn.values()
-        for path in paths
+        for index, path in enumerate(writer_input_files(params), start=1)
         if Path(path).suffix.lower() in _LOCAL_WRITER_DOCUMENT_SUFFIXES
+        and (not filename or Path(path).name == filename
+             # Runtime prefixes list inputs to keep duplicate basenames distinct.
+             or bound and Path(path).name == f'{index:04d}_{filename}')
     ]
-    if filename:
-        candidates = [path for path in candidates if path.name == filename]
     if len(candidates) != 1:
         raise ValueError('Exactly one matching Markdown, text, or .lmd source file is required.')
     source = candidates[0]
@@ -153,6 +167,9 @@ def _writer_load_local_document(filename: str = '') -> dict:
         document = _read_json_file(str(source))
         if source.suffix.lower() == '.lmd':
             document = detach_provider_binding(document)
+        elif isinstance(document, str):
+            from .markdown_inputs import unpack_markdown
+            document = unpack_markdown(document)[0]
     except (json.JSONDecodeError, ValueError) as exc:
         if source.suffix.lower() != '.lmd':
             raise
@@ -212,8 +229,7 @@ def _writer_profile_resources(
         input_resources = _read_json_file(profile_input_resources_path)
         file_paths = []
     else:
-        files_by_turn = require_context().params.get('history_files_per_turn') or {}
-        file_paths = [path for paths in files_by_turn.values() for path in paths]
+        file_paths = writer_input_files(require_context().params)
         input_resources = []
     if not file_paths and not input_resources and not source_document_path and not knowledge_text.strip():
         return ''
@@ -224,6 +240,9 @@ def _writer_profile_resources(
         source = Path(source_uri)
         if source_uri in resource_uris and source.suffix.lower() in {'.md', '.markdown', '.txt'}:
             original = source.read_text(encoding='utf-8')
+            if source.suffix.lower() in {'.md', '.markdown'}:
+                from .markdown_inputs import unpack_markdown
+                original = unpack_markdown(original)[0]
             if normalize_writer_document(original) == source_document:
                 # Reuse the loaded attachment's analysis, retaining its ID and full content.
                 source_document = None
@@ -249,15 +268,7 @@ def _writer_collect_available_media(
 ) -> dict:
     """Collect attached and source-document images into the authoritative media library."""
     ctx = require_context()
-    files_by_turn = ctx.params.get('history_files_per_turn') or {}
-    file_paths: list[str] = []
-    seen: set[str] = set()
-    for paths in files_by_turn.values():
-        for path in paths or []:
-            normalized = str(path).strip()
-            if normalized and normalized not in seen:
-                seen.add(normalized)
-                file_paths.append(normalized)
+    file_paths = list(dict.fromkeys(writer_input_files(ctx.params)))
 
     task = _read_json_file(writing_task_path)
     policy = (task.get('constraints') or {}).get('visual_policy') or {}
@@ -299,6 +310,7 @@ def _writer_collect_available_media(
         directory=root,
     )
     return {
+        'source_materials': payload.get('source_materials') or [],
         'media_assets': media_assets_path,
         'profile_input_resources': profile_input_resources_path,
         'warnings': payload.get('warnings') or [],

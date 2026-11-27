@@ -76,6 +76,7 @@ func (c *Client) prepareStartInputs(ctx context.Context, sources map[string][]In
 				if err != nil {
 					return nil, fmt.Errorf("inputs[%q][%d] (%s): %w", material, index, source.LocalPath, err)
 				}
+				file = c.prepareMarkdownInput(ctx, source.LocalPath, file)
 				imported, err := c.ImportInput(ctx, file.Name, file.MIMEType, file.Hash, file.Base64, int64(file.Size))
 				if err != nil {
 					return nil, fmt.Errorf("inputs[%q][%d] (%s): import failed: %w", material, index, file.Name, err)

@@ -72,6 +72,7 @@ import { SlideThumb, type SlideThumbHandle } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import { findWriterArtifactStream, shouldShowArtifactStream } from './writerArtifactStream';
+import { matchingWriterSourceMaterial } from './writerSourceMaterials';
 import { PaperAnalysisProgress } from './PaperAnalysisProgress';
 import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
 import { pptStageRetryKind, workflowTabStatus } from './workflowStepStatus';
@@ -1799,7 +1800,14 @@ function TabSlotGrid({
   </div>;
   const renderSlot = (slotDef: SlotDef) => {
     const artifactKey = slotDef.id;
-    const revisions = getTabSlotRevisions(session, tab, artifactKey);
+    const scopedRevisions = getTabSlotRevisions(session, tab, artifactKey);
+    const sourceDocument = session.workflow_id === 'writer-workflow'
+      ? getTabSlotRevisions(session, tab, 'source_document').find(slot => slot.selected) : undefined;
+    const duplicate = slotDef.id === 'source_materials' && sourceDocument
+      ? matchingWriterSourceMaterial(sourceDocument, scopedRevisions) : undefined;
+    const revisions = duplicate ? scopedRevisions.filter(slot => slot.list_index !== duplicate.list_index) : scopedRevisions;
+    const displayDefinition = session.workflow_id === 'writer-workflow' && slotDef.id === 'source_materials'
+      ? { ...slotDef, label: tab.slots.find(slot => slot.id === 'source_document')?.label ?? slotDef.label } : slotDef;
     const artifactStream = findWriterArtifactStream(
       session,
       getTabStepId(tab),
@@ -1814,7 +1822,7 @@ function TabSlotGrid({
     return (
       <NamedTabSlot
         key={slotDef.id}
-        slotDef={slotDef}
+        slotDef={displayDefinition}
         slotStepId={resolveWorkflowTabStepId(tab, session.steps)}
         hideLabel={session.workflow_id === 'paper_expansion' || visibleSlots.length === 1 && slotDef.widget?.widgetType === 'writer-document'
           && slotDef.widget?.collapsed === undefined && slotDef.label === tab.label}

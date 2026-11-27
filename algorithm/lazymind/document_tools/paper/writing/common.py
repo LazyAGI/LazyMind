@@ -23,6 +23,7 @@ from lazyllm.tools.writer.utils.serialization import (
 )
 
 from .. import contracts
+from ..source_preparation import is_citable
 from ..publication import (
     figure_catalog,
     normalize_source_citations,
@@ -176,7 +177,7 @@ def _reference_candidates(papers):
     candidates = []
     for paper in papers:
         entry = paper.get('citation')
-        if entry is None:
+        if not is_citable(paper):
             continue
         candidates.append({'id': paper['id'], 'citation': entry})
     return candidates

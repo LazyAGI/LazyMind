@@ -571,10 +571,12 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
         context = SimpleNamespace(workspace_path=str(self.root / 'workspace'),
                                   params={'user_input': self.request, 'step_id': 'prepare'})
         self.stack.enter_context(patch.object(tools, 'require_context', return_value=context))
+        task_path = self.root / 'writing_task.json'
+        task_path.write_text(json.dumps({'query': self.request, 'constraints': {}}))
         # Language-model planning and Session persistence are outside this local-file test.
         for name, value in {
             'writer_classify_structure': 'sectioned',
-            'writer_build_writing_task': '',
+            'writer_build_writing_task': str(task_path),
             'writer_collect_available_media': {'media_assets': '', 'profile_input_resources': ''},
             'writer_profile_resources': '',
             'writer_create_writing_context': '',
