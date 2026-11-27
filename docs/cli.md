@@ -666,7 +666,7 @@ tests/test_cli.py
 
 桥接器只监听 `127.0.0.1`，只接受本机 LazyMind 页面来源。Desktop 通过 Electron IPC 和 connector 标准输入同步当前会话，令牌不会进入命令行参数；标准 Docker 网页通过同源回环接口同步。两种入口都会把会话写入 `0600` 凭证文件，并在退出时清除。同步接口拒绝与页面 Origin 不一致的服务地址。Host 遇到被拒绝的 access token 时会刷新令牌，本地 refresh token 失效时会尝试从当前本地 Runtime 重建会话；仍无法恢复时，“助理”页会明确显示 LazyMind 登录失效或本机连接失败，不再无限显示“正在连接”。写入外部 Agent 配置的内容始终只有 connector 绝对路径、`mcp proxy` 参数以及可选的 `LAZYMIND_HOME`，不会把 access token 或 refresh token 写入任何 Agent 配置。
 
-`lazymind assistant start` 会复用协议相同的助理桥接器。确认旧桥接器属于当前环境且未被其他部署使用后，启动命令会等待旧进程正常退出，再启动当前版本随附的桥接器并继续接入。
+`lazymind assistant start` 会复用协议相同的助理桥接器。本机桥接器报告的协议版本不同时，启动命令会通过其生命周期接口请求退出，等待原监听关闭，再启动当前版本随附的桥接器。
 
 直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。Windows 可从 Git Bash 或启用了 Windows 可执行文件互操作的 WSL 执行该入口；两种方式都会生成并启动原生 `lazymind.exe`，不会把 Linux Bridge 路径写入 Windows Agent。已经用裸 compose 启动服务时，可在同一环境补充运行 `make assistant-bridge-start`。
 

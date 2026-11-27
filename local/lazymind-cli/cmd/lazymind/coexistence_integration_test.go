@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -29,15 +30,7 @@ import (
 // The subprocess executes the real CLI/HTTP server, including detached launch,
 // environment routing and shutdown. No Docker or user runtime is required.
 func TestMain(m *testing.M) {
-	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-	if name == desktopDSHInstaller || name == "DeepSeek Harness" {
-		if err := runDesktopDSHFixture(name, os.Args[1:]); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}
-	if name == dshNativeInstallFixture {
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == dshNativeInstallFixture {
 		if err := runDSHNativeInstallFixture(os.Args[1:]); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -58,6 +51,85 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestAssistantStartReplacesLegacyBridge(t *testing.T) {
+	t.Setenv("LAZYMIND_HOME", t.TempDir())
+	t.Setenv("LAZYMIND_COEXISTENCE_TEST_HELPER", "1")
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "desktop")
+	t.Setenv(connectorconfig.EnvironmentKey, "")
+
+	var shutdowns atomic.Int32
+	var legacy *httptest.Server
+	legacy = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/health":
+			fmt.Fprint(w, `{"ok":true,"version":"v9","platform":"legacy","executable":"previous-installation","pid":1}`)
+		case "POST /v1/shutdown":
+			shutdowns.Add(1)
+			fmt.Fprint(w, `{"ok":true}`)
+			time.AfterFunc(150*time.Millisecond, func() { _ = legacy.Listener.Close() })
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(legacy.Close)
+	address := strings.TrimPrefix(legacy.URL, "http://")
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := assistantbridge.Stop(ctx, address); err != nil {
+			t.Error(err)
+		}
+	})
+
+	// Two concurrent callers should replace the old listener once and share
+	// the Bridge started through the normal detached CLI path.
+	type result struct {
+		status map[string]any
+		err    error
+	}
+	results := make(chan result, 2)
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
+	defer cancel()
+	for range 2 {
+		go func() {
+			status, err := assistantbridge.Start(ctx, address)
+			results <- result{status, err}
+		}()
+	}
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("start failed: %v, %v", first.err, second.err)
+	}
+	if first.status["version"] == "v9" || first.status["bridge_url"] != legacy.URL ||
+		second.status["pid"] != first.status["pid"] || shutdowns.Load() != 1 {
+		t.Fatalf("expected one replacement on the same address: %v, %v, %d shutdowns", first.status, second.status, shutdowns.Load())
+	}
+}
+
+func TestAssistantStartLeavesOtherServiceRunning(t *testing.T) {
+	t.Setenv("LAZYMIND_HOME", t.TempDir())
+	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
+	t.Setenv(connectorconfig.EnvironmentKey, "")
+	var mutations atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			mutations.Add(1)
+		}
+		fmt.Fprint(w, `{"ok":true,"version":"v9"}`)
+	}))
+	defer other.Close()
+	address := strings.TrimPrefix(other.URL, "http://")
+	if _, err := assistantbridge.Start(t.Context(), address); err == nil {
+		t.Fatal("startup succeeded on a port occupied by another service")
+	}
+	if _, err := assistantbridge.Health(t.Context(), address); err != nil {
+		t.Fatal(err)
+	}
+	if mutations.Load() != 0 {
+		t.Fatalf("unexpected lifecycle requests: %d", mutations.Load())
+	}
 }
 
 func TestDesktopComposeSharedBridgeLifecycle(t *testing.T) {

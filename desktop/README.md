@@ -192,9 +192,9 @@ uploads and knowledge stores remain independent. Desktop prefers frontend port
 8091, leaving Compose's default 8090 available even when Desktop starts first;
 explicit port settings and Desktop's automatic port fallback remain supported.
 
-The local Assistant Bridge is reused when its protocol and platform are
-compatible. Each deployment keeps its own backend credentials, Agent pairings
-and requests. Existing connector state stays in its original directory; another
+Startup reuses the local Assistant Bridge when it reports the current protocol.
+Each deployment keeps its own backend credentials, Agent pairings and requests.
+Existing connector state stays in its original directory; another
 deployment receives a private context beneath `~/.lazymind/environments/`.
 Signing out of one deployment does not clear the other's login. Business data
 is neither shared nor migrated.
@@ -216,11 +216,9 @@ configuration to release that deployment's host integration.
 
 Unrelated occupied ports are skipped; browser clients discover compatible
 bridges on loopback ports 19091–19100. An explicitly configured bridge URL is
-preserved. Startup reuses a bridge on the current protocol. When the previous
-bridge belongs to this environment and other deployments have no active leases,
-startup waits for it to exit, then launches and verifies the bundled bridge.
-If ownership cannot be verified or another deployment still uses the bridge,
-startup reports the conflict and leaves the running service in place.
+preserved. If the local Bridge reports a different protocol, startup asks it to
+shut down through its lifecycle API, waits for its listener to close, and starts
+the bundled Bridge.
 
 Desktop stages the PPT export scripts into a content-addressed directory under
 the user runtime's `deps/editable-ppt/export-runtime` before linking Node

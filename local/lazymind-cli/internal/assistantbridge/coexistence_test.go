@@ -5,12 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -316,8 +314,6 @@ func TestReleaseDoesNotStopUnmanagedLegacyBridge(t *testing.T) {
 
 func TestReleaseDrainsPreviousScopedBridgeWithoutStoppingOtherClient(t *testing.T) {
 	s, b := sharedTestServer(t)
-	var stopped atomic.Bool
-	s.stop = func() { stopped.Store(true) }
 	t.Setenv("LAZYMIND_HOME", b.root)
 	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
 	t.Setenv(connectorconfig.EnvironmentKey, "")
@@ -342,215 +338,61 @@ func TestReleaseDrainsPreviousScopedBridgeWithoutStoppingOtherClient(t *testing.
 	if err := connectorconfig.WriteBridgeEndpoint(b.root, connectorconfig.BridgeEndpoint{URL: broker.URL, Broker: broker.URL}); err != nil {
 		t.Fatal(err)
 	}
-	if err := releaseForUpgrade(t.Context(), broker.Client(), strings.TrimPrefix(broker.URL, "http://"), b.token,
-		ClientOptions{ID: "desktop", Home: b.root}, b.root); err == nil {
-		t.Fatal("upgrade should preserve a broker still leased by Compose")
-	}
 	if err := ReleaseClient(t.Context(), ClientOptions{ID: "compose"}); err != nil {
 		t.Fatal(err)
 	}
 	b.mu.Lock()
-	_, desktopRemains := b.clients["desktop"]
-	shared := len(b.clients) == 1 && !b.stopping
-	b.mu.Unlock()
-	if !desktopRemains || !shared {
-		t.Fatal("releasing Compose must keep the Desktop client active")
-	}
-	if err := releaseForUpgrade(t.Context(), broker.Client(), strings.TrimPrefix(broker.URL, "http://"), b.token,
-		ClientOptions{ID: "desktop", Home: b.root}, b.root); err != nil {
-		t.Fatalf("release the sole remaining client for upgrade: %v", err)
-	}
-	b.mu.Lock()
 	defer b.mu.Unlock()
-	if len(b.clients) != 0 || !b.stopping {
-		t.Fatal("verified broker with no other clients refused shutdown")
+	if _, ok := b.clients["desktop"]; !ok || len(b.clients) != 1 || b.stopping {
+		t.Fatalf("releasing Compose must keep the Desktop client active: %+v", b.clients)
 	}
 }
 
-func TestStartBridgeOwnership(t *testing.T) {
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, test := range []struct {
-		name     string
-		version  string
-		scoped   bool
-		verified bool
-	}{
-		{name: "verified v9 replaces itself", version: "v9", verified: true},
-		{name: "unverified v8", version: "v8"},
-		{name: "unverified v9", version: "v9"},
-		{name: "unverified scoped v9", version: "v9", scoped: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			root := t.TempDir()
-			t.Setenv("LAZYMIND_HOME", root)
-			t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
-			t.Setenv(connectorconfig.EnvironmentKey, "")
-			if test.verified {
-				checkVerifiedBridgeReplacement(t, self, root)
-				return
-			}
-			status := map[string]any{
-				"ok": true, "pid": os.Getpid(), "version": test.version, "platform": runtime.GOOS, "executable": self,
-			}
-			if test.scoped {
-				status["service"], status["home"], status["isolated"] = bridgeProduct, root, false
-			}
-			var mutations atomic.Int32
-			legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodGet {
-					mutations.Add(1)
+func TestUpgradeReleasesPreviousBrokerRegistrations(t *testing.T) {
+	for name, clients := range map[string][]string{"empty": nil, "previous-clients": {"manual:previous", "desktop:previous"}} {
+		t.Run(name, func(t *testing.T) {
+			s, b := sharedTestServer(t)
+			for _, id := range clients {
+				w := lifecycleRequest(s, b, "acquire", ClientOptions{ID: id, Home: b.root})
+				if w.Code != http.StatusOK {
+					t.Fatal(w.Body.String())
 				}
-				writeJSON(w, 200, status)
+			}
+			status := map[string]any{"ok": true, "service": bridgeProduct, "version": "v123", "home": b.root, "isolated": false}
+			routes := s.routes()
+			broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/health" {
+					writeJSON(w, http.StatusOK, status)
+					return
+				}
+				routes.ServeHTTP(w, r)
 			}))
-			defer legacy.Close()
-			address := strings.TrimPrefix(legacy.URL, "http://")
-			_, err := Start(context.Background(), address)
-			if err == nil || !strings.Contains(err.Error(), "cannot verify ownership for this environment") {
-				t.Fatalf("expected ownership error, got %v", err)
-			}
-			if mutations.Load() != 0 {
-				t.Fatal("modified existing legacy bridge")
-			}
-			if _, err := Health(context.Background(), address); err != nil {
+			t.Cleanup(broker.Close)
+			s.stop = func() { _ = broker.Listener.Close() }
+			address := strings.TrimPrefix(broker.URL, "http://")
+			client := ClientOptions{ID: "local:current", Home: b.root}
+			if err := replaceBridge(t.Context(), address, status, b.token, client, b.root); err != nil {
 				t.Fatal(err)
 			}
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if len(b.clients) != 0 || !b.stopping {
+				t.Fatalf("previous broker still has clients: %v", b.clients)
+			}
 		})
 	}
 }
 
-const bridgeStartupTestProcess = "LAZYMIND_TEST_ASSISTANT_BRIDGE_PROCESS"
-
-func TestMain(m *testing.M) {
-	mode := os.Getenv(bridgeStartupTestProcess)
-	if mode != "" && len(os.Args) == 5 && os.Args[1] == "assistant" && os.Args[2] == "serve" && os.Args[3] == "--listen" {
-		if err := serveBridgeStartupTest(mode, os.Args[4]); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}
-	os.Exit(m.Run())
-}
-
-func serveBridgeStartupTest(mode, address string) error {
-	if mode == "legacy" {
-		executable, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		// Reproduce the old protocol only. OS process identity, logfile ownership,
-		// the HTTP round trip and process exit are real in this test.
-		mux := http.NewServeMux()
-		server := &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: time.Second}
-		stopped := make(chan struct{})
-		mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"ok": true, "pid": os.Getpid(), "version": "v9", "platform": runtime.GOOS, "executable": executable,
-			})
-		})
-		mux.HandleFunc("POST /v1/shutdown", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-			go func() {
-				defer close(stopped)
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				defer cancel()
-				_ = server.Shutdown(ctx)
-			}()
-		})
-		err = server.ListenAndServe()
-		if errors.Is(err, http.ErrServerClosed) {
-			<-stopped
-			return nil
-		}
-		return err
-	}
-	home := os.Getenv("LAZYMIND_HOME")
-	store, err := credentials.NewStore(home, "")
-	if err != nil {
-		return err
-	}
-	mcp, err := mcpbridge.New(store)
-	if err != nil {
-		return err
-	}
-	policy, err := executorpolicy.New(home)
-	if err != nil {
-		return err
-	}
-	server, err := New(address, mcp, store, policy)
-	if err != nil {
-		return err
-	}
-	return server.Serve(context.Background())
-}
-
-func checkVerifiedBridgeReplacement(t *testing.T, self, root string) {
-	t.Helper()
-	switch runtime.GOOS {
-	case "darwin", "linux", "windows":
-	default:
-		t.Skip("legacy process verification requires macOS, Linux or Windows")
-	}
-	t.Setenv(bridgeStartupTestProcess, "current")
-	t.Setenv("LAZYMIND_DESKTOP_OWNER_PID", "")
-	t.Setenv("LAZYMIND_BRIDGE_ISOLATED", "")
-	t.Setenv("LAZYMIND_HOST_HOME", root)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	_ = listener.Close()
-	logPath := filepath.Join(root, "logs", "assistant-bridge.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
-		t.Fatal(err)
-	}
-	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy := exec.Command(self, "assistant", "serve", "--listen", address)
-	legacy.Env = append(os.Environ(), bridgeStartupTestProcess+"=legacy")
-	legacy.Stdout, legacy.Stderr = log, log
-	err = legacy.Start()
-	_ = log.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- legacy.Wait(); close(done) }()
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		defer cancel()
-		_ = ReleaseClient(ctx, ClientOptions{})
-		_ = legacy.Process.Kill()
-		<-done
-	})
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+func TestUpgradeRequiresListenerExit(t *testing.T) {
+	status := map[string]any{"ok": true, "version": "v8", "platform": "darwin", "executable": "/old/lazymind"}
+	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, status)
+	}))
+	defer legacy.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	for {
-		if status, err := Health(ctx, address); err == nil && status["pid"] == float64(legacy.Process.Pid) {
-			break
-		}
-		select {
-		case err := <-done:
-			t.Fatalf("legacy test Bridge exited during startup: %v", err)
-		case <-ctx.Done():
-			t.Fatal("legacy test Bridge never became healthy")
-		case <-time.After(25 * time.Millisecond):
-		}
-	}
-	status, err := Start(ctx, address)
-	if err != nil {
-		t.Fatalf("replace verified v9: %v", err)
-	}
-	if !compatibleBridge(status, root, false) || status["pid"] == float64(legacy.Process.Pid) {
-		t.Fatalf("start did not launch a compatible replacement: %v", status)
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("verified v9 did not shut down gracefully: %v", err)
+	address := strings.TrimPrefix(legacy.URL, "http://")
+	if err := replaceBridge(ctx, address, status, "", ClientOptions{}, ""); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected timeout for listener that did not exit, got %v", err)
 	}
 }

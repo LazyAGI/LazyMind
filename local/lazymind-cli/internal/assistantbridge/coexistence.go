@@ -283,15 +283,10 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 			candidates = append(candidates, "127.0.0.1:"+strconv.Itoa(port))
 		}
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
 	seen := map[string]bool{}
 	var available []string
 	var selected string
 	var status map[string]any
-	launch := false
 	for _, candidate := range candidates {
 		if seen[candidate] {
 			continue
@@ -302,24 +297,17 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 			available = append(available, candidate)
 			continue
 		}
-		if compatibleBridge(current, root, false) {
-			selected, status = candidate, current
-			break
-		}
-		// Before scoping, a daemon could only be associated with an explicit
-		// address. Do not make unrelated legacy listeners in the fallback
-		// range block a caller that has no relationship with them.
-		if legacyBridge(current) && candidate != address && candidate != recordedAddress {
+		version := reportedBrokerProtocol(current, root)
+		if version == "" || (current["service"] != bridgeProduct && candidate != address && candidate != recordedAddress) {
 			continue
 		}
-		replace, err := replaceBridge(ctx, candidate, current, self, root, token, client)
-		if err != nil {
+		selected = candidate
+		if version == bridgeProtocol {
+			status = current
+		} else if err := replaceBridge(ctx, candidate, current, token, client, root); err != nil {
 			return nil, err
 		}
-		if replace {
-			selected, launch = candidate, true
-			break
-		}
+		break
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -329,19 +317,23 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 			listener, err := net.Listen("tcp", candidate)
 			if err == nil {
 				_ = listener.Close()
-				selected, launch = candidate, true
+				selected = candidate
 				break
 			}
 		}
 	}
 	if selected == "" {
-		return nil, errors.New("Assistant Bridge unavailable: no usable loopback address or verified Assistant Bridge for this environment")
+		return nil, errors.New("Assistant Bridge unavailable: no usable loopback address")
 	}
 	// Provision the current distribution before the deployment uses it.
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
 	if err := workflowconnector.Provision(ctx, client.Home, self, true); err != nil {
 		log.Printf("Workflow Connector package: %v", err)
 	}
-	if launch {
+	if status == nil {
 		executable, err := stageBridgeExecutable(root)
 		if err != nil {
 			return nil, err
@@ -370,7 +362,7 @@ func StartWithClient(ctx context.Context, address string, options ClientOptions)
 }
 
 func manageBridge(ctx context.Context, address, token, action string, client ClientOptions, output any) error {
-	return manageBridgeHTTP(ctx, &http.Client{Timeout: 15 * time.Second}, address, token, action, client, output)
+	return manageBridgeHTTP(ctx, &bridgeHTTPClient, address, token, action, client, output)
 }
 
 func manageBridgeHTTP(ctx context.Context, httpClient *http.Client, address, token, action string, client ClientOptions, output any) error {
@@ -387,14 +379,10 @@ func manageBridgeHTTP(ctx context.Context, httpClient *http.Client, address, tok
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("Assistant Bridge %s failed: %s", action, strings.TrimSpace(string(body)))
+		return fmt.Errorf("Assistant Bridge %s failed (HTTP %d): %s", action, response.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if output != nil {
-		body, err := io.ReadAll(io.LimitReader(response.Body, 8192))
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(body, output)
+		return decodeBridgeResponse(response.Body, output)
 	}
 	_, err = io.Copy(io.Discard, io.LimitReader(response.Body, 8192))
 	return err

@@ -95,8 +95,17 @@ func Stop(ctx context.Context, address string) error {
 	return ReleaseClient(ctx, ClientOptions{})
 }
 
+var bridgeHTTPClient = http.Client{
+	// Probe the listener on a fresh connection after a restart.
+	Transport: &http.Transport{DisableKeepAlives: true},
+	Timeout:   15 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 func Health(ctx context.Context, address string) (map[string]any, error) {
-	return bridgeHealth(ctx, http.DefaultClient, address)
+	return bridgeHealth(ctx, &bridgeHTTPClient, address)
 }
 
 func bridgeHealth(ctx context.Context, client *http.Client, address string) (map[string]any, error) {
@@ -115,11 +124,7 @@ func bridgeHealth(ctx context.Context, client *http.Client, address string) (map
 		return nil, fmt.Errorf("Assistant Bridge health returned HTTP %d", response.StatusCode)
 	}
 	var status map[string]any
-	body, err := io.ReadAll(io.LimitReader(response.Body, 8192))
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(body, &status); err != nil {
+	if err := decodeBridgeResponse(response.Body, &status); err != nil {
 		return nil, err
 	}
 	if status == nil {
@@ -127,6 +132,18 @@ func bridgeHealth(ctx context.Context, client *http.Client, address string) (map
 	}
 	status["running"] = true
 	return status, nil
+}
+
+func decodeBridgeResponse(reader io.Reader, output any) error {
+	const maxResponseSize = 8192
+	body, err := io.ReadAll(io.LimitReader(reader, maxResponseSize+1))
+	if err != nil {
+		return err
+	}
+	if len(body) > maxResponseSize {
+		return errors.New("Assistant Bridge response exceeds size limit")
+	}
+	return json.Unmarshal(body, output)
 }
 
 func (s *Server) Serve(ctx context.Context) error {
