@@ -29,21 +29,26 @@ afterEach(async () => {
 });
 
 describe("external execution identity", () => {
-  it.each([false, true])("shows the executor model rather than the configured chat model (multiple answers: %s)", (multiple) => {
+  it.each([
+    { provider: "codex", name: "Codex", multiple: false },
+    { provider: "codex", name: "Codex", multiple: true },
+    { provider: "deepseek-harness", name: "DeepSeek Harness", multiple: false },
+    { provider: "deepseek-harness", name: "DeepSeek Harness", multiple: true },
+  ])("shows the $name executor and its reported model (multiple answers: $multiple)", ({ provider, name, multiple }) => {
     const item = {
       role: "assistant", delta: "answer",
       model_route: { mode: "fixed", provider_name: "OpenAI", model_name: "qwen38-27b", reason: "fixed" },
-      execution: { provider: "codex", status: "running", run_id: "external-run", history_id: "external-history",
+      execution: { provider, status: "running", run_id: "external-run", history_id: "external-history",
         workflows: [], invocation: { total: 0, tools: [] }, recovery_count: 0 },
       ...(multiple ? { answers: [{ content: "first" }, { content: "second" }] } : {}),
     };
     const props = { index: 0, length: 1, sendMessage: vi.fn(), regenerate: vi.fn(),
       stopGeneration: vi.fn(), renderText: () => null, updateMessage: vi.fn() };
     const { rerender } = render(<AssistantMessage {...props} item={item} />);
-    expect(screen.getByText("Codex")).toBeVisible();
+    expect(screen.getByText(name)).toBeVisible();
     expect(screen.queryByText(/qwen38-27b/)).not.toBeInTheDocument();
-    rerender(<AssistantMessage {...props} item={{ ...item, execution: { ...item.execution, status: "completed", model: "actual-codex-model" } }} />);
-    expect(screen.getByText("Codex · actual-codex-model")).toBeVisible();
+    rerender(<AssistantMessage {...props} item={{ ...item, execution: { ...item.execution, status: "completed", model: "reported-model" } }} />);
+    expect(screen.getByText(`${name} · reported-model`)).toBeVisible();
     expect(screen.getByText("chat.executionStatus.completed")).toBeVisible();
     expect(screen.queryByText("chat.executionStatus.running")).not.toBeInTheDocument();
     expect(screen.queryByText(/qwen38-27b/)).not.toBeInTheDocument();
@@ -645,6 +650,10 @@ describe("AssistantMessage cancellation", () => {
 describe("externalProviderDisplayName", () => {
   it("presents the provider ID as WorkBuddy", () => {
     expect(externalProviderDisplayName("workbuddy")).toBe("WorkBuddy");
+  });
+
+  it("preserves the fallback for an unknown provider", () => {
+    expect(externalProviderDisplayName("custom-agent")).toBe("Custom-agent");
   });
 });
 

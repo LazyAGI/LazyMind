@@ -272,7 +272,7 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
   useEffect(() => { void fetch(page); }, [fetch, page]);
 
   const handleOpenConversation = (conversationId: string) => {
-    selectChatConversationFilter('task');
+    selectChatConversationFilter('task', { remember: false });
     navigate(getChatConversationPath(conversationId));
   };
 

@@ -1,0 +1,1 @@
+ALTER TABLE plugin_slot_revisions DROP COLUMN restored_from_revision;

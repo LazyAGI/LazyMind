@@ -190,3 +190,26 @@ it('places external results beside request and snapshot tasks, without changing 
   await screen.findByRole('button', { name: '确认测试审核' });
   expect(screen.queryByRole('tab', { name: '子任务' })).not.toBeInTheDocument();
 });
+
+it('keeps an external conversation visible before the first snapshot, on failure, and after recovery', async () => {
+  const baseline = await fixture.load();
+  baseline.session.steps = [{ id: 'one', step_id: 'write', status: 'running' }];
+  let fail!: (error: Error) => void;
+  fixture.load.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }))
+    .mockResolvedValue(baseline);
+  render(<WorkflowRunPage resultsOnly title='Fallback request' conversationContent={<p>DSH second turn</p>} />);
+  const originalTurn = screen.getByText('DSH second turn');
+  expect(originalTurn).toBeVisible();
+  expect(screen.getByRole('tab', { name: '子任务' })).toHaveAttribute('aria-disabled', 'true');
+  await act(async () => fail(new Error('snapshot unavailable')));
+  expect(await screen.findByText('snapshot unavailable')).toBeVisible();
+  expect(originalTurn).toBeVisible();
+  act(() => fixture.reload());
+  await screen.findByRole('button', { name: '确认测试审核' });
+  expect(screen.getByText('DSH second turn')).toBe(originalTurn);
+  expect(screen.queryByText('Fallback request')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: '子任务' }));
+  expect(await screen.findByText('write: running')).toBeVisible();
+  fireEvent.click(screen.getByRole('tab', { name: '对话' }));
+  expect(originalTurn).toBeVisible();
+});

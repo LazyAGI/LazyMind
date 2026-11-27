@@ -56,6 +56,13 @@ func invocationMiddleware(
 					clientName = "unknown-mcp-client"
 				}
 			}
+			var pairedSource *coreapi.InvocationSource
+			if sourceProvider == "deepseek-harness" {
+				pairedSource, err = dshInvocationSource(recorder, call.Params.Name, &call.Params.Arguments)
+				if err != nil {
+					return nil, err
+				}
+			}
 			requestHash, requestSummary := summarizeArguments(call.Params.Arguments)
 			start := coreapi.InvocationStart{
 				ClientName: clientName, ClientVersion: clientVersion,
@@ -66,10 +73,14 @@ func invocationMiddleware(
 			}
 			if strings.TrimSpace(os.Getenv("LAZYMIND_CONVERSATION_ID")) == "" &&
 				strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF")) == "" {
-				start.Source = invocationSource(
-					sourceProvider, call.Params.Meta, call.Params.Name,
-					call.Params.Arguments,
-				)
+				if sourceProvider == "deepseek-harness" {
+					start.Source = pairedSource
+				} else {
+					start.Source = invocationSource(
+						sourceProvider, call.Params.Meta, call.Params.Name,
+						call.Params.Arguments,
+					)
+				}
 			}
 			started, err := recorder.StartInvocation(ctx, invocationID, start)
 			if err != nil {

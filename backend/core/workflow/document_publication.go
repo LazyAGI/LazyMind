@@ -544,12 +544,31 @@ func FinalizeDocumentPublication(ctx context.Context, db *gorm.DB, owner, id str
 			result = &orm.WorkflowSlotRevision{ID: op.SourceRevisionID}
 			return nil
 		}
-		current, content, _, _, err := publicationSource(ctx, tx, publicationInput(op), op.SourceRevisionID)
-		if err != nil {
-			return err
+		var current orm.WorkflowSlotRevision
+		var markSource bool
+		// Single-target Writer clients also publish immutable checkpoints. Keep the
+		// receipt bound to the submitted content even if a newer version is selected.
+		if op.Provider == "feishu" && isWriterFinalSlot(op.SlotID) && op.ItemIndex == -1 && len(op.CandidateValue) == 0 {
+			var session orm.WorkflowSession
+			if err := tx.Select("plugin_id").First(&session, "id = ?", op.SessionID).Error; err != nil {
+				return err
+			}
+			if session.WorkflowID == "writer-workflow" {
+				if err := tx.First(&current, "id = ? AND session_id = ?", op.SourceRevisionID, op.SessionID).Error; err != nil {
+					return err
+				}
+				markSource = current.ChangeSource != "human"
+			}
 		}
-		if publicationHash(content.Schema, content.Value) != op.SourceHash {
-			return ErrDraftVersionConflict
+		if !markSource {
+			var content *document.Content
+			current, content, _, _, err = publicationSource(ctx, tx, publicationInput(op), op.SourceRevisionID)
+			if err != nil {
+				return err
+			}
+			if publicationHash(content.Schema, content.Value) != op.SourceHash {
+				return ErrDraftVersionConflict
+			}
 		}
 		var receipt DocumentPublicationReceipt
 		if json.Unmarshal(op.ReceiptJSON, &receipt) != nil || len(receipt.Value) == 0 {
@@ -560,7 +579,7 @@ func FinalizeDocumentPublication(ctx context.Context, db *gorm.DB, owner, id str
 			cardinality = "list"
 		}
 		revision := &current
-		if !receipt.NoLocalChange {
+		if !receipt.NoLocalChange && !markSource {
 			revision, err = WriteSlotRevisionWithHumanArtifact(ctx, tx, op.SessionID, op.SlotID, current.Slot, current.StepID, current.Attempt, cardinality, publicationPointer(op.ItemIndex), receipt.ContentType, receipt.Value, nil, "provider_sync", &op.SourceRevision, publicationInput(op).BaseDraftVersion)
 			if err != nil {
 				return err

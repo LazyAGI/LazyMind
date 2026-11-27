@@ -13,10 +13,11 @@
 }
 
 .writer-image-group-controls {
-  position: absolute;
-  right: 0;
-  top: 0;
+  position: relative;
   display: flex;
+  justify-content: flex-end;
+  padding-bottom: 4px;
+  pointer-events: none;
   gap: 6px;
   opacity: 0;
   transition: opacity 0.15s;
@@ -24,6 +25,7 @@
 
 .writer-image-group:hover .writer-image-group-controls,
 .writer-image-group:focus-within .writer-image-group-controls {
+  pointer-events: auto;
   opacity: 1;
 }
 
@@ -80,6 +82,18 @@
   width: max-content;
   max-width: 100%;
   margin: 0;
+}
+
+.writer-image-group[data-layout='sliding'] [data-editor-block-type='image']:has(.writer-markdown-editor__image-toolbar) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  > .writer-markdown-editor__image-toolbar {
+    position: static;
+    order: -1;
+    align-self: flex-end;
+  }
 }
 
 .writer-image-group[data-layout='sliding'] .writer-ir__image {
@@ -165,4 +179,22 @@
 .writer-image-drag-indicator[data-position='child'] {
   border: 2px solid #3370ff;
   background: #3370ff0f;
+}
+
+.writer-image-drag-indicator[data-label]:not([data-label=''])::after {
+  content: attr(data-label);
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #245acf;
+  color: white;
+  font: 12px/1.5 sans-serif;
+  white-space: nowrap;
+}
+
+.writer-image-drag-indicator[data-position='merge-after']::after {
+  left: auto;
+  right: 4px;
 }

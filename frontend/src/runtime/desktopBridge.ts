@@ -141,7 +141,7 @@ export interface DesktopAgentIntegrationStatus {
 
 export type DesktopAgentIntegrationAction = "connect" | "disconnect" | "login";
 
-export type DesktopExecutorProvider = "codex" | "cursor" | "workbuddy";
+export type DesktopExecutorProvider = "codex" | "cursor" | "workbuddy" | "deepseek-harness";
 export type DesktopExecutorPolicyAction = "enable" | "disable";
 export type DesktopAgentBindingTarget =
   | "codex-cli"

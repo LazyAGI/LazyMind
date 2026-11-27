@@ -1,5 +1,6 @@
 import { externalLinkProps } from '@/runtime/externalNavigation';
 import { useSettingsDraft } from "@/modules/settings/SettingsNavigationGuard";
+import { executorUnavailableReason, notifyChatExecutorsChanged } from "@/modules/chat/hooks/useChatExecutors";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Alert, Button, Card, Input, Modal, Popover, Space, Spin, Switch, Tag, Tooltip, Typography, message } from "antd";
 import {
@@ -48,55 +49,7 @@ import { dshErrorMessage } from "./dshConnection";
 import { agentConnectionReady, agentConnectionStatusKey } from "./agentConnection";
 import { codexErrorMessage } from "./codexErrors";
 import { workbuddyErrorMessage } from "./workbuddyErrors";
-
-interface AgentDefinition {
-  id: DesktopAgent;
-  name: string;
-  icon: string;
-  installURL: string;
-  executorInstallURL?: string;
-  executorName?: string;
-  executorLoginMode?: "automatic" | "interactive";
-  executorLoginURL?: string;
-  mcpBindingTarget?: DesktopAgentBindingTarget;
-  executorBindingTarget?: DesktopAgentBindingTarget;
-}
-
-const AGENTS: AgentDefinition[] = [
-  {
-    id: "codex", name: "Codex", icon: "/assistant-icons/codex.png",
-    installURL: "https://learn.chatgpt.com/docs/app",
-    executorName: "Codex CLI", executorLoginMode: "automatic",
-    mcpBindingTarget: "codex-desktop", executorBindingTarget: "codex-cli",
-  },
-  {
-    id: "cursor", name: "Cursor", icon: "/assistant-icons/cursor.png",
-    installURL: "https://cursor.com/downloads",
-    executorInstallURL: "https://cursor.com/docs/cli/installation",
-    executorName: "Cursor Agent CLI", executorLoginMode: "automatic",
-    mcpBindingTarget: "cursor-desktop", executorBindingTarget: "cursor-cli",
-  },
-  {
-    id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.svg",
-    installURL: "https://www.workbuddy.cn",
-    executorName: "WorkBuddy CLI", executorLoginMode: "automatic",
-    mcpBindingTarget: "workbuddy-desktop",
-  },
-  {
-    id: "raccoon", name: "Raccoon", icon: "/assistant-icons/raccoon.svg",
-    installURL: "https://office.xiaohuanxiong.com/download",
-    mcpBindingTarget: "raccoon-desktop",
-  },
-  {
-    id: "traework", name: "TRAE Work", icon: "/assistant-icons/traework.png",
-    installURL: "https://www.trae.ai",
-    mcpBindingTarget: "traework-desktop",
-  },
-  {
-    id: "deepseek-harness", name: "DeepSeek Harness", icon: "/assistant-icons/deepseek.png",
-    installURL: "https://github.com/deepseek-ai/deepseek-harness",
-  },
-];
+import { AGENTS, type AgentDefinition } from "./catalog";
 
 const EXECUTOR_SYNC_ATTEMPTS = 6;
 const EXECUTOR_SYNC_DELAY_MS = 500;
@@ -125,15 +78,21 @@ async function retryBridgeResult<T extends { ok: boolean; reason?: string }>(cal
 }
 
 function executorRuntimeState(
-  status?: ChatExecutorDescriptor,
-  policy?: DesktopExecutorPolicy,
+  agent: AgentDefinition,
+  status: ChatExecutorDescriptor | undefined,
+  policy: DesktopExecutorPolicy | undefined,
+  mcpStatus: DesktopAgentIntegrationStatus | undefined,
 ) {
   const enabled = policy?.enabled ?? false;
-  const installed = policy?.installed ?? Boolean(status?.installed);
-  const ready = policy?.ready ?? Boolean(status?.available);
   const hostOnline = Boolean(status?.host_online);
   const hostInstalled = Boolean(status?.installed);
   const hostAvailable = Boolean(status?.available);
+  const dshExecutor = agent.id === "deepseek-harness";
+  const installed = dshExecutor ? hostInstalled : policy?.installed ?? hostInstalled;
+  const ready = dshExecutor
+    ? Boolean(policy && agentConnectionReady(mcpStatus) && (hostAvailable ||
+      status?.unavailable_reason_code === "not_activated" || status?.unavailable_reason === "Disabled in LazyMind settings"))
+    : policy?.ready ?? hostAvailable;
   const hostSynchronized = hostOnline && hostInstalled && (!enabled || hostAvailable);
   return {
     enabled, installed, ready, hostOnline, hostSynchronized,
@@ -141,13 +100,21 @@ function executorRuntimeState(
   };
 }
 
-export default function AgentIntegrationPage() {
+export default function AgentIntegrationPage({ agentId }: { agentId?: string | null }) {
   const { t } = useTranslation();
+  const targetAgent = AGENTS.find((agent) => agent.id === agentId)?.id;
   const [statuses, setStatuses] = useState<StatusMap>({});
   const [executors, setExecutors] = useState<ChatExecutorDescriptor[]>([]);
   const [executorPolicies, setExecutorPolicies] = useState<ExecutorPolicyMap>({});
   const [bindings, setBindings] = useState<BindingMap>({});
-  const [expandedAgents, setExpandedAgents] = useState<Set<DesktopAgent>>(() => new Set(["codex"]));
+  const [expandedAgents, setExpandedAgents] = useState<Set<DesktopAgent>>(() => new Set([targetAgent ?? "codex"]));
+  useEffect(() => {
+    if (!targetAgent) return;
+    setExpandedAgents((current) => current.has(targetAgent) ? current : new Set([...current, targetAgent]));
+    const toggle = document.getElementById(`agent-integration-toggle-${targetAgent}`);
+    toggle?.focus({ preventScroll: true });
+    toggle?.scrollIntoView?.({ block: "nearest" });
+  }, [targetAgent]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [action, setAction] = useState("");
@@ -209,7 +176,10 @@ export default function AgentIntegrationPage() {
           currentPolicies = policyResult.data;
           setExecutorPolicies(policyResult.data);
         }
-        else recordBridgeFailure(policyResult.reason);
+        else {
+          setExecutorPolicies({});
+          recordBridgeFailure(policyResult.reason);
+        }
 
         if (bindingResult.ok) setBindings(bindingResult.data);
         else recordBridgeFailure(bindingResult.reason);
@@ -234,6 +204,8 @@ export default function AgentIntegrationPage() {
             }
           }
         } catch (executorError) {
+          if (!isCurrent()) return;
+          setExecutors([]);
           nextError = executorError instanceof Error ? executorError.message : String(executorError);
         }
       } finally {
@@ -267,23 +239,32 @@ export default function AgentIntegrationPage() {
   useEffect(() => {
     let stopped = false;
     let inFlight = false;
+    let policyRefreshPending = false;
     const markUnavailable = () => setStatuses(unavailableInspections);
     const check = async () => {
       if (stopped || inFlight || document.visibilityState !== "visible" || pendingAgentActions.current.size || refreshInFlight.current) return;
       inFlight = true;
       const version = refreshVersion.current;
+      const recheckPolicy = policyRefreshPending;
+      policyRefreshPending = false;
       try {
-        const result = await agentIntegrationStatuses();
-        if (!stopped && version === refreshVersion.current && !pendingAgentActions.current.size) {
-          if (result.ok) setStatuses(result.data); else markUnavailable();
-        }
-      } catch {
-        if (!stopped && version === refreshVersion.current && !pendingAgentActions.current.size) markUnavailable();
-      }
-      finally { inFlight = false; }
+        // The plugin reports execution readiness to Core separately from its local MCP connection.
+        const [result, hosts, policies] = await Promise.all([
+          agentIntegrationStatuses().catch(() => undefined),
+          ConversationSettingsApi().listChatExecutors({ silentError: true }).catch(() => undefined),
+          recheckPolicy ? executorIntegrationPolicies().catch(() => undefined) : undefined,
+        ]);
+        if (stopped || version !== refreshVersion.current || pendingAgentActions.current.size) return;
+        if (result?.ok) setStatuses(result.data); else markUnavailable();
+        setExecutors(hosts?.data.data.executors ?? []);
+        if (policies?.ok) setExecutorPolicies(policies.data);
+      } finally { inFlight = false; }
     };
     const timer = window.setInterval(() => void check(), 5000);
-    const onFocus = () => void check();
+    const onFocus = () => {
+      policyRefreshPending = true;
+      void check();
+    };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
     return () => {
@@ -421,6 +402,7 @@ export default function AgentIntegrationPage() {
       ? "agentIntegration.executorEnableSuccess"
       : "agentIntegration.executorDisableSuccess", { agent: agentName }));
     await refresh();
+    notifyChatExecutorsChanged();
   };
 
   const saveBinding = async (target: DesktopAgentBindingTarget, path?: string) => {
@@ -669,10 +651,10 @@ function AgentCard({
   const mcpPrepared = requirements.length > 0 && requirements.every((item) => item.satisfied) &&
     !["action_required", "conflict", "error"].includes(mcpState);
   const executorSupported = Boolean(agent.executorName);
-  const executorRuntime = executorRuntimeState(executorStatus, executorPolicy);
+  const executorRuntime = executorRuntimeState(agent, executorStatus, executorPolicy, mcpStatus);
   const executorEnabled = executorRuntime.enabled;
   const executorPrepared = executorSupported && executorRuntime.prepared;
-  const detectionComplete = mcpPrepared && (!executorSupported || executorPrepared);
+  const detectionComplete = mcpPrepared && (!executorSupported || agent.id === "deepseek-harness" || executorPrepared);
   const mcpEnabled = mcpState === "enabled";
   const detected = mcpInstalled || mcpEnabled;
   const mcpChecked = mcpStatus?.enabled ?? (mcpEnabled || mcpState === "conflict" || Boolean(mcpStatus?.can_disconnect));
@@ -687,6 +669,7 @@ function AgentCard({
         <button
           type="button"
           className="agent-integration-card-toggle"
+          id={`agent-integration-toggle-${agent.id}`}
           aria-expanded={expanded}
           onClick={onToggle}
         >
@@ -710,6 +693,7 @@ function AgentCard({
               mcpConnectionStatus={t(agentConnectionStatusKey(mcpStatus, mcpChecked), { agent: mcpStatus?.display_name || agent.name })}
               mcpConnected={agentConnectionReady(mcpStatus)}
               mcpCanToggle={mcpCanToggle}
+              executorStatus={executorStatus}
               executorEnabled={executorEnabled}
               executorPrepared={executorPrepared}
               busyAction={busyAction}
@@ -804,8 +788,16 @@ function CollapsedDetectionSummary({
     }),
     ready: requirement.satisfied,
   }));
-  if (agent.executorName) {
-    const runtime = executorRuntimeState(executorStatus, executorPolicy);
+  if (agent.id === "deepseek-harness") {
+    const runtime = executorRuntimeState(agent, executorStatus, executorPolicy, mcpStatus);
+    items.push({
+      id: "executor-plugin",
+      ready: runtime.prepared,
+      label: runtime.prepared ? t("agentIntegration.compactHostSynchronized")
+        : dshExecutorSetupStatus(agentConnectionReady(mcpStatus), executorStatus, t),
+    });
+  } else if (agent.executorName) {
+    const runtime = executorRuntimeState(agent, executorStatus, executorPolicy, mcpStatus);
     const { installed, ready } = runtime;
     items.push({
       id: "executor-installed",
@@ -866,6 +858,7 @@ function CompactIntegrationControls({
   mcpConnectionStatus,
   mcpConnected,
   mcpCanToggle,
+  executorStatus,
   executorEnabled,
   executorPrepared,
   busyAction,
@@ -880,6 +873,7 @@ function CompactIntegrationControls({
   mcpConnectionStatus: string;
   mcpConnected: boolean;
   mcpCanToggle: boolean;
+  executorStatus?: ChatExecutorDescriptor;
   executorEnabled: boolean;
   executorPrepared: boolean;
   busyAction: string;
@@ -903,8 +897,10 @@ function CompactIntegrationControls({
       id: "executor",
       title: t("agentIntegration.executorModeTitle", { agent: agent.executorName }),
       description: t("agentIntegration.executorModeDescription", { agent: agent.executorName }),
-      status: t(executorEnabled ? "agentIntegration.enabled" : "agentIntegration.notEnabled"),
-      ready: executorEnabled,
+      status: agent.id === "deepseek-harness" && !executorPrepared
+        ? dshExecutorSetupStatus(mcpConnected, executorStatus, t)
+        : t(executorEnabled ? "agentIntegration.enabled" : "agentIntegration.notEnabled"),
+      ready: executorEnabled && (agent.id !== "deepseek-harness" || executorPrepared),
       checked: executorEnabled,
       disabled: !executorEnabled && !executorPrepared,
       loading: busyAction === `executor:${agent.id}:${executorEnabled ? "disable" : "enable"}`,
@@ -937,6 +933,18 @@ function CompactIntegrationControls({
       ))}
     </div>
   );
+}
+
+function dshExecutorSetupStatus(connected: boolean, executor: ChatExecutorDescriptor | undefined, t: TFunction): string {
+  if (connected && executor?.unavailable_reason_code === "host_offline") {
+    return executorUnavailableReason(executor, t);
+  }
+  if (executor?.host_online && executor.installed && !executor.available &&
+      (executor.unavailable_reason_code === "model_unavailable" || executor.unavailable_reason_code === "login_required" ||
+        executor.unavailable_reason_code === "unavailable" || executor.unavailable_reason?.startsWith("DSH "))) {
+    return executorUnavailableReason(executor, t);
+  }
+  return t(connected ? "agentIntegration.dshExecutorWaiting" : "agentIntegration.dshExecutorConnect");
 }
 
 function AgentConfigurationFlow({
@@ -980,7 +988,7 @@ function AgentConfigurationFlow({
   const mcpInstallationMissing = mcpRequirements.length > 0 && !mcpRequirements[0].satisfied;
 
   const executorSupported = Boolean(agent.executorName);
-  const executorRuntime = executorRuntimeState(executorStatus, executorPolicy);
+  const executorRuntime = executorRuntimeState(agent, executorStatus, executorPolicy, mcpStatus);
   const executorEnabled = executorRuntime.enabled;
   const executorInstalled = executorRuntime.installed;
   const executorReady = executorRuntime.ready;
@@ -1146,7 +1154,7 @@ function AgentConfigurationFlow({
 
       </ConfigurationStage>
 
-      {executorSupported && (
+      {executorSupported && agent.id !== "deepseek-harness" && (
         <ConfigurationStage
           step={2}
           title={t("agentIntegration.executorStageTitle", { agent: agent.executorName })}
@@ -1227,7 +1235,7 @@ function AgentConfigurationFlow({
       {preparation}
 
       <ConfigurationStage
-        step={executorSupported ? 3 : 2}
+        step={executorSupported && agent.id !== "deepseek-harness" ? 3 : 2}
         title={t("agentIntegration.integrationStageTitle")}
         ready={agentConnectionReady(mcpStatus) || executorEnabled}
         status={t("agentIntegration.chooseIntegrationMode")}
@@ -1258,12 +1266,13 @@ function AgentConfigurationFlow({
             <IntegrationMethod
               title={t("agentIntegration.executorModeTitle", { agent: agent.executorName })}
               description={t("agentIntegration.executorModeDescription", { agent: agent.executorName })}
-              status={executorEnabled
+              status={agent.id === "deepseek-harness" && !executorPrepared ? dshExecutorSetupStatus(agentConnectionReady(mcpStatus), executorStatus, t)
+                : executorEnabled
                 ? t("agentIntegration.enabled")
                 : executorPrepared
                   ? t("agentIntegration.notEnabled")
                   : t("agentIntegration.configurationIncomplete")}
-              ready={executorEnabled}
+              ready={executorEnabled && (agent.id !== "deepseek-harness" || executorPrepared)}
               disabled={!executorEnabled && !executorPrepared}
               loading={busyAction === `executor:${agent.id}:${executorEnabled ? "disable" : "enable"}`}
               checked={executorEnabled}

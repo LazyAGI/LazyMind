@@ -39,7 +39,7 @@ export class HostBridge {
     this.base = parsed.href.replace(/\/$/, '') + '/v1/workflow-host'
   }
 
-  private async request<T>(path: string, signal: AbortSignal, body?: unknown, headers?: Record<string, string>): Promise<T> {
+  protected async request<T>(path: string, signal: AbortSignal, body?: unknown, headers?: Record<string, string>): Promise<T> {
     const response = await fetch(this.base + path, {
       method: body === undefined ? 'GET' : 'POST', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
       headers: { ...headers, Authorization: `Bearer ${this.pairing.token}`, 'X-LazyMind-Connector-Id': this.pairing.connector_id,
@@ -55,6 +55,10 @@ export class HostBridge {
     const value = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {}
     if (!response.ok) throw new BridgeError(typeof value.code === 'string' ? value.code : 'BRIDGE_ERROR', typeof value.error === 'string' ? value.error : 'Workflow Bridge request failed', response.status)
     return value as T
+  }
+
+  async syncConversation(snapshot: unknown, signal: AbortSignal): Promise<void> {
+    await this.request('/conversation', signal, snapshot)
   }
 
   async bind(runId: string, driver: string, signal: AbortSignal): Promise<WorkflowControl> {

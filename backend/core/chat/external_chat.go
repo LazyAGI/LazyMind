@@ -20,6 +20,7 @@ const (
 	ChatExecutorCodex     = "codex"
 	ChatExecutorCursor    = "cursor"
 	ChatExecutorWorkBuddy = "workbuddy"
+	ChatExecutorDSH       = "deepseek-harness"
 	externalHostTTL       = 15 * time.Second
 	externalRunLeaseTTL   = 2 * externalHostTTL
 )
@@ -32,9 +33,10 @@ type chatExecutorDefinition struct {
 
 var chatExecutorDefinitions = []chatExecutorDefinition{
 	{ID: ChatExecutorLazyMind, DisplayName: "LazyMind", Kind: "internal"},
-	{ID: ChatExecutorCodex, DisplayName: "Codex CLI", Kind: "external"},
-	{ID: ChatExecutorCursor, DisplayName: "Cursor Agent CLI", Kind: "external"},
+	{ID: ChatExecutorCodex, DisplayName: "Codex", Kind: "external"},
+	{ID: ChatExecutorCursor, DisplayName: "Cursor", Kind: "external"},
 	{ID: ChatExecutorWorkBuddy, DisplayName: "WorkBuddy", Kind: "external"},
+	{ID: ChatExecutorDSH, DisplayName: "DeepSeek Harness", Kind: "external"},
 }
 
 type externalChatJob struct {
@@ -59,14 +61,15 @@ type externalChatEvent struct {
 }
 
 type chatExecutorStatus struct {
-	ID                string `json:"id"`
-	DisplayName       string `json:"display_name"`
-	Kind              string `json:"kind"`
-	Installed         bool   `json:"installed"`
-	HostOnline        bool   `json:"host_online"`
-	Available         bool   `json:"available"`
-	Connected         bool   `json:"connected"`
-	UnavailableReason string `json:"unavailable_reason,omitempty"`
+	ID                    string `json:"id"`
+	DisplayName           string `json:"display_name"`
+	Kind                  string `json:"kind"`
+	Installed             bool   `json:"installed"`
+	HostOnline            bool   `json:"host_online"`
+	Available             bool   `json:"available"`
+	Connected             bool   `json:"connected"`
+	UnavailableReason     string `json:"unavailable_reason,omitempty"`
+	UnavailableReasonCode string `json:"unavailable_reason_code,omitempty"`
 }
 
 // externalExecutionProjection is a read model assembled from existing Chat,

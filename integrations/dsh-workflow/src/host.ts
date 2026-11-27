@@ -9,6 +9,8 @@ import { object } from '../../workflow-agent-core/src/protocol'
 import { workflowOperation } from './events'
 import { dshRuntime } from './host-adapter'
 import { workflowTool } from './tool'
+import type { Pairing } from './bridge'
+import { nativeConversation, nativeConversationTool, hasNativeConversation, isManagedThread } from './conversation'
 
 interface Registration {
   context?: Context
@@ -20,11 +22,12 @@ interface Registration {
 export interface HostConfig { serverName: string; webUrl: string }
 
 /** Wire DSH public hooks to the shared coordinator. MCP execution remains in workflowTool. */
-export function installHost(ctx: Context, bridge: HostTransport, config: HostConfig, instanceId: string): () => Promise<void> {
+export function installHost(ctx: Context, bridge: HostTransport, config: HostConfig, instanceId: string, conversations?: { pairing: Pairing; sync(snapshot: NonNullable<ReturnType<typeof nativeConversation>>, signal: AbortSignal): Promise<void> }): () => Promise<void> {
   const lifetime = new AbortController()
   const runtime = dshRuntime(ctx, config.serverName, config.webUrl)
   const coordinator = createCoordinator(runtime, bridge, config.webUrl, lifetime.signal)
   const registrations = new Map<Agent, Registration>()
+  const observed = new WeakSet<Agent>()
   const tracked = new Set<Promise<unknown>>()
   const own = <T>(promise: Promise<T>): Promise<T> => {
     tracked.add(promise)
@@ -44,18 +47,18 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
     const live = new Set<string>()
     for (const schema of ctx.tools.schemas()) {
       const operation = workflowOperation(schema.name, config.serverName)
-      if (operation === null) continue
+      if (operation === null && (!conversations || !schema.name.startsWith(`mcp__${config.serverName}__`))) continue
       live.add(schema.name)
       const original = ctx.tools.get(schema.name)
       const previous = registration.wrappers.get(schema.name)
       if (!original || previous?.original === original) continue
       previous?.dispose()
-      const definition = workflowTool(original, {
+      const definition = operation === null ? original : workflowTool(original, {
         hostSessionId: runtime.id(coordinator.driver(agent)), operation,
         afterResult: (value, exec) => own(coordinator.afterResult(value, call(exec))),
         shouldConclude: control => coordinator.shouldConclude(agent, control),
       })
-      registration.wrappers.set(schema.name, { original, dispose: context.tools.register(definition) })
+      registration.wrappers.set(schema.name, { original, dispose: context.tools.register(conversations ? nativeConversationTool(definition, conversations.pairing, observed) : definition) })
     }
     for (const [name, value] of registration.wrappers) if (!live.has(name)) { value.dispose(); registration.wrappers.delete(name) }
   }
@@ -100,6 +103,13 @@ export function installHost(ctx: Context, bridge: HostTransport, config: HostCon
   const removeHook2 = ctx.on('agent/status', ({ agent, status }) => {
     if (status !== 'idle') return
     coordinator.idle(agent)
+    if (conversations && !isManagedThread(agent.session.id, conversations.pairing) &&
+      (observed.has(agent) || hasNativeConversation(agent, conversations.pairing.connector_id))) {
+      const snapshot = nativeConversation(agent.session)
+      if (snapshot) void own(conversations.sync(snapshot, lifetime.signal).catch(() => {
+        if (!lifetime.signal.aborted) ctx.logger.warn('LazyMind conversation history sync failed')
+      }))
+    }
     const registration = registrations.get(agent)
     if (!registration?.resumeInbox) return
     registration.resumeInbox = false

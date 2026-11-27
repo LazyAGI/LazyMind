@@ -34,6 +34,7 @@ import { matchPath, Navigate, Outlet, useLocation, useNavigate } from "react-rou
 import type { UserDetailResponse } from "@/api/generated/auth-client";
 import type { Conversation } from "@/api/generated/chatbot-client";
 import { AUTH_USER_CHANGE_EVENT, AgentAppsAuth } from "@/components/auth";
+import { AUTH_USER_STORAGE_KEY, principalFor } from "@/components/authPrincipal";
 import {
   changeCurrentUserPassword,
   fetchCurrentUser,
@@ -142,6 +143,7 @@ export default function MainLayout() {
       .conversationId || "";
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
+  const conversationPrincipal = principalFor(userInfo);
   const appVersion = useAppVersion();
   const isLoggedIn = Boolean(userInfo?.token);
   const datasetUserKey = JSON.stringify([
@@ -406,7 +408,7 @@ export default function MainLayout() {
       void refreshCloudSession();
     };
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === "lazymind:user") {
+      if (!event.key || event.key === AUTH_USER_STORAGE_KEY) {
         setUserInfo(AgentAppsAuth.getUserInfo());
       }
     };
@@ -454,6 +456,7 @@ export default function MainLayout() {
   }, [isMenuCollapsed, sidebarFocusTarget]);
 
   useEffect(() => {
+    setChatConversationMode(readChatConversationMode());
     const handleFilterChange = (event: Event) => {
       const filter = (
         event as CustomEvent<{ filter?: ChatConversationFilter }>
@@ -474,7 +477,7 @@ export default function MainLayout() {
         handleFilterChange,
       );
     };
-  }, []);
+  }, [conversationPrincipal]);
 
   useEffect(() => {
     const handleConversationListRefresh = () => {
@@ -1130,6 +1133,7 @@ export default function MainLayout() {
           </div>
           <div className="sider-history" ref={sidebarHistoryRef} tabIndex={-1} aria-label={t("layout.conversationHistory")} hidden={isMenuCollapsed}>
             <RecordList
+              key={conversationPrincipal}
               ref={recordListRef}
               groupSection={(batchSelection, filters, assistants) => {
                 const types = filters.filter(value => value === "normal" || value === "task");

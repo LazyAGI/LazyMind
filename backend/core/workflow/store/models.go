@@ -44,6 +44,7 @@ type WorkflowPackage struct {
 }
 
 type Artifact struct {
+	SelectionVersion  int64                     `json:"selection_version,omitempty"`
 	DraftVersion      int64                     `json:"draft_version,omitempty"`
 	Document          *document.Descriptor      `json:"document,omitempty"`
 	DocumentError     *document.ProjectionError `json:"document_error,omitempty"`

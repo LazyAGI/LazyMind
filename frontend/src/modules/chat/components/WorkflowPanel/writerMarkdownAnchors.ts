@@ -102,6 +102,7 @@ interface WriterMarkdownTargetBinding {
   type: 'heading' | 'image';
   level?: number;
   signature: string;
+  imageLabel?: string;
   outlineInstructionLine?: string;
   paperChartsLines?: string[];
 }
@@ -264,6 +265,7 @@ function writerMarkdownTargetBindings(
           type: 'image',
           // The URL is the stable identity when numbering changes image alt text.
           signature: `image:${image.source}`,
+          imageLabel: image.label,
         });
       }
     }
@@ -316,7 +318,14 @@ export function protectWriterMarkdownAnchors(
   });
   nextAnchorLines.forEach((anchorId) => usedAnchorIds.add(anchorId));
 
-  const matchedPrevious = next.map((target) => previousBySignature.get(target.signature)?.shift());
+  // When two figures reuse the same file, their captions distinguish them after a swap.
+  const matchedPrevious = next.map(target => {
+    const candidates = previousBySignature.get(target.signature);
+    if (!candidates?.length) return undefined;
+    const index = target.type === 'image' && candidates.length > 1
+      ? candidates.findIndex(i => previous[i].imageLabel === target.imageLabel) : 0;
+    return candidates.splice(Math.max(0, index), 1)[0];
+  });
   const consumedPrevious = new Set(
     matchedPrevious.filter((index): index is number => index !== undefined),
   );

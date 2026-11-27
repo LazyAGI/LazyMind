@@ -2436,6 +2436,7 @@ export function WorkflowPanel({
       onBrowse: enterBrowse,
       setEditing: handleSlotEditingChange,
       registerFlush,
+      flushPendingEdits,
       registerSnapshot,
       getSnapshot,
       registerFooterAction,

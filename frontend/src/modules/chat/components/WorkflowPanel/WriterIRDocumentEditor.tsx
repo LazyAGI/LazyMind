@@ -1,7 +1,7 @@
 import { writerOutlineDescription } from './writerOutlineDescription';
-import { irImageCandidates, imageGroups, imageGroupKey, imageGroupLayout, setImageGroup } from './writerImageGroups';
+import { movedIRImageLayouts, irImageCandidates, imageGroups, imageGroupKey, imageGroupLayout, setImageGroup } from './writerImageGroups';
 import { WriterImageGroupControls } from './WriterImageGroupControls';
-import { startWriterImageDrag } from './writerImageDrag';
+import { imageMergePosition, startWriterImageDrag } from './writerImageDrag';
 import './writerImageGroups.scss';
 import { mergeIRRewrite } from './mergeRewritePreview';
 import { createPortal } from 'react-dom';
@@ -142,7 +142,7 @@ interface WriterIRDocumentEditorProps {
   document: WriterDocument;
   numbering?: WriterNumberingState;
   ariaLabel: string;
-  onChange: (document: WriterDocument) => void;
+  onChange: (document: WriterDocument, edit?: 'drag') => void;
   onCrossReferenceApplied?: (document: WriterDocument) => void;
   onNumberingUpdate?: (update: WriterNumberingUpdate) => void;
   onFocus: () => void;
@@ -578,7 +578,7 @@ function renderBlock(
   const foldToggle = foldable
     ? renderFoldToggle(block.node_id, collapsed, foldLabels)
     : '';
-  const dragHandle = draggable
+  const dragHandle = draggable && block.type !== 'image'
     ? renderDragHandle(block.node_id, dragLabel)
     : '';
 
@@ -1342,6 +1342,7 @@ export function WriterIRDocumentEditor({
     codeCopied: t('chat.writerIR.codeCopied'),
   }), [t]);
   const dragLabel = t('chat.writerIR.dragBlock');
+  const mergeLabel = t('chat.writerImageGroups.merge');
 
   const imageGroupScrollPositions = () => new Map(Array.from(editorRef.current?.querySelectorAll<HTMLElement>('.writer-image-group') ?? [],
     group => [group.dataset.imageGroupKey!, group.querySelector<HTMLElement>('.writer-image-group-images')?.scrollLeft ?? 0]));
@@ -1640,13 +1641,13 @@ export function WriterIRDocumentEditor({
       editor.classList.remove('writer-ir__document--dragging');
     };
 
-    const moveBlock = (sourceId: string, hint: WriterBlockRelocateTarget) => {
+    const moveBlock = (sourceId: string, hint: WriterBlockRelocateTarget, merge = false) => {
       const nextDocument = relocateWriterBlock(document, sourceId, hint);
       if (nextDocument !== document) {
         pendingSelectionRef.current = findWriterBlock(document.blocks, sourceId)?.type === 'image'
           ? null : { nodeId: sourceId, start: 0, end: 0 };
         lastEmittedDocumentRef.current = undefined;
-        onChange(nextDocument);
+        onChange(movedIRImageLayouts(document, nextDocument, merge ? sourceId : undefined), 'drag');
       }
     };
     let cancelImageDrag: (() => void) | undefined;
@@ -1659,12 +1660,18 @@ export function WriterIRDocumentEditor({
       const nodeId = handle?.dataset.dragNodeId
         ?? image?.closest<HTMLElement>('[data-writer-block]')?.dataset.nodeId;
       if (!nodeId) return;
-      const block = editor.querySelector<HTMLElement>(`[data-writer-block][data-node-id="${CSS.escape(nodeId)}"]`);
-      const draggedImage = block?.dataset.nodeType === 'image' ? block.querySelector<HTMLImageElement>('.writer-ir__image img') : null;
-      if (draggedImage) {
+      if (image) {
         if (findWriterBlock(document.blocks, nodeId)?.editable === false) return;
         cancelImageDrag?.();
-        cancelImageDrag = startWriterImageDrag(event, draggedImage, editor, (x, y) => {
+        cancelImageDrag = startWriterImageDrag(event, image, editor, (x, y) => {
+          const hit = globalThis.document.elementFromPoint(x, y);
+          const targetImage = hit?.closest('.writer-ir__image')?.querySelector('img');
+          if (targetImage && targetImage !== image && editor.contains(targetImage)) {
+            const element = targetImage.closest<HTMLElement>('[data-writer-block]');
+            if (!element?.dataset.nodeId || findWriterBlock(document.blocks, element.dataset.nodeId)?.editable === false) return null;
+            const position = imageMergePosition(targetImage, x, y);
+            if (position) return { element, position, label: mergeLabel };
+          }
           const hint = resolveDropHint(x, y, nodeId);
           if (!hint) return null;
           const id = hint.type === 'child' ? hint.parentId : hint.type === 'after' ? hint.afterId : hint.beforeId;
@@ -1672,8 +1679,10 @@ export function WriterIRDocumentEditor({
           return element ? { element, position: hint.type } : null;
         }, ({ element, position }) => {
           const id = element.dataset.nodeId!;
+          const merge = position === 'merge-before' || position === 'merge-after';
           moveBlock(nodeId, position === 'child' ? { type: 'child', parentId: id }
-            : position === 'before' ? { type: 'before', beforeId: id } : { type: 'after', afterId: id });
+            : position === 'before' || position === 'merge-before' ? { type: 'before', beforeId: id }
+            : { type: 'after', afterId: id }, merge);
         });
         return;
       }
@@ -1711,7 +1720,7 @@ export function WriterIRDocumentEditor({
       window.removeEventListener('mouseup', handleMouseUp);
       stopDragging();
     };
-  }, [disabled, document, onChange]);
+  }, [disabled, document, onChange, mergeLabel]);
 
   useEffect(() => {
     const editor = editorRef.current;

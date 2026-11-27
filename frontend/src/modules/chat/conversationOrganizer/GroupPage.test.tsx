@@ -21,7 +21,7 @@ vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conver
 vi.mock("./useOrganizerNameLock", () => ({ default: () => false }));
 vi.mock("./api", () => ({ getConversationGroup: vi.fn(), listConversationGroups: vi.fn().mockResolvedValue([]), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed", deleteConversationGroup: vi.fn(), updateConversationGroup: vi.fn(), updateGroupPlacement: vi.fn(), emitConversationGroupsChanged: vi.fn(), renameGroupConversation: vi.fn() }));
 const detail = (id: string, task: boolean) => ({ group: { id, name: id, kind: "group", is_task_conv: task, member_count: 0 }, conversations: [], nextPageToken: "" }) as any;
-beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); });
+beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear(); });
 function SwitchGroup() { const navigate = useNavigate(); return <button onClick={() => navigate('/groups/task')}>Switch to task</button>; }
 function view(id = 'chat') { return render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={['/groups/' + id]}><SwitchGroup /><Routes><Route path="/groups/:groupId" element={<GroupPage />} /><Route path="/agent/chat/home" element={<div>Home</div>} /></Routes></MemoryRouter></ConfigProvider>); }
 it.each(["group", "project"])("opens the rename dialog by right-clicking a %s member", async kind => {
@@ -68,7 +68,7 @@ it("ignores an old detail response after switching group routes", async () => {
   let finish!: (value: any) => void;
   vi.mocked(api.getConversationGroup).mockImplementation(id => id === "chat" ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(detail("task", true)));
   view();
-  await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledWith("chat", "", "", undefined));
+  await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledWith("chat", "", "", "lazymind"));
   fireEvent.click(screen.getByText("Switch to task"));
   await screen.findByRole("button", { name: "Start task" });
   await act(async () => finish(detail("chat", false)));
@@ -78,11 +78,11 @@ it("ignores an old detail response after switching group routes", async () => {
 it("reloads group detail when the source filter changes", async () => {
   vi.mocked(api.getConversationGroup).mockImplementation(async (id, _token, _keyword, assistants) => ({ ...detail(id, false), conversations: [{ conversation_id: assistants || 'all', display_name: assistants || 'all', membership_revision: 1 }] }));
   view();
-  await screen.findByText('all');
+  await screen.findByText('lazymind');
   const { selectChatConversationSources } = await import('../constants/chat');
   act(() => selectChatConversationSources(['codex']));
   await screen.findByText('codex');
-  expect(screen.queryByText('all')).not.toBeInTheDocument();
+  expect(screen.queryByText('lazymind')).not.toBeInTheDocument();
   expect(api.getConversationGroup).toHaveBeenLastCalledWith('chat', '', '', 'codex');
 });
 

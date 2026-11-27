@@ -41,6 +41,7 @@ func ListChatExecutors(w http.ResponseWriter, r *http.Request) {
 			}
 			status.Installed, status.HostOnline, status.Available = host.Installed, host.HostOnline, host.Available
 			status.UnavailableReason = host.UnavailableReason
+			status.UnavailableReasonCode = host.UnavailableReasonCode
 			var connectedSessions int64
 			if err := store.DB().WithContext(r.Context()).Model(&orm.ExternalAgentSession{}).
 				Where("owner_user_id = ? AND provider = ? AND active = ?", owner, definition.ID, true).
@@ -72,6 +73,7 @@ func ExternalChatHostStatus(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"provider": provider, "installed": status.Installed, "host_online": status.HostOnline,
 		"available": status.Available, "unavailable_reason": status.UnavailableReason,
+		"unavailable_reason_code": status.UnavailableReasonCode,
 	})
 }
 
@@ -84,7 +86,7 @@ func SyncExternalAgentSessions(w http.ResponseWriter, r *http.Request) {
 		Reset                bool                            `json:"reset"`
 		SessionAccessEnabled *bool                           `json:"session_access_enabled"`
 	}
-	if owner == "" || !isExternalChatProvider(provider) ||
+	if owner == "" || !common.ExternalConversationSource(provider) ||
 		json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&input) != nil {
 		common.ReplyErr(w, "invalid external Agent session catalog", http.StatusBadRequest)
 		return
@@ -115,7 +117,7 @@ func SyncExternalAgentSessions(w http.ResponseWriter, r *http.Request) {
 func ListExternalAgentSessions(w http.ResponseWriter, r *http.Request) {
 	owner := store.UserID(r)
 	provider := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
-	if owner == "" || !isExternalChatProvider(provider) {
+	if owner == "" || !common.ExternalConversationSource(provider) {
 		common.ReplyErr(w, "unsupported external chat provider", http.StatusBadRequest)
 		return
 	}
@@ -158,7 +160,7 @@ func BindExternalAgentSession(w http.ResponseWriter, r *http.Request) {
 	provider := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
 	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
 	hostID := strings.TrimSpace(r.URL.Query().Get("host_id"))
-	if owner == "" || !isExternalChatProvider(provider) || hostID == "" || threadID == "" {
+	if owner == "" || !common.ExternalConversationSource(provider) || hostID == "" || threadID == "" {
 		common.ReplyErr(w, "unsupported external chat provider", http.StatusBadRequest)
 		return
 	}
@@ -231,13 +233,16 @@ func ClaimExternalChatRun(w http.ResponseWriter, r *http.Request) {
 	if len(input.UnavailableReason) > 512 {
 		input.UnavailableReason = input.UnavailableReason[:512]
 	}
-	installed, ready := true, true
+	// Earlier CLI hosts omitted both fields. DSH execution requires an explicit
+	// opt-in and readiness report from its paired host.
+	installed, ready := provider != ChatExecutorDSH, provider != ChatExecutorDSH
 	if input.Installed != nil {
 		installed = *input.Installed
 	}
 	if input.Ready != nil {
 		ready = *input.Ready
 	}
+	ready = ready && installed
 	app := newExternalChatApplication(store.DB())
 	if err := app.reportHost(r.Context(), owner, provider, input.HostID, installed, ready, input.UnavailableReason); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)

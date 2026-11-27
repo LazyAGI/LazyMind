@@ -85,21 +85,22 @@ type stepDTO struct {
 
 // slotDTO represents a currently-selected slot revision, with its artifact value inline.
 type slotDTO struct {
-	ArtifactID    string                    `json:"artifact_id"`
-	Document      *document.Descriptor      `json:"document,omitempty"`
-	DocumentError *document.ProjectionError `json:"document_error,omitempty"`
-	SlotID        string                    `json:"slot_id"`
-	Revision      int                       `json:"revision"`
-	ListIndex     *int                      `json:"list_index,omitempty"`
-	SortOrder     *int                      `json:"sort_order,omitempty"`
-	Selected      bool                      `json:"selected"`
-	Slot          string                    `json:"slot"`
-	CreatedAt     time.Time                 `json:"created_at"`
-	ContentType   string                    `json:"content_type,omitempty"`
-	ArtifactValue json.RawMessage           `json:"artifact_value,omitempty"`
-	DraftVersion  int64                     `json:"draft_version,omitempty"`
-	Caption       *string                   `json:"caption,omitempty"`
-	ChangeSource  string                    `json:"change_source,omitempty"`
+	SelectionVersion int64                     `json:"selection_version,omitempty"`
+	ArtifactID       string                    `json:"artifact_id"`
+	Document         *document.Descriptor      `json:"document,omitempty"`
+	DocumentError    *document.ProjectionError `json:"document_error,omitempty"`
+	SlotID           string                    `json:"slot_id"`
+	Revision         int                       `json:"revision"`
+	ListIndex        *int                      `json:"list_index,omitempty"`
+	SortOrder        *int                      `json:"sort_order,omitempty"`
+	Selected         bool                      `json:"selected"`
+	Slot             string                    `json:"slot"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	ContentType      string                    `json:"content_type,omitempty"`
+	ArtifactValue    json.RawMessage           `json:"artifact_value,omitempty"`
+	DraftVersion     int64                     `json:"draft_version,omitempty"`
+	Caption          *string                   `json:"caption,omitempty"`
+	ChangeSource     string                    `json:"change_source,omitempty"`
 	// Write-back state is calculated from the server-side Writer revision history
 	// and source document. It must not be inferred from a locally edited artifact.
 	WriteBackReady     bool   `json:"write_back_ready,omitempty"`
@@ -190,6 +191,7 @@ func buildStepIntentMap(ctx context.Context, db *gorm.DB, sessionID string) map[
 
 func toSlotDTO(r *orm.WorkflowSlotRevision) slotDTO {
 	return slotDTO{
+		SelectionVersion:  r.SelectionVersion,
 		ArtifactID:        r.ID,
 		SlotID:            r.SlotID,
 		Revision:          r.Revision,
@@ -398,7 +400,11 @@ func slotRevisionVersionKey(slotID string, listIndex *int) string {
 }
 
 func isWriterWorkingDraftRevision(slotID, changeSource string) bool {
-	return (slotID == "draft_document" || slotID == "flat_draft_document") && changeSource == "human"
+	return isWriterFinalSlot(slotID) && changeSource == "human"
+}
+
+func isWriterFinalSlot(slotID string) bool {
+	return slotID == "draft_document" || slotID == "flat_draft_document"
 }
 
 // ListConversationSessions handles GET /conversations/{conversation_id}/workflow-sessions.

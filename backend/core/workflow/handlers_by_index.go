@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -401,6 +402,46 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := make([]map[string]any, 0, len(revisions))
+	type marker struct {
+		PublishedAt time.Time `json:"published_at"`
+		TargetURL   string    `json:"target_url"`
+	}
+	published := make(map[string]map[string]marker)
+	if isWriterFinalSlot(slotID) && listIndex == -1 {
+		var ops []struct {
+			Provider, SourceRevisionID, ResultRevisionID string
+			HasCandidate                                 bool
+			ReceiptJSON                                  json.RawMessage
+			UpdatedAt                                    time.Time
+		}
+		if err := db.WithContext(ctx).Model(&orm.DocumentPublicationOperation{}).
+			Select("provider, source_revision_id, result_revision_id, candidate_value IS NOT NULL AS has_candidate, receipt_json, updated_at").
+			Where("owner_user_id = ? AND session_id = ? AND slot_id = ? AND item_index = ? AND status = ?", owner, sessionID, slotID, listIndex, "succeeded").
+			Order("updated_at ASC, id ASC").Find(&ops).Error; err != nil {
+			common.ReplyErr(w, "query publication history failed", http.StatusInternalServerError)
+			return
+		}
+		visible := make(map[string]bool, len(revisions))
+		for _, rev := range revisions {
+			visible[rev.ID] = !isWriterWorkingDraftRevision(slotID, rev.ChangeSource)
+		}
+		for _, op := range ops {
+			id := op.SourceRevisionID
+			// Legacy writes can publish candidate content or promote a hidden draft.
+			if op.ResultRevisionID != "" && (op.HasCandidate || !visible[id]) {
+				id = op.ResultRevisionID
+			}
+			var receipt DocumentPublicationReceipt
+			if json.Unmarshal(op.ReceiptJSON, &receipt) != nil {
+				continue
+			}
+			if published[id] == nil {
+				published[id] = make(map[string]marker)
+			}
+			published[id][op.Provider] = marker{PublishedAt: op.UpdatedAt, TargetURL: documentPublicationTargetURL(op.Provider, receipt.TargetDocument)}
+		}
+	}
+	versionByRevision := map[int]int{}
 	formalVersion := 0
 	for _, rev := range revisions {
 		if isWriterWorkingDraftRevision(slotID, rev.ChangeSource) {
@@ -416,6 +457,18 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 		}
 		if slotID == "preview_html" || slotID == "draft_document" || slotID == "flat_draft_document" {
 			item["version"] = formalVersion
+		}
+		versionByRevision[rev.Revision] = formalVersion
+		if rev.RestoredFromRevision != nil {
+			if n, ok := versionByRevision[*rev.RestoredFromRevision]; ok {
+				item["restored_from_version"] = n
+			}
+		}
+		if info := published[rev.ID]; info != nil {
+			item["publications"] = info
+			if feishu, ok := info["feishu"]; ok {
+				item["feishu_publication"] = feishu // Older frontends read this field.
+			}
 		}
 		var artifactValue json.RawMessage
 		if rev.HumanArtifactID != nil {

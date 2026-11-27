@@ -5278,11 +5278,67 @@
   &--slide.history-preview--thumb { aspect-ratio: 16 / 9; display: grid; align-items: center; }
   &__slide { display: block; width: 100%; height: auto; }
   &__placeholder { display: block; padding: 10px; color: #667085; }
-  &__excerpt { display: grid; gap: 3px; padding: 6px; background: white; color: #344054; }
-  &__excerpt > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &__excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   &__actions { display: flex; gap: 8px; margin: 10px 0; }
   &__actions button { color: #245bc2; background: transparent; border: 0; cursor: pointer; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+.workflow-slot__version-popover--writer {
+  .workflow-slot__version-list {
+    box-sizing: border-box;
+    width: clamp(138px, 25%, 220px);
+    padding: 4px 0;
+    background: #fafbfc;
+  }
+  .workflow-slot__version-item {
+    gap: 3px;
+    padding: 9px 12px;
+    font-weight: 400;
+
+    &:hover { background: #f1f4f8; }
+    &[aria-selected='true'] { background: #ecf3ff; }
+  }
+  .workflow-slot__version-label {
+    gap: 5px;
+    color: #27374e;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .workflow-slot__version-current-tag {
+    padding: 0;
+    background: transparent;
+    color: #3867a6;
+    font-weight: 400;
+  }
+  .workflow-slot__version-time {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+  time.workflow-slot__version-time { margin-inline-start: auto; }
+  .history-preview--thumb {
+    min-height: 18px;
+    color: #566579;
+    font-size: 12px;
+    line-height: 18px;
+  }
+  .history-preview__placeholder { padding: 0; }
+}
+
+.workflow-slot__version-publication {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  color: #246345;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+
+  .anticon { flex: none; color: #228053; }
 }
 
 // Give the opened comparison the full reading area.

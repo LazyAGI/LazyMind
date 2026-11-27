@@ -164,7 +164,7 @@ func TestDeleteArtifactCreatesTombstoneAndPreservesHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.db.Create(&orm.WorkflowSession{ID: "s1", CreateUserID: "u1",
-		WorkflowID: "wf", Status: "active", StateVersion: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		WorkflowID: "wf", Status: "active", StateVersion: 8, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
 	caption := "original"
@@ -179,15 +179,19 @@ func TestDeleteArtifactCreatesTombstoneAndPreservesHistory(t *testing.T) {
 		Validity: "effective", ChangeSource: "agent", CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
+	current, err := repo.ReadArtifact(ctx, "u1", "a1")
+	if err != nil || !current.Selected || current.SelectionVersion != 8 {
+		t.Fatalf("selected artifact lost its session clock: %#v err=%v", current, err)
+	}
 	deleted, err := repo.DeleteArtifact(ctx, "u1", "a1", 1, "cmd-delete")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !deleted.Deleted || deleted.Revision != 2 || deleted.Validity != "deleted" || !deleted.Selected {
+	if !deleted.Deleted || deleted.Revision != 2 || deleted.Validity != "deleted" || !deleted.Selected || deleted.SelectionVersion != 9 {
 		t.Fatalf("unexpected tombstone: %#v", deleted)
 	}
 	original, err := repo.ReadArtifact(ctx, "u1", "a1")
-	if err != nil || original.Selected || original.Deleted || string(original.Value) != `{"text":"kept"}` {
+	if err != nil || original.Selected || original.SelectionVersion != 0 || original.Deleted || string(original.Value) != `{"text":"kept"}` {
 		t.Fatalf("history was not preserved: %#v err=%v", original, err)
 	}
 	if _, err := repo.DeleteArtifact(ctx, "u1", deleted.ID, 2, "cmd-again"); !errors.Is(err, ErrIdempotencyConflict) {

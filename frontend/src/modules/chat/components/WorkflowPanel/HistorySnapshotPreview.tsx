@@ -141,10 +141,12 @@ function PreviewContent({ preview, detail, label, resolveImageUrl }: { preview: 
     <foreignObject width='1600' height='900'><SlideCanvas spec={preview.slide} /></foreignObject>
   </svg>;
   if (!detail) {
-    const lines = 'markdown' in preview ? preview.markdown.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-      : [preview.document.title, ...preview.document.blocks.map(b => b.content).filter(Boolean)];
-    return <div className='history-preview__excerpt'><strong>{lines[0]?.replace(/^#+\s*/, '').slice(0, 100)}</strong>
-      <span>{lines[1]?.slice(0, 120)}</span></div>;
+    const lines = 'markdown' in preview
+      ? preview.markdown.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+      : preview.document.blocks.map(block => block.content).filter(Boolean);
+    const excerpt = ('markdown' in preview && /^#{1,6}\s/.test(lines[0] ?? '') ? lines[1] : lines[0])
+      || ('markdown' in preview ? lines[0]?.replace(/^#+\s*/, '') : preview.document.title);
+    return <div className='history-preview__excerpt'>{excerpt?.slice(0, 120)}</div>;
   }
   if ('markdown' in preview) return <MarkdownViewer resolveImageUrl={resolveImageUrl ?? resolveMarkdownImageUrlAsync}>{preview.markdown}</MarkdownViewer>;
   return <WriterIRDocumentEditor document={preview.document} ariaLabel={label} disabled

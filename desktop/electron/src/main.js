@@ -899,6 +899,7 @@ async function runExecutorConnector(provider, action) {
     codex: new Set(["status", "enable", "disable"]),
     cursor: new Set(["status", "enable", "disable"]),
     workbuddy: new Set(["status", "enable", "disable"]),
+    "deepseek-harness": new Set(["status", "enable", "disable"]),
   };
   if (!allowedActions[provider]?.has(action)) {
     throw new Error(`Unsupported external executor action: ${provider}/${action}`);
@@ -907,7 +908,7 @@ async function runExecutorConnector(provider, action) {
     ["internal", "executor", provider, action],
     agentConnectorActionTimeoutMs,
   );
-  if (action !== "status") {
+  if (action !== "status" && provider !== "deepseek-harness") {
     restartAgentHost();
   }
   return result;

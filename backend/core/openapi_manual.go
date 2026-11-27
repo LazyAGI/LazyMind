@@ -998,9 +998,9 @@ func conversationItemSchema(includeSourceContext bool) map[string]any {
 		prop("is_pinned", boolSchema()),
 		prop("history_order", nullableSchema(int64Schema())),
 		prop("models", array(strSchema())),
-		prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")),
+		prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy", "deepseek-harness")),
 		prop("thinking_depth", enumStringSchema("low", "medium", "high", "max")),
-		prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")),
+		prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy", "deepseek-harness")),
 		prop("project_key", strSchema()),
 		prop("project_name", strSchema()),
 		prop("parent_conversation_id", nullableSchema(strSchema())),
@@ -1266,7 +1266,7 @@ func manualPaths() map[string]any {
 			"post": op("Start, pause, resume or retry conversation metadata backfill", nil, jsonBody(objReq([]string{"action"}, prop("action", enumStringSchema("start", "pause", "resume", "retry"))), true), response(200, "Metadata progress", refSchema("ConversationOpeningState"))),
 		},
 		"/conversations/{name}/title": map[string]any{"patch": op("Rename conversation with title revision protection", queryParams(param("path", "name", true, strSchema())), jsonBody(objReq([]string{"display_name", "title_revision"}, prop("display_name", strSchema()), prop("title_revision", int64Schema())), true), response(200, "Updated title", obj(prop("display_name", strSchema()), prop("title_revision", int64Schema()))))},
-		"/conversations":              map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "assistant", false, enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema()), param("query", "selection_snapshot", false, boolSchema()), param("query", "selection_group_id", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
+		"/conversations":              map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "assistant", false, enumStringSchema("lazymind", "codex", "cursor", "workbuddy", "deepseek-harness")), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema()), param("query", "selection_snapshot", false, boolSchema()), param("query", "selection_group_id", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
 		"/memory/soul": map[string]any{
 			"get": map[string]any{
 				"summary": "Get current user's Soul memory",

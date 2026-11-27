@@ -10,7 +10,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { WriterImageGroupControls } from './WriterImageGroupControls';
-import { startWriterImageDrag } from './writerImageDrag';
+import { imageMergePosition, startWriterImageDrag } from './writerImageDrag';
 import { imageGroups, imageGroupKey, imageGroupLayout, normalizeImageSource, setImageGroup, type WriterImageGroup, type WriterImageRef } from './writerImageGroups';
 import './writerImageGroups.scss';
 
@@ -63,6 +63,29 @@ function normalizeImageParagraphs(node: WriterImageGroupNode) {
   }
 }
 
+function normalizeRootGroups(root: RootNode) {
+  let run: LexicalNode[] = [];
+  const finish = () => {
+    const count = run.reduce((total, item) => total + imageCount(item), 0);
+    if (count >= 2 && !(run.length === 1 && run[0] instanceof WriterImageGroupNode)) {
+      const group = $applyNodeReplacement(new WriterImageGroupNode()); run[0].insertBefore(group);
+      for (const item of run) {
+        if (item instanceof WriterImageGroupNode) { group.append(...item.getChildren()); item.remove(); }
+        else group.append(item);
+      }
+    }
+    run = [];
+  };
+  for (const child of root.getChildren()) {
+    if (child instanceof WriterImageGroupNode && (!child.getChildren().every(imageParagraph)
+      || imageCount(child) < 2)) {
+      child.getChildren().forEach(item => child.insertBefore(item)); child.remove(); finish();
+    } else if (imageParagraph(child) || child instanceof WriterImageGroupNode) run.push(child);
+    else finish();
+  }
+  finish();
+}
+
 function nearestDropElement(elements: HTMLElement[], point: number, horizontal: boolean) {
   let nearest: HTMLElement | null = null, distance = Infinity;
   for (const element of elements) {
@@ -90,6 +113,18 @@ function groupState() {
   visit($getRoot()); return result;
 }
 
+function updateGroupLayouts(previousGroups: ReturnType<typeof groupState>, merged?: ImageNode) {
+  const root = $getRoot();
+  const previous = $getState(root, imageGroupsState);
+  const mergedKey = merged?.getParent()?.getParent()?.getKey();
+  const next = groupState().flatMap(group => {
+    const old = previousGroups.find(entry => entry.key === group.key);
+    const layout = group.key === mergedKey ? 'sliding' : old && imageGroupLayout(previous, old.images);
+    return layout ? [{ images: group.images, layout }] : [];
+  });
+  $setState(root, imageGroupsState, next);
+}
+
 function GroupControls() {
   const settings = useContext(WriterImageGroupContext);
   if (!settings) throw new Error('Image group settings are required.');
@@ -98,6 +133,7 @@ function GroupControls() {
   settingsRef.current = settings;
   const [editor] = useCellValues(rootEditor$);
   const { t } = useTranslation();
+  const mergeLabel = t('chat.writerImageGroups.merge');
   const [groups, setGroups] = useState<ReturnType<typeof groupState>>([]);
   const [editable, setEditable] = useState(false);
   useLayoutEffect(() => {
@@ -138,6 +174,14 @@ function GroupControls() {
       cancelDrag = startWriterImageDrag(event, source, root, (x, y) => {
         const hovered = document.elementFromPoint(x, y);
         if (!(hovered instanceof HTMLElement) || !root.contains(hovered) || hovered.closest('.writer-image-group-host')) return null;
+        const hitImage = hovered.closest('[data-editor-block-type="image"]')?.querySelector('img');
+        if (canJoinGroup && hitImage && hitImage !== source && editor.read(() => {
+          const node = $getNearestNodeFromDOMNode(hitImage);
+          return node instanceof ImageNode && imageParagraph(node.getParentOrThrow());
+        })) {
+          const position = imageMergePosition(hitImage, x, y);
+          if (position) return { element: hitImage, position, label: mergeLabel };
+        }
         let target: HTMLElement | null = hovered;
         const targetGroup = hovered.closest('.writer-image-group');
         const horizontal = canJoinGroup && targetGroup?.getAttribute('data-layout') === 'sliding';
@@ -176,13 +220,9 @@ function GroupControls() {
           }
           const paragraph = imageParagraph(parent) ? parent : $createParagraphNode().append(content);
           const targetNode = destination instanceof ImageNode ? destination.getParentOrThrow() : destination;
-          if (target.position === 'before') targetNode.insertBefore(paragraph); else targetNode.insertAfter(paragraph);
-          const currentGroups = groupState();
-          $setState($getRoot(), imageGroupsState, $getState($getRoot(), imageGroupsState).flatMap(config => {
-            const previous = previousGroups.find(group => imageGroupKey(group.images) === imageGroupKey(config.images));
-            const current = currentGroups.find(group => group.key === previous?.key);
-            return current && current.images.length >= 2 ? [{ ...config, images: current.images }] : [];
-          }));
+          if (target.position === 'before' || target.position === 'merge-before') targetNode.insertBefore(paragraph); else targetNode.insertAfter(paragraph);
+          normalizeRootGroups($getRoot());
+          updateGroupLayouts(previousGroups, target.position.startsWith('merge-') ? image : undefined);
         }, { tag: HISTORY_PUSH_TAG });
       });
     };
@@ -193,7 +233,7 @@ function GroupControls() {
     });
     editor.update(() => $getRoot().markDirty());
     return () => { cancelDrag?.(); unsubscribe(); unsubscribeEditable(); unsubscribeRoot(); };
-  }, [editor]);
+  }, [editor, mergeLabel]);
   if (!editor) return null;
   return <>{groups.map(group => {
     const host = editor.getElementByKey(group.key)?.querySelector<HTMLElement>('.writer-image-group-host');
@@ -215,27 +255,6 @@ export const writerImageGroupPlugin = realmPlugin({
       testLexicalNode: (node): node is WriterImageGroupNode => node instanceof WriterImageGroupNode,
       visitLexicalNode({ lexicalNode, mdastParent, actions }) { actions.visitChildren(lexicalNode, mdastParent); },
     });
-    realm.pub(createRootEditorSubscription$, editor => editor.registerNodeTransform(RootNode, root => {
-      let run: LexicalNode[] = [];
-      const finish = () => {
-        const count = run.reduce((total, item) => total + imageCount(item), 0);
-        if (count >= 2 && !(run.length === 1 && run[0] instanceof WriterImageGroupNode)) {
-          const group = $applyNodeReplacement(new WriterImageGroupNode()); run[0].insertBefore(group);
-          for (const item of run) {
-            if (item instanceof WriterImageGroupNode) { group.append(...item.getChildren()); item.remove(); }
-            else group.append(item);
-          }
-        }
-        run = [];
-      };
-      for (const child of root.getChildren()) {
-        if (child instanceof WriterImageGroupNode && (!child.getChildren().every(imageParagraph)
-          || imageCount(child) < 2)) {
-          child.getChildren().forEach(item => child.insertBefore(item)); child.remove(); finish();
-        } else if (imageParagraph(child) || child instanceof WriterImageGroupNode) run.push(child);
-        else finish();
-      }
-      finish();
-    }));
+    realm.pub(createRootEditorSubscription$, editor => editor.registerNodeTransform(RootNode, normalizeRootGroups));
   },
 });
