@@ -190,9 +190,11 @@ def test_bound_metadata_is_preserved_when_body_contains_only_an_abstract(context
         prepare_sources(papers, entries)
 
 
-def test_native_and_external_file_adapters_share_preparation(context, monkeypatch, tmp_path):
+@pytest.mark.parametrize('newline', ['\n', '\r\n'], ids=['lf', 'crlf'])
+def test_native_and_external_file_adapters_share_preparation(context, monkeypatch, tmp_path, newline):
+    raw = PAPER.replace('\n', newline).encode('utf-8')
     path = tmp_path / 'study.md'
-    path.write_text(PAPER)
+    path.write_bytes(raw)
     identity = {key: getattr(context, key) for key in
                 ('session_id', 'attempt_id', 'revision', 'step_id', 'bindings', 'request', 'launch_request')}
     runtime = SimpleNamespace(
@@ -202,7 +204,7 @@ def test_native_and_external_file_adapters_share_preparation(context, monkeypatc
     monkeypatch.setattr('lazymind.chat.engine.subagent.context.require_context', lambda: runtime)
     native = tools.native_context()
     external = tools.PaperContext.parse({**identity, 'values': {'research_materials': [{
-        'filename': 'study.md', '__file_base64': base64.b64encode(PAPER.encode()).decode()}]}})
+        'filename': 'study.md', '__file_base64': base64.b64encode(raw).decode()}]}})
     native_pool = tools.base_pool(native)
     assert native_pool == tools.base_pool(external)
     entry = annotations(tools.base_pool(context))[0]
