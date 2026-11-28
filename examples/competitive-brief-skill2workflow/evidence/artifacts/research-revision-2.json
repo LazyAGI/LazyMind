@@ -1,0 +1,238 @@
+{
+  "research_date": "2026-10-27",
+  "mode": "model_knowledge",
+  "confidence": "medium",
+  "freshness_caveat": "No live web search or page fetch occurred in this run. This is an OFFLINE REPLAY of seven researcher-selected official-source fact cards (S1-S7) collected by unauthenticated HTTPS on 2026-10-27, which is why mode is reported as model_knowledge rather than live. Prices are vendor-displayed USD list prices on the English pages at that date, may since have changed, and regional quotes differ. [UNKNOWN] throughout and never estimated or set to zero: third-party review and complaint themes, analyst reports, SEO/traffic/ranking data, social engagement, win-loss and market share, funding/headcount/company size, negotiated and enterprise pricing, hands-on UX testing, actual AI credit consumption. Content observations are a one-date sample of index pages, with no frequency, traffic or performance claims. Vendor claims are not independent proof, and silence in a sampled page is not evidence of an absent capability. Human review: pending.",
+  "competitors": [
+    {
+      "name": "Linear",
+      "overview": {
+        "positioning_one_sentence": "[INFERENCE S2] A single system for modern product development, spanning roadmap to release, for software-building teams. Verbatim tagline [UNKNOWN].",
+        "target_audience": "[INFERENCE S2] Software product and engineering teams doing planning, building and release.",
+        "size_or_stage_signals": "[UNKNOWN] no headcount, funding, revenue or customer-count data collected.",
+        "product_category": "[FACT S2] Product-development system: issue tracking, cycles and planning from roadmap to release.",
+        "recurring_complaint_themes_public_reviews": "[UNKNOWN] not found; no review sources in corpus and none fetched by design.",
+        "public_pricing_approach": "[FACT S1] Per-user per-month billed yearly: Free $0 (unlimited members, 2 teams, 250 issues); Basic $10 (5 teams, unlimited issues/uploads, admin roles, Loops); Business $16 (unlimited teams, private teams/guests, Triage Intelligence, Code Intelligence, Insights, Asks, Zendesk/Intercom); Enterprise custom annual (SAML/SCIM, controls/support). Coding sessions and Loops require AI credits; enterprise and AI usage pricing [UNKNOWN]."
+      },
+      "messaging": {
+        "primary_tagline": "[UNKNOWN] not found; cards paraphrase rather than quote a tagline. Closest source language: a system for modern product development spanning roadmap to release [S2, paraphrase].",
+        "core_value_proposition": "[INFERENCE S2] One coherent system where teams plan (projects, initiatives), build (issues, cycles) and release, with AI workflows and analytics inside the same tool rather than across point solutions.",
+        "messaging_themes": [
+          "Roadmap to release in one system [S2]",
+          "Development-native craft: issues, cycles, triage, code intelligence [S1, S2]",
+          "AI inside the workflow: agents, Loops triggers, coding-agent controls, reasoning levels [S2, S3]",
+          "Rigour and visibility: analytics, Insights, admin roles [S1, S2]",
+          "Broad intake: Asks, customer requests, Zendesk/Intercom [S1, S2]"
+        ],
+        "tone_and_voice": "[INFERENCE S3] Terse, changelog-driven, engineering-literate; concrete feature and infrastructure language over outcome marketing.",
+        "problem_framed": "[INFERENCE S1, S2] Product-development work is fragmented across planning, building and release, and requests arrive from customers and other teams through scattered channels.",
+        "claimed_differentiators": [
+          "Unified roadmap-to-release scope [S2]",
+          "Triage Intelligence, Code Intelligence and Insights bundled at Business [S1]",
+          "AI embedded natively rather than added on [S2, S3]"
+        ],
+        "emphasised_features": [
+          "Projects and initiatives [S2]",
+          "Issue tracking and cycles [S2]",
+          "AI workflows and agents [S2]",
+          "Analytics and Insights [S1, S2]",
+          "Mobile [S2]",
+          "Asks intake, customer requests, Zendesk/Intercom [S1, S2]",
+          "Loops with Slack and GitHub triggers, templates, reasoning levels [S3]"
+        ]
+      },
+      "positioning": {
+        "category": "Product development / issue tracking and planning [FACT S2]",
+        "competitive_positioning": "[INFERENCE] Narrow and deep: owns the software team build loop rather than company-wide work management; prices on teams and issues rather than cross-functional portfolio constructs.",
+        "proof_points_used": [
+          "Feature and entitlement lists [S1, S2]",
+          "Public changelog and launch narrative [S3]",
+          "Customer stories as a content category [S3]"
+        ],
+        "vulnerabilities_in_positioning": [
+          "Cross-functional launch artefacts not evidenced in sampled cards [UNKNOWN, not a claimed absence]",
+          "Enterprise price and AI credit consumption unquantified [S1]",
+          "AI reliability asserted by vendor only [S3]"
+        ]
+      },
+      "content_strategy": {
+        "blog_cadence": "[UNKNOWN] not found; dated entries exist (e.g. 22 Oct 2026) but no frequency is measured or claimed.",
+        "topics": [
+          "Product launches and changelog entries [S3]",
+          "Engineering infrastructure and working with AI agents [S3]",
+          "Team/community posts and press [S3]",
+          "Customer stories [S3]"
+        ],
+        "formats": [
+          "Launch posts [S3]",
+          "Changelog entries [S3]",
+          "Team/community posts [S3]",
+          "Customer stories [S3]"
+        ],
+        "social_and_thought_leadership_themes": "[INFERENCE S3] Engineering practice and human-agent collaboration norms; actual channels, reach and engagement [UNKNOWN].",
+        "seo_observations": "[UNKNOWN] not found; no keyword, ranking, traffic or backlink data collected."
+      },
+      "strengths": [
+        "[INFERENCE S2] Coherent single-system story mapping to how a software team organises planning, building and release.",
+        "[FACT S1] Transparent ladder with a usable free tier (unlimited members, 2 teams, 250 issues) that lowers trial friction.",
+        "[FACT S1] Clear paid entry at $10 per user/month billed yearly, the lowest paid tier in this comparison.",
+        "[FACT S3] Visible shipping inside the six-month window plus AI tied to concrete Slack and GitHub events."
+      ],
+      "weaknesses": [
+        "[INFERENCE] Cross-functional launch support not evidenced in sampled cards; adequacy [UNKNOWN] and must be tested, not assumed absent.",
+        "[FACT S1] AI credits gate coding sessions and Loops while overage and consumption pricing stay unquantified, creating budget uncertainty.",
+        "[FACT S1] Enterprise price is custom and unquantified, so scale-up economics are [UNKNOWN].",
+        "[UNKNOWN] Public review complaint themes could not be established from this corpus."
+      ],
+      "recent_developments": [
+        "[FACT S3] 2026-10-22 changelog: Loops triggered by Slack and GitHub events, shareable templates, assignable reasoning levels.",
+        "[FACT S3] Dated entries on stacked pull requests and coding-agent controls.",
+        "[FACT S3] Sampled items on engineering infrastructure, working with AI agents, and customer stories."
+      ],
+      "sources": [
+        {
+          "card_id": "S1",
+          "url": "https://linear.app/pricing",
+          "retrieved": "2026-10-27",
+          "supports": "Tiers, annual per-user prices, entitlements, AI credit requirement, unquantified enterprise price"
+        },
+        {
+          "card_id": "S2",
+          "url": "https://linear.app/features",
+          "retrieved": "2026-10-27",
+          "supports": "Roadmap-to-release positioning and feature scope"
+        },
+        {
+          "card_id": "S3",
+          "url": "https://linear.app/now",
+          "retrieved": "2026-10-27",
+          "supports": "Content structure, topics, October 2026 developments"
+        }
+      ]
+    },
+    {
+      "name": "Asana",
+      "overview": {
+        "positioning_one_sentence": "[INFERENCE S5] Work management at organisational scale, where humans and agents coordinate critical cross-functional workflows around shared plans and goals. Verbatim tagline [UNKNOWN].",
+        "target_audience": "[FACT S5] Cross-functional teams and functions including operations, marketing, IT and leaders; a developer-team offering is also listed, so software teams are not excluded.",
+        "size_or_stage_signals": "[UNKNOWN] no headcount, funding, revenue or customer-count data collected.",
+        "product_category": "[FACT S5] Work management platform with multiple product families: agentic work management, service/client management, developer-team offering.",
+        "recurring_complaint_themes_public_reviews": "[UNKNOWN] not found; no review sources in corpus and none fetched by design.",
+        "public_pricing_approach": "[FACT S4] Per-user per-month billed annually: Personal $0 (2 users, unlimited tasks/projects); Starter $10.99 (timeline/Gantt, dashboards, automations, forms, custom fields, free guests); Advanced $24.99 (adds portfolios, goals, portfolio resource management, approvals/proofing, time tracking); Enterprise by sales quote [UNKNOWN]. AI Teammates and Dash include five requests per user/month capped at 50 per account; AI Studio 50K credits (Starter) and 75K (Advanced) per billing account/month; overage and add-ons [UNKNOWN]."
+      },
+      "messaging": {
+        "primary_tagline": "[UNKNOWN] not found; cards paraphrase positioning. Closest source language: work management at organisational scale with humans and agents coordinating critical workflows [S5, paraphrase].",
+        "core_value_proposition": "[INFERENCE S5, S7] A shared operating layer for the organisation: plans, goals and workflows connecting cross-functional teams and AI agents, with governance, so leaders can see and steer critical work.",
+        "messaging_themes": [
+          "Scale and coordination across the organisation [S5]",
+          "Humans and agents in the same plans (AI Teammates, agentic work management) [S5, S7]",
+          "Shared context, plans and goals as the alignment mechanism [S4, S5]",
+          "Governance and control for organisation-wide AI [S7]",
+          "Function-specific relevance: marketing, operations, IT, service/client, developer teams [S5, S6]"
+        ],
+        "tone_and_voice": "[INFERENCE S5, S6, S7] Enterprise-marketing register: outcome, scale and governance language, with evaluation formats such as demo video, research report, calculator, release kit and webinar.",
+        "problem_framed": "[INFERENCE S5, S7] Work sprawls across teams, functions and tools so leaders lack shared visibility, while AI adoption without shared context and governance adds risk.",
+        "claimed_differentiators": [
+          "Breadth across functions and product families [S5]",
+          "Goals, portfolios and portfolio resource management in a published tier [S4]",
+          "Prebuilt AI Teammates plus cross-tool AI workflows, shared context and governance [S7]"
+        ],
+        "emphasised_features": [
+          "Timeline/Gantt, dashboards, automations, forms, custom fields, free guests [S4]",
+          "Portfolios, goals, portfolio resource management, approvals/proofing, time tracking [S4]",
+          "AI Teammates and Dash with request caps [S4]",
+          "AI Studio credits per billing account [S4]",
+          "Cross-tool AI workflows, shared context and governance [S7]",
+          "Assignment automation and planning pages [S7]"
+        ]
+      },
+      "positioning": {
+        "category": "Work management platform, multi-product [FACT S5]",
+        "competitive_positioning": "[INFERENCE] Broad and horizontal: wins on cross-functional scope, goal and portfolio alignment and AI governance; prices tiers by planning and resourcing constructs rather than issue volume.",
+        "proof_points_used": [
+          "Product-family breadth and function-based navigation [S5]",
+          "Quarterly release with release kit and webinar [S7]",
+          "Research report, calculator, templates and training [S6]"
+        ],
+        "vulnerabilities_in_positioning": [
+          "Engineering-native depth not evidenced in sampled cards [UNKNOWN, not a claimed absence]",
+          "AI use capped by request and credit allowances with unquantified overage [S4, UNKNOWN]",
+          "Enterprise price requires a quote, so the top of the ladder is opaque [S4, UNKNOWN]"
+        ]
+      },
+      "content_strategy": {
+        "blog_cadence": "[UNKNOWN] not found; the resource index carries no dates in the card and no frequency is measured.",
+        "topics": [
+          "Work management and project planning [S6]",
+          "Workflow automation and AI at work [S6]",
+          "Strategic planning, team growth and focus [S6]",
+          "Function tracks for marketing, operations and IT [S6]"
+        ],
+        "formats": [
+          "Product-demo video [S6]",
+          "Research report, ebooks, calculator [S6]",
+          "Templates and training [S6]",
+          "Release kit and webinar [S7]"
+        ],
+        "social_and_thought_leadership_themes": "[INFERENCE S6, S7] AI at work, strategic planning and organisational focus, framed for functional leaders rather than developers; channels and engagement [UNKNOWN].",
+        "seo_observations": "[UNKNOWN] not found; only topical breadth is observable [S6], which is not an SEO metric."
+      },
+      "strengths": [
+        "[FACT S5] Scope that reaches launch stakeholders beyond engineering (operations, marketing, IT, leaders).",
+        "[FACT S4] Advanced publishes goals, portfolios, resource management, approvals/proofing and time tracking, which map to common launch artefacts.",
+        "[FACT S7] Explicit governance and shared-context narrative for AI, suited to risk-averse buyers.",
+        "[FACT S6, S7] Multiple evaluation formats: demo video, calculator, research report, templates, training, webinar."
+      ],
+      "weaknesses": [
+        "[FACT S4] Higher published prices than Linear at both paid tiers ($10.99 vs $10; $24.99 vs $16), though the plans are not feature-equivalent, so this is not a like-for-like premium.",
+        "[FACT S4] AI requests capped at five per user/month and 50 per account, with 50K/75K credits per billing account; adequacy at 20 seats [UNKNOWN] and overage unquantified.",
+        "[FACT S4] Enterprise price requires a quote, so total cost at scale [UNKNOWN].",
+        "[INFERENCE] Organisation-scale framing may imply configuration and admin overhead disproportionate to a 20-person team; hypothesis only."
+      ],
+      "recent_developments": [
+        "[FACT S7] Q3 2026 release: prebuilt AI Teammates, AI workflows across tools, shared context and governance.",
+        "[FACT S7] Same release: assignment automation and planning pages.",
+        "[FACT S7] Release supported by a release kit and webinar; adoption and reliability [UNKNOWN]."
+      ],
+      "sources": [
+        {
+          "card_id": "S4",
+          "url": "https://asana.com/pricing",
+          "retrieved": "2026-10-27",
+          "supports": "Tiers, annual per-user USD prices, tier features, AI request caps and AI Studio credits, unquantified overage and enterprise price"
+        },
+        {
+          "card_id": "S5",
+          "url": "https://asana.com/product",
+          "retrieved": "2026-10-27",
+          "supports": "Organisational-scale positioning, humans-and-agents framing, cross-functional audience, product families"
+        },
+        {
+          "card_id": "S6",
+          "url": "https://asana.com/resources",
+          "retrieved": "2026-10-27",
+          "supports": "Content topics, function organisation, content formats"
+        },
+        {
+          "card_id": "S7",
+          "url": "https://asana.com/whats-new",
+          "retrieved": "2026-10-27",
+          "supports": "Q3 2026 release: AI Teammates, cross-tool AI, governance, assignment automation, release kit and webinar"
+        }
+      ]
+    }
+  ],
+  "brief_note": "brief_markdown is an ordered array of Markdown sections; join with a blank line to render the full brief.",
+  "brief_markdown": [
+    "# Competitive Brief: Linear vs Asana for a 20-person software team\n\n**Source and retrieval date:** 2026-10-27 (corpus collection date; no system clock or live web access in this run).\n**Evidence mode:** OFFLINE REPLAY of seven fixed official-source fact cards (S1-S7) collected by unauthenticated HTTPS on 2026-10-27. Cards are researcher-selected paraphrases, not full page snapshots. Collection was live at the time; this run did not search the web.\n**Competitive set:** exactly two vendors, Linear then Asana. No other vendors added. No 'Your Company' column: no company positioning was supplied.\n**Buyer frame:** a product manager coordinating product development and cross-functional launch planning for 20 people.\n\n**Human review: pending.** Not reviewed or approved by any human. Bounded desk research, not market intelligence, procurement advice, or a product test.\n\n## Scope, evidence rules, limitations\n\n- [FACT] = traceable to the named card and URL. [INFERENCE] = judgement derived from the cards. [UNKNOWN] = not established by this corpus.\n- A vendor claim is not independent proof; entitlements are vendor-listed packaging, not tested behaviour [S1, S4].\n- [UNKNOWN] throughout, never estimated or set to zero: third-party reviews and complaint themes, analyst reports, SEO/traffic/rankings, social engagement, win-loss and market share, funding/headcount/company size, negotiated and enterprise pricing, hands-on UX testing, actual AI credit consumption.\n- Silence is not absence. A capability missing from a sampled page is not evidence the vendor lacks it; S5 explicitly warns against concluding Asana excludes software teams or Linear excludes cross-functional work.\n- Content observations are a one-date sample of index pages; no frequency, traffic, ranking, sentiment or performance claim is made [S3, S6].\n- Pricing basis: USD per user per month, billed annually, English pages as of 2026-10-27; taxes, discounts and usage/credit charges excluded; regional quotes differ. Plan features are not treated as equivalent.\n- Nothing was sent, purchased, signed into, or drawn from private files; neither product was used.",
+    "## 1. Executive Summary\n\n- Two centres of gravity, not two presences. [FACT S2] Linear presents a system for modern product development spanning roadmap to release. [FACT S5] Asana presents work management at organisational scale for humans and agents around shared plans and goals, addressing operations, marketing, IT and leaders. Neither excludes the other's territory: Asana lists a developer-team offering [FACT S5] and Linear sells broader intake via Asks and Zendesk/Intercom [FACT S1, S2].\n- Entry-tier pricing is close; the second tier diverges. [FACT S1] Linear Basic $10 and Business $16 per user/month billed yearly. [FACT S4] Asana Starter $10.99 and Advanced $24.99 per user/month billed annually. At 20 seats over 12 months: $2,400 and $3,840 (Linear) versus $2,637.60 and $5,997.60 (Asana). The gap is $237.60 per year at entry (about 9.9%) and $2,157.60 per year at the second tier (about 56.2%). Plans are not feature-equivalent, so neither gap is a like-for-like premium.\n- Both are shipping AI inside the six-month window. [FACT S3] Linear's 2026-10-22 changelog lets Loops be triggered by Slack and GitHub events, shared as templates and given reasoning levels, alongside stacked pull requests and coding-agent controls. [FACT S7] Asana's Q3 2026 release promotes prebuilt AI Teammates, cross-tool AI workflows, shared context and governance, assignment automation and planning pages. Both are vendor announcements; adoption and reliability [UNKNOWN].\n- Content posture differs more than messaging. [FACT S3] Linear's index is launch, changelog, team/community, press and customer-story shaped, with engineering and AI-agent topics. [FACT S6] Asana's resource index is topic and function organised, with a demo video, research report, ebooks, calculator, templates and training, plus a release kit and webinar [FACT S7]. Cadence and performance [UNKNOWN] for both.\n- Bottom line [INFERENCE]. At 20 seats the entry tiers are within about 10%, so seat price is unlikely to decide it. The choice turns on whether launches need Asana's goals, portfolios and resourcing layer [S4, S5] or Linear's development-native roadmap-to-release workflow [S2], and on which vendor's AI credit and enterprise terms are tolerable once priced. Human review: pending.",
+    "## 2. Competitor Profiles\n\n### 2.1 Linear\n\n| Field | Finding |\n|---|---|\n| Positioning (one sentence) | [INFERENCE S2] The single system for modern product development, roadmap to release, for software-building teams. Tagline [UNKNOWN]. |\n| Target audience | [INFERENCE S2] Product and engineering teams doing planning, building and release. |\n| Size or stage signals | [UNKNOWN] no headcount, funding, revenue or customer-count data collected. |\n| Product category | [FACT S2] Product-development system: issue tracking, cycles and planning. |\n| Emphasised features | [FACT S2] Projects and initiatives, issue tracking and cycles, AI workflows and agents, analytics, mobile, customer requests, Asks. [FACT S1] Triage Intelligence, Code Intelligence, Insights, private teams and guests, Zendesk/Intercom at Business; SAML/SCIM at Enterprise. [FACT S3] Loops with Slack and GitHub triggers, shareable templates, reasoning levels. |\n| Messaging themes | Roadmap to release in one system [S2]; development-native craft [S1, S2]; AI inside the workflow [S2, S3]; rigour and visibility [S1, S2]; broad intake [S1, S2]. |\n| Tone and voice | [INFERENCE S3] Terse, changelog-driven, engineering-literate; concrete feature language over outcome marketing. |\n| Problem framed | [INFERENCE S1, S2] Fragmented development work and requests scattered across customers and teams. |\n| Claimed differentiators | Unified scope [S2]; intelligence features bundled at Business [S1]; AI native rather than bolted on [S2, S3]. Vendor claims only. |\n| Public pricing approach | [FACT S1] Free $0 (unlimited members, 2 teams, 250 issues); Basic $10; Business $16; Enterprise custom annual. Coding sessions and Loops need AI credits; credit cost and enterprise price [UNKNOWN]. |\n| Content formats and topics | [FACT S3] Launches, changelog, team/community, press, customer stories; engineering infrastructure and AI-agent topics. Cadence, SEO, engagement [UNKNOWN]. |\n| Strengths | Coherent single-system story [S2]; open free tier and clear ladder [S1]; visible shipping in the last six months [S3]. |\n| Weaknesses (evidence-bounded) | Cross-functional launch artefacts not evidenced in sampled cards, adequacy [UNKNOWN] not disproven; AI credit and enterprise cost unquantified [S1]; review themes [UNKNOWN]. |\n| Recurring public review complaints | [UNKNOWN] not found; no review sources in corpus, none fetched by design. |\n\n### 2.2 Asana\n\n| Field | Finding |\n|---|---|\n| Positioning (one sentence) | [INFERENCE S5] Work management at organisational scale, where humans and agents coordinate critical cross-functional workflows around shared plans and goals. Tagline [UNKNOWN]. |\n| Target audience | [FACT S5] Cross-functional functions (operations, marketing, IT) and leaders; a developer-team offering is also listed. |\n| Size or stage signals | [UNKNOWN] no headcount, funding, revenue or customer-count data collected. |\n| Product category | [FACT S5] Work management platform with multiple product families: agentic work management, service/client management, developer teams. |\n| Emphasised features | [FACT S4] Starter: timeline/Gantt, dashboards, automations, forms, custom fields, free guests. Advanced adds portfolios, goals, portfolio resource management, approvals/proofing, time tracking. AI Teammates and Dash five requests per user/month capped at 50 per account; AI Studio 50K/75K credits per billing account/month. [FACT S7] Cross-tool AI workflows, shared context and governance, assignment automation, planning pages. |\n| Messaging themes | Organisational scale and coordination [S5]; humans plus agents in shared plans [S5, S7]; shared context and goals [S4, S5]; governance for AI rollout [S7]; function-specific relevance [S5, S6]. |\n| Tone and voice | [INFERENCE S5, S6, S7] Enterprise register: outcome, scale and governance language with multiple evaluation formats. |\n| Problem framed | [INFERENCE S5, S7] Work sprawls across teams and tools so leaders lack visibility, and ungoverned AI adoption adds risk. |\n| Claimed differentiators | Breadth across functions and product families [S5]; goals, portfolios and resourcing in a published tier [S4]; prebuilt AI Teammates with governance [S7]. Vendor claims only. |\n| Public pricing approach | [FACT S4] Personal $0 (2 users); Starter $10.99; Advanced $24.99; Enterprise quote [UNKNOWN]. AI request caps and AI Studio credits published; overage and add-ons [UNKNOWN]. |\n| Content formats and topics | [FACT S6] Topics: work management, project planning, workflow automation, AI at work, strategic planning, team growth/focus; organised for marketing, operations, IT. Formats: demo video, research report, ebooks, calculator, templates, training. [FACT S7] Release kit and webinar. Cadence, SEO, engagement [UNKNOWN]. |\n| Strengths | Cross-functional reach [S5]; goals, portfolios, resourcing and proofing at Advanced [S4]; explicit AI governance narrative [S7]; multiple evaluation formats [S6, S7]. |\n| Weaknesses (evidence-bounded) | Higher published prices than Linear at both paid tiers, plans not equivalent [S1, S4]; AI caps with unquantified overage [S4]; enterprise price opaque [S4]; engineering depth not evidenced [UNKNOWN]; review themes [UNKNOWN]. |\n| Recurring public review complaints | [UNKNOWN] not found; no review sources in corpus, none fetched by design. |",
+    "## 3. Messaging Comparison Matrix\n\nTwo vendors only; the 'Your Company' column is omitted because no company positioning was supplied.\n\n| Dimension | Linear | Asana | Evidence |\n|---|---|---|---|\n| One-line positioning | System for modern product development, roadmap to release | Work management at organisational scale for humans and agents | S2 / S5 (paraphrase) |\n| Primary audience | Product and engineering teams | Ops, marketing, IT, leaders; also developer teams | INFERENCE S2 / FACT S5 |\n| Category label | Product development system | Work management platform, multi-product | FACT S2 / FACT S5 |\n| Core value proposition | One build-to-release system with AI in the workflow | One shared operating layer for cross-functional plans, goals and governed AI | INFERENCE S2 / S5, S7 |\n| Verbatim tagline | [UNKNOWN] | [UNKNOWN] | Cards hold paraphrases only |\n| Theme 1 | Roadmap-to-release integration | Organisational scale and coordination | S2 / S5 |\n| Theme 2 | Development-native craft | Humans plus AI agents in shared plans | S1, S2 / S5, S7 |\n| Theme 3 | AI inside the workflow | Shared context, plans and goals | S2, S3 / S4, S5 |\n| Theme 4 | Insight and admin control | Governance for AI at scale | S1, S2 / S7 |\n| Theme 5 | Broad intake via Asks and integrations | Function-specific relevance and product families | S1, S2 / S5, S6 |\n| Tone | Terse, engineering-literate, changelog-led | Enterprise, outcome and governance oriented | INFERENCE S3 / S5-S7 |\n| Problem framed | Fragmented development work, scattered requests | Sprawling cross-functional work, ungoverned AI | INFERENCE |\n| Proof style | Entitlement lists, changelog, customer stories | Product families, research report, calculator, demo, webinar | S1, S3 / S5-S7 |\n| AI narrative | Embedded in developer workflow; credits for coding sessions and Loops | AI Teammates with request caps, credits, governance | S1-S3 / S4, S7 |\n| Pricing story | Ladder from $10 with an unlimited-member free tier | Ladder from $10.99 with a two-user free tier, goals at Advanced | S1 / S4 |\n| Explicitly unstated | Cross-functional launch artefacts, enterprise price, credit cost | Engineering-native depth, overage cost, enterprise price | [UNKNOWN] |",
+    "## 4. Product and Feature Comparison\n\nOnly what the cards support. 'Not evidenced in the sampled cards' means a gap in this corpus, not a missing capability.\n\n| Area | Linear | Asana | Evidence |\n|---|---|---|---|\n| Planning constructs | Projects and initiatives | Portfolios, goals, portfolio resource management (Advanced) | S2 / S4 |\n| Execution | Issue tracking and cycles | Tasks/projects, timeline/Gantt, custom fields, forms | S2 / S4 |\n| Intake and requests | Asks, customer requests, Zendesk/Intercom (Business) | Forms, free guests, service/client management family | S1, S2 / S4, S5 |\n| AI capabilities | AI workflows and agents; Triage and Code Intelligence; Loops with Slack/GitHub triggers, templates, reasoning levels | AI Teammates and Dash (5 requests/user/month, 50/account); AI Studio 50K/75K credits; cross-tool AI workflows; shared context and governance | S1-S3 / S4, S7 |\n| AI cost mechanics | Coding sessions and Loops need credits; rates [UNKNOWN] | Request caps and credit allowances published; overage [UNKNOWN] | S1 / S4 |\n| Reporting | Analytics, Insights | Dashboards | S1, S2 / S4 |\n| Approvals and proofing | Not evidenced in sampled cards [UNKNOWN] | Advanced | [UNKNOWN] / S4 |\n| Time tracking | Not evidenced in sampled cards [UNKNOWN] | Advanced | [UNKNOWN] / S4 |\n| Automation | Coding-agent controls, Loops triggers | Automations, assignment automation | S3 / S4, S7 |\n| Mobile | Listed | Not evidenced in sampled cards [UNKNOWN] | S2 / [UNKNOWN] |\n| Admin and security | Admin roles; SAML/SCIM and controls at Enterprise | Governance emphasis; SSO/SCIM specifics not in corpus | S1 / S7, [UNKNOWN] |\n| Free tier limits | Unlimited members, 2 teams, 250 issues | 2 users, unlimited tasks/projects | S1 / S4 |\n| Team constructs | Basic 5 teams; Business unlimited teams, private teams and guests | Free guests on Starter; seat-based pricing on all paid tiers | S1 / S4 |\n\nReading caution [INFERENCE]: the products do not map one-to-one. Linear gates on teams, issues and intelligence features [S1]; Asana on planning, resourcing constructs and AI allowances [S4]. Comparing 'the same tier' across vendors would mislead.",
+    "## 5. Pricing and Packaging\n\nVendor-displayed USD per user per month, billed annually, English pages retrieved 2026-10-27; excludes taxes, discounts, usage charges and AI credit purchases.\n\n| Vendor | Plan | USD/user/month (annual) | 20 seats x 12 months | Arithmetic | Basis and notes |\n|---|---|---|---|---|---|\n| Linear | Basic | 10.00 | **$2,400.00** | 10.00 x 20 x 12 | 5 teams, unlimited issues and uploads, admin roles, Loops [S1] |\n| Linear | Business | 16.00 | **$3,840.00** | 16.00 x 20 x 12 | Unlimited teams, private teams/guests, Triage and Code Intelligence, Insights, Asks, Zendesk/Intercom [S1] |\n| Linear | Enterprise | [UNKNOWN] custom | [UNKNOWN] | n/a | Annual billing, SAML/SCIM and additional controls/support [S1] |\n| Linear | Free (not a paid plan) | 0 | $0 | n/a | Unlimited members, 2 teams, 250 issues [S1] |\n| Asana | Starter | 10.99 | **$2,637.60** | 10.99 x 20 x 12 | Timeline/Gantt, dashboards, automations, forms, custom fields, free guests [S4] |\n| Asana | Advanced | 24.99 | **$5,997.60** | 24.99 x 20 x 12 | Adds portfolios, goals, portfolio resource management, approvals/proofing, time tracking [S4] |\n| Asana | Enterprise | [UNKNOWN] quote | [UNKNOWN] | n/a | Requires a sales quote [S4] |\n| Asana | Personal (not a paid plan) | 0 | $0 | n/a | 2 users, unlimited tasks/projects [S4] |\n\nDeltas at 20 seats per year [INFERENCE, arithmetic only]: entry tier $2,637.60 minus $2,400.00 = **$237.60** (about +9.9%); second tier $5,997.60 minus $3,840.00 = **$2,157.60** (about +56.2%).\n\nPackaging cautions:\n\n- Not feature-equivalent. Linear Business includes code and triage intelligence not listed on Asana tiers; Asana Advanced includes goals, portfolios, resourcing, proofing and time tracking not listed on Linear's page [S1, S4]. Neither list proves absence on the other side; the delta is a price difference, not a value judgement.\n- AI consumption is a separate unpriced variable for both: Linear requires credits for coding sessions and Loops [S1]; Asana caps requests and publishes credit allowances [S4]. Overage, add-ons and actual consumption cost are [UNKNOWN] and must be obtained in writing before budgeting.\n- Enterprise tiers are [UNKNOWN] for both [S1, S4]. No total cost of ownership is asserted.\n- Assumption: 20 seats at full list price for 12 months. Part-year seats, guest users, mixed tiers and negotiated discounts are out of scope.",
+    "## 6. Content Gap Analysis\n\nHypotheses about the sampled pages on 2026-10-27, not established absences across either vendor's content estate; no keyword or traffic evidence supports them.\n\n| # | Hypothesis | Basis | Validation needed |\n|---|---|---|---|\n| H1 | Neither sampled index is organised around a small software team's real job: one launch with engineering plus marketing and ops dependencies. Linear skews to engineering infrastructure and AI agents [S3]; Asana to functions and general work management [S6]. | FACT S3, S6 + INFERENCE | Page inventory and keyword research |\n| H2 | Linear-side gap hypothesis: cross-functional launch artefacts appear in Asana's cards [S4, S5] but not in Linear's sampled cards [S1, S2]. | FACT S1, S2, S4, S5 | Check Linear docs and changelog for goals, resourcing, approvals |\n| H3 | Asana-side gap hypothesis: engineering-native depth is absent from Asana's sampled cards even though a developer-team offering is listed [S5]. | FACT S1, S4, S5 | Review Asana developer-team pages |\n| H4 | Cost predictability is under-explained on both sides: credits and caps stated, overage and consumption pricing not [S1, S4]. | FACT S1, S4 | Vendor AI pricing pages or written quotes |\n| H5 | Evaluation-format asymmetry: Asana shows demo video, calculator, research report, templates, training and a webinar [S6, S7]; Linear's sample shows changelog, launch, community, press and customer stories [S3]. | FACT S3, S6, S7 + INFERENCE | Confirm whether Linear hosts demos or ROI tools elsewhere |\n\nNot claimed: keyword gaps, share of voice, content volume, publishing frequency, traffic, rankings, or that any vendor lacks a topic site-wide.",
+    "## 7. Opportunities\n\nNo company positioning was supplied, so these are evaluation and decision opportunities for the PM's team, not market-entry opportunities for an unnamed vendor. A market-facing opportunity analysis would require company positioning, which is [UNKNOWN].\n\n1. Negotiate on workflow fit, not sticker price [INFERENCE]. The entry-tier gap is about 9.9% ($2,400 versus $2,637.60), small relative to the cost of a launch failing on handoffs [S1, S4].\n2. Buy the cross-functional layer only where needed [INFERENCE]. If launches need goals, resourcing and proofing, Asana Advanced is the only plan in this corpus publishing them [S4], but it costs $2,157.60 more per year at 20 seats than Linear Business.\n3. Use AI credit terms as an evaluation lever [INFERENCE]. Both vendors leave overage unquantified [S1, S4]; asking for written credit economics is a cheap way to expose total cost before commitment.\n4. Use free tiers for low-risk familiarisation only [INFERENCE]. Linear Free allows unlimited members, 2 teams and 250 issues [S1]; Asana Personal allows 2 users [S4]. Neither supports a 20-person trial, so a paid or sales-supported pilot is needed.\n5. A single-platform pilot is commercially feasible at 20 seats [INFERENCE]. Linear Basic covers five teams [S1] and Asana Starter covers 20 seats at list [S4], subject to validating entitlements not evidenced here.\n\n## 8. Threats\n\n1. Cost creep through AI consumption [FACT S1, S4]. AI is metered by credits or request caps whose overage is unquantified; budgets built on seat price alone risk understating spend.\n2. Expansion-driven tier ladders [INFERENCE S1, S4]. Linear gates teams and intelligence by tier; Asana gates goals, portfolios, resourcing, proofing and time tracking to Advanced, so later needs are a step change not a marginal increase.\n3. Roadmap volatility [FACT S3, S7]. Both shipped AI changes within six months; this comparison may age within a quarter.\n4. Opaque enterprise tier [FACT S1, S4]. SAML/SCIM and additional controls sit behind Linear Enterprise; Asana Enterprise requires a quote, so published prices stop applying if procurement triggers them.\n5. Change-management burden [INFERENCE S5]. An organisation-scale platform may impose admin overhead disproportionate to 20 people; hypothesis to test, not a measured finding.\n6. Evidence risk in this brief itself. Seven paraphrased cards from one date, no independent reviews, no traffic or SEO data, no hands-on testing, no win-loss data. Decisions made solely on this brief carry documented information risk.\n7. Mutual encroachment [INFERENCE S1, S5]. Asana lists a developer-team offering while Linear sells cross-functional intake via Asks and Zendesk/Intercom, so differentiation may narrow.",
+    "## 9. Recommended Actions\n\nFive actions; the first three are quick wins, the last two longer-term.\n\nQuick wins (roughly one to two weeks each)\n\n1. Build a 20-seat cost model with unknowns explicit. Use the four published prices and the arithmetic in section 5, then open two lines for AI credit consumption and enterprise uplift. Send both vendors a written request for credit and overage terms and enterprise banding. Owner: PM with finance. Success: no unknown silently set to zero. Evidence S1, S4.\n2. Score the team's real launch workflow before any demo. Write the actual cross-functional launch checklist (brief, dependencies, approvals, resourcing, reporting, intake) and mark each row evidenced-in-corpus versus must-be-demonstrated, so no marketing page is read as a capability. Evidence S1, S2, S4, S5.\n3. Split the 20 seats by need rather than preference. Separate seats needing cross-functional views (goals, portfolios, resourcing, proofing) from those needing build views (issues, cycles, triage), map each subset to a published tier without assuming equivalence, and flag subsets with no evidenced home. Evidence S1, S4.\n\nLonger-term (roughly one to two quarters)\n\n4. Decide single-platform versus two-tool with integration cost priced. Weigh Linear-for-build plus Asana-for-launch against one platform, including the touchpoints the cards actually name (Slack and GitHub triggers [S3]; Zendesk/Intercom [S1]) plus admin overhead and duplicate-record risk.\n5. Set an AI governance and budget policy before choosing a tier. Agree who may spend credits, which work agents may touch and what control evidence is required, then check it against what each vendor publishes (Linear admin roles and enterprise controls [S1]; Asana shared context and governance [S7]). Refresh this brief quarterly given the shipping pace [S3, S7].\n\n## 10. Optional follow-up choices (not executed)\n\nNone of the following was performed; offered for the reviewer to select.\n\n- A. Decision scorecard: turn sections 3 to 5 into a weighted matrix for the 20-seat evaluation, keeping must-be-demonstrated rows separate.\n- B. Vendor question pack: written questions on AI credit consumption and overage, enterprise banding, SSO/SCIM, migration and data residency.\n- C. Corroboration round: extend beyond official pages to third-party reviews, analyst commentary and community discussion, all [UNKNOWN] here, in a new dated collection run.\n- D. Pilot design: a two-week structured trial of both products on one real launch, with rubric and exit criteria. This brief contains no product testing.\n- E. Positioning draft: requires company positioning input, which is absent; without it any messaging recommendation would be invented.\n- F. Monitoring brief: track both vendors' pricing and what's-new/changelog pages for changes to AI credit terms, entitlements and enterprise packaging.",
+    "## Appendix A: Unknowns register\n\n| Unknown | Why | How to close |\n|---|---|---|\n| Linear and Asana Enterprise prices | Both require quotes [S1, S4] | Written quotes |\n| AI credit, overage, add-on and consumption cost | Not quantified [S1, S4] | Vendor pages or quotes |\n| Review themes, complaints, sentiment | No review sources; not fetched by design | Separate third-party collection |\n| SEO rankings, traffic, share of voice | No SEO or traffic tools | Paid database, new run |\n| Social engagement, community size | No social listening data | New collection run |\n| Company size, funding, headcount, revenue | Not collected | Separate company research |\n| Market share, win rates, ROI evidence | Not collected | Analyst or CRM data outside this brief |\n| Verbatim taglines | Cards paraphrase | Direct page capture |\n| Publishing frequency, content performance | Single-date index sample [S3, S6] | Longitudinal capture |\n| Comparative usability, implementation quality | No hands-on testing performed | Structured pilot |\n\n## Appendix B: Sources actually used\n\n| Card | URL | Retrieved | Used for |\n|---|---|---|---|\n| S1 | https://linear.app/pricing | 2026-10-27 | Linear tiers, prices, entitlements, AI credits |\n| S2 | https://linear.app/features | 2026-10-27 | Linear positioning and features |\n| S3 | https://linear.app/now | 2026-10-27 | Linear content structure and recent developments |\n| S4 | https://asana.com/pricing | 2026-10-27 | Asana tiers, prices, entitlements, AI caps and credits |\n| S5 | https://asana.com/product | 2026-10-27 | Asana positioning, audience, product families |\n| S6 | https://asana.com/resources | 2026-10-27 | Asana content topics and formats |\n| S7 | https://asana.com/whats-new | 2026-10-27 | Asana recent developments |\n\nAll seven cards were used. No other URL was visited or inferred in this run.\n\n**Human review: pending.** No approval given or implied; nothing was sent to any vendor; no purchase, sign-in or private data use at any point."
+  ]
+}

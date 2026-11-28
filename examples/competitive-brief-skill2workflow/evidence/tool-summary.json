@@ -1,0 +1,23 @@
+{
+  "9027eae4-d01f-4c4f-994a-8ce03d4426aa": {
+    "save_artifacts": 1
+  },
+  "96506dfd-8dc3-40f6-aa76-b2696ef4cee0": {
+    "save_artifacts": 1
+  },
+  "5d8396f1-080b-4699-9054-f927cee2edcb": {
+    "save_artifacts": 6,
+    "patch_artifact": 13,
+    "get_artifact": 5,
+    "search_file_resource": 1
+  },
+  "2d8d95bd-5b6c-4dd6-b425-90dfdf017957": {
+    "save_artifacts": 2
+  },
+  "17e9b8ba-335f-40f3-b1ac-f924397cb308": {
+    "save_artifacts": 1
+  },
+  "24e2a9ac-9456-4bd1-984b-cc8aa7fd579d": {
+    "save_artifacts": 1
+  }
+}

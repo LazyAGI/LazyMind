@@ -1,0 +1,37 @@
+{
+  "repository": "anthropics/knowledge-work-plugins",
+  "commit": "c75fda00ff0e41c8ee331ae312c8a07f1967653b",
+  "checked_at": "2026-10-27",
+  "primary": {
+    "path": "marketing/skills/competitive-brief/SKILL.md",
+    "blob": "1a7df218996ed350c67e6899a60321f205bb69d6",
+    "sha256": "c1e5442facbc3206ac6a77392bef009fe9aff4ba7c2678e2f4118be2f6be82b3",
+    "bytes": 13150,
+    "recorded_e2e": true,
+    "scope": "positioning, messaging, content gaps; seven-section brief"
+  },
+  "dependency": {
+    "path": "marketing/CONNECTORS.md",
+    "blob": "f4d375273c56cfeb923022556ac5ec60e4c818ff",
+    "sha256": "e85d04dde99b220ba438cf1345212e7414da536fb7d781d83a4ad57270586630",
+    "bytes": 1260
+  },
+  "license": {
+    "path": "LICENSE",
+    "blob": "f53c679acba79cbb292961fd9fb9e87ca20eab22",
+    "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26",
+    "bytes": 11607,
+    "handling": "Preserve exact upstream bytes including nonstandard trailing text; no normalization."
+  },
+  "distinct_same_name": {
+    "path": "product-management/skills/competitive-brief/SKILL.md",
+    "blob": "05ca7ec4314ec1a73a882562a364726870944cff",
+    "sha256": "720916695f99a70e723be02d0123908c9c968ce56e1ffdeeb423014587017cd2",
+    "bytes": 14774,
+    "connectors_path": "product-management/CONNECTORS.md",
+    "connectors_blob": "aa15b5ccfb4cd0a5d8ea668632634c25061bb40b",
+    "recorded_e2e": false,
+    "scope": "product/feature comparison and product-strategy implications; not the PR873 input"
+  },
+  "notice_file": null
+}

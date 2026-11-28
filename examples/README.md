@@ -23,4 +23,5 @@ See LazyMind in action through published demos. All videos and articles below ar
 
 ### Runnable experiments
 
+- [Competitive Brief Skill2Workflow compatibility trial](competitive-brief-skill2workflow/README.md): three fixed-corpus original-Skill runs, real hosted conversion, a failed autonomous run and assisted session recovery; includes report-quality and artifact-edit limitations.
 - [Superpowers dispatch reliability](superpowers-workflow-reliability/README.md): try a native Brief gate from Codex and inspect Panel Artifacts; Advanced Git/Coverage checks, verified CLI recovery and explicit native recovery limits.

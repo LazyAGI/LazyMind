@@ -1,0 +1,9 @@
+{
+  "mode": "recorded_evidence_replay",
+  "autonomous_external_task": "failed",
+  "assisted_session": "completed",
+  "prior_inputs_reused": true,
+  "human_approval_verified": false,
+  "artifact_edit_succeeded": false,
+  "new_live_runs": 0
+}

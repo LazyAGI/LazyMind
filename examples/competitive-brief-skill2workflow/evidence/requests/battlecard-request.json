@@ -1,0 +1,17 @@
+{
+  "contract_version": "workflow.v1",
+  "command_id": "competitive-brief-20261027-battlecard-noop-1",
+  "tool": "advance_step",
+  "session_id": "ce3dbc32-0454-5928-aac0-e3a349666882",
+  "expected_state_version": 17,
+  "workflow_mode": "manual",
+  "retry_origin": "automatic",
+  "steps": [
+    {
+      "step_id": "build_battlecard",
+      "objective": "Execute only the existing build_battlecard step. The user requested the competitive brief, not a battlecard or follow-up execution. Follow the generated step no-request branch: save the declared output as a short note that no battlecard was requested, with no additional research or recommendations. Keep the completed competitive_brief artifact unchanged. Human review remains pending. Evaluate this step against its own no-request output contract.",
+      "user_input": "Execute only the existing build_battlecard step. The user requested the competitive brief, not a battlecard or follow-up execution. Follow the generated step no-request branch: save the declared output as a short note that no battlecard was requested, with no additional research or recommendations. Keep the completed competitive_brief artifact unchanged. Human review remains pending. Evaluate this step against its own no-request output contract.",
+      "runtime_instruction": "Execute only the existing build_battlecard step. The user requested the competitive brief, not a battlecard or follow-up execution. Follow the generated step no-request branch: save the declared output as a short note that no battlecard was requested, with no additional research or recommendations. Keep the completed competitive_brief artifact unchanged. Human review remains pending. Evaluate this step against its own no-request output contract."
+    }
+  ]
+}
